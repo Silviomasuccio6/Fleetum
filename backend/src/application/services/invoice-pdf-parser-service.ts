@@ -3,10 +3,17 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { PDFParse } from "pdf-parse";
 
 const execFile = promisify(execFileCallback);
 const MAX_REASONABLE_INVOICE_TOTAL = 1_000_000;
+let pdfParseCtorPromise: Promise<any> | null = null;
+
+const getPdfParseCtor = async () => {
+  if (!pdfParseCtorPromise) {
+    pdfParseCtorPromise = import("pdf-parse").then((module) => module.PDFParse);
+  }
+  return pdfParseCtorPromise;
+};
 
 const parseEuroAmount = (rawAmount: string): number | null => {
   const normalized = rawAmount
@@ -296,10 +303,11 @@ const extractOcrTextsFromPdfPages = async (filePath: string): Promise<string[]> 
 };
 
 const extractTextFromPdf = async (filePath: string): Promise<string> => {
-  let parser: PDFParse | null = null;
+  const PDFParseCtor = await getPdfParseCtor();
+  let parser: any = null;
   try {
     const buffer = await fs.readFile(filePath);
-    parser = new PDFParse({ data: buffer });
+    parser = new PDFParseCtor({ data: buffer });
     const parsed = await parser.getText();
     return parsed?.text ?? "";
   } finally {

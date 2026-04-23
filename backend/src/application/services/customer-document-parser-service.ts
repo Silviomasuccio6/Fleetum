@@ -3,9 +3,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { PDFParse } from "pdf-parse";
 
 const execFile = promisify(execFileCallback);
+let pdfParseCtorPromise: Promise<any> | null = null;
+
+const getPdfParseCtor = async () => {
+  if (!pdfParseCtorPromise) {
+    pdfParseCtorPromise = import("pdf-parse").then((module) => module.PDFParse);
+  }
+  return pdfParseCtorPromise;
+};
 
 export type CustomerDocumentDraftFields = {
   firstName?: string;
@@ -114,9 +121,10 @@ const isImage = (mimeType: string, filePath: string) =>
 
 const extractTextFromPdf = async (filePath: string): Promise<string> => {
   const buffer = await fs.readFile(filePath);
-  let parser: PDFParse | null = null;
+  const PDFParseCtor = await getPdfParseCtor();
+  let parser: any = null;
   try {
-    parser = new PDFParse({ data: buffer });
+    parser = new PDFParseCtor({ data: buffer });
     const parsed = await parser.getText();
     return String(parsed?.text ?? "").trim();
   } finally {
