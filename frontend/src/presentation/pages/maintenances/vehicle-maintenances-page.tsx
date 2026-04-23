@@ -866,8 +866,9 @@ export const VehicleMaintenancesPage = () => {
       {exportDialogOpen ? (
         <>
           <div className="fixed inset-0 z-[90] bg-black/55 backdrop-blur-sm" onClick={() => (exportLoading ? null : setExportDialogOpen(false))} />
-          <div className="fixed inset-0 z-[91] grid place-items-center p-4">
-            <div className="w-full max-w-2xl rounded-2xl border border-border/80 bg-card shadow-2xl">
+          <div className="fixed inset-0 z-[91] overflow-y-auto p-4">
+            <div className="mx-auto flex min-h-full w-full max-w-2xl items-center py-4">
+            <div className="w-full rounded-2xl border border-border/80 bg-card shadow-2xl">
               <div className="flex items-center justify-between border-b px-5 py-4">
                 <div>
                   <p className="text-sm font-semibold">Export Manutenzioni</p>
@@ -937,6 +938,7 @@ export const VehicleMaintenancesPage = () => {
                 </Button>
               </div>
             </div>
+            </div>
           </div>
         </>
       ) : null}
@@ -944,8 +946,9 @@ export const VehicleMaintenancesPage = () => {
       {previewAttachment ? (
         <>
           <div className="fixed inset-0 z-[92] bg-black/60 backdrop-blur-sm" onClick={closePreview} />
-          <div className="fixed inset-0 z-[93] grid place-items-center p-4">
-            <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-border/80 bg-card shadow-2xl">
+          <div className="fixed inset-0 z-[93] overflow-y-auto p-4">
+            <div className="mx-auto flex min-h-full w-full max-w-5xl items-center py-4">
+            <div className="w-full overflow-hidden rounded-2xl border border-border/80 bg-card shadow-2xl">
               <div className="flex items-center justify-between border-b px-4 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">{previewAttachment.fileName}</p>
@@ -994,6 +997,7 @@ export const VehicleMaintenancesPage = () => {
                   </div>
                 )}
               </div>
+            </div>
             </div>
           </div>
         </>

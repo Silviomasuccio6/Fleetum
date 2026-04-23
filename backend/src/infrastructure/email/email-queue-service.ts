@@ -37,8 +37,8 @@ export class EmailQueueService {
     });
 
     for (const item of pending) {
+      const meta = (item.meta ?? {}) as Record<string, unknown>;
       try {
-        const meta = (item.meta ?? {}) as Record<string, unknown>;
         const rawAttachments = Array.isArray(meta.attachments) ? meta.attachments : [];
         const attachments = rawAttachments
           .map((x) => x as { filename?: string; contentBase64?: string; contentType?: string })
@@ -56,6 +56,34 @@ export class EmailQueueService {
           where: { id: item.id },
           data: { status: "SENT", attempts: { increment: 1 }, lastError: null }
         });
+
+        if (meta.contractDeliveryId && meta.contractId && meta.bookingId && meta.tenantId) {
+          try {
+            await prisma.bookingContractDelivery.update({
+              where: { id: String(meta.contractDeliveryId) },
+              data: { status: "SENT", sentAt: new Date(), errorMessage: null }
+            });
+            await prisma.bookingContract.update({
+              where: { id: String(meta.contractId) },
+              data: { status: "SENT", lastSentAt: new Date(), errorMessage: null }
+            });
+            await prisma.bookingContractEvent.create({
+              data: {
+                tenantId: String(meta.tenantId),
+                bookingId: String(meta.bookingId),
+                contractId: String(meta.contractId),
+                type: "EMAIL_SENT",
+                message: `Contratto inviato a ${item.recipient}`,
+                details: {
+                  deliveryId: String(meta.contractDeliveryId),
+                  queueEmailId: item.id
+                }
+              }
+            });
+          } catch {
+            // evitare retry duplicati: email già inviata
+          }
+        }
 
         if (meta.stoppageId && meta.tenantId && meta.reminderType) {
           try {
@@ -93,6 +121,35 @@ export class EmailQueueService {
             lastError: (error as Error).message
           }
         });
+
+        if (meta.contractDeliveryId && meta.contractId && meta.bookingId && meta.tenantId && !hasAttemptsLeft) {
+          try {
+            await prisma.bookingContractDelivery.update({
+              where: { id: String(meta.contractDeliveryId) },
+              data: { status: "FAILED", errorMessage: (error as Error).message }
+            });
+            await prisma.bookingContract.update({
+              where: { id: String(meta.contractId) },
+              data: { status: "ERROR", errorMessage: (error as Error).message }
+            });
+            await prisma.bookingContractEvent.create({
+              data: {
+                tenantId: String(meta.tenantId),
+                bookingId: String(meta.bookingId),
+                contractId: String(meta.contractId),
+                type: "EMAIL_FAILED",
+                message: `Invio contratto fallito verso ${item.recipient}`,
+                details: {
+                  deliveryId: String(meta.contractDeliveryId),
+                  queueEmailId: item.id,
+                  error: (error as Error).message
+                }
+              }
+            });
+          } catch {
+            // no-op
+          }
+        }
       }
     }
 

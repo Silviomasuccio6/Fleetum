@@ -1637,8 +1637,9 @@ export const PlatformAdminPage = () => {
       </div>
 
       {planConfirmState ? (
-        <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
-          <div className="modal-pop w-full max-w-lg rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="mx-auto flex min-h-full w-full max-w-lg items-center py-4">
+          <div className="modal-pop w-full rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl" role="dialog" aria-modal="true">
             <h3 className="text-lg font-semibold">Conferma downgrade piano</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               Cliente: <span className="font-medium text-foreground">{planConfirmState.tenant.name}</span>
@@ -1664,12 +1665,14 @@ export const PlatformAdminPage = () => {
               </Button>
             </div>
           </div>
+          </div>
         </div>
       ) : null}
 
       {confirmState ? (
-        <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
-          <div className="modal-pop w-full max-w-lg rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="mx-auto flex min-h-full w-full max-w-lg items-center py-4">
+          <div className="modal-pop w-full rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl" role="dialog" aria-modal="true">
             <h3 className="text-lg font-semibold">{confirmState.title}</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               Cliente: <span className="font-medium text-foreground">{confirmState.tenantName}</span>
@@ -1690,6 +1693,7 @@ export const PlatformAdminPage = () => {
                 Conferma azione
               </Button>
             </div>
+          </div>
           </div>
         </div>
       ) : null}

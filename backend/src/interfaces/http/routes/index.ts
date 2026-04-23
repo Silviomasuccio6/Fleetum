@@ -39,6 +39,8 @@ import { SettingsController } from "../controllers/settings-controller.js";
 import { StatsController } from "../controllers/stats-controller.js";
 import { StoppagesController } from "../controllers/stoppages-controller.js";
 import { UsersController } from "../controllers/users-controller.js";
+import { RentalBookingsController } from "../controllers/rental-bookings-controller.js";
+import { RentalPricingController } from "../controllers/rental-pricing-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
 import { createRequireFeature } from "../middlewares/feature-entitlements.js";
@@ -52,6 +54,10 @@ import { statsRoutes } from "./stats-routes.js";
 import { stoppagesRoutes } from "./stoppages-routes.js";
 import { uploadsRoutes } from "./uploads-routes.js";
 import { usersRoutes } from "./users-routes.js";
+import { rentalBookingsRoutes } from "./rental-bookings-routes.js";
+import { contractTemplatesRoutes } from "./contract-templates-routes.js";
+import { rentalCustomersRoutes } from "./rental-customers-routes.js";
+import { rentalPricingRoutes } from "./rental-pricing-routes.js";
 import { TokenService } from "../../../application/services/token-service.js";
 import { asyncHandler } from "./async-handler.js";
 
@@ -117,11 +123,14 @@ const statsController = new StatsController(statsUseCase);
 const notificationsController = new NotificationsController(notificationsService);
 const settingsController = new SettingsController(settingsService);
 const auditController = new AuditController(auditService);
+const rentalBookingsController = new RentalBookingsController(emailQueueService);
+const rentalPricingController = new RentalPricingController();
 
 export const apiRouter = Router();
 apiRouter.get("/health", (_req, res) => res.json({ ok: true, service: "fermi-backend", timestamp: new Date().toISOString() }));
 apiRouter.get("/calendar/apple/feed.ics", asyncHandler(stoppagesController.appleCalendarFeedPublic));
 apiRouter.get("/calendar/google/callback", asyncHandler(stoppagesController.googleCalendarCallback));
+apiRouter.get("/contracts/public/:token", asyncHandler(rentalBookingsController.downloadContractPdfPublic));
 apiRouter.get("/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -146,3 +155,7 @@ apiRouter.use("/notifications", notificationsRoutes(notificationsController));
 apiRouter.use("/settings", settingsRoutes(settingsController));
 apiRouter.use("/audit", auditRoutes(auditController));
 apiRouter.use("/uploads", uploadsRoutes());
+apiRouter.use("/rental-bookings", rentalBookingsRoutes(rentalBookingsController));
+apiRouter.use("/rental-pricing", rentalPricingRoutes(rentalPricingController));
+apiRouter.use("/rental-customers", rentalCustomersRoutes(rentalBookingsController));
+apiRouter.use("/contract-templates", contractTemplatesRoutes(rentalBookingsController));

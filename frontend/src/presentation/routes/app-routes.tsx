@@ -12,11 +12,15 @@ import { StoppageDetailPage } from "../pages/stoppages/stoppage-detail-page";
 import { StoppageFormPage } from "../pages/stoppages/stoppage-form-page";
 import { StoppagesKanbanPage } from "../pages/stoppages/stoppages-kanban-page";
 import { StoppagesCalendarPage } from "../pages/stoppages/stoppages-calendar-page";
+import { RentalBookingsPage } from "../pages/bookings/rental-bookings-page";
+import { RentalContractsPage } from "../pages/contracts/rental-contracts-page";
+import { RentalPricingPage } from "../pages/pricing/rental-pricing-page";
 import { SitesPage } from "../pages/sites/sites-page";
 import { WorkshopsPage } from "../pages/workshops/workshops-page";
 import { VehiclesPage } from "../pages/vehicles/vehicles-page";
 import { VehicleMaintenancesPage } from "../pages/maintenances/vehicle-maintenances-page";
 import { VehicleDeadlinesPage } from "../pages/deadlines/vehicle-deadlines-page";
+import { CustomersPage } from "../pages/customers/customers-page";
 import { UsersPage } from "../pages/users/users-page";
 import { StatsPage } from "../pages/stats/stats-page";
 import { ProfileSettingsPage } from "../pages/profile/profile-settings-page";
@@ -41,6 +45,9 @@ export const AppRoutes = () => (
     >
       <Route index element={<Navigate to="/dashboard" replace />} />
       <Route path="dashboard" element={<DashboardPage />} />
+      <Route path="booking" element={<RentalBookingsPage />} />
+      <Route path="booking/contratti" element={<RentalContractsPage />} />
+      <Route path="booking/listini" element={<RentalPricingPage />} />
       <Route path="fermi" element={<StoppagesListPage />} />
       <Route path="fermi/kanban" element={<StoppagesKanbanPage />} />
       <Route path="fermi/calendario" element={<StoppagesCalendarPage />} />
@@ -50,6 +57,7 @@ export const AppRoutes = () => (
       <Route path="anagrafiche/sedi" element={<SitesPage />} />
       <Route path="anagrafiche/officine" element={<WorkshopsPage />} />
       <Route path="anagrafiche/veicoli" element={<VehiclesPage />} />
+      <Route path="anagrafiche/clienti" element={<CustomersPage />} />
       <Route path="anagrafiche/manutenzioni" element={<VehicleMaintenancesPage />} />
       <Route path="anagrafiche/scadenziario" element={<VehicleDeadlinesPage />} />
       <Route path="utenti" element={<UsersPage />} />
