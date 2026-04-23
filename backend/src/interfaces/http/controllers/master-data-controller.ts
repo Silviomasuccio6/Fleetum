@@ -560,8 +560,9 @@ export class MasterDataController {
     workbook.lastModifiedBy = "Gestione Fermi SaaS";
     workbook.created = new Date();
     workbook.modified = new Date();
-    workbook.subject = "Maintenance Enterprise Report";
-    workbook.title = "Gestione Fermi Manutenzioni";
+    const workbookMetadata = workbook as unknown as { subject?: string; title?: string };
+    workbookMetadata.subject = "Maintenance Enterprise Report";
+    workbookMetadata.title = "Gestione Fermi Manutenzioni";
 
     const totalCost = this.roundTo2(rows.reduce((acc, row) => acc + (row.cost ?? 0), 0));
     const totalInvoiceAmount = this.roundTo2(rows.reduce((acc, row) => acc + row.invoiceTotalAmount, 0));

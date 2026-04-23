@@ -11,5 +11,9 @@
     "dev:platform": "npm run dev -w backend & npm run dev:platform -w frontend",
     "build": "npm run build -w backend && npm run build -w frontend",
     "lint": "npm run lint -w backend && npm run lint -w frontend"
+  },
+  "overrides": {
+    "follow-redirects": "^1.16.0",
+    "uuid": "^14.0.0"
   }
 }
