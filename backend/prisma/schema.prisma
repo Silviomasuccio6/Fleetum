@@ -42,25 +42,122 @@ enum EmailQueueStatus {
   FAILED
 }
 
+enum RentalBookingStatus {
+  DRAFT
+  QUOTED
+  HOLD
+  CONFIRMED
+  CONTRACT_SIGNED
+  READY_FOR_HANDOVER
+  IN_RENT
+  CLOSED
+  CANCELED
+  NO_SHOW
+}
+
+enum RentalContractStatus {
+  NOT_READY
+  READY
+  SIGNED
+}
+
+enum RentalCargosStatus {
+  NOT_REQUIRED
+  PENDING
+  SENT
+  ERROR
+}
+
+enum BookingContractStatus {
+  DRAFT
+  READY
+  SENT
+  SIGNED
+  ERROR
+}
+
+enum BookingContractDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum BookingContractDeliveryChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum RentalPricingScope {
+  GLOBAL
+  SITE
+  VEHICLE_CATEGORY
+  VEHICLE
+}
+
+enum RentalBaseRateUnit {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum RentalKmPackageType {
+  LIMITED
+  UNLIMITED
+}
+
+enum RentalKmScope {
+  PER_DAY
+  PER_RENTAL
+}
+
+enum RentalExtraKmPolicyType {
+  FLAT
+  TIERED
+}
+
+enum RentalHourOverflowRule {
+  NONE
+  HALF_DAY
+  FULL_DAY
+}
+
+enum RentalCustomerType {
+  PERSONA_FISICA
+  PERSONA_GIURIDICA
+}
+
 model Tenant {
-  id          String      @id @default(cuid())
-  name        String
-  vatNumber   String?
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  deletedAt   DateTime?
-  users       User[]
-  sites       Site[]
-  workshops   Workshop[]
-  vehicles    Vehicle[]
-  stoppages   Stoppage[]
-  reminders   Reminder[]
-  auditLogs   AuditLog[]
-  calendarEvents CalendarEvent[]
-  vehicleMaintenances VehicleMaintenance[]
+  id                            String                         @id @default(cuid())
+  name                          String
+  vatNumber                     String?
+  isActive                      Boolean                        @default(true)
+  createdAt                     DateTime                       @default(now())
+  updatedAt                     DateTime                       @updatedAt
+  deletedAt                     DateTime?
+  users                         User[]
+  sites                         Site[]
+  workshops                     Workshop[]
+  vehicles                      Vehicle[]
+  stoppages                     Stoppage[]
+  reminders                     Reminder[]
+  auditLogs                     AuditLog[]
+  calendarEvents                CalendarEvent[]
+  vehicleMaintenances           VehicleMaintenance[]
   vehicleMaintenanceAttachments VehicleMaintenanceAttachment[]
-  vehicleBooklets VehicleBooklet[]
+  vehicleBooklets               VehicleBooklet[]
+  rentalBookings                RentalBooking[]
+  rentalBookingNotes            RentalBookingNote[]
+  rentalCustomers               RentalCustomer[]
+  rentalCustomerAttachments     RentalCustomerAttachment[]
+  contractTemplates             ContractTemplate[]
+  bookingContracts              BookingContract[]
+  bookingContractEvents         BookingContractEvent[]
+  bookingContractDeliveries     BookingContractDelivery[]
+  rentalPriceLists              RentalPriceList[]
+  rentalPricePackages           RentalPricePackage[]
+  rentalExtraKmPolicies         RentalExtraKmPolicy[]
+  rentalExtraKmTiers            RentalExtraKmTier[]
+  rentalBookingPricingSnapshots RentalBookingPricingSnapshot[]
 
   @@index([isActive])
 }
@@ -91,76 +188,77 @@ model CalendarEvent {
 }
 
 model User {
-  id             String      @id @default(cuid())
-  tenantId       String
-  email          String
-  passwordHash   String
-  firstName      String
-  lastName       String
-  status         UserStatus  @default(ACTIVE)
-  isEmailVerified Boolean    @default(false)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  deletedAt      DateTime?
-  tenant         Tenant      @relation(fields: [tenantId], references: [id])
-  roles          UserRole[]
-  createdStoppages Stoppage[] @relation("StoppageCreator")
-  passwordResetTokens PasswordResetToken[]
-  invitationTokens InvitationToken[]
-  refreshSessions RefreshSession[]
+  id                    String               @id @default(cuid())
+  tenantId              String
+  email                 String
+  passwordHash          String
+  firstName             String
+  lastName              String
+  status                UserStatus           @default(ACTIVE)
+  isEmailVerified       Boolean              @default(false)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  deletedAt             DateTime?
+  tenant                Tenant               @relation(fields: [tenantId], references: [id])
+  roles                 UserRole[]
+  createdStoppages      Stoppage[]           @relation("StoppageCreator")
+  passwordResetTokens   PasswordResetToken[]
+  invitationTokens      InvitationToken[]
+  refreshSessions       RefreshSession[]
+  rentalBookingsCreated RentalBooking[]      @relation("RentalBookingCreator")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
 }
 
 model RefreshSession {
-  id             String   @id @default(cuid())
-  userId         String
-  tenantId       String
-  tokenHash      String   @unique
-  userAgent      String?
-  ipAddress      String?
-  expiresAt      DateTime
-  revokedAt      DateTime?
-  replacedById   String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  user           User     @relation(fields: [userId], references: [id])
+  id           String    @id @default(cuid())
+  userId       String
+  tenantId     String
+  tokenHash    String    @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id])
 
   @@index([userId, revokedAt, expiresAt])
   @@index([tenantId, createdAt])
 }
 
 model PasswordResetToken {
-  id          String   @id @default(cuid())
-  userId      String
-  tokenHash   String
-  expiresAt   DateTime
-  usedAt      DateTime?
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id])
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
 
   @@index([userId, expiresAt])
 }
 
 model InvitationToken {
-  id          String   @id @default(cuid())
-  userId      String
-  tokenHash   String
-  expiresAt   DateTime
-  usedAt      DateTime?
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id])
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
 
   @@index([userId, expiresAt])
 }
 
 model Role {
-  id          String      @id @default(cuid())
-  key         RoleKey     @unique
+  id          String           @id @default(cuid())
+  key         RoleKey          @unique
   name        String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   users       UserRole[]
   permissions RolePermission[]
 }
@@ -196,29 +294,30 @@ model RolePermission {
 }
 
 model Site {
-  id          String    @id @default(cuid())
-  tenantId    String
-  name        String
-  address     String
-  city        String
-  contactName String?
-  email       String?
-  phone       String?
-  notes       String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
-  vehicles    Vehicle[]
-  stoppages   Stoppage[]
+  id               String            @id @default(cuid())
+  tenantId         String
+  name             String
+  address          String
+  city             String
+  contactName      String?
+  email            String?
+  phone            String?
+  notes            String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  vehicles         Vehicle[]
+  stoppages        Stoppage[]
+  rentalPriceLists RentalPriceList[]
 
   @@index([tenantId, isActive])
   @@index([tenantId, city])
 }
 
 model Workshop {
-  id          String    @id @default(cuid())
+  id          String     @id @default(cuid())
   tenantId    String
   name        String
   contactName String?
@@ -228,47 +327,49 @@ model Workshop {
   address     String?
   city        String?
   notes       String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  tenant      Tenant     @relation(fields: [tenantId], references: [id])
   stoppages   Stoppage[]
 
   @@index([tenantId, isActive])
 }
 
 model Vehicle {
-  id          String    @id @default(cuid())
-  tenantId    String
-  siteId      String
-  plate       String
-  brand       String
-  model       String
-  year        Int?
-  currentKm   Int?
+  id                    String               @id @default(cuid())
+  tenantId              String
+  siteId                String
+  plate                 String
+  brand                 String
+  model                 String
+  year                  Int?
+  currentKm             Int?
   maintenanceIntervalKm Int?
-  registrationDate DateTime?
-  lastRevisionAt DateTime?
-  revisionDueAt DateTime?
-  notes       String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
-  site        Site      @relation(fields: [siteId], references: [id])
-  photos      VehiclePhoto[]
-  booklet     VehicleBooklet?
-  stoppages   Stoppage[]
-  maintenances VehicleMaintenance[]
+  registrationDate      DateTime?
+  lastRevisionAt        DateTime?
+  revisionDueAt         DateTime?
+  notes                 String?
+  isActive              Boolean              @default(true)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  deletedAt             DateTime?
+  tenant                Tenant               @relation(fields: [tenantId], references: [id])
+  site                  Site                 @relation(fields: [siteId], references: [id])
+  photos                VehiclePhoto[]
+  booklet               VehicleBooklet?
+  stoppages             Stoppage[]
+  maintenances          VehicleMaintenance[]
+  rentalBookings        RentalBooking[]
+  rentalPriceLists      RentalPriceList[]
 
   @@index([tenantId, siteId])
   @@index([tenantId, revisionDueAt])
 }
 
 model VehicleMaintenance {
-  id              String    @id @default(cuid())
+  id              String                         @id @default(cuid())
   tenantId        String
   vehicleId       String
   performedAt     DateTime
@@ -278,11 +379,11 @@ model VehicleMaintenance {
   kmAtService     Int?
   cost            Float?
   notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime                       @default(now())
+  updatedAt       DateTime                       @updatedAt
   deletedAt       DateTime?
-  tenant          Tenant    @relation(fields: [tenantId], references: [id])
-  vehicle         Vehicle   @relation(fields: [vehicleId], references: [id])
+  tenant          Tenant                         @relation(fields: [tenantId], references: [id])
+  vehicle         Vehicle                        @relation(fields: [vehicleId], references: [id])
   attachments     VehicleMaintenanceAttachment[]
 
   @@index([tenantId, vehicleId])
@@ -290,161 +391,550 @@ model VehicleMaintenance {
 }
 
 model VehicleMaintenanceAttachment {
-  id             String             @id @default(cuid())
-  tenantId       String
-  maintenanceId  String
-  filePath       String
-  fileName       String
-  mimeType       String
-  sizeBytes      Int
+  id                 String             @id @default(cuid())
+  tenantId           String
+  maintenanceId      String
+  filePath           String
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
   invoiceTotalAmount Float?
-  createdAt      DateTime           @default(now())
-  tenant         Tenant             @relation(fields: [tenantId], references: [id])
-  maintenance    VehicleMaintenance @relation(fields: [maintenanceId], references: [id])
+  createdAt          DateTime           @default(now())
+  tenant             Tenant             @relation(fields: [tenantId], references: [id])
+  maintenance        VehicleMaintenance @relation(fields: [maintenanceId], references: [id])
 
   @@index([tenantId, maintenanceId])
   @@index([maintenanceId])
 }
 
 model VehiclePhoto {
-  id          String    @id @default(cuid())
-  vehicleId   String
-  filePath    String
-  fileName    String
-  mimeType    String
-  sizeBytes   Int
-  createdAt   DateTime  @default(now())
-  vehicle     Vehicle   @relation(fields: [vehicleId], references: [id])
+  id        String   @id @default(cuid())
+  vehicleId String
+  filePath  String
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  createdAt DateTime @default(now())
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
 
   @@index([vehicleId])
 }
 
 model VehicleBooklet {
-  id          String    @id @default(cuid())
-  tenantId    String
-  vehicleId   String    @unique
-  filePath    String
-  fileName    String
-  mimeType    String
-  sizeBytes   Int
+  id                        String    @id @default(cuid())
+  tenantId                  String
+  vehicleId                 String    @unique
+  filePath                  String
+  fileName                  String
+  mimeType                  String
+  sizeBytes                 Int
   extractedRegistrationDate DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
-  vehicle     Vehicle   @relation(fields: [vehicleId], references: [id])
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  tenant                    Tenant    @relation(fields: [tenantId], references: [id])
+  vehicle                   Vehicle   @relation(fields: [vehicleId], references: [id])
 
   @@index([tenantId, vehicleId])
 }
 
+model RentalBooking {
+  id                   String                        @id @default(cuid())
+  tenantId             String
+  vehicleId            String
+  customerId           String?
+  contractRequired     Boolean                       @default(true)
+  createdByUserId      String?
+  code                 String
+  status               RentalBookingStatus           @default(DRAFT)
+  contractStatus       RentalContractStatus          @default(NOT_READY)
+  cargosStatus         RentalCargosStatus            @default(NOT_REQUIRED)
+  customerName         String
+  customerEmail        String?
+  customerPhone        String?
+  customerDocument     String?
+  pickupAt             DateTime
+  returnAt             DateTime
+  pickupLocation       String?
+  returnLocation       String?
+  pickupKm             Int?
+  returnKm             Int?
+  expectedTotal        Float?
+  finalTotal           Float?
+  reason               String?
+  internalNotes        String?
+  contractSignedAt     DateTime?
+  cargosSentAt         DateTime?
+  cargosOutcomeMessage String?
+  cargosTransmissionId String?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+  deletedAt            DateTime?
+  tenant               Tenant                        @relation(fields: [tenantId], references: [id])
+  vehicle              Vehicle                       @relation(fields: [vehicleId], references: [id])
+  customer             RentalCustomer?               @relation(fields: [customerId], references: [id])
+  createdBy            User?                         @relation("RentalBookingCreator", fields: [createdByUserId], references: [id])
+  notes                RentalBookingNote[]
+  attachments          RentalCustomerAttachment[]
+  contract             BookingContract?
+  pricingSnapshot      RentalBookingPricingSnapshot?
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@index([tenantId, contractStatus])
+  @@index([tenantId, cargosStatus])
+  @@index([tenantId, pickupAt])
+  @@index([tenantId, returnAt])
+  @@index([tenantId, customerId])
+  @@index([tenantId, customerId, pickupAt])
+  @@index([vehicleId, pickupAt, returnAt])
+}
+
+model RentalBookingNote {
+  id        String        @id @default(cuid())
+  tenantId  String
+  bookingId String
+  userId    String?
+  type      String        @default("NOTE")
+  message   String
+  createdAt DateTime      @default(now())
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+  booking   RentalBooking @relation(fields: [bookingId], references: [id])
+
+  @@index([tenantId, bookingId, createdAt])
+}
+
+model RentalCustomer {
+  id                      String                     @id @default(cuid())
+  tenantId                String
+  customerType            RentalCustomerType         @default(PERSONA_FISICA)
+  firstName               String
+  lastName                String
+  drivingLicenseNumber    String                     @default("")
+  drivingLicenseIssuedAt  DateTime?
+  drivingLicenseExpiresAt DateTime?
+  drivingLicenseAuthority String?
+  drivingLicenseCategory  String?
+  email                   String?
+  phone                   String?
+  dateOfBirth             DateTime?
+  placeOfBirth            String?
+  nationality             String?
+  residenceAddress        String?
+  taxCode                 String?
+  documentType            String?
+  documentNumber          String?
+  documentIssuedAt        DateTime?
+  documentExpiresAt       DateTime?
+  documentAuthority       String?
+  companyName             String?
+  companyLegalForm        String?
+  companyVatNumber        String?
+  companyTaxCode          String?
+  companyLegalAddress     String?
+  companyPec              String?
+  companySdi              String?
+  companyRea              String?
+  legalRepFirstName       String?
+  legalRepLastName        String?
+  legalRepTaxCode         String?
+  legalRepRole            String?
+  legalRepEmail           String?
+  legalRepPhone           String?
+  notes                   String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  deletedAt               DateTime?
+  tenant                  Tenant                     @relation(fields: [tenantId], references: [id])
+  bookings                RentalBooking[]
+  attachments             RentalCustomerAttachment[]
+
+  @@index([tenantId, customerType])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, companyName])
+  @@index([tenantId, companyVatNumber])
+  @@index([tenantId, drivingLicenseNumber])
+  @@index([tenantId, email])
+  @@index([tenantId, phone])
+}
+
+model RentalCustomerAttachment {
+  id         String         @id @default(cuid())
+  tenantId   String
+  customerId String
+  bookingId  String?
+  filePath   String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  category   String?
+  createdAt  DateTime       @default(now())
+  tenant     Tenant         @relation(fields: [tenantId], references: [id])
+  customer   RentalCustomer @relation(fields: [customerId], references: [id])
+  booking    RentalBooking? @relation(fields: [bookingId], references: [id])
+
+  @@index([tenantId, customerId, createdAt])
+  @@index([tenantId, bookingId])
+}
+
+model RentalPriceList {
+  id               String                         @id @default(cuid())
+  tenantId         String
+  name             String
+  description      String?
+  isActive         Boolean                        @default(true)
+  validFrom        DateTime?
+  validTo          DateTime?
+  scope            RentalPricingScope             @default(GLOBAL)
+  siteId           String?
+  vehicleId        String?
+  vehicleCategory  String?
+  baseRateUnit     RentalBaseRateUnit             @default(DAILY)
+  baseRateAmount   Float
+  vatRate          Float                          @default(22)
+  discountPercent  Float                          @default(0)
+  hourOverflowRule RentalHourOverflowRule         @default(FULL_DAY)
+  priority         Int                            @default(100)
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  deletedAt        DateTime?
+  tenant           Tenant                         @relation(fields: [tenantId], references: [id])
+  site             Site?                          @relation(fields: [siteId], references: [id])
+  vehicle          Vehicle?                       @relation(fields: [vehicleId], references: [id])
+  packages         RentalPricePackage[]
+  extraKmPolicies  RentalExtraKmPolicy[]
+  bookingSnapshots RentalBookingPricingSnapshot[]
+
+  @@index([tenantId, isActive])
+  @@index([tenantId, validFrom, validTo])
+  @@index([tenantId, siteId, vehicleCategory, vehicleId])
+  @@index([tenantId, priority, updatedAt])
+}
+
+model RentalPricePackage {
+  id               String                         @id @default(cuid())
+  tenantId         String
+  priceListId      String
+  name             String
+  code             String?
+  type             RentalKmPackageType            @default(LIMITED)
+  kmIncluded       Int?
+  kmScope          RentalKmScope                  @default(PER_DAY)
+  isDefault        Boolean                        @default(false)
+  isActive         Boolean                        @default(true)
+  sortOrder        Int                            @default(0)
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  deletedAt        DateTime?
+  tenant           Tenant                         @relation(fields: [tenantId], references: [id])
+  priceList        RentalPriceList                @relation(fields: [priceListId], references: [id])
+  extraKmPolicies  RentalExtraKmPolicy[]
+  bookingSnapshots RentalBookingPricingSnapshot[]
+
+  @@index([tenantId, priceListId, isActive])
+  @@index([tenantId, code])
+  @@index([tenantId, sortOrder, updatedAt])
+}
+
+model RentalExtraKmPolicy {
+  id               String                         @id @default(cuid())
+  tenantId         String
+  priceListId      String
+  packageId        String?
+  name             String
+  type             RentalExtraKmPolicyType        @default(FLAT)
+  flatRatePerKm    Float?
+  currency         String                         @default("EUR")
+  isDefault        Boolean                        @default(false)
+  isActive         Boolean                        @default(true)
+  sortOrder        Int                            @default(0)
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  deletedAt        DateTime?
+  tenant           Tenant                         @relation(fields: [tenantId], references: [id])
+  priceList        RentalPriceList                @relation(fields: [priceListId], references: [id])
+  package          RentalPricePackage?            @relation(fields: [packageId], references: [id])
+  tiers            RentalExtraKmTier[]
+  bookingSnapshots RentalBookingPricingSnapshot[]
+
+  @@index([tenantId, isActive])
+  @@index([tenantId, priceListId, packageId])
+  @@index([tenantId, type, updatedAt])
+}
+
+model RentalExtraKmTier {
+  id        String              @id @default(cuid())
+  tenantId  String
+  policyId  String
+  fromKm    Int                 @default(1)
+  toKm      Int?
+  ratePerKm Float
+  sortOrder Int                 @default(0)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  tenant    Tenant              @relation(fields: [tenantId], references: [id])
+  policy    RentalExtraKmPolicy @relation(fields: [policyId], references: [id])
+
+  @@index([tenantId, policyId, sortOrder])
+  @@index([policyId, fromKm, toKm])
+}
+
+model RentalBookingPricingSnapshot {
+  id                   String                  @id @default(cuid())
+  tenantId             String
+  bookingId            String                  @unique
+  priceListId          String?
+  pricePackageId       String?
+  extraKmPolicyId      String?
+  priceListName        String?
+  pricePackageName     String?
+  extraKmPolicyName    String?
+  baseRateUnit         RentalBaseRateUnit?
+  baseRateAmount       Float?
+  vatRate              Float?
+  discountPercent      Float?
+  hourOverflowRule     RentalHourOverflowRule?
+  estimatedKm          Int?
+  actualKm             Int?
+  includedKmTotal      Int?
+  extraKmEstimated     Int?
+  extraKmActual        Int?
+  extraKmEstimatedCost Float?
+  extraKmActualCost    Float?
+  daysCharged          Float?
+  expectedSubtotal     Float?
+  expectedTaxAmount    Float?
+  expectedTotal        Float?
+  finalSubtotal        Float?
+  finalTaxAmount       Float?
+  finalTotal           Float?
+  notes                String?
+  metadata             Json?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  deletedAt            DateTime?
+  tenant               Tenant                  @relation(fields: [tenantId], references: [id])
+  booking              RentalBooking           @relation(fields: [bookingId], references: [id])
+  priceList            RentalPriceList?        @relation(fields: [priceListId], references: [id])
+  pricePackage         RentalPricePackage?     @relation(fields: [pricePackageId], references: [id])
+  extraKmPolicy        RentalExtraKmPolicy?    @relation(fields: [extraKmPolicyId], references: [id])
+
+  @@index([tenantId, bookingId])
+  @@index([tenantId, priceListId, pricePackageId, extraKmPolicyId])
+  @@index([tenantId, updatedAt])
+}
+
+model ContractTemplate {
+  id              String            @id @default(cuid())
+  tenantId        String
+  name            String
+  content         String
+  emailSubject    String?
+  emailBody       String?
+  companyName     String?
+  companyAddress  String?
+  companyVat      String?
+  companyEmail    String?
+  companyPhone    String?
+  logoFilePath    String?
+  logoFileName    String?
+  logoMimeType    String?
+  brandPrimary    String?
+  brandAccent     String?
+  brandFont       String?
+  version         Int               @default(1)
+  isDefault       Boolean           @default(true)
+  createdByUserId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  contracts       BookingContract[]
+
+  @@index([tenantId, isDefault, updatedAt])
+}
+
+model BookingContract {
+  id              String                    @id @default(cuid())
+  tenantId        String
+  bookingId       String                    @unique
+  templateId      String?
+  templateVersion Int                       @default(1)
+  status          BookingContractStatus     @default(DRAFT)
+  title           String
+  content         String
+  emailTo         String?
+  emailSubject    String?
+  emailBody       String?
+  pdfFileName     String?
+  pdfGeneratedAt  DateTime?
+  lastSentAt      DateTime?
+  signedAt        DateTime?
+  errorMessage    String?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  deletedAt       DateTime?
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id])
+  booking         RentalBooking             @relation(fields: [bookingId], references: [id])
+  template        ContractTemplate?         @relation(fields: [templateId], references: [id])
+  events          BookingContractEvent[]
+  deliveries      BookingContractDelivery[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, bookingId, updatedAt])
+  @@index([tenantId, bookingId, status, createdAt])
+  @@index([tenantId, lastSentAt])
+}
+
+model BookingContractEvent {
+  id          String          @id @default(cuid())
+  tenantId    String
+  bookingId   String
+  contractId  String
+  actorUserId String?
+  type        String
+  message     String
+  details     Json?
+  createdAt   DateTime        @default(now())
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  contract    BookingContract @relation(fields: [contractId], references: [id])
+
+  @@index([tenantId, bookingId, createdAt])
+  @@index([contractId, createdAt])
+}
+
+model BookingContractDelivery {
+  id           String                        @id @default(cuid())
+  tenantId     String
+  bookingId    String
+  contractId   String
+  channel      BookingContractDeliveryChannel @default(EMAIL)
+  recipient    String
+  subject      String
+  body         String
+  status       BookingContractDeliveryStatus @default(PENDING)
+  sentAt       DateTime?
+  details      Json?
+  errorMessage String?
+  createdAt    DateTime                      @default(now())
+  tenant       Tenant                        @relation(fields: [tenantId], references: [id])
+  contract     BookingContract               @relation(fields: [contractId], references: [id])
+
+  @@index([tenantId, bookingId, createdAt])
+  @@index([contractId, status, createdAt])
+  @@index([tenantId, channel, status, createdAt])
+}
+
 model Stoppage {
-  id                    String         @id @default(cuid())
-  tenantId              String
-  siteId                String
-  vehicleId             String
-  workshopId            String
-  createdByUserId       String
-  reason                String
-  notes                 String?
-  closureSummary        String?
-  status                StoppageStatus @default(OPEN)
-  priority              StoppagePriority @default(MEDIUM)
-  assignedToUserId      String?
-  estimatedCostPerDay   Float?
-  openedAt              DateTime
-  closedAt              DateTime?
-  reminderAfterDays     Int?
-  lastReminderSentAt    DateTime?
-  totalRemindersSent    Int            @default(0)
-  workshopEmailSnapshot String?
-  workshopPhoneSnapshot String?
+  id                       String           @id @default(cuid())
+  tenantId                 String
+  siteId                   String
+  vehicleId                String
+  workshopId               String
+  createdByUserId          String
+  reason                   String
+  notes                    String?
+  closureSummary           String?
+  status                   StoppageStatus   @default(OPEN)
+  priority                 StoppagePriority @default(MEDIUM)
+  assignedToUserId         String?
+  estimatedCostPerDay      Float?
+  openedAt                 DateTime
+  closedAt                 DateTime?
+  reminderAfterDays        Int?
+  lastReminderSentAt       DateTime?
+  totalRemindersSent       Int              @default(0)
+  workshopEmailSnapshot    String?
+  workshopPhoneSnapshot    String?
   workshopWhatsappSnapshot String?
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  deletedAt             DateTime?
-  tenant                Tenant         @relation(fields: [tenantId], references: [id])
-  site                  Site           @relation(fields: [siteId], references: [id])
-  vehicle               Vehicle        @relation(fields: [vehicleId], references: [id])
-  workshop              Workshop       @relation(fields: [workshopId], references: [id])
-  createdBy             User           @relation("StoppageCreator", fields: [createdByUserId], references: [id])
-  photos                StoppagePhoto[]
-  reminders             Reminder[]
-  events                StoppageEvent[]
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  deletedAt                DateTime?
+  tenant                   Tenant           @relation(fields: [tenantId], references: [id])
+  site                     Site             @relation(fields: [siteId], references: [id])
+  vehicle                  Vehicle          @relation(fields: [vehicleId], references: [id])
+  workshop                 Workshop         @relation(fields: [workshopId], references: [id])
+  createdBy                User             @relation("StoppageCreator", fields: [createdByUserId], references: [id])
+  photos                   StoppagePhoto[]
+  reminders                Reminder[]
+  events                   StoppageEvent[]
 
   @@index([tenantId, status])
   @@index([tenantId, openedAt])
 }
 
 model StoppageEvent {
-  id          String   @id @default(cuid())
-  tenantId    String
-  stoppageId  String
-  userId      String?
-  type        String
-  message     String
-  payload     Json?
-  createdAt   DateTime @default(now())
-  stoppage    Stoppage @relation(fields: [stoppageId], references: [id])
+  id         String   @id @default(cuid())
+  tenantId   String
+  stoppageId String
+  userId     String?
+  type       String
+  message    String
+  payload    Json?
+  createdAt  DateTime @default(now())
+  stoppage   Stoppage @relation(fields: [stoppageId], references: [id])
 
   @@index([tenantId, stoppageId, createdAt])
 }
 
 model StoppagePhoto {
-  id          String    @id @default(cuid())
-  stoppageId  String
-  filePath    String
-  fileName    String
-  mimeType    String
-  sizeBytes   Int
-  createdAt   DateTime  @default(now())
-  stoppage    Stoppage  @relation(fields: [stoppageId], references: [id])
+  id         String   @id @default(cuid())
+  stoppageId String
+  filePath   String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  createdAt  DateTime @default(now())
+  stoppage   Stoppage @relation(fields: [stoppageId], references: [id])
 
   @@index([stoppageId])
 }
 
 model Reminder {
-  id            String   @id @default(cuid())
-  tenantId      String
-  stoppageId    String
-  type          String
-  channel       String
-  recipient     String
-  subject       String?
-  body          String
-  sentAt        DateTime @default(now())
-  success       Boolean  @default(true)
-  errorMessage  String?
-  createdAt     DateTime @default(now())
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
-  stoppage      Stoppage @relation(fields: [stoppageId], references: [id])
+  id           String   @id @default(cuid())
+  tenantId     String
+  stoppageId   String
+  type         String
+  channel      String
+  recipient    String
+  subject      String?
+  body         String
+  sentAt       DateTime @default(now())
+  success      Boolean  @default(true)
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  stoppage     Stoppage @relation(fields: [stoppageId], references: [id])
 
   @@index([tenantId, sentAt])
   @@index([stoppageId])
 }
 
 model AuditLog {
-  id          String   @id @default(cuid())
-  tenantId    String
-  userId      String?
-  action      String
-  resource    String
-  resourceId  String?
-  details     Json?
-  createdAt   DateTime @default(now())
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String?
+  action     String
+  resource   String
+  resourceId String?
+  details    Json?
+  createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, createdAt])
   @@index([resource, resourceId])
 }
 
 model LoginRateLimitState {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   scope           String
   identifier      String
-  attempts        Int      @default(0)
-  windowStartedAt DateTime @default(now())
+  attempts        Int       @default(0)
+  windowStartedAt DateTime  @default(now())
   blockedUntil    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([scope, identifier])
   @@index([scope, blockedUntil])

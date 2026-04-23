@@ -4,6 +4,7 @@ import {
   Building2,
   CalendarDays,
   CarFront,
+  ChevronDown,
   ChartColumnIncreasing,
   ClipboardList,
   Gauge,
@@ -44,10 +45,11 @@ import { GBackground } from "./g-background";
 type NavItem = {
   key: string;
   label: string;
-  to: string;
+  to?: string;
   icon: any;
   feature?: FeatureKey;
-  match: (pathname: string) => boolean;
+  match?: (pathname: string) => boolean;
+  children?: NavItem[];
 };
 
 const navSections: Array<{ title: string; items: NavItem[] }> = [
@@ -56,6 +58,27 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { key: "dashboard", to: "/dashboard", label: "Dashboard", icon: Gauge, match: (path) => path === "/dashboard" },
       {
+        key: "booking",
+        to: "/booking",
+        label: "Booking Noleggi",
+        icon: CalendarDays,
+        match: (path) => path === "/booking"
+      },
+      {
+        key: "booking-contratti",
+        to: "/booking/contratti",
+        label: "Contratti Noleggio",
+        icon: ClipboardList,
+        match: (path) => path.startsWith("/booking/contratti")
+      },
+      {
+        key: "booking-listini",
+        to: "/booking/listini",
+        label: "Listini Noleggi",
+        icon: ChartColumnIncreasing,
+        match: (path) => path.startsWith("/booking/listini")
+      },
+      {
         key: "fermi-calendario",
         to: "/fermi/calendario",
         label: "Calendario Fermi",
@@ -63,21 +86,42 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
         match: (path) => path.startsWith("/fermi/calendario")
       },
       {
-        key: "fermi-lista",
-        to: "/fermi",
-        label: "Fermi",
+        key: "fermi-tecnici",
+        label: "Fermi Tecnici",
         icon: ClipboardList,
-        match: (path) =>
-          path.startsWith("/fermi") &&
-          !path.startsWith("/fermi/kanban") &&
-          !path.startsWith("/fermi/calendario")
-      },
-      {
-        key: "fermi-kanban",
-        to: "/fermi/kanban",
-        label: "Kanban Fermi",
-        icon: KanbanSquare,
-        match: (path) => path.startsWith("/fermi/kanban")
+        children: [
+          {
+            key: "fermi-lista",
+            to: "/fermi",
+            label: "Fermi",
+            icon: ClipboardList,
+            match: (path) =>
+              path.startsWith("/fermi") &&
+              !path.startsWith("/fermi/kanban") &&
+              !path.startsWith("/fermi/calendario")
+          },
+          {
+            key: "scadenziario",
+            to: "/anagrafiche/scadenziario",
+            label: "Scadenziario",
+            icon: BellRing,
+            match: (path) => path.startsWith("/anagrafiche/scadenziario")
+          },
+          {
+            key: "manutenzioni",
+            to: "/anagrafiche/manutenzioni",
+            label: "Manutenzioni",
+            icon: TimerReset,
+            match: (path) => path.startsWith("/anagrafiche/manutenzioni")
+          },
+          {
+            key: "fermi-kanban",
+            to: "/fermi/kanban",
+            label: "Kanban Fermi",
+            icon: KanbanSquare,
+            match: (path) => path.startsWith("/fermi/kanban")
+          }
+        ]
       },
       {
         key: "statistiche",
@@ -96,34 +140,24 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       { key: "officine", to: "/anagrafiche/officine", label: "Officine", icon: Wrench, match: (path) => path.startsWith("/anagrafiche/officine") },
       { key: "veicoli", to: "/anagrafiche/veicoli", label: "Veicoli", icon: CarFront, match: (path) => path.startsWith("/anagrafiche/veicoli") },
       {
-        key: "manutenzioni",
-        to: "/anagrafiche/manutenzioni",
-        label: "Manutenzioni",
-        icon: TimerReset,
-        match: (path) => path.startsWith("/anagrafiche/manutenzioni")
-      },
-      {
-        key: "scadenziario",
-        to: "/anagrafiche/scadenziario",
-        label: "Scadenziario",
-        icon: BellRing,
-        match: (path) => path.startsWith("/anagrafiche/scadenziario")
+        key: "clienti",
+        to: "/anagrafiche/clienti",
+        label: "Clienti",
+        icon: Users,
+        match: (path) => path.startsWith("/anagrafiche/clienti")
       }
     ]
-  },
-  {
-    title: "Organizzazione",
-    items: [
-      { key: "utenti", to: "/utenti", label: "Utenti e Ruoli", icon: Users, match: (path) => path.startsWith("/utenti") }
-    ]
-  }
-];
+  }];
 
 const mobileNavItems: Array<{ to: string; label: string; icon: any; feature?: FeatureKey }> = [
   { to: "/dashboard", label: "Dashboard", icon: Gauge },
+  { to: "/booking", label: "Booking", icon: CalendarDays },
+  { to: "/booking/contratti", label: "Contratti", icon: ClipboardList },
+  { to: "/booking/listini", label: "Listini", icon: ChartColumnIncreasing },
   { to: "/fermi/calendario", label: "Calendario", icon: CalendarDays },
   { to: "/fermi", label: "Fermi", icon: ClipboardList },
   { to: "/anagrafiche/scadenziario", label: "Scadenze", icon: BellRing },
+  { to: "/anagrafiche/clienti", label: "Clienti", icon: Users },
   { to: "/fermi/kanban", label: "Kanban", icon: KanbanSquare },
   { to: "/statistiche", label: "Statistiche", icon: ChartColumnIncreasing, feature: "reports_advanced" }
 ];
@@ -154,6 +188,25 @@ export const AppLayout = () => {
     () => (user ? `fermi_dismissed_notifications:${user.tenantId}:${user.id}` : null),
     [user]
   );
+  const isNavItemActive = useCallback((item: NavItem, pathname: string): boolean => {
+    if (item.children?.length) return item.children.some((child) => isNavItemActive(child, pathname));
+    return item.match ? item.match(pathname) : false;
+  }, []);
+  const getAutoOpenGroups = useCallback(
+    (pathname: string): Record<string, boolean> => {
+      const groups: Record<string, boolean> = {};
+      for (const section of navSections) {
+        for (const item of section.items) {
+          if (item.children?.length && item.children.some((child) => isNavItemActive(child, pathname))) {
+            groups[item.key] = true;
+          }
+        }
+      }
+      return groups;
+    },
+    [isNavItemActive]
+  );
+  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(() => getAutoOpenGroups(location.pathname));
 
   const scrollToTop = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -186,6 +239,22 @@ export const AppLayout = () => {
     if (!token || user) return;
     authUseCases.me().then(setUser).catch(() => logout());
   }, [logout, setUser, token, user]);
+
+  useEffect(() => {
+    const autoOpen = getAutoOpenGroups(location.pathname);
+    if (!Object.keys(autoOpen).length) return;
+    setOpenNavGroups((old) => {
+      let changed = false;
+      const next = { ...old };
+      for (const [key, value] of Object.entries(autoOpen)) {
+        if (value && !next[key]) {
+          next[key] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : old;
+    });
+  }, [getAutoOpenGroups, location.pathname]);
 
   useEffect(() => {
     if (!token) return;
@@ -336,14 +405,34 @@ export const AppLayout = () => {
   const visibleMobileNavItems = useMemo(() => mobileNavItems, []);
 
   const activeLabel = useMemo(() => {
+    const findActiveLabel = (items: NavItem[]): string | null => {
+      for (const item of items) {
+        if (item.children?.length) {
+          const childMatch = findActiveLabel(item.children);
+          if (childMatch) return childMatch;
+          if (item.match?.(location.pathname)) return item.label;
+          continue;
+        }
+        if (item.match?.(location.pathname)) return item.label;
+      }
+      return null;
+    };
     if (location.pathname.startsWith("/upgrade")) return "Upgrade piano";
     for (const section of visibleNavSections) {
-      for (const item of section.items) {
-        if (item.match(location.pathname)) return item.label;
-      }
+      const match = findActiveLabel(section.items);
+      if (match) return match;
     }
     return "Gestione Fermi";
   }, [location.pathname, visibleNavSections]);
+
+  const flattenedMobileSidebarItems = useMemo(
+    () =>
+      visibleNavSections
+        .flatMap((section) => section.items)
+        .flatMap((item) => (item.children?.length ? item.children : [item]))
+        .filter((item): item is NavItem => Boolean(item.to)),
+    [visibleNavSections]
+  );
 
   const isCalendarRoute = location.pathname.startsWith("/fermi/calendario");
 
@@ -611,6 +700,16 @@ export const AppLayout = () => {
                       className="justify-start"
                       onClick={() => {
                         setProfileOpen(false);
+                        navigate("/utenti");
+                      }}
+                    >
+                      Utenti e Ruoli
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      onClick={() => {
+                        setProfileOpen(false);
                         navigate("/profilo");
                       }}
                     >
@@ -637,7 +736,7 @@ export const AppLayout = () => {
 
       <aside
         className={cn(
-          "saas-sidebar fixed bottom-0 left-0 top-0 z-[45] hidden w-72 px-5 pb-6 pt-3 text-slate-800 transition-transform duration-300 dark:text-slate-200 lg:block",
+          "saas-sidebar fixed bottom-0 left-0 top-0 z-[45] hidden w-72 flex-col px-5 pb-6 pt-3 text-slate-800 transition-transform duration-300 dark:text-slate-200 lg:flex",
           sidebarHidden ? "-translate-x-full lg:pointer-events-none" : "translate-x-0"
         )}
       >
@@ -647,20 +746,85 @@ export const AppLayout = () => {
           <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{user?.firstName} {user?.lastName}</p>
         </div>
 
-        <nav className="mt-4 space-y-5 overflow-y-auto pb-6">
+        <nav className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pb-6 pr-1">
           {visibleNavSections.map((section) => (
             <div key={section.title}>
               <p className="g-section-label mb-2 px-2">{section.title}</p>
               <div className="space-y-1">
                 {section.items.map((item) => {
-                  const active = item.match(location.pathname);
+                  const active = isNavItemActive(item, location.pathname);
                   const Icon = item.icon;
+                  const isGroup = Boolean(item.children?.length);
                   const locked = item.feature ? !entitlementsLoading && !entitlementsError && !can(item.feature) : false;
                   const planNeeded = item.feature ? requiredPlan(item.feature) : null;
+                  if (isGroup) {
+                    const groupOpen = Boolean(openNavGroups[item.key]);
+                    const contentId = `nav-group-${item.key}`;
+                    return (
+                      <div key={item.key}>
+                        <button
+                          type="button"
+                          aria-expanded={groupOpen}
+                          aria-controls={contentId}
+                          onClick={() => setOpenNavGroups((old) => ({ ...old, [item.key]: !old[item.key] }))}
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition duration-200",
+                            active
+                              ? "g-nav-active bg-primary text-primary-foreground"
+                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                          )}
+                        >
+                          <Icon className="h-4 w-4" />
+                          <span>{item.label}</span>
+                          <ChevronDown className={cn("ml-auto h-4 w-4 transition-transform duration-200", groupOpen && "rotate-180")} />
+                        </button>
+                        <div
+                          id={contentId}
+                          className={cn(
+                            "grid overflow-hidden transition-[grid-template-rows,opacity] duration-200 ease-out",
+                            groupOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                          )}
+                        >
+                          <div className="min-h-0 space-y-1 pl-6 pt-1">
+                            {item.children?.map((child) => {
+                              const childActive = isNavItemActive(child, location.pathname);
+                              const ChildIcon = child.icon;
+                              const childLocked = child.feature ? !entitlementsLoading && !entitlementsError && !can(child.feature) : false;
+                              const childPlanNeeded = child.feature ? requiredPlan(child.feature) : null;
+                              return (
+                                <Link
+                                  key={child.key}
+                                  to={child.to ?? "#"}
+                                  onClick={scrollToTop}
+                                  className={cn(
+                                    "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition duration-200",
+                                    childActive
+                                      ? "g-nav-active bg-primary text-primary-foreground"
+                                      : childLocked
+                                        ? "text-slate-500/95 hover:bg-violet-100/50 hover:text-violet-700 dark:text-slate-300 dark:hover:bg-violet-500/15 dark:hover:text-violet-200"
+                                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                                  )}
+                                >
+                                  <ChildIcon className="h-4 w-4" />
+                                  <span>{child.label}</span>
+                                  {childLocked ? (
+                                    <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-violet-300/70 bg-violet-100/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-violet-700 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-200">
+                                      <Lock className="h-3 w-3" />
+                                      {childPlanNeeded === "ENTERPRISE" ? "Enterprise" : "Pro"}
+                                    </span>
+                                  ) : null}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <Link
                       key={item.key}
-                      to={item.to}
+                      to={item.to ?? "#"}
                       onClick={scrollToTop}
                       className={cn(
                         "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition duration-200",
@@ -696,7 +860,7 @@ export const AppLayout = () => {
       >
         <div
           className={cn(
-            "saas-sidebar g-sidebar h-full w-[86%] max-w-xs px-4 pb-5 pt-4 text-slate-800 transition-transform dark:text-slate-200",
+            "saas-sidebar g-sidebar flex h-full w-[86%] max-w-xs flex-col px-4 pb-5 pt-4 text-slate-800 transition-transform dark:text-slate-200",
             mobileOpen ? "translate-x-0" : "-translate-x-full"
           )}
         >
@@ -709,14 +873,14 @@ export const AppLayout = () => {
               <X className="h-4 w-4" />
             </Button>
           </div>
-          <nav className="space-y-1">
-            {visibleNavSections.flatMap((x) => x.items).map((item) => {
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1">
+            {flattenedMobileSidebarItems.map((item) => {
               const Icon = item.icon;
-              const active = item.match(location.pathname);
+              const active = isNavItemActive(item, location.pathname);
               return (
                 <Link
                   key={item.key}
-                  to={item.to}
+                  to={item.to ?? "#"}
                   onClick={() => {
                     setMobileOpen(false);
                     scrollToTop();

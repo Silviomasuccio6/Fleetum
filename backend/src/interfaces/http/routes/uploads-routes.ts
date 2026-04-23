@@ -7,7 +7,12 @@ import { computeVehicleRevisionDueAt } from "../../../application/services/vehic
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 import { sanitizeImageMetadata, validateImageMagic } from "../../../infrastructure/storage/file-security.js";
-import { upload, uploadMaintenanceAttachments, uploadVehicleBooklet } from "../../../infrastructure/storage/multer.js";
+import {
+  upload,
+  uploadMaintenanceAttachments,
+  uploadRentalCustomerAttachments,
+  uploadVehicleBooklet
+} from "../../../infrastructure/storage/multer.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { requirePermissions } from "../middlewares/permissions.js";
@@ -423,6 +428,88 @@ export const uploadsRoutes = () => {
       if (!attachment) throw new AppError("Allegato non trovato", 404, "NOT_FOUND");
 
       await prisma.vehicleMaintenanceAttachment.delete({ where: { id: attachment.id } });
+      await unlinkStoredFile(attachment.filePath);
+      res.status(204).send();
+    })
+  );
+
+  router.post(
+    "/rental-customers/:customerId/attachments",
+    requirePermissions("vehicles:write"),
+    uploadRentalCustomerAttachments.array("files", 10),
+    asyncHandler(async (req, res) => {
+      const tenantId = req.auth!.tenantId;
+      const customerId = req.params.customerId;
+      const bookingIdRaw = String(req.body?.bookingId ?? "").trim();
+      const categoryRaw = String(req.body?.category ?? "").trim();
+      const bookingId = bookingIdRaw || null;
+      const category = categoryRaw || null;
+
+      const customer = await prisma.rentalCustomer.findFirst({
+        where: { id: customerId, tenantId, deletedAt: null },
+        select: { id: true }
+      });
+      if (!customer) throw new AppError("Cliente non trovato", 404, "CUSTOMER_NOT_FOUND");
+
+      if (bookingId) {
+        const booking = await prisma.rentalBooking.findFirst({
+          where: { id: bookingId, tenantId, deletedAt: null },
+          select: { id: true, customerId: true }
+        });
+        if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+        if (booking.customerId && booking.customerId !== customerId) {
+          throw new AppError("La prenotazione selezionata appartiene a un altro cliente", 400, "BOOKING_CUSTOMER_MISMATCH");
+        }
+      }
+
+      const files = (req.files ?? []) as Express.Multer.File[];
+      await secureFiles(files);
+
+      await prisma.rentalCustomerAttachment.createMany({
+        data: files.map((file) => ({
+          tenantId,
+          customerId,
+          bookingId,
+          category,
+          filePath: `${env.UPLOAD_DIR}/${file.filename}`,
+          fileName: file.originalname || file.filename,
+          mimeType: file.mimetype,
+          sizeBytes: file.size
+        }))
+      });
+
+      res.status(201).json({ uploaded: files.length });
+    })
+  );
+
+  router.get(
+    "/rental-customer-attachments/:attachmentId/file",
+    requirePermissions("vehicles:read"),
+    asyncHandler(async (req, res) => {
+      const tenantId = req.auth!.tenantId;
+      const attachment = await prisma.rentalCustomerAttachment.findFirst({
+        where: { id: req.params.attachmentId, tenantId },
+        select: { filePath: true, mimeType: true, fileName: true }
+      });
+      if (!attachment) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
+
+      res.setHeader("Content-Disposition", `inline; filename="${attachment.fileName.replace(/"/g, "")}"`);
+      await sendStoredFile(res, attachment);
+    })
+  );
+
+  router.delete(
+    "/rental-customer-attachments/:attachmentId",
+    requirePermissions("vehicles:write"),
+    asyncHandler(async (req, res) => {
+      const tenantId = req.auth!.tenantId;
+      const attachment = await prisma.rentalCustomerAttachment.findFirst({
+        where: { id: req.params.attachmentId, tenantId },
+        select: { id: true, filePath: true }
+      });
+      if (!attachment) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
+
+      await prisma.rentalCustomerAttachment.delete({ where: { id: attachment.id } });
       await unlinkStoredFile(attachment.filePath);
       res.status(204).send();
     })

@@ -1,8 +1,17 @@
 import { httpClient } from "../../infrastructure/api/http-client";
 import { tokenStorage } from "../../infrastructure/auth/token-storage";
 
+const normalizeListParams = (params: Record<string, string | number | undefined>) => {
+  const rawPageSize = params.pageSize;
+  const asNumber = typeof rawPageSize === "number" ? rawPageSize : Number(rawPageSize);
+  if (Number.isFinite(asNumber) && asNumber > 200) {
+    return { ...params, pageSize: 200 };
+  }
+  return params;
+};
+
 const list = (resource: "sites" | "workshops" | "vehicles" | "vehicle-maintenances", params: Record<string, string | number | undefined>) =>
-  httpClient.get<{ data: any[]; total: number; page: number; pageSize: number }>(`/master-data/${resource}`, params);
+  httpClient.get<{ data: any[]; total: number; page: number; pageSize: number }>(`/master-data/${resource}`, normalizeListParams(params));
 const create = (resource: "sites" | "workshops" | "vehicles" | "vehicle-maintenances", input: unknown) =>
   httpClient.post(`/master-data/${resource}`, input);
 const update = (resource: "sites" | "workshops" | "vehicles" | "vehicle-maintenances", id: string, input: unknown) =>
