@@ -376,8 +376,9 @@ export class StatsController {
     workbook.lastModifiedBy = "Gestione Fermi SaaS";
     workbook.created = new Date();
     workbook.modified = new Date();
-    workbook.subject = "Analytics Enterprise Report";
-    workbook.title = "Gestione Fermi Analytics";
+    const workbookMetadata = workbook as unknown as { subject?: string; title?: string };
+    workbookMetadata.subject = "Analytics Enterprise Report";
+    workbookMetadata.title = "Gestione Fermi Analytics";
 
     const executive = workbook.addWorksheet("Executive Dashboard");
     this.setupWorksheet(executive, [
