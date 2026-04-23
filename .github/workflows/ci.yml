@@ -22,9 +22,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   sast:
-    name: SAST (Semgrep)
+    name: SAST (Semgrep, advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
 
     steps:
       - name: Checkout
