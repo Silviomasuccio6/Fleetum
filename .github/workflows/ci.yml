@@ -40,15 +40,6 @@ jobs:
     name: Lint, Build, Test, Audit
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fermi_ci?schema=public
-      JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-      PLATFORM_JWT_SECRET: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
-      SMTP_HOST: localhost
-      SMTP_USER: ci@example.com
-      SMTP_PASS: ci_dummy_password
-      PLATFORM_ADMIN_EMAIL: ci-admin@example.com
-      PLATFORM_ADMIN_PASSWORD: ci_platform_admin_password_123456
 
     steps:
       - name: Checkout
@@ -73,6 +64,8 @@ jobs:
         run: npm run build
 
       - name: Backend tests
+        env:
+          NODE_ENV: test
         run: npm run test -w backend
 
       - name: Frontend tests

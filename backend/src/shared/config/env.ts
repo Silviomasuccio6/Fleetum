@@ -8,6 +8,13 @@ const required = (name: string, fallback?: string) => {
   return value;
 };
 
+const isCiOrTest = process.env.NODE_ENV === "test" || process.env.CI === "true";
+const TEST_JWT_SECRET = "test-jwt-secret-for-ci-only-0000000000000000";
+const TEST_PLATFORM_JWT_SECRET =
+  "test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000";
+const TEST_PLATFORM_ADMIN_PASSWORD = "ci-platform-admin-password-0000";
+const TEST_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/fermi_ci?schema=public";
+
 const toInt = (value: string, name: string) => {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`Invalid number for ${name}: ${value}`);
@@ -32,10 +39,14 @@ const parseTrustProxy = (value?: string): boolean | number | string => {
   return value;
 };
 
-const JWT_SECRET = required("JWT_SECRET");
-const PLATFORM_JWT_SECRET = required("PLATFORM_JWT_SECRET");
+const JWT_SECRET = required("JWT_SECRET", isCiOrTest ? TEST_JWT_SECRET : undefined);
+const PLATFORM_JWT_SECRET = required("PLATFORM_JWT_SECRET", isCiOrTest ? TEST_PLATFORM_JWT_SECRET : undefined);
 const APP_URL = process.env.APP_URL ?? "http://localhost:5173";
 const BACKEND_PUBLIC_URL = process.env.BACKEND_PUBLIC_URL ?? "http://127.0.0.1:4000";
+const PLATFORM_ADMIN_PASSWORD = required(
+  "PLATFORM_ADMIN_PASSWORD",
+  isCiOrTest ? TEST_PLATFORM_ADMIN_PASSWORD : undefined
+);
 
 if (JWT_SECRET.length < 32) {
   throw new Error("JWT_SECRET must be at least 32 chars");
@@ -49,7 +60,7 @@ if (PLATFORM_JWT_SECRET.length < 64) {
   throw new Error("PLATFORM_JWT_SECRET must be at least 64 chars");
 }
 
-if ((process.env.PLATFORM_ADMIN_PASSWORD ?? "").length < 20) {
+if (PLATFORM_ADMIN_PASSWORD.length < 20) {
   throw new Error("PLATFORM_ADMIN_PASSWORD must be at least 20 chars");
 }
 
@@ -61,7 +72,7 @@ export const env = {
   PLATFORM_BIND_HOST: process.env.PLATFORM_BIND_HOST ?? "127.0.0.1",
   TRUST_PROXY: parseTrustProxy(process.env.TRUST_PROXY),
 
-  DATABASE_URL: required("DATABASE_URL"),
+  DATABASE_URL: required("DATABASE_URL", isCiOrTest ? TEST_DATABASE_URL : undefined),
   JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "1d",
   PLATFORM_JWT_SECRET,
@@ -85,19 +96,19 @@ export const env = {
 
   UPLOAD_DIR: process.env.UPLOAD_DIR ?? "uploads",
 
-  SMTP_HOST: required("SMTP_HOST"),
+  SMTP_HOST: required("SMTP_HOST", isCiOrTest ? "localhost" : undefined),
   SMTP_PORT: toInt(process.env.SMTP_PORT ?? "465", "SMTP_PORT"),
   SMTP_SECURE: toBool(process.env.SMTP_SECURE ?? "true"),
-  SMTP_USER: required("SMTP_USER"),
-  SMTP_PASS: required("SMTP_PASS"),
+  SMTP_USER: required("SMTP_USER", isCiOrTest ? "ci@example.local" : undefined),
+  SMTP_PASS: required("SMTP_PASS", isCiOrTest ? "ci-smtp-pass-placeholder" : undefined),
   SMTP_FROM: process.env.SMTP_FROM ?? "",
 
   CRON_REMINDER_SCHEDULE: process.env.CRON_REMINDER_SCHEDULE ?? "*/10 * * * *",
   SLA_PRIORITY_THRESHOLDS:
     process.env.SLA_PRIORITY_THRESHOLDS ?? '{"LOW":15,"MEDIUM":10,"HIGH":5,"CRITICAL":2}',
 
-  PLATFORM_ADMIN_EMAIL: required("PLATFORM_ADMIN_EMAIL"),
-  PLATFORM_ADMIN_PASSWORD: required("PLATFORM_ADMIN_PASSWORD"),
+  PLATFORM_ADMIN_EMAIL: required("PLATFORM_ADMIN_EMAIL", isCiOrTest ? "ci-admin@example.local" : undefined),
+  PLATFORM_ADMIN_PASSWORD,
   PLATFORM_ADMIN_OTP: process.env.PLATFORM_ADMIN_OTP,
   PLATFORM_ALLOWED_IPS_CSV: process.env.PLATFORM_ALLOWED_IPS ?? "",
   PLATFORM_ALERT_EMAILS: toCsvList(process.env.PLATFORM_ALERT_EMAILS),
