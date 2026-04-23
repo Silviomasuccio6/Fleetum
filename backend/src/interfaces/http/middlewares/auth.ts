@@ -4,6 +4,7 @@ import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { JwtPayload } from "../../../shared/types/auth.js";
 import { ACCESS_COOKIE_NAME, getCookieValue } from "../utils/auth-cookies.js";
+import { appendLogContext } from "../../../infrastructure/logging/logger.js";
 
 declare global {
   namespace Express {
@@ -27,6 +28,7 @@ export const requireAuth = (req: Request, _res: Response, next: NextFunction) =>
       throw new AppError("Token non valido", 401, "UNAUTHORIZED");
     }
     req.auth = payload;
+    appendLogContext({ tenantId: payload.tenantId, userId: payload.userId });
     next();
   } catch {
     throw new AppError("Token non valido", 401, "UNAUTHORIZED");
