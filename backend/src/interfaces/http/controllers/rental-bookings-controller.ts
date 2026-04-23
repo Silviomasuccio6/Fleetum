@@ -74,6 +74,10 @@ const MONTHLY_VISIBLE_STATUSES = [
   "NO_SHOW"
 ] as const satisfies readonly RentalBookingStatus[];
 
+const IDEMPOTENCY_HEADER = "x-idempotency-key";
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const CONTRACT_DELIVERY_DEDUPE_WINDOW_MS = 2 * 60 * 1000;
+
 const TRANSITIONS: Record<RentalBookingStatus, RentalBookingStatus[]> = {
   DRAFT: ["QUOTED", "HOLD", "CANCELED"],
   QUOTED: ["HOLD", "CONFIRMED", "CANCELED"],
@@ -445,6 +449,71 @@ export class RentalBookingsController {
     return null;
   }
 
+  private extractIdempotencyKey(req: Request) {
+    const fromHelper = typeof req.header === "function" ? req.header(IDEMPOTENCY_HEADER) : undefined;
+    const fromHeaders = req.headers?.[IDEMPOTENCY_HEADER];
+    const raw = fromHelper ?? (Array.isArray(fromHeaders) ? fromHeaders[0] : fromHeaders);
+    if (!raw) return null;
+    const normalized = String(raw).trim();
+    if (!normalized) return null;
+    if (!IDEMPOTENCY_KEY_PATTERN.test(normalized)) {
+      throw new AppError(
+        "Header x-idempotency-key non valido (usa 8-128 caratteri alfanumerici, ., _, :, -).",
+        400,
+        "INVALID_IDEMPOTENCY_KEY"
+      );
+    }
+    return normalized;
+  }
+
+  private extractIdempotencyKeyFromDetails(details: Prisma.JsonValue | null | undefined) {
+    if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+    const payload = details as Record<string, unknown>;
+    return typeof payload.idempotencyKey === "string" ? payload.idempotencyKey : null;
+  }
+
+  private async findDuplicateContractDelivery(input: {
+    tenantId: string;
+    contractId: string;
+    channel: "EMAIL" | "WHATSAPP";
+    recipient: string;
+    subject: string;
+    body: string;
+    matchBody?: boolean;
+    idempotencyKey?: string | null;
+  }) {
+    if (input.idempotencyKey) {
+      const byKey = await prisma.bookingContractDelivery.findFirst({
+        where: {
+          tenantId: input.tenantId,
+          contractId: input.contractId,
+          channel: input.channel,
+          details: {
+            path: ["idempotencyKey"],
+            equals: input.idempotencyKey
+          }
+        },
+        orderBy: [{ createdAt: "desc" }]
+      });
+      if (byKey) return byKey;
+    }
+
+    const threshold = new Date(Date.now() - CONTRACT_DELIVERY_DEDUPE_WINDOW_MS);
+    return prisma.bookingContractDelivery.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        contractId: input.contractId,
+        channel: input.channel,
+        recipient: input.recipient,
+        subject: input.subject,
+        ...(input.matchBody === false ? {} : { body: input.body }),
+        status: { in: ["PENDING", "SENT"] },
+        createdAt: { gte: threshold }
+      },
+      orderBy: [{ createdAt: "desc" }]
+    });
+  }
+
   private buildPublicContractToken(input: { tenantId: string; bookingId: string; expiresAt: Date }) {
     const payload = Buffer.from(
       JSON.stringify({
@@ -583,7 +652,11 @@ export class RentalBookingsController {
   }
 
   private async buildContractPdf(contract: Awaited<ReturnType<RentalBookingsController["getContractOrThrow"]>>) {
-    const signedEventWithSignature = contract.events.find((entry) => {
+    const events = Array.isArray(contract.events) ? contract.events : [];
+    const deliveries = Array.isArray(contract.deliveries) ? contract.deliveries : [];
+    const latestDelivery = deliveries[0] ?? null;
+
+    const signedEventWithSignature = events.find((entry) => {
       if (entry.type !== "SIGNED") return false;
       return Boolean(this.extractContractSignatureDetails(entry.details));
     });
@@ -603,14 +676,14 @@ export class RentalBookingsController {
           updatedAt: contract.updatedAt,
           lastSentAt: contract.lastSentAt,
           signedAt: contract.signedAt,
-          latestDelivery: contract.deliveries[0]
+          latestDelivery: latestDelivery
             ? {
-                channel: contract.deliveries[0].channel,
-                recipient: contract.deliveries[0].recipient,
-                status: contract.deliveries[0].status,
-                sentAt: contract.deliveries[0].sentAt,
-                createdAt: contract.deliveries[0].createdAt,
-                errorMessage: contract.deliveries[0].errorMessage
+                channel: latestDelivery.channel,
+                recipient: latestDelivery.recipient,
+                status: latestDelivery.status,
+                sentAt: latestDelivery.sentAt,
+                createdAt: latestDelivery.createdAt,
+                errorMessage: latestDelivery.errorMessage
               }
             : null,
           signatureFilePath: signatureDetails?.signatureFilePath ?? null,
@@ -1689,6 +1762,7 @@ export class RentalBookingsController {
   sendContractEmail = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
+    const idempotencyKey = this.extractIdempotencyKey(req);
     const payload = bookingContractEmailSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
     const dictionary = this.buildContractContext(contract.booking as Awaited<ReturnType<RentalBookingsController["getBookingOrThrow"]>>);
@@ -1706,6 +1780,35 @@ export class RentalBookingsController {
     const body = payload.body
       ? sanitizeTemplateInput(payload.body)
       : renderContractTemplate(contract.emailBody ?? "In allegato il contratto.", dictionary);
+
+    const duplicateDelivery = idempotencyKey
+      ? await this.findDuplicateContractDelivery({
+          tenantId,
+          contractId: contract.id,
+          channel: "EMAIL",
+          recipient,
+          subject,
+          body,
+          idempotencyKey
+        })
+      : null;
+    if (duplicateDelivery) {
+      await this.logContractEvent({
+        tenantId,
+        bookingId: contract.bookingId,
+        contractId: contract.id,
+        actorUserId,
+        type: "EMAIL_DEDUPED",
+        message: `Invio email duplicato ignorato per ${recipient}`,
+        details: withDefined({
+          deliveryId: duplicateDelivery.id,
+          idempotencyKey: idempotencyKey ?? undefined
+        })
+      });
+      res.status(200).json({ queued: duplicateDelivery.status === "PENDING", deliveryId: duplicateDelivery.id, duplicate: true });
+      return;
+    }
+
     const filename = this.contractFileName(contract.booking.code, contract.booking.customerName);
     const pdfBuffer = await this.buildContractPdf(contract);
 
@@ -1718,7 +1821,11 @@ export class RentalBookingsController {
         recipient,
         subject,
         body,
-        status: "PENDING"
+        status: "PENDING",
+        details: withDefined({
+          idempotencyKey: idempotencyKey ?? undefined,
+          requestId: req.requestId ?? undefined
+        })
       }
     });
 
@@ -1763,7 +1870,10 @@ export class RentalBookingsController {
       actorUserId,
       type: "EMAIL_QUEUED",
       message: `Email contratto accodata per ${recipient}`,
-      details: { deliveryId: delivery.id }
+      details: withDefined({
+        deliveryId: delivery.id,
+        idempotencyKey: idempotencyKey ?? undefined
+      })
     });
 
     res.status(201).json({ queued: true, deliveryId: delivery.id });
@@ -1772,6 +1882,7 @@ export class RentalBookingsController {
   sendContractWhatsapp = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
+    const idempotencyKey = this.extractIdempotencyKey(req);
     const payload = bookingContractWhatsappSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
 
@@ -1779,6 +1890,52 @@ export class RentalBookingsController {
     const normalizedPhone = this.normalizeWhatsAppPhone(rawPhone);
     if (!normalizedPhone) {
       throw new AppError("Numero WhatsApp cliente mancante o non valido.", 400, "CONTRACT_WHATSAPP_PHONE_MISSING");
+    }
+
+    const subject = `WhatsApp contratto ${contract.booking.code}`;
+    const duplicateDelivery = idempotencyKey
+      ? await this.findDuplicateContractDelivery({
+          tenantId,
+          contractId: contract.id,
+          channel: "WHATSAPP",
+          recipient: `+${normalizedPhone}`,
+          subject,
+          body: contract.booking.code,
+          matchBody: false,
+          idempotencyKey
+        })
+      : null;
+    if (duplicateDelivery) {
+      const duplicateDetails =
+        duplicateDelivery.details && typeof duplicateDelivery.details === "object" && !Array.isArray(duplicateDelivery.details)
+          ? (duplicateDelivery.details as Record<string, unknown>)
+          : null;
+      const whatsappUrl = typeof duplicateDetails?.whatsappUrl === "string" ? duplicateDetails.whatsappUrl : null;
+      const shareUrl = typeof duplicateDetails?.shareUrl === "string" ? duplicateDetails.shareUrl : null;
+      const expiresAtRaw = typeof duplicateDetails?.expiresAt === "string" ? duplicateDetails.expiresAt : null;
+      await this.logContractEvent({
+        tenantId,
+        bookingId: contract.bookingId,
+        contractId: contract.id,
+        actorUserId,
+        type: "WHATSAPP_DEDUPED",
+        message: `Invio WhatsApp duplicato ignorato per +${normalizedPhone}`,
+        details: withDefined({
+          deliveryId: duplicateDelivery.id,
+          idempotencyKey: idempotencyKey ?? undefined
+        })
+      });
+      res.status(200).json({
+        queued: false,
+        channel: "WHATSAPP",
+        deliveryId: duplicateDelivery.id,
+        phone: `+${normalizedPhone}`,
+        whatsappUrl,
+        shareUrl,
+        expiresAt: expiresAtRaw,
+        duplicate: true
+      });
+      return;
     }
 
     const expiresAt = new Date(Date.now() + payload.shareExpiresHours * 60 * 60 * 1000);
@@ -1808,15 +1965,17 @@ export class RentalBookingsController {
         contractId: contract.id,
         channel: "WHATSAPP",
         recipient: `+${normalizedPhone}`,
-        subject: `WhatsApp contratto ${contract.booking.code}`,
+        subject,
         body: message,
         status: "SENT",
         sentAt: new Date(),
-        details: {
+        details: withDefined({
           whatsappUrl,
           shareUrl,
-          expiresAt: expiresAt.toISOString()
-        }
+          expiresAt: expiresAt.toISOString(),
+          idempotencyKey: idempotencyKey ?? undefined,
+          requestId: req.requestId ?? undefined
+        })
       }
     });
 
@@ -1839,7 +1998,8 @@ export class RentalBookingsController {
       message: `Contratto condiviso via WhatsApp a +${normalizedPhone}`,
       details: {
         deliveryId: delivery.id,
-        expiresAt: expiresAt.toISOString()
+        expiresAt: expiresAt.toISOString(),
+        idempotencyKey: idempotencyKey ?? undefined
       }
     });
 
@@ -1857,8 +2017,41 @@ export class RentalBookingsController {
   markContractSigned = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
+    const idempotencyKey = this.extractIdempotencyKey(req);
     const payload = bookingContractMarkSignedSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
+    const events = Array.isArray(contract.events) ? contract.events : [];
+
+    if (idempotencyKey) {
+      const alreadySignedByKey = events.find(
+        (entry) => entry.type === "SIGNED" && this.extractIdempotencyKeyFromDetails(entry.details) === idempotencyKey
+      );
+      if (alreadySignedByKey) {
+        const signatureDetails = this.extractContractSignatureDetails(alreadySignedByKey.details);
+        res.status(200).json({
+          ...contract,
+          signatureSaved: Boolean(signatureDetails),
+          signatureFilePath: signatureDetails?.signatureFilePath ?? null,
+          duplicate: true,
+          idempotent: true
+        });
+        return;
+      }
+    }
+
+    if (contract.status === "SIGNED" && !payload.signatureDataUrl) {
+      const latestSignedEvent = events.find((entry) => entry.type === "SIGNED");
+      const signatureDetails = latestSignedEvent ? this.extractContractSignatureDetails(latestSignedEvent.details) : null;
+      res.status(200).json({
+        ...contract,
+        signatureSaved: Boolean(signatureDetails),
+        signatureFilePath: signatureDetails?.signatureFilePath ?? null,
+        duplicate: true,
+        idempotent: true
+      });
+      return;
+    }
+
     const signedAt = payload.signedAt ?? new Date();
     const signature = payload.signatureDataUrl
       ? await this.persistContractSignature({
@@ -1898,7 +2091,8 @@ export class RentalBookingsController {
         signedAt: signedAt.toISOString(),
         signatureFilePath: signature?.filePath,
         signatureMimeType: signature?.mimeType,
-        signatureSizeBytes: signature?.sizeBytes
+        signatureSizeBytes: signature?.sizeBytes,
+        idempotencyKey: idempotencyKey ?? undefined
       })
     });
 

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { JwtPayload } from "../../../shared/types/auth.js";
+import { appendLogContext } from "../../../infrastructure/logging/logger.js";
 
 export const requirePlatformAuth = (req: Request, _res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
@@ -15,6 +16,7 @@ export const requirePlatformAuth = (req: Request, _res: Response, next: NextFunc
       throw new AppError("Accesso platform negato", 403, "FORBIDDEN");
     }
     req.auth = payload;
+    appendLogContext({ tenantId: payload.tenantId, userId: payload.userId });
     next();
   } catch (error) {
     if (error instanceof AppError) throw error;
