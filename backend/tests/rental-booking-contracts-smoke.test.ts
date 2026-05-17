@@ -130,6 +130,13 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
     body: {}
   } as any;
 
+  (controller as any).tenantProfileService = {
+    contractBranding: async () => ({
+      companyName: "Fleetum Demo",
+      companyEmail: "noreply@fleetum.it"
+    })
+  };
+
   const originalDeliveryCreate = prisma.bookingContractDelivery.create;
   const originalDeliveryFindUnique = prisma.bookingContractDelivery.findUnique;
   const originalBookingContractUpdate = prisma.bookingContract.update;
@@ -191,6 +198,13 @@ test("contracts smoke: sendContractEmail fails when recipient is missing", async
     params: { id: "booking_1" },
     body: {}
   } as any;
+
+  (controller as any).tenantProfileService = {
+    contractBranding: async () => ({
+      companyName: "Fleetum Demo",
+      companyEmail: "noreply@fleetum.it"
+    })
+  };
 
   (controller as any).getContractOrThrow = async () => ({
     id: "contract_1",
