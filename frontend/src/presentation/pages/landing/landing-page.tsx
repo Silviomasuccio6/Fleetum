@@ -14,11 +14,14 @@ import {
   KeyRound,
   LockKeyhole,
   MailCheck,
+  MapPin,
   Menu,
   Route,
+  ServerCog,
   ShieldCheck,
   Sparkles,
   UsersRound,
+  WalletCards,
   Wrench,
   X,
 } from "lucide-react";
@@ -174,11 +177,33 @@ const modules = [
 
 const workflow = ["Cliente", "Prenotazione", "Contratto", "Uscita", "Rientro", "Manutenzione", "Report"];
 
+const proofStats = [
+  { label: "Processi collegati", value: "7", text: "cliente, booking, contratto, uscita, rientro, manutenzione e report" },
+  { label: "Vista operativa", value: "1", text: "calendario mensile per veicolo, sede e stato" },
+  { label: "Canali contratto", value: "2", text: "email e WhatsApp con storico invii" },
+];
+
+const personas = [
+  { icon: Building2, title: "Rent a car locali", text: "Per team che vogliono sostituire fogli, chat e cartelle con un flusso unico." },
+  { icon: MapPin, title: "Aziende multi-sede", text: "Per chi deve controllare disponibilita, uscite e rientri su piu filiali." },
+  { icon: ServerCog, title: "Direzione operativa", text: "Per leggere ricavi, occupazione, contratti e criticita senza inseguire dati." },
+];
+
+const operationalChecks = [
+  { label: "Uscite oggi", value: "12", tone: "blue" },
+  { label: "Rientri in ritardo", value: "2", tone: "warn" },
+  { label: "Contratti da firmare", value: "8", tone: "teal" },
+  { label: "Veicoli con revisione critica", value: "3", tone: "danger" },
+];
+
+
 const securityItems = [
   { icon: ShieldCheck, title: "Workspace separati", text: "Architettura multi-tenant progettata per isolare aziende, dati e operativita." },
   { icon: LockKeyhole, title: "Ruoli e permessi", text: "Accessi controllati per admin, manager, operatori e utenti in sola lettura." },
   { icon: FileCheck2, title: "Audit operativo", text: "Azioni sensibili, documenti, contratti e invii producono evidenze tracciabili." },
   { icon: Building2, title: "Brand aziendale", text: "Logo, dati societari e impostazioni legali alimentano contratti, email ed export." },
+  { icon: ServerCog, title: "CI/CD controllato", text: "Deploy tracciati tramite GitHub Actions, health check e workflow ripetibili." },
+  { icon: WalletCards, title: "SaaS monetizzabile", text: "Piani, upgrade e processi commerciali pensati per una piattaforma B2B." },
 ];
 
 const plans = [
@@ -186,20 +211,20 @@ const plans = [
     name: "Starter",
     price: "129€",
     target: "Per piccoli autonoleggi che vogliono uscire da Excel.",
-    features: ["Booking e veicoli", "Clienti e contratti base", "Dashboard operativa"],
+    features: ["Booking mensile per veicolo", "Clienti e contratti base", "Dashboard operativa", "Scadenze principali"],
   },
   {
     name: "Pro",
     price: "199€",
     target: "Per team che gestiscono flotta e contratti ogni giorno.",
-    features: ["Contratti evoluti", "Scadenze e manutenzioni", "Statistiche e alert"],
+    features: ["Contratti evoluti e invii", "Scadenze e manutenzioni", "Statistiche, alert e listini", "Priorita operative giornaliere"],
     highlight: true,
   },
   {
     name: "Enterprise",
     price: "249€",
     target: "Per aziende con piu sedi, processi e governance.",
-    features: ["Controllo avanzato", "Workflow completi", "Supporto scalabilita"],
+    features: ["Multi-sede e governance", "Workflow completi", "Supporto scalabilita", "Controllo avanzato contratti"],
   },
 ];
 
@@ -255,25 +280,25 @@ const ProductMockup = () => {
           <span />
           <span />
           <span />
-          <strong>Fleetum control room</strong>
+          <strong>Fleetum control room · demo operativa</strong>
         </div>
         <div className="fleetum-product-grid">
           <div className="fleetum-product-panel fleetum-product-panel--kpis">
             <div>
               <p>Disponibili oggi</p>
               <strong><CountUp value={74} suffix="%" /></strong>
-              <small>flotta pronta per nuove uscite</small>
+              <small>mezzi liberi, prenotati e in rientro</small>
             </div>
             <div>
               <p>Ricavi mese</p>
               <strong><CountUp value={38} suffix="k" /></strong>
-              <small>previsto + consuntivo</small>
+              <small>stima booking + consuntivo rientri</small>
             </div>
           </div>
           <div className="fleetum-product-panel fleetum-product-panel--alerts">
             <span><FileCheck2 className="h-4 w-4" /> 8 contratti da firmare</span>
-            <span><Clock3 className="h-4 w-4" /> 12 rientri oggi</span>
-            <span><Wrench className="h-4 w-4" /> 3 manutenzioni critiche</span>
+            <span><Clock3 className="h-4 w-4" /> 12 rientri oggi · 2 in ritardo</span>
+            <span><Wrench className="h-4 w-4" /> 3 manutenzioni prima dell'uscita</span>
           </div>
           <div className="fleetum-booking-preview">
             <div className="fleetum-booking-preview__head">
@@ -316,10 +341,10 @@ const HeroSection = () => (
         <div className="fleetum-eyebrow"><Sparkles className="h-4 w-4" /> SaaS per autonoleggi e flotte</div>
         <h1>Il sistema operativo per autonoleggi moderni.</h1>
         <p>
-          Fleetum centralizza booking, contratti digitali, clienti, veicoli, manutenzioni, scadenze e KPI in una control room pensata per rent a car e flotte aziendali.
+          Fleetum collega prenotazioni, contratti digitali, clienti, veicoli, manutenzioni, scadenze e KPI in una control room progettata per rent a car e flotte aziendali.
         </p>
         <div className="fleetum-hero__actions">
-          <Link to="/demo" className="fleetum-btn fleetum-btn--hero">Richiedi demo <ChevronRight className="h-5 w-5" /></Link>
+          <Link to="/demo" className="fleetum-btn fleetum-btn--hero">Vedi Fleetum in azione <ChevronRight className="h-5 w-5" /></Link>
           <Link to="/login" className="fleetum-btn fleetum-btn--secondary">Accedi al gestionale</Link>
         </div>
         <div className="fleetum-trust-row">
@@ -342,6 +367,68 @@ const SectionHeading = ({ eyebrow, title, text, center = false }: { eyebrow: str
     <h2>{title}</h2>
     <span>{text}</span>
   </Reveal>
+);
+
+
+const ProofBarSection = () => (
+  <section className="fleetum-proof-strip" aria-label="Sintesi valore Fleetum">
+    {proofStats.map((item, index) => (
+      <Reveal key={item.label} delay={index * 70}>
+        <article className="fleetum-proof-card">
+          <strong>{item.value}</strong>
+          <div>
+            <p>{item.label}</p>
+            <span>{item.text}</span>
+          </div>
+        </article>
+      </Reveal>
+    ))}
+  </section>
+);
+
+const PersonaSection = () => (
+  <section className="fleetum-section fleetum-persona-section">
+    <SectionHeading
+      eyebrow="Per chi e pensato"
+      title="Costruito per chi gestisce flotta, banco e contratti ogni giorno."
+      text="Fleetum parla il linguaggio operativo del noleggio: disponibilita, uscite, rientri, documenti, firme, km e scadenze."
+      center
+    />
+    <div className="fleetum-persona-grid">
+      {personas.map((item, index) => {
+        const Icon = item.icon;
+        return (
+          <Reveal key={item.title} delay={index * 80}>
+            <article className="fleetum-glass-card fleetum-persona-card">
+              <Icon className="h-6 w-6" />
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </article>
+          </Reveal>
+        );
+      })}
+    </div>
+  </section>
+);
+
+const OperationalControlSection = () => (
+  <section className="fleetum-section fleetum-ops-section">
+    <Reveal className="fleetum-ops-panel">
+      <div className="fleetum-ops-copy">
+        <p>Controllo giornaliero</p>
+        <h2>Cosa devi sapere prima che apra il banco.</h2>
+        <span>Una vista sintetica ti mostra cosa puo uscire, cosa deve rientrare, quali contratti mancano e quali mezzi richiedono attenzione.</span>
+      </div>
+      <div className="fleetum-ops-grid">
+        {operationalChecks.map((item) => (
+          <div key={item.label} className={`fleetum-ops-card is-${item.tone}`}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        ))}
+      </div>
+    </Reveal>
+  </section>
 );
 
 const ProblemSection = () => (
@@ -394,18 +481,18 @@ const BookingControlRoomSection = () => (
     <Reveal className="fleetum-showcase-copy">
       <p>Booking control room</p>
       <h2>Il calendario booking diventa il centro operativo.</h2>
-      <span>Vedi disponibilita, uscite, rientri e criticita in un'unica vista mensile per veicolo.</span>
+      <span>Vedi disponibilita, uscite, rientri e criticita in un'unica vista mensile per veicolo, prima che diventino problemi al banco.</span>
       <ul>
         <li><Check className="h-4 w-4" /> Barre multi-giorno leggibili</li>
         <li><Check className="h-4 w-4" /> Stato manutenzione e revisione vicino alla targa</li>
         <li><Check className="h-4 w-4" /> Cliente e contratto collegati alla prenotazione</li>
       </ul>
-      <Link to="/login" className="fleetum-link-cta">Apri Booking <ArrowRight className="h-4 w-4" /></Link>
+      <Link to="/login" className="fleetum-link-cta">Apri una demo operativa <ArrowRight className="h-4 w-4" /></Link>
     </Reveal>
     <Reveal className="fleetum-calendar-showcase" delay={120}>
       <div className="fleetum-calendar-toolbar">
         <span>Aprile 2026</span>
-        <strong>Tutte le sedi</strong>
+        <strong>Sede Roma Centro</strong>
         <em>Occupazione 78%</em>
       </div>
       <div className="fleetum-calendar-table">
@@ -432,48 +519,48 @@ const BookingControlRoomSection = () => (
 const ContractsShowcaseSection = () => (
   <section className="fleetum-section fleetum-split-section fleetum-split-section--contracts">
     <Reveal className="fleetum-contract-paper">
-      <div className="fleetum-contract-watermark">Fleetum</div>
+      <div className="fleetum-contract-watermark">F</div>
       <div className="fleetum-contract-paper__head">
         <div className="fleetum-contract-brand">
           <img src="/brand/fleetum-symbol-for-dark-bg.svg" alt="" />
           <div>
-            <strong>Autonoleggio Demo</strong>
-            <span>P.IVA 01234567890 · Roma</span>
+            <strong>Autonoleggio Aurora</strong>
+            <span>P.IVA 01234567890 · Roma · Noleggio senza conducente</span>
           </div>
         </div>
-        <div className="fleetum-contract-code"><p>Contratto noleggio</p><strong>BK-2026-1048</strong></div>
+        <div className="fleetum-contract-code"><p>Contratto noleggio</p><strong>RA-2026-1048</strong></div>
       </div>
       <div className="fleetum-contract-title">
         <p>Locazione veicolo senza conducente</p>
-        <span>Documento dimostrativo generato da Fleetum</span>
+        <span>Template dimostrativo: dati cliente, mezzo, condizioni, firma e invio collegati al booking.</span>
       </div>
       <div className="fleetum-contract-summary">
         <div>
           <p>Cliente</p>
-          <strong>Luca Bianchi</strong>
-          <span>Persona fisica · patente verificata</span>
+          <strong>Marco Conti</strong>
+          <span>Persona fisica · patente e documento verificati</span>
         </div>
         <div>
           <p>Veicolo</p>
-          <strong>Fiat Ducato</strong>
-          <span>GF101AB · km uscita 42.180</span>
+          <strong>Ford Transit</strong>
+          <span>GF204RT · km uscita 42.180</span>
         </div>
       </div>
       <div className="fleetum-contract-details">
         <span><small>Uscita</small><strong>18 Apr 2026 · 09:00</strong></span>
         <span><small>Rientro</small><strong>21 Apr 2026 · 18:30</strong></span>
         <span><small>Pacchetto</small><strong>100 km/giorno</strong></span>
-        <span><small>Totale</small><strong>€ 420,00</strong></span>
+        <span><small>Totale previsto</small><strong>€ 420,00</strong></span>
       </div>
       <div className="fleetum-contract-terms">
         <p>Condizioni principali</p>
-        <span>Franchigia, cauzione, responsabilita conducente, chilometri extra e riconsegna veicolo sono riportati in clausole chiare e firmabili.</span>
+        <span>Franchigia, cauzione, responsabilita conducente, chilometri extra e riconsegna sono organizzati in clausole leggibili e firmabili.</span>
       </div>
       <div className="fleetum-signature-row">
         <span><small>Data</small>18/04/2026</span>
         <span><small>Firma cliente</small><em /></span>
       </div>
-      <div className="fleetum-contract-status"><MailCheck className="h-4 w-4" /> Inviato via email · firmato</div>
+      <div className="fleetum-contract-status"><MailCheck className="h-4 w-4" /> Inviato via email · WhatsApp pronto · firmato</div>
     </Reveal>
     <Reveal className="fleetum-showcase-copy" delay={120}>
       <p>Contratti digitali</p>
@@ -518,7 +605,7 @@ const DashboardIntelligenceSection = () => (
     <SectionHeading
       eyebrow="Dashboard intelligence"
       title="Non solo gestione: controllo decisionale."
-      text="Fleetum evidenzia cio che richiede attenzione oggi: ricavi, rientri, contratti, manutenzioni e stato flotta."
+      text="Fleetum evidenzia cio che richiede attenzione oggi: ricavi, rientri, contratti, manutenzioni, scadenze e disponibilita reale della flotta."
       center
     />
     <div className="fleetum-decision-grid">
@@ -589,7 +676,7 @@ const PricingSection = () => (
             <ul>
               {plan.features.map((feature) => <li key={feature}><Check className="h-4 w-4" />{feature}</li>)}
             </ul>
-            <Link to="/signup" className={plan.highlight ? "fleetum-btn fleetum-btn--primary" : "fleetum-btn fleetum-btn--dark"}>Inizia ora</Link>
+            <Link to={plan.name === "Enterprise" ? "/demo" : "/signup"} className={plan.highlight ? "fleetum-btn fleetum-btn--primary" : "fleetum-btn fleetum-btn--dark"}>{plan.name === "Enterprise" ? "Parla con noi" : "Inizia ora"}</Link>
           </article>
         </Reveal>
       ))}
@@ -637,11 +724,14 @@ export const LandingPage = () => (
   <main className="fleetum-landing">
     <LandingSeo />
     <HeroSection />
+    <ProofBarSection />
     <ProblemSection />
+    <PersonaSection />
     <WorkflowSection />
     <BookingControlRoomSection />
     <ContractsShowcaseSection />
     <ModulesSection />
+    <OperationalControlSection />
     <DashboardIntelligenceSection />
     <SecuritySection />
     <PricingSection />
