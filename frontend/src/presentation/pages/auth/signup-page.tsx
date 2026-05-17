@@ -1,34 +1,10 @@
-import { type CSSProperties, type ReactNode, FormEvent, useEffect, useMemo, useState } from "react";
-import { AtSign, Briefcase, Building2, CircleCheck, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, ShieldCheck, Sparkles, Star, User } from "lucide-react";
+import { type CSSProperties, type ReactNode, FormEvent, useEffect, useState } from "react";
+import { AtSign, Briefcase, Building2, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, Star, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMouseParallax } from "../../../features/auth/hooks/useMouseParallax";
-import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
-import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
-import { FleetumLanguageSwitcher } from "../../components/i18n/fleetum-language-switcher";
-import { translateText, useFleetumLanguage } from "../../i18n/fleetum-language";
 import "../../../features/auth/premium-login.css";
-
-const TRUST_ITEMS = [
-  "Provisioning tenant automatico in pochi secondi",
-  "Credenziali admin protette con policy JWT",
-  "Ambiente pronto per onboarding team e sedi"
-];
-
-const STATS = [
-  { label: "Tenant creati", value: "4.8K+", delta: "ultimi 12 mesi" },
-  { label: "Setup medio", value: "< 60s", delta: "dalla registrazione" },
-  { label: "Soddisfazione", value: "98%", delta: "clienti attivi" }
-];
-
-const FLOATING_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
-  id: index,
-  left: `${Math.round((index * 7.13) % 100)}%`,
-  delay: `${(index % 7) * 0.6}s`,
-  duration: `${6 + (index % 5) * 1.2}s`
-}));
 
 const SIGNUP_STEPS = [
   {
@@ -109,8 +85,6 @@ const initialForm = {
 
 export const SignupPage = () => {
   const navigate = useNavigate();
-  const { nx, ny } = useMouseParallax();
-  const { language } = useFleetumLanguage();
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -137,13 +111,6 @@ export const SignupPage = () => {
       }
     };
   }, []);
-
-  const backgroundTransform = useMemo(
-    () => ({
-      transform: `translate(${nx * 24}px, ${ny * 18}px)`
-    }),
-    [nx, ny]
-  );
 
   const openSocialAuth = (provider: "google" | "apple") => {
     const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
@@ -268,66 +235,8 @@ export const SignupPage = () => {
   };
 
   return (
-    <div className="premium-login-root">
-      <div className="premium-login-bg-gradient" style={backgroundTransform} aria-hidden />
-      <FleetumLanguageSwitcher />
-
-      <ParticleCanvas />
-      <MagneticOrbs />
-
-      <div className="premium-login-grid-overlay" aria-hidden />
-      <div className="premium-login-noise-overlay" aria-hidden />
-
-      <div className="premium-login-floating-layer" aria-hidden>
-        {FLOATING_PARTICLES.map((particle) => (
-          <span
-            key={particle.id}
-            className="premium-login-floating-dot"
-            style={{
-              left: particle.left,
-              animationDelay: particle.delay,
-              animationDuration: particle.duration
-            }}
-          />
-        ))}
-      </div>
-
-      <main className="premium-login-grid">
-        <aside className="premium-login-side premium-login-side--left">
-          <div className="premium-login-logo-row">
-            <img className="premium-login-logo-wordmark" src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" />
-          </div>
-
-          <div className="premium-login-hero-copy">
-            <p className="premium-login-pill">
-              <span className="premium-login-pill-dot" />
-              Fast Tenant Onboarding
-            </p>
-            <h1 className="premium-login-hero-title">
-              Crea il tuo ambiente<br />
-              <span>e parti in meno di un minuto.</span>
-            </h1>
-            <p className="premium-login-hero-subtitle">
-              Configura tenant, admin iniziale e workspace operativo con setup guidato e pronto per la produzione.
-            </p>
-
-            <div className="premium-login-chip-list">
-              <span className="premium-login-chip"><span style={{ background: "#34d399" }} />Setup rapido</span>
-              <span className="premium-login-chip"><span style={{ background: "#818cf8" }} />JWT secure</span>
-              <span className="premium-login-chip"><span style={{ background: "#22d3ee" }} />Ready to scale</span>
-            </div>
-          </div>
-
-          <ul className="space-y-2 text-sm text-slate-600">
-            {TRUST_ITEMS.map((item) => (
-              <li key={item} className="flex items-center gap-2.5">
-                <CircleCheck className="h-4 w-4 text-indigo-600" />
-                {item}
-              </li>
-            ))}
-          </ul>
-        </aside>
-
+    <div className="premium-login-root premium-login-root--clean">
+      <main className="premium-login-auth-shell">
         <section className="premium-login-card-wrap premium-login-card-wrap--signup">
           <div className="premium-login-card premium-login-card--signup">
             <div className="premium-login-card-head">
@@ -390,7 +299,7 @@ export const SignupPage = () => {
               <div className="premium-signup-stepper" style={signupProgressStyle} aria-label="Avanzamento registrazione">
                 <div className="premium-signup-stepper__meta">
                   <span>Registrazione guidata</span>
-                  <strong>{translateText(`${signupProgress}% completato`, language)}</strong>
+                  <strong>{signupProgress}% completato</strong>
                 </div>
                 <div className="premium-signup-stepper__track" aria-hidden>
                   <span />
@@ -576,7 +485,7 @@ export const SignupPage = () => {
                       </div>
                       <div className="min-w-0">
                         <label className="premium-login-field-label" htmlFor="signup-country">Paese</label>
-                        <div className={`premium-login-field ${form.country ? "is-ok" : ""}`}>
+                        <div className="premium-login-field">
                           <input
                             id="signup-country"
                             name="country"
@@ -832,38 +741,6 @@ export const SignupPage = () => {
             )}
           </div>
         </section>
-
-        <aside className="premium-login-side premium-login-side--right">
-          {STATS.map((stat, index) => (
-            <article
-              key={stat.label}
-              className={`premium-login-stat-card ${
-                index === 0
-                  ? "premium-login-stat-card--violet"
-                  : index === 1
-                    ? "premium-login-stat-card--cyan"
-                    : "premium-login-stat-card--emerald"
-              }`}
-            >
-              <p className="premium-login-stat-label">{stat.label}</p>
-              <p className="premium-login-stat-value">{stat.value}</p>
-              <p className="premium-login-stat-delta">{stat.delta}</p>
-            </article>
-          ))}
-
-          <article className="premium-login-feature-callout">
-            <p className="premium-login-stat-label">NUOVO · FEATURE</p>
-            <p className="premium-login-feature-title">
-              <Sparkles className="mr-1 inline h-4 w-4" /> Onboarding assistito
-            </p>
-            <p className="premium-login-feature-subtitle">
-              Setup iniziale guidato con policy di sicurezza preconfigurate.
-            </p>
-            <div className="premium-login-chip mt-2 w-fit">
-              <ShieldCheck className="h-4 w-4" /> Ready in produzione
-            </div>
-          </article>
-        </aside>
       </main>
     </div>
   );

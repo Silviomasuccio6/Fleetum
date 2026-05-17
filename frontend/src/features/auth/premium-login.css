@@ -2033,3 +2033,199 @@
 .premium-login-root--clean .premium-login-submit {
   min-height: 3.1rem;
 }
+
+.premium-login-auth-shell {
+  position: relative;
+  z-index: 10;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1.2rem, 3vw, 2.5rem);
+}
+
+.premium-login-root--clean {
+  --font-display: "Manrope", "Inter", "Segoe UI", sans-serif;
+  --font-body: "Inter", "Segoe UI", sans-serif;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 255, 0.05), transparent 22rem),
+    linear-gradient(180deg, #fbfdff 0%, #f4f7fb 100%);
+}
+
+.premium-login-root--clean .premium-login-bg-gradient,
+.premium-login-root--clean .premium-login-grid-overlay,
+.premium-login-root--clean .premium-login-noise-overlay,
+.premium-login-root--clean .premium-login-floating-layer,
+.premium-login-root--clean canvas {
+  display: none !important;
+}
+
+.premium-login-root--clean .premium-login-card-wrap {
+  width: min(100%, 28.5rem);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.premium-login-root--clean .premium-login-card-wrap--signup {
+  width: min(100%, 43.5rem);
+}
+
+.premium-login-root--clean .premium-login-card {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 1.45rem;
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 28px 70px -46px rgba(15, 23, 42, 0.36),
+    0 1px 0 rgba(255, 255, 255, 0.92) inset;
+  font-family: var(--font-body);
+  transform: none !important;
+}
+
+.premium-login-root--clean .premium-login-card--signup {
+  max-height: none;
+  padding: clamp(1.25rem, 2vw, 1.7rem);
+}
+
+.premium-login-root--clean .premium-login-card-head {
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.premium-login-root--clean .premium-login-card-head h2 {
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 2vw, 1.85rem);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.06;
+  color: #0f172a;
+}
+
+.premium-login-root--clean .premium-login-card-head p {
+  margin-top: 0.42rem;
+  font-family: var(--font-body);
+  font-size: 0.91rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.premium-login-root--clean .premium-login-card-logo {
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-bottom: 0.7rem;
+  box-shadow: none;
+  animation: none;
+}
+
+.premium-login-root--clean .premium-login-form {
+  gap: 0.72rem;
+}
+
+.premium-login-root--clean .premium-login-field-label {
+  margin-top: 0.1rem;
+  font-family: var(--font-body);
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: -0.006em;
+  color: #334155;
+}
+
+.premium-login-root--clean .premium-login-field {
+  min-height: 2.85rem;
+  border-radius: 0.9rem;
+  border-color: rgba(203, 213, 225, 0.95);
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.premium-login-root--clean .premium-login-field.is-ok {
+  border-color: rgba(203, 213, 225, 0.95);
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.premium-login-root--clean .premium-login-field.is-ok .premium-login-field-icon-wrap,
+.premium-login-root--clean .premium-login-field.is-ok span {
+  color: #64748b;
+}
+
+.premium-login-root--clean .premium-login-field:focus-within {
+  border-color: rgba(37, 99, 255, 0.46);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 255, 0.10);
+}
+
+.premium-login-root--clean .premium-login-field input {
+  padding-top: 0.68rem;
+  padding-bottom: 0.68rem;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  line-height: 1.25;
+  color: #0f172a;
+}
+
+.premium-login-root--clean .premium-login-social-btn {
+  min-height: 2.55rem;
+  border-color: rgba(203, 213, 225, 0.9);
+  background: #ffffff;
+  font-family: var(--font-body);
+  font-weight: 650;
+  color: #1e293b;
+}
+
+.premium-login-root--clean .premium-login-divider,
+.premium-login-root--clean .premium-login-signup-text,
+.premium-login-root--clean .premium-login-check,
+.premium-login-root--clean .premium-login-link {
+  font-family: var(--font-body);
+}
+
+.premium-login-root--clean .premium-login-submit {
+  min-height: 2.95rem;
+  border-radius: 0.95rem;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
+.premium-login-root--clean .premium-signup-stepper {
+  border-color: rgba(203, 213, 225, 0.8);
+  background: rgba(248, 250, 252, 0.72);
+  box-shadow: none;
+}
+
+.premium-login-root--clean .premium-signup-stepper__meta,
+.premium-login-root--clean .premium-signup-stepper__copy {
+  font-family: var(--font-body);
+}
+
+.premium-login-root--clean .premium-signup-stepper__step {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.premium-login-root--clean .premium-signup-stepper__copy span,
+.premium-login-root--clean .premium-signup-stepper__copy small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .premium-login-auth-shell {
+    align-items: flex-start;
+    padding: 1rem;
+  }
+
+  .premium-login-root--clean .premium-login-card {
+    border-radius: 1.2rem;
+  }
+
+  .premium-login-root--clean .premium-signup-stepper__steps {
+    grid-template-columns: 1fr;
+  }
+}
