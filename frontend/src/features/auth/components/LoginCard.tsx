@@ -1,9 +1,10 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../../presentation/components/brand/fleetum-logo-loader";
+import { getSafeReturnTo } from "../../../presentation/routes/safe-return-to";
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
@@ -63,6 +64,7 @@ const AppleLogo = () => (
 
 export const LoginCard = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const setSession = useAuthStore((state) => state.setSession);
   const apiBaseUrl = getApiBaseUrl();
   const googleAuthUrl = (import.meta.env.VITE_GOOGLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/google`;
@@ -70,7 +72,9 @@ export const LoginCard = () => {
 
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const [email, setEmail] = useState("");
+  const returnTo = getSafeReturnTo(searchParams.get("next"));
+  const welcome = searchParams.get("welcome");
+  const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [pwVisible, setPwVisible] = useState(false);
@@ -123,7 +127,7 @@ export const LoginCard = () => {
       const result = await authUseCases.login({ email, password });
       setSession(result.user, remember);
       setSuccess(true);
-      window.setTimeout(() => navigate("/dashboard"), 450);
+      window.setTimeout(() => navigate(returnTo, { replace: true }), 450);
     } catch (error) {
       setFormError((error as Error).message || "Credenziali non valide");
       triggerShake();
@@ -134,7 +138,9 @@ export const LoginCard = () => {
 
   const openSocialAuth = (provider: "google" | "apple") => {
     const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
-    window.location.href = providerUrl;
+    const target = new URL(providerUrl, window.location.origin);
+    target.searchParams.set("returnTo", returnTo);
+    window.location.href = target.toString();
   };
 
   return (
@@ -175,6 +181,18 @@ export const LoginCard = () => {
           </div>
 
           <div className="premium-login-divider">o continua con email</div>
+
+          {welcome === "trial" ? (
+            <p className="premium-login-error premium-login-error--block" style={{ color: "#065f46", background: "rgba(209,250,229,0.8)", borderColor: "rgba(16,185,129,0.45)" }}>
+              Prova gratuita di 14 giorni pronta. Accedi per entrare nel gestionale.
+            </p>
+          ) : null}
+
+          {welcome === "billing" ? (
+            <p className="premium-login-error premium-login-error--block" style={{ color: "#3730a3", background: "rgba(224,231,255,0.82)", borderColor: "rgba(99,102,241,0.35)" }}>
+              Accedi e ti porto alla scelta piano con checkout Stripe.
+            </p>
+          ) : null}
 
           <label className="premium-login-field-label" htmlFor="premium-login-email">
             Indirizzo email

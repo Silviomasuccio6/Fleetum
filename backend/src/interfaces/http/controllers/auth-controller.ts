@@ -88,7 +88,7 @@ export class AuthController {
 
   googleAuthStart = async (req: Request, res: Response) => {
     const intent = this.parseOAuthIntent(req);
-    const state = this.socialOAuthService.createState("google", intent);
+    const state = this.socialOAuthService.createState("google", intent, this.parseSafeReturnTo(req));
     const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("google", state);
     res.redirect(authorizationUrl);
   };
@@ -99,7 +99,7 @@ export class AuthController {
 
   appleAuthStart = async (req: Request, res: Response) => {
     const intent = this.parseOAuthIntent(req);
-    const state = this.socialOAuthService.createState("apple", intent);
+    const state = this.socialOAuthService.createState("apple", intent, this.parseSafeReturnTo(req));
     const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("apple", state);
     res.redirect(authorizationUrl);
   };
@@ -282,6 +282,7 @@ export class AuthController {
       const payload = new URLSearchParams();
       payload.set("refreshExpiresAt", session.refreshExpiresAt);
       payload.set("user", Buffer.from(JSON.stringify(session.user), "utf-8").toString("base64url"));
+      if (statePayload.returnTo) payload.set("returnTo", statePayload.returnTo);
       const csrfToken = issueCsrfToken();
       setAccessCookie(res, session.token);
       setRefreshCookie(res, session.refreshToken, session.refreshExpiresAt);
@@ -298,6 +299,21 @@ export class AuthController {
   private parseOAuthIntent(req: Request): OAuthIntent {
     const rawIntent = String(req.query.intent ?? "login").toLowerCase();
     return rawIntent === "signup" ? "signup" : "login";
+  }
+
+  private parseSafeReturnTo(req: Request) {
+    const rawReturnTo = String(req.query.returnTo ?? req.query.next ?? "").trim();
+    if (!rawReturnTo || !rawReturnTo.startsWith("/") || rawReturnTo.startsWith("//")) return undefined;
+    try {
+      const parsed = new URL(rawReturnTo, env.APP_URL);
+      const allowedOrigin = new URL(env.APP_URL).origin;
+      if (parsed.origin !== allowedOrigin) return undefined;
+      const safePath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      if (!safePath.startsWith("/") || safePath.startsWith("//")) return undefined;
+      return safePath.slice(0, 240);
+    } catch {
+      return undefined;
+    }
   }
 
   private redirectOauthError(res: Response, message: string) {

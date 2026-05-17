@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../../application/stores/auth-store";
 import { authUseCases } from "../../application/usecases/auth-usecases";
 import { FleetumFullScreenLoader } from "../components/brand/fleetum-logo-loader";
 
 export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
+  const location = useLocation();
   const { isAuthenticated, authChecked, setUser, logout } = useAuthStore();
 
   useEffect(() => {
@@ -16,5 +17,6 @@ export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
     return <FleetumFullScreenLoader label="Verifica sessione" />;
   }
 
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
+  return isAuthenticated ? children : <Navigate to={`/login?next=${encodeURIComponent(returnTo)}`} replace />;
 };
