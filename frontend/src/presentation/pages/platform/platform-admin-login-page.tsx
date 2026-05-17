@@ -1,35 +1,33 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CircleCheck, ShieldCheck, Sparkles } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMouseParallax } from "../../../features/auth/hooks/useMouseParallax";
-import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
-import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
 import { platformAdminUseCases } from "../../../application/usecases/platform/platform-admin-usecases";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
 import "../../../features/auth/premium-login.css";
 
-const TRUST_ITEMS = [
-  "127.0.0.1 only + IP allowlist",
-  "JWT separato + lock anti brute-force",
-  "Alert email su accessi anomali e cambi licenza"
-];
+const MailIcon = () => (
+  <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
+    <path d="M4.75 6.75h14.5v10.5H4.75V6.75Z" />
+    <path d="m5.25 7.25 6.75 5.2 6.75-5.2" />
+  </svg>
+);
 
-const STATS = [
-  { label: "Tenant monitorati", value: "1.240+", delta: "in tempo reale" },
-  { label: "Eventi audit/giorno", value: "86.5K", delta: "immutabili" },
-  { label: "Disponibilità", value: "99.99%", delta: "ultimi 90 giorni" }
-];
+const LockIcon = () => (
+  <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
+    <path d="M7.75 10.25V8.4a4.25 4.25 0 0 1 8.5 0v1.85" />
+    <path d="M6.25 10.25h11.5v8H6.25v-8Z" />
+    <path d="M12 13.35v1.8" />
+  </svg>
+);
 
-const FLOATING_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
-  id: index,
-  left: `${Math.round((index * 7.13) % 100)}%`,
-  delay: `${(index % 7) * 0.6}s`,
-  duration: `${6 + (index % 5) * 1.2}s`
-}));
+const OtpIcon = () => (
+  <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
+    <path d="M7.75 5.75h8.5v12.5h-8.5V5.75Z" />
+    <path d="M10 8.75h.01M12 8.75h.01M14 8.75h.01M10 11.75h.01M12 11.75h.01M14 11.75h.01M10 14.75h.01M12 14.75h.01M14 14.75h.01" />
+  </svg>
+);
 
 export const PlatformAdminLoginPage = () => {
   const navigate = useNavigate();
-  const { nx, ny } = useMouseParallax();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
@@ -49,13 +47,6 @@ export const PlatformAdminLoginPage = () => {
       }
     };
   }, []);
-
-  const backgroundTransform = useMemo(
-    () => ({
-      transform: `translate(${nx * 24}px, ${ny * 18}px)`
-    }),
-    [nx, ny]
-  );
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -84,68 +75,8 @@ export const PlatformAdminLoginPage = () => {
   };
 
   return (
-    <div className="premium-login-root">
-      <div className="premium-login-bg-gradient" style={backgroundTransform} aria-hidden />
-
-      <ParticleCanvas />
-      <MagneticOrbs />
-
-      <div className="premium-login-grid-overlay" aria-hidden />
-      <div className="premium-login-noise-overlay" aria-hidden />
-
-      <div className="premium-login-floating-layer" aria-hidden>
-        {FLOATING_PARTICLES.map((particle) => (
-          <span
-            key={particle.id}
-            className="premium-login-floating-dot"
-            style={{
-              left: particle.left,
-              animationDelay: particle.delay,
-              animationDuration: particle.duration
-            }}
-          />
-        ))}
-      </div>
-
-      <main className="premium-login-grid">
-        <aside className="premium-login-side premium-login-side--left">
-          <div className="premium-login-logo-row">
-            <img className="premium-login-logo-mark" src="/brand/fleetum-symbol-color.svg" alt="" />
-            <span className="premium-login-logo-text">
-              Fleetum<span> Platform</span>
-            </span>
-          </div>
-
-          <div className="premium-login-hero-copy">
-            <p className="premium-login-pill">
-              <span className="premium-login-pill-dot" />
-              Secure Platform Access
-            </p>
-            <h1 className="premium-login-hero-title">
-              Control Tower privata<br />
-              <span>per licenze SaaS multi-tenant.</span>
-            </h1>
-            <p className="premium-login-hero-subtitle">
-              Accesso limitato a host/IP autorizzati, sessioni brevi, audit immutabile e alert automatici.
-            </p>
-
-            <div className="premium-login-chip-list">
-              <span className="premium-login-chip"><span style={{ background: "#34d399" }} />99.9% Uptime</span>
-              <span className="premium-login-chip"><span style={{ background: "#818cf8" }} />IP restricted</span>
-              <span className="premium-login-chip"><span style={{ background: "#22d3ee" }} />Local-only</span>
-            </div>
-          </div>
-
-          <ul className="space-y-2 text-sm text-slate-600">
-            {TRUST_ITEMS.map((item) => (
-              <li key={item} className="premium-login-list-item flex items-center gap-2.5">
-                <CircleCheck className="h-4 w-4 text-indigo-600" />
-                {item}
-              </li>
-            ))}
-          </ul>
-        </aside>
-
+    <div className="premium-login-root premium-login-root--clean">
+      <main className="premium-login-auth-shell">
         <div className="premium-login-card-wrap">
           <section className={`premium-login-card ${shake ? "animate-shake" : ""}`}>
             <header className="premium-login-card-head">
@@ -159,7 +90,7 @@ export const PlatformAdminLoginPage = () => {
                 Email admin
               </label>
               <div className={`premium-login-field ${email && email.includes("@") ? "is-ok" : ""}`}>
-                <span>✉</span>
+                <span className="premium-login-field-icon-wrap"><MailIcon /></span>
                 <input
                   id="platform-email"
                   name="email"
@@ -176,7 +107,7 @@ export const PlatformAdminLoginPage = () => {
                 Password
               </label>
               <div className={`premium-login-field ${error ? "is-error" : ""}`}>
-                <span>🔒</span>
+                <span className="premium-login-field-icon-wrap"><LockIcon /></span>
                 <input
                   id="platform-password"
                   name="password"
@@ -193,7 +124,7 @@ export const PlatformAdminLoginPage = () => {
                 OTP (se abilitato)
               </label>
               <div className="premium-login-field">
-                <span>🔢</span>
+                <span className="premium-login-field-icon-wrap"><OtpIcon /></span>
                 <input
                   id="platform-otp"
                   name="otp"
@@ -224,38 +155,6 @@ export const PlatformAdminLoginPage = () => {
             </form>
           </section>
         </div>
-
-        <aside className="premium-login-side premium-login-side--right">
-          {STATS.map((stat, index) => (
-            <article
-              key={stat.label}
-              className={`premium-login-stat-card ${
-                index === 0
-                  ? "premium-login-stat-card--violet"
-                  : index === 1
-                    ? "premium-login-stat-card--cyan"
-                    : "premium-login-stat-card--emerald"
-              }`}
-            >
-              <p className="premium-login-stat-label">{stat.label}</p>
-              <p className="premium-login-stat-value">{stat.value}</p>
-              <p className="premium-login-stat-delta">{stat.delta}</p>
-            </article>
-          ))}
-
-          <article className="premium-login-feature-callout">
-            <p className="premium-login-stat-label">NUOVO · FEATURE</p>
-            <p className="premium-login-feature-title">
-              <Sparkles className="mr-1 inline h-4 w-4" /> Policy Anomaly Detection
-            </p>
-            <p className="premium-login-feature-subtitle">
-              Rilevamento comportamenti anomali su login e cambi licenza.
-            </p>
-            <div className="premium-login-chip mt-2 w-fit">
-              <ShieldCheck className="h-4 w-4" /> Security posture elevata
-            </div>
-          </article>
-        </aside>
       </main>
     </div>
   );
