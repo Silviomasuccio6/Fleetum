@@ -47,7 +47,7 @@ jobs:
       - name: Configure SSH key
         env:
           FLEETUM_VPS_SSH_KEY: ${{ secrets.FLEETUM_VPS_SSH_KEY }}
-          FLEETUM_VPS_HOST: ${{ secrets.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_HOST: 57.131.47.124
         run: |
           test -n "$FLEETUM_VPS_SSH_KEY"
           test -n "$FLEETUM_VPS_HOST"
@@ -58,7 +58,7 @@ jobs:
 
       - name: Verify remote deploy target
         env:
-          FLEETUM_VPS_HOST: ${{ secrets.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_HOST: 57.131.47.124
           FLEETUM_VPS_USER: fleetum
           FLEETUM_APP_DIR: /opt/fleetum/app
         run: |
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload application files
         env:
-          FLEETUM_VPS_HOST: ${{ secrets.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_HOST: 57.131.47.124
           FLEETUM_VPS_USER: fleetum
           FLEETUM_APP_DIR: /opt/fleetum/app
         run: |
@@ -83,7 +83,7 @@ jobs:
 
       - name: Rebuild and restart production containers
         env:
-          FLEETUM_VPS_HOST: ${{ secrets.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_HOST: 57.131.47.124
           FLEETUM_VPS_USER: fleetum
           FLEETUM_APP_DIR: /opt/fleetum/app
           FLEETUM_ENV_FILE: /opt/fleetum/env/compose.env
