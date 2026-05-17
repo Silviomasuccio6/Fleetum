@@ -158,8 +158,75 @@ model Tenant {
   rentalExtraKmPolicies         RentalExtraKmPolicy[]
   rentalExtraKmTiers            RentalExtraKmTier[]
   rentalBookingPricingSnapshots RentalBookingPricingSnapshot[]
+  privacyAcceptances            PrivacyAcceptance[]
+  tenantProfile                 TenantProfile?
+  tenantBranding                TenantBranding?
+  tenantLegalSettings           TenantLegalSettings?
 
   @@index([isActive])
+}
+
+model TenantProfile {
+  id                 String    @id @default(cuid())
+  tenantId           String    @unique
+  legalName          String
+  tradeName          String?
+  legalForm          String?
+  vatNumber          String?
+  taxCode            String?
+  pec                String?
+  sdiCode            String?
+  rea                String?
+  legalAddress       String?
+  city               String?
+  province           String?
+  postalCode         String?
+  country            String    @default("IT")
+  phone              String?
+  email              String?
+  website            String?
+  adminFirstName     String?
+  adminLastName      String?
+  adminEmail         String?
+  adminPhone         String?
+  adminRole          String?
+  profileCompletedAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+  tenant             Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([vatNumber])
+  @@index([taxCode])
+  @@index([email])
+  @@index([tenantId, deletedAt])
+}
+
+model TenantBranding {
+  id            String   @id @default(cuid())
+  tenantId      String   @unique
+  logoFilePath  String?
+  logoFileName  String?
+  logoMimeType  String?
+  primaryColor  String?
+  accentColor   String?
+  fontFamily    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+model TenantLegalSettings {
+  id                   String   @id @default(cuid())
+  tenantId             String   @unique
+  contractFooterText   String?
+  defaultContractTerms String?
+  privacyNoticeVersion String?
+  termsVersion         String?
+  dpaVersion           String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  tenant               Tenant   @relation(fields: [tenantId], references: [id])
 }
 
 model CalendarEvent {
@@ -206,6 +273,7 @@ model User {
   invitationTokens      InvitationToken[]
   refreshSessions       RefreshSession[]
   rentalBookingsCreated RentalBooking[]      @relation("RentalBookingCreator")
+  privacyAcceptances    PrivacyAcceptance[]
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -924,6 +992,42 @@ model AuditLog {
 
   @@index([tenantId, createdAt])
   @@index([resource, resourceId])
+}
+
+model PrivacyNotice {
+  id          String              @id @default(cuid())
+  version     String              @unique
+  title       String
+  content     String
+  summary     String?
+  publishedAt DateTime
+  isActive    Boolean             @default(false)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  acceptances PrivacyAcceptance[]
+
+  @@index([isActive, publishedAt])
+}
+
+model PrivacyAcceptance {
+  id         String        @id @default(cuid())
+  tenantId   String
+  userId     String
+  noticeId   String
+  version    String
+  source     String        @default("banner")
+  ipAddress  String?
+  userAgent  String?
+  acceptedAt DateTime      @default(now())
+  createdAt  DateTime      @default(now())
+  tenant     Tenant        @relation(fields: [tenantId], references: [id])
+  user       User          @relation(fields: [userId], references: [id])
+  notice     PrivacyNotice @relation(fields: [noticeId], references: [id])
+
+  @@unique([tenantId, userId, version])
+  @@index([tenantId, acceptedAt])
+  @@index([tenantId, userId, acceptedAt])
+  @@index([noticeId, acceptedAt])
 }
 
 model LoginRateLimitState {

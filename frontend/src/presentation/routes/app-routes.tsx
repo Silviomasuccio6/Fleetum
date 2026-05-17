@@ -24,26 +24,39 @@ import { CustomersPage } from "../pages/customers/customers-page";
 import { UsersPage } from "../pages/users/users-page";
 import { StatsPage } from "../pages/stats/stats-page";
 import { ProfileSettingsPage } from "../pages/profile/profile-settings-page";
+import { CompanyProfilePage } from "../pages/profile/company-profile-page";
 import { PlanUpgradePage } from "../pages/profile/plan-upgrade-page";
+import { PrivacyPolicyPage } from "../pages/privacy/privacy-policy-page";
+import { CookieConsentBanner } from "../components/privacy/cookie-consent-banner";
+import { DemoRequestPage, LegalDocumentPage } from "../pages/legal/legal-pages";
+import { LandingPage } from "../pages/landing/landing-page";
 import { ProtectedRoute } from "./protected-route";
+import { GlobalTextTranslator } from "../components/i18n/global-text-translator";
 
 export const AppRoutes = () => (
-  <Routes>
+  <>
+    <GlobalTextTranslator />
+    <CookieConsentBanner />
+    <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/signup" element={<SignupPage />} />
     <Route path="/forgot-password" element={<ForgotPasswordPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route path="/accept-invite" element={<AcceptInvitePage />} />
     <Route path="/auth/social-callback" element={<SocialAuthCallbackPage />} />
+    <Route path="/privacy" element={<PrivacyPolicyPage />} />
+    <Route path="/cookie" element={<LegalDocumentPage type="cookie" />} />
+    <Route path="/termini" element={<LegalDocumentPage type="terms" />} />
+    <Route path="/dpa" element={<LegalDocumentPage type="dpa" />} />
+    <Route path="/demo" element={<DemoRequestPage />} />
+    <Route path="/" element={<LandingPage />} />
     <Route
-      path="/"
       element={
         <ProtectedRoute>
           <AppLayout />
         </ProtectedRoute>
       }
     >
-      <Route index element={<Navigate to="/dashboard" replace />} />
       <Route path="dashboard" element={<DashboardPage />} />
       <Route path="booking" element={<RentalBookingsPage />} />
       <Route path="booking/contratti" element={<RentalContractsPage />} />
@@ -62,10 +75,12 @@ export const AppRoutes = () => (
       <Route path="anagrafiche/scadenziario" element={<VehicleDeadlinesPage />} />
       <Route path="utenti" element={<UsersPage />} />
       <Route path="profilo" element={<ProfileSettingsPage />} />
+      <Route path="profilo/azienda" element={<CompanyProfilePage />} />
       <Route path="upgrade" element={<PlanUpgradePage />} />
       <Route path="statistiche" element={<StatsPage />} />
     </Route>
 
-    <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  </>
 );

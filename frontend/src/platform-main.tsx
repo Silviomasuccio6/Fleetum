@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { HashRouter } from "react-router-dom";
 import { initTheme } from "./infrastructure/theme/theme-manager";
 import { SnackbarViewport } from "./presentation/components/ui/snackbar-viewport";
 import { PlatformRoutes } from "./presentation/routes/platform-routes";
@@ -10,9 +10,9 @@ initTheme();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <HashRouter>
       <PlatformRoutes />
       <SnackbarViewport />
-    </BrowserRouter>
+    </HashRouter>
   </React.StrictMode>
 );

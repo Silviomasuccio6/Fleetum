@@ -13,7 +13,8 @@ export const AuthShell = ({ title, subtitle, children }: AuthShellProps) => (
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(59,130,246,0.42),transparent_45%),radial-gradient(circle_at_80%_20%,rgba(45,212,191,0.28),transparent_50%),radial-gradient(circle_at_50%_85%,rgba(99,102,241,0.24),transparent_45%)]" />
         <div className="relative z-10 flex h-full flex-col justify-between rounded-2xl border border-slate-200 bg-white/75 p-8 backdrop-blur-sm dark:border-white/20 dark:bg-white/10">
           <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-600 dark:text-slate-200">Gestione Fermi</p>
+            <img src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" className="h-9 w-auto max-w-[190px] object-contain dark:hidden" />
+            <img src="/brand/fleetum-logo-full-dark.svg" alt="Fleetum" className="hidden h-9 w-auto max-w-[190px] object-contain dark:block" />
             <h2 className="mt-4 max-w-sm text-3xl font-semibold leading-tight text-slate-900 dark:text-white">
               Controllo completo di fermi macchina e workflow officine.
             </h2>

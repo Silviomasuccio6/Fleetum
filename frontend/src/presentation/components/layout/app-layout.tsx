@@ -15,8 +15,10 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  ShieldCheck,
   Sun,
   TimerReset,
+  Trash2,
   TriangleAlert,
   AlertTriangle,
   UserPlus,
@@ -36,11 +38,13 @@ import {
   getFeatureListForPlan
 } from "../../../domain/constants/entitlements";
 import { ThemeMode, getStoredTheme, setTheme } from "../../../infrastructure/theme/theme-manager";
+import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { cn } from "../../../lib/utils";
 import { useEntitlements } from "../../hooks/use-entitlements";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { GBackground } from "./g-background";
+import { FleetumLanguageSwitcher } from "../i18n/fleetum-language-switcher";
 
 type NavItem = {
   key: string;
@@ -164,9 +168,10 @@ const mobileNavItems: Array<{ to: string; label: string; icon: any; feature?: Fe
 
 export const AppLayout = () => {
   const sidebarStorageKey = "fermi_sidebar_hidden";
+  const privacyNoticeVersion = "2026-05-05";
   const navigate = useNavigate();
   const location = useLocation();
-  const { token, user, setUser, logout } = useAuthStore();
+  const { isAuthenticated, user, setUser, logout } = useAuthStore();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -187,6 +192,15 @@ export const AppLayout = () => {
   const dismissedStorageKey = useMemo(
     () => (user ? `fermi_dismissed_notifications:${user.tenantId}:${user.id}` : null),
     [user]
+  );
+  const privacyAcceptanceKey = useMemo(
+    () => (user ? `fermi_privacy_notice:${privacyNoticeVersion}:${user.tenantId}:${user.id}` : null),
+    [user]
+  );
+  const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(false);
+  const [privacyNoticeTitle, setPrivacyNoticeTitle] = useState("Informativa privacy aggiornata");
+  const [privacyNoticeSummary, setPrivacyNoticeSummary] = useState(
+    "Abbiamo reso disponibile l'informativa privacy del gestionale."
   );
   const isNavItemActive = useCallback((item: NavItem, pathname: string): boolean => {
     if (item.children?.length) return item.children.some((child) => isNavItemActive(child, pathname));
@@ -236,11 +250,6 @@ export const AppLayout = () => {
   }, [location.pathname, location.key, scrollToTop]);
 
   useEffect(() => {
-    if (!token || user) return;
-    authUseCases.me().then(setUser).catch(() => logout());
-  }, [logout, setUser, token, user]);
-
-  useEffect(() => {
     const autoOpen = getAutoOpenGroups(location.pathname);
     if (!Object.keys(autoOpen).length) return;
     setOpenNavGroups((old) => {
@@ -257,7 +266,7 @@ export const AppLayout = () => {
   }, [getAutoOpenGroups, location.pathname]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     let mounted = true;
     const loadLicense = async () => {
       try {
@@ -279,7 +288,7 @@ export const AppLayout = () => {
       mounted = false;
       clearInterval(interval);
     };
-  }, [token]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!licenseInfo?.plan) return;
@@ -318,7 +327,55 @@ export const AppLayout = () => {
   }, [dismissedNotificationIds, dismissedStorageKey]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!privacyAcceptanceKey) {
+      setPrivacyNoticeVisible(false);
+      return;
+    }
+
+    let mounted = true;
+    const loadPrivacyStatus = async () => {
+      try {
+        const result = await authUseCases.privacyCurrent();
+        if (!mounted) return;
+        setPrivacyNoticeTitle(result.notice.title);
+        setPrivacyNoticeSummary(result.notice.summary ?? "Informativa privacy disponibile.");
+        setPrivacyNoticeVisible(!result.accepted);
+        if (result.accepted) {
+          try {
+            localStorage.setItem(privacyAcceptanceKey, "1");
+          } catch {
+            // ignore storage errors
+          }
+        }
+      } catch {
+        if (!mounted) return;
+        try {
+          setPrivacyNoticeVisible(localStorage.getItem(privacyAcceptanceKey) !== "1");
+        } catch {
+          setPrivacyNoticeVisible(true);
+        }
+      }
+    };
+
+    void loadPrivacyStatus();
+
+    return () => {
+      mounted = false;
+    };
+  }, [privacyAcceptanceKey]);
+
+  useEffect(() => {
+    if (!privacyAcceptanceKey) return;
+
+    try {
+      if (localStorage.getItem(privacyAcceptanceKey) === "1") setPrivacyNoticeVisible(false);
+    } catch {
+      // ignore storage errors
+    }
+  }, [privacyAcceptanceKey]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
     let mounted = true;
     const load = async () => {
       try {
@@ -338,11 +395,11 @@ export const AppLayout = () => {
       mounted = false;
       clearInterval(interval);
     };
-  }, [token]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     let mounted = true;
-    const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
+    const base = getApiBaseUrl();
     const check = async () => {
       try {
         const res = await fetch(`${base}/health`);
@@ -422,7 +479,7 @@ export const AppLayout = () => {
       const match = findActiveLabel(section.items);
       if (match) return match;
     }
-    return "Gestione Fermi";
+    return "Fleetum";
   }, [location.pathname, visibleNavSections]);
 
   const flattenedMobileSidebarItems = useMemo(
@@ -435,6 +492,7 @@ export const AppLayout = () => {
   );
 
   const isCalendarRoute = location.pathname.startsWith("/fermi/calendario");
+  const isWideWorkspaceRoute = isCalendarRoute || location.pathname === "/booking";
 
   const visibleNotifications = useMemo(
     () => notifications.filter((item) => !dismissedNotificationIds.includes(item.id)),
@@ -506,8 +564,33 @@ export const AppLayout = () => {
     setDismissedNotificationIds((old) => (old.includes(notificationId) ? old : [...old, notificationId]));
   };
 
+  const dismissAllVisibleNotifications = () => {
+    if (visibleNotifications.length === 0) return;
+    const visibleIds = visibleNotifications.map((item) => item.id).filter((id): id is string => typeof id === "string");
+    setDismissedNotificationIds((old) => Array.from(new Set([...old, ...visibleIds])));
+  };
+
   const restoreNotifications = () => {
     setDismissedNotificationIds([]);
+  };
+
+  const acceptPrivacyNotice = async () => {
+    if (!privacyAcceptanceKey) return;
+    try {
+      await authUseCases.acceptPrivacy("banner");
+    } catch {
+      // Manteniamo un fallback locale per non bloccare l'utente in caso di rete instabile.
+    }
+    try {
+      localStorage.setItem(privacyAcceptanceKey, "1");
+      localStorage.setItem(
+        `${privacyAcceptanceKey}:acceptedAt`,
+        JSON.stringify({ version: privacyNoticeVersion, acceptedAt: new Date().toISOString() })
+      );
+    } catch {
+      // Se localStorage non e disponibile, non blocchiamo la sessione corrente.
+    }
+    setPrivacyNoticeVisible(false);
   };
 
   return (
@@ -637,6 +720,17 @@ export const AppLayout = () => {
                         <Button
                           size="sm"
                           variant="ghost"
+                          onClick={dismissAllVisibleNotifications}
+                          className="gap-1 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Elimina tutte
+                        </Button>
+                      ) : null}
+                      {visibleNotifications.length > 0 ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           onClick={() => {
                             setNotificationsOpen(false);
                             navigate("/fermi");
@@ -654,6 +748,8 @@ export const AppLayout = () => {
             <Button variant="outline" size="icon" className="h-10 w-10" onClick={toggleTheme} aria-label="Cambia tema">
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
+
+            <FleetumLanguageSwitcher className="premium-language-switcher--topbar" />
 
             <div ref={profileMenuRef} className="relative">
               <Button
@@ -710,6 +806,27 @@ export const AppLayout = () => {
                       className="justify-start"
                       onClick={() => {
                         setProfileOpen(false);
+                        navigate("/profilo/azienda");
+                      }}
+                    >
+                      <Building2 className="h-4 w-4" />
+                      Profilo Azienda
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        navigate("/privacy");
+                      }}
+                    >
+                      Privacy e trattamento dati
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      onClick={() => {
+                        setProfileOpen(false);
                         navigate("/profilo");
                       }}
                     >
@@ -741,8 +858,11 @@ export const AppLayout = () => {
         )}
       >
         <div className="saas-surface g-card g-card-anim rounded-xl p-4">
-          <p className="text-xs uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">Gestione Fermi</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">Fleet Ops Suite</p>
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">Fleetum</p>
+            <img src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" className="mt-1 h-8 w-auto max-w-[176px] object-contain dark:hidden" />
+            <img src="/brand/fleetum-logo-full-dark.svg" alt="Fleetum" className="mt-1 hidden h-8 w-auto max-w-[176px] object-contain dark:block" />
+          </div>
           <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{user?.firstName} {user?.lastName}</p>
         </div>
 
@@ -865,9 +985,10 @@ export const AppLayout = () => {
           )}
         >
           <div className="mb-4 flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">Menu</p>
-              <p className="text-base font-semibold text-slate-900 dark:text-white">Gestione Fermi</p>
+              <img src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" className="mt-0.5 h-6 w-auto max-w-[145px] object-contain dark:hidden" />
+              <img src="/brand/fleetum-logo-full-dark.svg" alt="Fleetum" className="mt-0.5 hidden h-6 w-auto max-w-[145px] object-contain dark:block" />
             </div>
             <Button variant="outline" size="icon" onClick={() => setMobileOpen(false)}>
               <X className="h-4 w-4" />
@@ -903,10 +1024,10 @@ export const AppLayout = () => {
         className={cn(
           "pb-24 pt-[4.5rem] lg:pb-10",
           sidebarHidden ? "lg:ml-0" : "lg:ml-72",
-          isCalendarRoute && "pb-8"
+          isWideWorkspaceRoute && "pb-8"
         )}
       >
-        <div className={cn("mx-auto w-full px-4 sm:px-6", isCalendarRoute ? "max-w-none lg:px-4" : "max-w-[1460px]")}>
+        <div className={cn("mx-auto w-full px-4 sm:px-6", isWideWorkspaceRoute ? "max-w-none lg:px-4" : "max-w-[1460px]")}>
           {!backendReachable ? (
             <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               Backend non raggiungibile. Verifica che API e database siano attivi. (tentativi falliti: {healthFailures})
@@ -922,6 +1043,33 @@ export const AppLayout = () => {
           <Outlet />
         </div>
       </main>
+
+      {privacyNoticeVisible ? (
+        <div className="fixed bottom-5 left-1/2 z-[95] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 rounded-3xl border border-primary/20 bg-background/95 p-4 shadow-[0_28px_80px_-34px_rgba(15,23,42,0.62)] backdrop-blur-xl dark:border-primary/25">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
+                <ShieldCheck className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-foreground">{privacyNoticeTitle}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {privacyNoticeSummary} Dopo l'accettazione non verra piu
+                  mostrata su questo browser per questa versione.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => navigate("/privacy")}>
+                Leggi
+              </Button>
+              <Button type="button" onClick={acceptPrivacyNotice}>
+                Accetto
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="saas-floating-panel fixed inset-x-3 bottom-3 z-40 rounded-2xl border-border/60 p-2 lg:hidden">
         <div className="grid grid-cols-6 gap-1">

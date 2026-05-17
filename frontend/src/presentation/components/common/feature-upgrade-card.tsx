@@ -36,7 +36,7 @@ export const FeatureUpgradeCard = ({ feature, currentPlan, requiredPlan, compact
             <Crown className="h-3.5 w-3.5" />
             Upgrade piano
           </Button>
-          <p className="text-[11px] text-amber-800/75 dark:text-amber-200/75">Contatta Platform Admin per abilitare questa feature.</p>
+          <p className="text-[11px] text-amber-800/75 dark:text-amber-200/75">Contatta il supporto piattaforma per abilitare questa feature.</p>
         </div>
       </CardContent>
     </Card>

@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { CSSProperties, useEffect, useMemo } from "react";
 import { LoginCard } from "./components/LoginCard";
 import { LoginHero } from "./components/LoginHero";
 import { LoginStats } from "./components/LoginStats";
 import { MagneticOrbs } from "./components/MagneticOrbs";
 import { ParticleCanvas } from "./components/ParticleCanvas";
 import { useMouseParallax } from "./hooks/useMouseParallax";
+import { FleetumLanguageSwitcher } from "../../presentation/components/i18n/fleetum-language-switcher";
 import "./premium-login.css";
 
 const FLOATING_PARTICLES = Array.from({ length: 14 }, (_, index) => ({
@@ -24,6 +25,15 @@ export const LoginPage = () => {
     [nx, ny]
   );
 
+  const spotlightStyle = useMemo(
+    () => ({
+      "--spotlight-x": `${50 + nx * 18}%`,
+      "--spotlight-y": `${50 + ny * 14}%`
+    }) as CSSProperties,
+    [nx, ny]
+  );
+
+
   useEffect(() => {
     const previousTheme = document.documentElement.getAttribute("data-theme");
     document.documentElement.setAttribute("data-theme", "light");
@@ -40,6 +50,13 @@ export const LoginPage = () => {
   return (
     <div className="premium-login-root">
       <div className="premium-login-bg-gradient" style={backgroundTransform} aria-hidden />
+      <FleetumLanguageSwitcher />
+      <div className="premium-login-aurora" aria-hidden>
+        <span className="premium-login-aurora__beam premium-login-aurora__beam--one" />
+        <span className="premium-login-aurora__beam premium-login-aurora__beam--two" />
+        <span className="premium-login-aurora__beam premium-login-aurora__beam--three" />
+      </div>
+      <div className="premium-login-spotlight" style={spotlightStyle} aria-hidden />
 
       <ParticleCanvas />
       <MagneticOrbs />

@@ -8,7 +8,7 @@ declare global {
       license?: {
         plan: "STARTER" | "PRO" | "ENTERPRISE";
         seats: number;
-        status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL";
+        status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
         expiresAt: string | null;
         daysRemaining: number | null;
         expiringSoon: boolean;
@@ -32,6 +32,9 @@ export const requireValidLicense = (licensePolicyService: LicensePolicyService) 
         }
         if (access.reason === "LICENSE_SUSPENDED") {
           throw new AppError("Licenza sospesa. Contatta il supporto.", 403, "LICENSE_SUSPENDED");
+        }
+        if (access.reason === "LICENSE_CANCELED") {
+          throw new AppError("Abbonamento cancellato. Riattiva il piano per continuare.", 402, "LICENSE_CANCELED");
         }
         throw new AppError("Licenza scaduta. Rinnova per continuare.", 402, "LICENSE_EXPIRED");
       }

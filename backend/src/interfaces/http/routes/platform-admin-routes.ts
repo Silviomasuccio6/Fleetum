@@ -9,6 +9,8 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
 
   router.post("/auth/login", platformAuthRateLimit, asyncHandler(controller.login));
   router.get("/tenants", requirePlatformAuth, asyncHandler(controller.tenants));
+  router.get("/tenants/:id/profile", requirePlatformAuth, asyncHandler(controller.tenantProfile));
+  router.get("/tenants/:id/onboarding-status", requirePlatformAuth, asyncHandler(controller.tenantOnboardingStatus));
   router.get("/users", requirePlatformAuth, asyncHandler(controller.users));
   router.get("/events/recent", requirePlatformAuth, asyncHandler(controller.recentEvents));
   router.get("/metrics/revenue", requirePlatformAuth, asyncHandler(controller.revenueMetrics));

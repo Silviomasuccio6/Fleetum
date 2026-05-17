@@ -119,7 +119,9 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
   const controller = new RentalBookingsController({
     enqueue: async (payload: unknown) => {
       queued.push(payload);
-    }
+      return { id: "queue_1" };
+    },
+    processPending: async () => ({ processed: 1 })
   } as any);
   const response = createMockResponse();
   const request = {
@@ -129,10 +131,12 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
   } as any;
 
   const originalDeliveryCreate = prisma.bookingContractDelivery.create;
+  const originalDeliveryFindUnique = prisma.bookingContractDelivery.findUnique;
   const originalBookingContractUpdate = prisma.bookingContract.update;
 
   let capturedContractUpdate: any = null;
   (prisma.bookingContractDelivery as any).create = async () => ({ id: "delivery_1" });
+  (prisma.bookingContractDelivery as any).findUnique = async () => ({ status: "SENT", errorMessage: null, sentAt: new Date() });
   (prisma.bookingContract as any).update = async (input: unknown) => {
     capturedContractUpdate = input;
     return { id: "contract_1" };
@@ -164,7 +168,9 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
     await controller.sendContractEmail(request, response as any);
 
     assert.equal(response.statusCode, 201);
-    assert.deepEqual(response.body, { queued: true, deliveryId: "delivery_1" });
+    assert.equal((response.body as any).queued, false);
+    assert.equal((response.body as any).deliveryId, "delivery_1");
+    assert.equal((response.body as any).status, "SENT");
     assert.equal(queued.length, 1);
     assert.equal((queued[0] as any).recipient, "mario.rossi@example.com");
     assert.equal(Array.isArray((queued[0] as any).meta?.attachments), true);
@@ -172,6 +178,7 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
     assert.equal(capturedEvent.type, "EMAIL_QUEUED");
   } finally {
     (prisma.bookingContractDelivery as any).create = originalDeliveryCreate;
+    (prisma.bookingContractDelivery as any).findUnique = originalDeliveryFindUnique;
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
   }
 });
@@ -257,6 +264,58 @@ test("contracts smoke: markContractSigned updates contract and booking status", 
     assert.equal(capturedBookingUpdate.data.contractStatus, "SIGNED");
     assert.equal(capturedBookingUpdate.data.status, "CONTRACT_SIGNED");
     assert.equal(capturedEvent.type, "SIGNED");
+  } finally {
+    (prisma.bookingContract as any).update = originalBookingContractUpdate;
+    (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
+  }
+});
+
+test("contracts smoke: markContractSigned persists graphical signature metadata", async () => {
+  const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  const response = createMockResponse();
+  const request = {
+    auth: { tenantId: "demo_tenant", userId: "user_6" },
+    params: { id: "booking_1" },
+    body: { signatureDataUrl: "data:image/png;base64,iVBORw0KGgo=" }
+  } as any;
+
+  const originalBookingContractUpdate = prisma.bookingContract.update;
+  const originalRentalBookingUpdate = prisma.rentalBooking.update;
+
+  (prisma.bookingContract as any).update = async (input: unknown) => ({
+    id: "contract_1",
+    status: "SIGNED",
+    signedAt: (input as any).data.signedAt
+  });
+  (prisma.rentalBooking as any).update = async () => ({ id: "booking_1" });
+
+  let capturedEvent: any = null;
+  (controller as any).persistContractSignature = async () => ({
+    filePath: "uploads/contract-signatures/demo_tenant/contract_1-test.png",
+    mimeType: "image/png",
+    sizeBytes: 128
+  });
+  (controller as any).logContractEvent = async (input: unknown) => {
+    capturedEvent = input;
+  };
+  (controller as any).getContractOrThrow = async () => ({
+    id: "contract_1",
+    bookingId: "booking_1",
+    status: "READY",
+    events: [],
+    booking: { id: "booking_1", status: "CONFIRMED" }
+  });
+
+  try {
+    await controller.markContractSigned(request, response as any);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal((response.body as any).signatureSaved, true);
+    assert.equal((response.body as any).signatureFilePath, "uploads/contract-signatures/demo_tenant/contract_1-test.png");
+    assert.equal(capturedEvent.type, "SIGNED");
+    assert.equal(capturedEvent.details.signatureFilePath, "uploads/contract-signatures/demo_tenant/contract_1-test.png");
+    assert.equal(capturedEvent.details.signatureMimeType, "image/png");
+    assert.equal(capturedEvent.details.signatureSizeBytes, 128);
   } finally {
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
     (prisma.rentalBooking as any).update = originalRentalBookingUpdate;

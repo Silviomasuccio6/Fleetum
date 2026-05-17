@@ -1,8 +1,10 @@
 import { Server } from "node:http";
 import { createApp, createPlatformApp } from "./app.js";
 import { startEmailQueueCron } from "./infrastructure/cron/email-queue-cron.js";
+import { startPrivacyRetentionCron } from "./infrastructure/cron/privacy-retention-cron.js";
 import { startReminderCron } from "./infrastructure/cron/reminder-cron.js";
 import { startReportsCron } from "./infrastructure/cron/reports-cron.js";
+import { PrivacyComplianceService } from "./application/services/privacy-compliance-service.js";
 import { prisma } from "./infrastructure/database/prisma/client.js";
 import { logger } from "./infrastructure/logging/logger.js";
 import { emailQueueCronService, reminderCronUseCase } from "./interfaces/http/routes/index.js";
@@ -25,6 +27,7 @@ const platformServer = platformApp.listen(env.PLATFORM_PORT, env.PLATFORM_BIND_H
 const reminderTask = startReminderCron(reminderCronUseCase);
 const emailQueueTask = startEmailQueueCron(emailQueueCronService);
 const reportsTask = startReportsCron(emailQueueCronService);
+const privacyRetentionTask = startPrivacyRetentionCron(new PrivacyComplianceService());
 
 let shuttingDown = false;
 
@@ -42,6 +45,7 @@ const shutdown = async (signal: string) => {
   reminderTask.stop();
   emailQueueTask.stop();
   reportsTask.stop();
+  privacyRetentionTask.stop();
 
   const closeAll = Promise.allSettled([closeServer(apiServer), closeServer(platformServer)]).then(() => "closed" as const);
   const closeTimeout = new Promise<"timeout">((resolve) =>

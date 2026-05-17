@@ -10,7 +10,7 @@ import {
   normalizeBillingCycle
 } from "./feature-entitlements-service.js";
 
-type LicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL";
+type LicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
 export type LicenseInfo = {
   plan: SaasPlan;
@@ -35,7 +35,7 @@ const defaultLicense: LicenseInfo = {
 };
 
 const toValidStatus = (value: unknown): LicenseStatus => {
-  if (value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL") return value;
+  if (value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") return value;
   return "ACTIVE";
 };
 
@@ -97,10 +97,18 @@ export class LicensePolicyService {
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { isActive: true } });
     const license = await this.getTenantLicense(tenantId);
 
-    const blocked = !tenant?.isActive || license.status === "SUSPENDED" || license.status === "EXPIRED";
+    const blocked = !tenant?.isActive || license.status === "SUSPENDED" || license.status === "EXPIRED" || license.status === "CANCELED";
     return {
       blocked,
-      reason: !tenant?.isActive ? "TENANT_INACTIVE" : license.status === "SUSPENDED" ? "LICENSE_SUSPENDED" : license.status === "EXPIRED" ? "LICENSE_EXPIRED" : null,
+      reason: !tenant?.isActive
+        ? "TENANT_INACTIVE"
+        : license.status === "SUSPENDED"
+          ? "LICENSE_SUSPENDED"
+          : license.status === "EXPIRED"
+            ? "LICENSE_EXPIRED"
+            : license.status === "CANCELED"
+              ? "LICENSE_CANCELED"
+              : null,
       license
     };
   }

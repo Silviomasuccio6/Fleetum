@@ -35,7 +35,7 @@ const defaultSettings: SettingsState = {
 
 export const ProfileSettingsPage = () => {
   const navigate = useNavigate();
-  const { user, token, setUser, logout } = useAuthStore();
+  const { user, setUser, logout } = useAuthStore();
   const { can, requiredPlan } = useEntitlements();
   const canScheduledReports = can("scheduled_reports");
   const canIntegrations = can("integrations_basic");
@@ -103,17 +103,7 @@ export const ProfileSettingsPage = () => {
       });
   }, []);
 
-  const currentSessionId = useMemo(() => {
-    if (!token) return null;
-    try {
-      const parts = token.split(".");
-      if (parts.length < 2) return null;
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      return typeof payload.sessionId === "string" ? payload.sessionId : null;
-    } catch {
-      return null;
-    }
-  }, [token]);
+  const currentSessionId = null;
 
   const reloadSessions = async () => {
     const result = await authUseCases.sessions();

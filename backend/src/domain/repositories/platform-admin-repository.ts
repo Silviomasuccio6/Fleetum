@@ -4,11 +4,20 @@ export type PlatformTenantRow = {
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+  tenantProfile?: {
+    legalName: string;
+    tradeName: string | null;
+    vatNumber: string | null;
+    email: string | null;
+    phone: string | null;
+    profileCompletedAt: Date | null;
+  } | null;
+  tenantBranding?: { logoFilePath: string | null } | null;
   users: Array<{ id: string; firstName: string; lastName: string; email: string; status: string; roles: Array<{ role: { key: string } }> }>;
   _count: { users: number; vehicles: number; stoppages: number };
 };
 
-export type PlatformLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL";
+export type PlatformLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
 export type PlatformLicense = {
   plan: string;
@@ -35,6 +44,7 @@ export type PlatformAuditEvent = {
 export interface PlatformAdminRepository {
   listTenants(): Promise<PlatformTenantRow[]>;
   getTenantById(tenantId: string): Promise<{ id: string; name: string; isActive: boolean } | null>;
+  getTenantCompanyProfile(tenantId: string): Promise<unknown | null>;
   setTenantActive(tenantId: string, isActive: boolean): Promise<void>;
   getLatestLicense(tenantId: string): Promise<PlatformLicense | null>;
   getLatestLicenseAtOrBefore(tenantId: string, at: Date): Promise<PlatformLicense | null>;

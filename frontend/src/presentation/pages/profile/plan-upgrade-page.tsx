@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { ArrowRight, Check, Crown, Lock, Sparkles } from "lucide-react";
+import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import {
   FeatureKey,
   getFeatureListForPlan,
@@ -69,7 +69,10 @@ const getPlanHighlights = (plan: SaasPlan) => {
 export const PlanUpgradePage = () => {
   const { plan, loading } = useEntitlements();
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
+  const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const currentPlan = loading ? null : plan;
+  const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
 
   const planCards = useMemo(
     () =>
@@ -221,8 +224,20 @@ export const PlanUpgradePage = () => {
                     Piano attivo
                   </Button>
                 ) : (
-                  <Link
-                    to="/profilo"
+                  <button
+                    type="button"
+                    disabled={busyPlan !== null}
+                    onClick={async () => {
+                      setCheckoutError(null);
+                      setBusyPlan(entry);
+                      try {
+                        const session = await billingUseCases.createCheckoutSession({ plan: entry, billingCycle });
+                        window.location.href = session.checkoutUrl;
+                      } catch (error) {
+                        setCheckoutError((error as Error).message);
+                        setBusyPlan(null);
+                      }
+                    }}
                     className={cn(
                       "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition",
                       isUpgrade
@@ -231,14 +246,36 @@ export const PlanUpgradePage = () => {
                     )}
                   >
                     {entry === "ENTERPRISE" ? <Crown className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
-                    {buttonLabel}
-                  </Link>
+                    {busyPlan === entry ? "Apertura pagamento..." : buttonLabel}
+                  </button>
                 )}
               </CardContent>
             </Card>
           );
         })}
       </div>
+
+      {checkoutStatus === "success" ? (
+        <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Pagamento confermato. Il piano e la licenza del tenant sono stati aggiornati.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {checkoutStatus === "cancelled" ? (
+        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Pagamento annullato. Puoi scegliere un piano quando vuoi.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {checkoutError ? (
+        <Card className="border-red-300/70 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+          <CardContent className="py-4 text-sm font-semibold">{checkoutError}</CardContent>
+        </Card>
+      ) : null}
 
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .4s both" }}>
         <CardHeader>
@@ -284,15 +321,16 @@ export const PlanUpgradePage = () => {
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .5s both" }}>
         <CardContent className="flex flex-col items-center gap-3 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-muted-foreground">
-            Upgrade o downgrade vengono applicati dal Platform Admin. Nessuna perdita dati, nessun blocco operativo.
+            Upgrade o downgrade vengono applicati dal supporto piattaforma. Nessuna perdita dati, nessun blocco operativo.
           </p>
-          <Link
-            to="/profilo"
+          <button
+            type="button"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/95"
           >
-            Apri Profilo e richiedi aggiornamento
+            Scegli un piano
             <ArrowRight className="h-4 w-4" />
-          </Link>
+          </button>
         </CardContent>
       </Card>
     </section>

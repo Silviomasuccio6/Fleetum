@@ -3,6 +3,9 @@ import { PrismaUserRepository } from "../../../infrastructure/repositories/prism
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { SignupInput } from "../../dtos/auth-dto.js";
+import { getPlanMonthlyPrice } from "../../services/feature-entitlements-service.js";
+import { TenantProfileService } from "../../services/tenant-profile-service.js";
+import { env } from "../../../shared/config/env.js";
 
 type SocialSignupInput = {
   email: string;
@@ -13,13 +16,21 @@ type SocialSignupInput = {
 };
 
 export class SignupUseCase {
-  constructor(private readonly userRepository: PrismaUserRepository) {}
+  constructor(
+    private readonly userRepository: PrismaUserRepository,
+    private readonly tenantProfileService: TenantProfileService = new TenantProfileService()
+  ) {}
 
   async execute(input: SignupInput) {
     const globalExisting = await prisma.user.findFirst({ where: { email: input.email, deletedAt: null } });
     if (globalExisting) throw new AppError("Email già utilizzata", 409, "CONFLICT");
 
-    const tenant = await prisma.tenant.create({ data: { name: input.tenantName } });
+    const tenant = await prisma.tenant.create({
+      data: {
+        name: input.company?.tradeName ?? input.tenantName,
+        vatNumber: input.company?.vatNumber ?? null
+      }
+    });
     const existing = await this.userRepository.findByEmail(tenant.id, input.email);
     if (existing) throw new AppError("Email già utilizzata", 409, "CONFLICT");
 
@@ -31,6 +42,47 @@ export class SignupUseCase {
       firstName: input.firstName,
       lastName: input.lastName,
       roleKey: "ADMIN"
+    });
+
+    await this.tenantProfileService.ensureForTenant({
+      tenantId: tenant.id,
+      tenantName: input.tenantName,
+      adminFirstName: input.firstName,
+      adminLastName: input.lastName,
+      adminEmail: input.email,
+      company: {
+        ...input.company,
+        legalName: input.company?.legalName ?? input.tenantName,
+        tradeName: input.company?.tradeName ?? input.tenantName,
+        adminFirstName: input.company?.adminFirstName ?? input.firstName,
+        adminLastName: input.company?.adminLastName ?? input.lastName,
+        adminEmail: input.company?.adminEmail ?? input.email,
+        adminPhone: input.company?.adminPhone ?? input.phone,
+        adminRole: input.company?.adminRole ?? input.adminRole
+      }
+    });
+
+    const trialEndsAt = new Date(Date.now() + env.BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await prisma.auditLog.create({
+      data: {
+        tenantId: tenant.id,
+        userId: user.id,
+        action: "PLATFORM_LICENSE_UPDATED",
+        resource: "tenant",
+        resourceId: tenant.id,
+        details: {
+          source: "signup_trial",
+          after: {
+            plan: "STARTER",
+            seats: 3,
+            status: "TRIAL",
+            expiresAt: trialEndsAt,
+            priceMonthly: getPlanMonthlyPrice("STARTER"),
+            billingCycle: "monthly",
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
     });
 
     return { tenantId: tenant.id, user };
@@ -64,6 +116,38 @@ export class SignupUseCase {
       firstName,
       lastName,
       roleKey: "ADMIN"
+    });
+
+    await this.tenantProfileService.ensureForTenant({
+      tenantId: tenant.id,
+      tenantName,
+      adminFirstName: firstName,
+      adminLastName: lastName,
+      adminEmail: normalizedEmail,
+      company: { legalName: tenantName, tradeName: tenantName, adminFirstName: firstName, adminLastName: lastName, adminEmail: normalizedEmail }
+    });
+
+    const trialEndsAt = new Date(Date.now() + env.BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await prisma.auditLog.create({
+      data: {
+        tenantId: tenant.id,
+        userId: user.id,
+        action: "PLATFORM_LICENSE_UPDATED",
+        resource: "tenant",
+        resourceId: tenant.id,
+        details: {
+          source: "signup_trial",
+          after: {
+            plan: "STARTER",
+            seats: 3,
+            status: "TRIAL",
+            expiresAt: trialEndsAt,
+            priceMonthly: getPlanMonthlyPrice("STARTER"),
+            billingCycle: "monthly",
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
     });
 
     return { tenantId: tenant.id, user };

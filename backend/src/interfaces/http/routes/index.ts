@@ -1,3 +1,4 @@
+import rateLimit from "express-rate-limit";
 import { Router } from "express";
 import { AcceptInviteUseCase } from "../../../application/usecases/auth/accept-invite-usecase.js";
 import { LoginUseCase } from "../../../application/usecases/auth/login-usecase.js";
@@ -16,11 +17,16 @@ import { ManageWorkshopsUseCases } from "../../../application/usecases/workshops
 import { AuditService } from "../../../application/services/audit-service.js";
 import { AuthSessionService } from "../../../application/services/auth-session-service.js";
 import { AuthThreatDetectionService } from "../../../application/services/auth-threat-detection-service.js";
+import { BillingService } from "../../../application/services/billing-service.js";
 import { LicensePolicyService } from "../../../application/services/license-policy-service.js";
 import { NotificationsService } from "../../../application/services/notifications-service.js";
+import { PrivacyComplianceService } from "../../../application/services/privacy-compliance-service.js";
+import { PrivacyNoticeService } from "../../../application/services/privacy-notice-service.js";
 import { SocialOAuthService } from "../../../application/services/social-oauth-service.js";
 import { SettingsService } from "../../../application/services/settings-service.js";
+import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { env } from "../../../shared/config/env.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { PrismaAuditLogRepository } from "../../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { PrismaNotificationsRepository } from "../../../infrastructure/repositories/prisma-notifications-repository.js";
@@ -33,22 +39,28 @@ import { PrismaVehicleRepository } from "../../../infrastructure/repositories/pr
 import { PrismaWorkshopRepository } from "../../../infrastructure/repositories/prisma-workshop-repository.js";
 import { AuthController } from "../controllers/auth-controller.js";
 import { AuditController } from "../controllers/audit-controller.js";
+import { BillingController } from "../controllers/billing-controller.js";
 import { MasterDataController } from "../controllers/master-data-controller.js";
 import { NotificationsController } from "../controllers/notifications-controller.js";
+import { PrivacyComplianceController } from "../controllers/privacy-compliance-controller.js";
 import { SettingsController } from "../controllers/settings-controller.js";
 import { StatsController } from "../controllers/stats-controller.js";
 import { StoppagesController } from "../controllers/stoppages-controller.js";
 import { UsersController } from "../controllers/users-controller.js";
 import { RentalBookingsController } from "../controllers/rental-bookings-controller.js";
 import { RentalPricingController } from "../controllers/rental-pricing-controller.js";
+import { TenantProfileController } from "../controllers/tenant-profile-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
 import { createRequireFeature } from "../middlewares/feature-entitlements.js";
 import { requireValidLicense } from "../middlewares/license-guard.js";
+import { publicDemoRequestSchema } from "../validators/public-validators.js";
 import { authRoutes } from "./auth-routes.js";
 import { auditRoutes } from "./audit-routes.js";
+import { billingRoutes, billingWebhookRoutes } from "./billing-routes.js";
 import { masterDataRoutes } from "./master-data-routes.js";
 import { notificationsRoutes } from "./notifications-routes.js";
+import { privacyComplianceRoutes } from "./privacy-compliance-routes.js";
 import { settingsRoutes } from "./settings-routes.js";
 import { statsRoutes } from "./stats-routes.js";
 import { stoppagesRoutes } from "./stoppages-routes.js";
@@ -58,6 +70,7 @@ import { rentalBookingsRoutes } from "./rental-bookings-routes.js";
 import { contractTemplatesRoutes } from "./contract-templates-routes.js";
 import { rentalCustomersRoutes } from "./rental-customers-routes.js";
 import { rentalPricingRoutes } from "./rental-pricing-routes.js";
+import { tenantProfileRoutes } from "./tenant-profile-routes.js";
 import { TokenService } from "../../../application/services/token-service.js";
 import { asyncHandler } from "./async-handler.js";
 
@@ -73,13 +86,28 @@ const notificationsRepo = new PrismaNotificationsRepository();
 const emailQueueService = new EmailQueueService();
 const settingsService = new SettingsService(auditRepo);
 const auditService = new AuditService(auditRepo);
+const billingService = new BillingService(auditRepo);
 const notificationsService = new NotificationsService(notificationsRepo);
+const privacyComplianceService = new PrivacyComplianceService();
 const licensePolicyService = new LicensePolicyService(auditRepo);
+const privacyNoticeService = new PrivacyNoticeService();
+const tenantProfileService = new TenantProfileService();
 const requireFeature = createRequireFeature(licensePolicyService, auditRepo);
 const tokenService = new TokenService();
 const authSessionService = new AuthSessionService(tokenService, userRepo);
 const authThreatDetectionService = new AuthThreatDetectionService(auditRepo);
 const socialOAuthService = new SocialOAuthService();
+
+const publicDemoRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Troppe richieste demo. Riprova tra qualche minuto.", error: "DEMO_RATE_LIMIT" }
+});
+
+const demoLeadRecipient = () =>
+  process.env.DEMO_LEAD_RECIPIENT_EMAIL || process.env.PLATFORM_ALERT_EMAILS?.split(",").map((x) => x.trim()).find(Boolean) || env.PLATFORM_ADMIN_EMAIL;
 
 const signupUseCase = new SignupUseCase(userRepo);
 const loginUseCase = new LoginUseCase(userRepo, tokenService, licensePolicyService, authSessionService);
@@ -109,8 +137,10 @@ const authController = new AuthController(
     licensePolicyService,
     authSessionService,
     authThreatDetectionService,
-    socialOAuthService
+    socialOAuthService,
+    privacyNoticeService
 );
+const billingController = new BillingController(billingService);
 const usersController = new UsersController(usersUseCases);
 const masterDataController = new MasterDataController(
   sitesUseCases,
@@ -121,16 +151,54 @@ const masterDataController = new MasterDataController(
 const stoppagesController = new StoppagesController(stoppagesUseCases, reminderUseCase, stoppageOpsRepo);
 const statsController = new StatsController(statsUseCase);
 const notificationsController = new NotificationsController(notificationsService);
+const privacyComplianceController = new PrivacyComplianceController(privacyComplianceService);
 const settingsController = new SettingsController(settingsService);
 const auditController = new AuditController(auditService);
 const rentalBookingsController = new RentalBookingsController(emailQueueService);
 const rentalPricingController = new RentalPricingController();
+const tenantProfileController = new TenantProfileController(tenantProfileService);
 
 export const apiRouter = Router();
-apiRouter.get("/health", (_req, res) => res.json({ ok: true, service: "fermi-backend", timestamp: new Date().toISOString() }));
+apiRouter.get("/health", (_req, res) => res.json({ ok: true, service: "fleetum-backend", timestamp: new Date().toISOString() }));
+apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (req, res) => {
+  const input = publicDemoRequestSchema.parse(req.body);
+  const recipient = demoLeadRecipient();
+  const body = [
+    "Nuova richiesta demo Fleetum",
+    `Azienda: ${input.companyName}`,
+    `Referente: ${input.fullName}`,
+    `Email: ${input.email}`,
+    input.phone ? `Telefono: ${input.phone}` : null,
+    input.fleetSize ? `Dimensione flotta: ${input.fleetSize}` : null,
+    input.message ? `Messaggio: ${input.message}` : null,
+    `Fonte: ${input.source}`,
+    `Data: ${new Date().toISOString()}`
+  ].filter(Boolean).join("\n");
+
+  await emailQueueService.enqueue({
+    type: "PUBLIC_DEMO_REQUEST",
+    recipient,
+    subject: `Nuova demo Fleetum - ${input.companyName}`,
+    body,
+    meta: {
+      source: input.source,
+      companyName: input.companyName,
+      fullName: input.fullName,
+      email: input.email,
+      phone: input.phone ?? null,
+      fleetSize: input.fleetSize ?? null,
+      replyTo: input.email,
+      fromName: "Fleetum"
+    }
+  });
+
+  res.status(202).json({ ok: true, message: "Richiesta demo ricevuta" });
+}));
+
 apiRouter.get("/calendar/apple/feed.ics", asyncHandler(stoppagesController.appleCalendarFeedPublic));
 apiRouter.get("/calendar/google/callback", asyncHandler(stoppagesController.googleCalendarCallback));
 apiRouter.get("/contracts/public/:token", asyncHandler(rentalBookingsController.downloadContractPdfPublic));
+apiRouter.use("/billing", billingWebhookRoutes(billingController));
 apiRouter.get("/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -145,6 +213,7 @@ apiRouter.get("/ready", async (_req, res) => {
 });
 apiRouter.use("/auth", authRoutes(authController));
 apiRouter.use(requireAuth);
+apiRouter.use("/billing", requireCsrfProtection, billingRoutes(billingController));
 apiRouter.use(requireValidLicense(licensePolicyService));
 apiRouter.use(requireCsrfProtection);
 apiRouter.use("/users", usersRoutes(usersController));
@@ -153,6 +222,8 @@ apiRouter.use("/stoppages", stoppagesRoutes(stoppagesController, requireFeature)
 apiRouter.use("/stats", statsRoutes(statsController, requireFeature));
 apiRouter.use("/notifications", notificationsRoutes(notificationsController));
 apiRouter.use("/settings", settingsRoutes(settingsController));
+apiRouter.use("/tenant", tenantProfileRoutes(tenantProfileController));
+apiRouter.use("/privacy", privacyComplianceRoutes(privacyComplianceController));
 apiRouter.use("/audit", auditRoutes(auditController));
 apiRouter.use("/uploads", uploadsRoutes());
 apiRouter.use("/rental-bookings", rentalBookingsRoutes(rentalBookingsController));

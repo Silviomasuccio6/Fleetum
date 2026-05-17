@@ -1,0 +1,1676 @@
+.fleetum-landing {
+  --fleetum-navy: #07111f;
+  --fleetum-midnight: #0b1220;
+  --fleetum-ink: #e6ecf2;
+  --fleetum-muted: #91a4bd;
+  --fleetum-muted-2: #607087;
+  --fleetum-blue: #2563ff;
+  --fleetum-blue-soft: #4b8cff;
+  --fleetum-teal: #00b8a9;
+  --fleetum-cyan: #32ddd1;
+  --fleetum-surface: rgba(8, 17, 33, 0.72);
+  --fleetum-surface-2: rgba(13, 26, 48, 0.76);
+  --fleetum-border: rgba(148, 163, 184, 0.18);
+  --fleetum-border-strong: rgba(99, 180, 255, 0.34);
+  --fleetum-radius: 24px;
+  --fleetum-radius-lg: 34px;
+  --fleetum-radius-xl: 46px;
+  --fleetum-shadow: 0 34px 110px -70px rgba(0, 0, 0, 0.86);
+  --fleetum-glow: 0 0 70px rgba(37, 99, 255, 0.24), 0 0 120px rgba(0, 184, 169, 0.11);
+  --fleetum-ease: cubic-bezier(.2, .82, .2, 1);
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--fleetum-ink);
+  background:
+    radial-gradient(circle at 50% -8%, rgba(37, 99, 255, 0.34), transparent 34rem),
+    radial-gradient(circle at 8% 20%, rgba(0, 184, 169, 0.16), transparent 30rem),
+    radial-gradient(circle at 92% 16%, rgba(75, 140, 255, 0.18), transparent 30rem),
+    linear-gradient(180deg, #040812 0%, #07111f 38%, #050a14 100%);
+  font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.fleetum-landing *,
+.fleetum-landing *::before,
+.fleetum-landing *::after {
+  box-sizing: border-box;
+}
+
+.fleetum-landing::selection {
+  color: #ffffff;
+  background: rgba(37, 99, 255, 0.72);
+}
+
+.fleetum-hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  padding: 22px clamp(18px, 4vw, 56px) 84px;
+}
+
+.fleetum-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -4;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
+  background-size: 70px 70px;
+  mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,0.75) 48%, transparent 92%);
+}
+
+.fleetum-hero::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  z-index: -3;
+  width: min(980px, 82vw);
+  height: min(980px, 82vw);
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, rgba(37, 99, 255, 0.28), transparent 58%),
+    radial-gradient(circle at 68% 42%, rgba(0, 184, 169, 0.22), transparent 36%);
+  filter: blur(42px);
+  opacity: 0.78;
+}
+
+.fleetum-ambient {
+  position: absolute;
+  z-index: -2;
+  width: 34rem;
+  height: 34rem;
+  border-radius: 999px;
+  filter: blur(46px);
+  pointer-events: none;
+  opacity: 0.56;
+  animation: fleetumAmbient 14s ease-in-out infinite alternate;
+}
+
+.fleetum-ambient--one {
+  left: -8rem;
+  top: 8rem;
+  background: rgba(37, 99, 255, 0.22);
+}
+
+.fleetum-ambient--two {
+  right: -10rem;
+  top: 18rem;
+  background: rgba(0, 184, 169, 0.16);
+  animation-delay: -5s;
+}
+
+.fleetum-starfield {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(230,236,242,0.22) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(50,221,209,0.16) 0 1px, transparent 1.6px);
+  background-size: 120px 120px, 190px 190px;
+  background-position: 0 0, 48px 72px;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 14%, transparent 76%);
+  animation: fleetumStars 28s linear infinite;
+}
+
+.fleetum-site-header {
+  position: sticky;
+  top: 18px;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(230px, 1fr);
+  align-items: center;
+  gap: 18px;
+  width: min(1180px, 100%);
+  min-height: 70px;
+  margin: 0 auto;
+  padding: 12px 14px 12px 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: rgba(6, 14, 28, 0.58);
+  box-shadow: 0 24px 90px -58px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255,255,255,0.08);
+  backdrop-filter: blur(22px);
+  transition: border-color .25s ease, background .25s ease, box-shadow .25s ease;
+}
+
+.fleetum-site-header.is-scrolled {
+  border-color: rgba(50, 221, 209, 0.22);
+  background: rgba(5, 12, 24, 0.82);
+  box-shadow: 0 26px 90px -58px rgba(37, 99, 255, 0.72), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.fleetum-site-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  height: 44px;
+  text-decoration: none;
+}
+
+.fleetum-site-logo img {
+  display: block;
+  width: 142px;
+  height: auto;
+  max-height: 32px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.fleetum-site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(18px, 2.1vw, 30px);
+  color: rgba(230, 236, 242, 0.72);
+  font-size: 0.88rem;
+  font-weight: 760;
+}
+
+.fleetum-site-nav a,
+.fleetum-footer a {
+  color: inherit;
+  text-decoration: none;
+  transition: color .2s ease, transform .2s ease;
+}
+
+.fleetum-site-nav a:hover,
+.fleetum-footer a:hover {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.fleetum-site-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  justify-self: end;
+}
+
+.fleetum-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 0 17px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 850;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform .22s var(--fleetum-ease), border-color .22s ease, box-shadow .22s ease, background .22s ease;
+}
+
+.fleetum-btn::after {
+  content: "";
+  position: absolute;
+  inset: -45% auto -45% -80%;
+  width: 42%;
+  transform: skewX(-18deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.48), transparent);
+  opacity: 0;
+  transition: opacity .22s ease, transform .68s ease;
+}
+
+.fleetum-btn:hover {
+  transform: translateY(-2px);
+}
+
+.fleetum-btn:hover::after {
+  opacity: 1;
+  transform: translateX(430%) skewX(-18deg);
+}
+
+.fleetum-btn--primary,
+.fleetum-btn--hero {
+  background: linear-gradient(135deg, #2563ff 0%, #4b8cff 48%, #00b8a9 100%);
+  box-shadow: 0 20px 55px -26px rgba(37, 99, 255, 0.9), inset 0 1px 0 rgba(255,255,255,0.24);
+}
+
+.fleetum-btn--ghost,
+.fleetum-btn--secondary {
+  color: rgba(230, 236, 242, 0.86);
+  background: rgba(255,255,255,0.055);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.fleetum-btn--hero {
+  min-height: 56px;
+  padding: 0 25px;
+  border-radius: 18px;
+  font-size: 1rem;
+}
+
+.fleetum-btn--dark {
+  color: #e6ecf2;
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.fleetum-btn--light {
+  color: #07111f;
+  background: #ffffff;
+  min-height: 54px;
+  padding: 0 26px;
+}
+
+.fleetum-btn--outline-light {
+  color: #ffffff;
+  min-height: 54px;
+  padding: 0 26px;
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.22);
+}
+
+.fleetum-mobile-toggle,
+.fleetum-mobile-menu {
+  display: none;
+}
+
+.fleetum-hero__content {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding-top: clamp(78px, 10vw, 132px);
+  text-align: center;
+}
+
+.fleetum-hero__copy {
+  max-width: 940px;
+  margin: 0 auto;
+}
+
+.fleetum-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 22px;
+  padding: 10px 14px;
+  border: 1px solid rgba(50,221,209,0.24);
+  border-radius: 999px;
+  color: #baf7ff;
+  background: rgba(12, 26, 48, 0.72);
+  box-shadow: 0 0 36px rgba(37, 99, 255, 0.13), inset 0 1px 0 rgba(255,255,255,0.08);
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.fleetum-hero h1 {
+  margin: 0 auto;
+  max-width: 980px;
+  color: #ffffff;
+  font-size: clamp(3.45rem, 8vw, 7.8rem);
+  line-height: 0.9;
+  letter-spacing: -0.072em;
+  font-weight: 950;
+  text-wrap: balance;
+}
+
+.fleetum-hero__copy > p {
+  max-width: 810px;
+  margin: 28px auto 0;
+  color: rgba(230, 236, 242, 0.74);
+  font-size: clamp(1.05rem, 1.5vw, 1.32rem);
+  line-height: 1.72;
+  font-weight: 560;
+}
+
+.fleetum-hero__actions,
+.fleetum-final-cta__box div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.fleetum-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.fleetum-trust-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid rgba(148,163,184,0.17);
+  border-radius: 999px;
+  color: rgba(230,236,242,0.78);
+  background: rgba(255,255,255,0.045);
+  font-size: 0.82rem;
+  font-weight: 760;
+  backdrop-filter: blur(12px);
+}
+
+.fleetum-trust-pill svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-hero__mockup {
+  margin-top: clamp(46px, 6vw, 78px);
+}
+
+.fleetum-product-orbit {
+  position: relative;
+  max-width: 1080px;
+  margin: 0 auto;
+  perspective: 1400px;
+}
+
+.fleetum-product-shell {
+  position: relative;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: var(--fleetum-radius-xl);
+  overflow: hidden;
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.035)),
+    #07111f;
+  box-shadow: var(--fleetum-shadow), var(--fleetum-glow), inset 0 1px 0 rgba(255,255,255,0.1);
+  transform: rotateX(7deg);
+  transform-origin: top center;
+  animation: fleetumMockupIn .95s .15s var(--fleetum-ease) both, fleetumMockupFloat 7s 1.2s ease-in-out infinite alternate;
+}
+
+.fleetum-product-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(37,99,255,0.22), transparent 32%),
+    radial-gradient(circle at 82% 16%, rgba(50,221,209,0.14), transparent 34%);
+}
+
+.fleetum-product-chrome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 18px 22px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(5, 12, 24, 0.72);
+}
+
+.fleetum-product-chrome span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #fb7185;
+}
+
+.fleetum-product-chrome span:nth-child(2) { background: #fbbf24; }
+.fleetum-product-chrome span:nth-child(3) { background: #34d399; }
+
+.fleetum-product-chrome strong {
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  color: #c7f9ff;
+  background: rgba(255,255,255,0.055);
+  font-size: 0.78rem;
+  font-weight: 780;
+}
+
+.fleetum-product-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr .85fr;
+  gap: 14px;
+  padding: 18px;
+}
+
+.fleetum-product-panel,
+.fleetum-booking-preview,
+.fleetum-glass-card,
+.fleetum-price-card,
+.fleetum-decision-card,
+.fleetum-chart-card,
+.fleetum-contract-paper,
+.fleetum-calendar-showcase {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.035));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.075), 0 28px 90px -68px rgba(0,0,0,0.88);
+  backdrop-filter: blur(18px);
+}
+
+.fleetum-product-panel--kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.fleetum-product-panel--kpis > div,
+.fleetum-product-panel--alerts {
+  min-height: 150px;
+  border-radius: 28px;
+  padding: 20px;
+  background: rgba(255,255,255,0.045);
+}
+
+.fleetum-product-panel--kpis p,
+.fleetum-booking-preview__head p {
+  margin: 0;
+  color: #9eeef4;
+  text-transform: uppercase;
+  letter-spacing: .18em;
+  font-size: .7rem;
+  font-weight: 880;
+}
+
+.fleetum-product-panel--kpis strong {
+  display: block;
+  margin-top: 14px;
+  color: #ffffff;
+  font-size: clamp(2.45rem, 4vw, 3.4rem);
+  line-height: 1;
+  letter-spacing: -.06em;
+  font-weight: 940;
+}
+
+.fleetum-product-panel--kpis small {
+  display: block;
+  margin-top: 14px;
+  color: rgba(230,236,242,0.58);
+  font-weight: 560;
+}
+
+.fleetum-product-panel--alerts {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+}
+
+.fleetum-product-panel--alerts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: rgba(230,236,242,0.84);
+  background: rgba(255,255,255,0.06);
+  font-size: .86rem;
+  font-weight: 720;
+}
+
+.fleetum-product-panel--alerts svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-booking-preview {
+  grid-column: 1 / -1;
+  border-radius: 30px;
+  padding: 20px;
+}
+
+.fleetum-booking-preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fleetum-booking-preview__head h3 {
+  margin: 4px 0 0;
+  color: #ffffff;
+  font-size: 1.35rem;
+  letter-spacing: -.03em;
+}
+
+.fleetum-booking-preview__head svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-booking-grid {
+  display: grid;
+  grid-template-columns: 1.35fr repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 18px;
+  font-size: .76rem;
+  font-weight: 820;
+}
+
+.fleetum-booking-cell,
+.fleetum-booking-slot,
+.fleetum-booking-plate {
+  min-height: 38px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.055);
+}
+
+.fleetum-booking-cell {
+  display: grid;
+  place-items: center;
+  color: rgba(230,236,242,0.72);
+}
+
+.fleetum-booking-cell--vehicle {
+  justify-content: start;
+  padding-left: 12px;
+}
+
+.fleetum-booking-row {
+  position: relative;
+  display: contents;
+}
+
+.fleetum-booking-plate {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: #ffffff;
+}
+
+.fleetum-booking-plate i,
+.fleetum-calendar-row strong i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.is-ok { background: #22c55e; box-shadow: 0 0 16px rgba(34,197,94,.55); }
+.is-warn { background: #f59e0b; box-shadow: 0 0 16px rgba(245,158,11,.55); }
+.is-danger { background: #ef4444; box-shadow: 0 0 16px rgba(239,68,68,.5); }
+
+.fleetum-booking-bar {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  white-space: nowrap;
+  background: linear-gradient(90deg, #2563ff, #32ddd1);
+  box-shadow: 0 15px 36px -18px rgba(37,99,255,0.92);
+  transform-origin: left center;
+  animation: fleetumBookingBar 1.15s .45s var(--fleetum-ease) both;
+}
+
+.fleetum-booking-bar--one { grid-column: 4 / 7; margin-top: 5px; }
+.fleetum-booking-bar--two { grid-column: 6 / 9; margin-top: 5px; }
+.fleetum-booking-bar--three { grid-column: 3 / 6; margin-top: 5px; }
+
+.fleetum-floating-chip {
+  position: absolute;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(8, 17, 33, 0.78);
+  box-shadow: 0 22px 64px -40px rgba(0,0,0,.82), 0 0 44px rgba(37,99,255,.18);
+  backdrop-filter: blur(18px);
+  font-size: .78rem;
+  font-weight: 820;
+  animation: fleetumChipFloat 4.8s ease-in-out infinite alternate;
+}
+
+.fleetum-floating-chip svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-floating-chip--one { right: -18px; top: 30%; }
+.fleetum-floating-chip--two { left: -18px; bottom: 18%; animation-delay: -1.8s; }
+
+.fleetum-section {
+  position: relative;
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(64px, 8vw, 112px) 0;
+}
+
+.fleetum-section-heading {
+  max-width: 790px;
+  margin-bottom: 34px;
+}
+
+.fleetum-section-heading--center {
+  margin-inline: auto;
+  text-align: center;
+}
+
+.fleetum-section-heading p,
+.fleetum-showcase-copy > p,
+.fleetum-final-cta__box > p {
+  margin: 0 0 13px;
+  color: #7be8f1;
+  text-transform: uppercase;
+  letter-spacing: .22em;
+  font-size: .76rem;
+  font-weight: 900;
+}
+
+.fleetum-section-heading h2,
+.fleetum-showcase-copy h2,
+.fleetum-final-cta__box h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(2.25rem, 4.2vw, 4.55rem);
+  line-height: .98;
+  letter-spacing: -.056em;
+  font-weight: 930;
+  text-wrap: balance;
+}
+
+.fleetum-section-heading span,
+.fleetum-showcase-copy > span,
+.fleetum-final-cta__box > span {
+  display: block;
+  max-width: 720px;
+  margin-top: 18px;
+  color: rgba(230,236,242,.66);
+  font-size: 1.04rem;
+  line-height: 1.74;
+  font-weight: 520;
+}
+
+.fleetum-section-heading--center span {
+  margin-inline: auto;
+}
+
+.fleetum-problem-grid,
+.fleetum-security-grid,
+.fleetum-modules-grid,
+.fleetum-pricing-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.fleetum-problem-grid,
+.fleetum-security-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fleetum-glass-card,
+.fleetum-price-card,
+.fleetum-decision-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--fleetum-radius-lg);
+  transition: transform .28s var(--fleetum-ease), border-color .28s ease, box-shadow .28s ease, background .28s ease;
+}
+
+.fleetum-glass-card::before,
+.fleetum-price-card::before,
+.fleetum-decision-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 18% 0%, rgba(37,99,255,.18), transparent 34%), radial-gradient(circle at 92% 12%, rgba(50,221,209,.12), transparent 32%);
+  opacity: .72;
+}
+
+.fleetum-glass-card:hover,
+.fleetum-price-card:hover,
+.fleetum-decision-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(50, 221, 209, 0.34);
+  box-shadow: 0 34px 105px -70px rgba(37, 99, 255, 0.9), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+.fleetum-problem-card,
+.fleetum-security-card {
+  min-height: 228px;
+  padding: 28px;
+}
+
+.fleetum-problem-card > *,
+.fleetum-security-card > *,
+.fleetum-module-card > *,
+.fleetum-price-card > *,
+.fleetum-decision-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.fleetum-problem-card svg,
+.fleetum-security-card svg,
+.fleetum-card-icon svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-problem-card h3,
+.fleetum-module-card h3,
+.fleetum-security-card h3 {
+  margin: 22px 0 10px;
+  color: #ffffff;
+  font-size: 1.2rem;
+  font-weight: 850;
+  letter-spacing: -.03em;
+}
+
+.fleetum-problem-card p,
+.fleetum-module-card p,
+.fleetum-security-card p {
+  margin: 0;
+  color: rgba(230,236,242,.62);
+  line-height: 1.68;
+  font-weight: 500;
+}
+
+.fleetum-workflow-section {
+  width: min(1280px, calc(100% - 40px));
+}
+
+.fleetum-workflow {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(112px, 1fr));
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 36px;
+  background: rgba(255,255,255,0.04);
+  box-shadow: var(--fleetum-shadow);
+  overflow: hidden;
+}
+
+.fleetum-workflow::before {
+  content: "";
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 50%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(37,99,255,0.45), rgba(0,184,169,0.62), transparent);
+  animation: fleetumLineDraw 1.55s ease both;
+}
+
+.fleetum-workflow-node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: 122px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 26px;
+  background: rgba(8,17,33,0.78);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  animation: fleetumNodePulse 3.1s ease-in-out infinite alternate;
+  animation-delay: var(--delay);
+}
+
+.fleetum-workflow-node span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #2563ff, #00b8a9);
+  font-size: .8rem;
+  font-weight: 880;
+}
+
+.fleetum-workflow-node strong {
+  color: rgba(230,236,242,.88);
+  font-size: .9rem;
+  font-weight: 820;
+}
+
+.fleetum-split-section {
+  display: grid;
+  grid-template-columns: minmax(0, .84fr) minmax(0, 1.16fr);
+  gap: clamp(24px, 5vw, 64px);
+  align-items: center;
+}
+
+.fleetum-split-section--contracts {
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr);
+}
+
+.fleetum-showcase-copy ul {
+  display: grid;
+  gap: 10px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fleetum-showcase-copy li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: rgba(230,236,242,.76);
+  font-weight: 650;
+}
+
+.fleetum-showcase-copy li svg,
+.fleetum-link-cta svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-link-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 26px;
+  color: #9eeef4;
+  text-decoration: none;
+  font-weight: 820;
+}
+
+.fleetum-calendar-showcase {
+  border-radius: 36px;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.fleetum-calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  background: rgba(255,255,255,0.055);
+}
+
+.fleetum-calendar-toolbar span,
+.fleetum-calendar-toolbar em {
+  color: rgba(230,236,242,.62);
+  font-size: .82rem;
+  font-style: normal;
+  font-weight: 720;
+}
+
+.fleetum-calendar-toolbar strong {
+  color: #ffffff;
+}
+
+.fleetum-calendar-table {
+  margin-top: 14px;
+}
+
+.fleetum-calendar-head,
+.fleetum-calendar-row {
+  display: grid;
+  grid-template-columns: 1.1fr 2fr;
+  gap: 8px;
+}
+
+.fleetum-calendar-head span:first-child,
+.fleetum-calendar-row strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 13px;
+  color: #ffffff;
+  background: rgba(255,255,255,0.055);
+}
+
+.fleetum-calendar-head span:first-child {
+  color: rgba(230,236,242,.62);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: .68rem;
+}
+
+.fleetum-calendar-head span:not(:first-child) {
+  display: none;
+}
+
+.fleetum-calendar-line {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fleetum-calendar-line span {
+  min-height: 42px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.045);
+}
+
+.fleetum-calendar-line .bar {
+  position: absolute;
+  top: 7px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  white-space: nowrap;
+  font-size: .72rem;
+  font-style: normal;
+  font-weight: 780;
+  background: linear-gradient(90deg, #2563ff, #32ddd1);
+  animation: fleetumBookingBar 1.1s .2s var(--fleetum-ease) both;
+}
+
+.fleetum-calendar-line .bar.a { left: 13%; width: 42%; }
+.fleetum-calendar-line .bar.b { left: 42%; width: 39%; }
+.fleetum-calendar-line .bar.c { left: 24%; width: 48%; }
+
+.fleetum-modules-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fleetum-module-card {
+  min-height: 238px;
+  padding: 26px;
+}
+
+.fleetum-card-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgba(50,221,209,0.2);
+  border-radius: 18px;
+  background: rgba(50,221,209,0.06);
+}
+
+.fleetum-mini-indicator {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 24px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563ff, #32ddd1, transparent);
+}
+
+.fleetum-contract-paper {
+  position: relative;
+  overflow: hidden;
+  border-radius: 34px;
+  padding: 26px;
+  color: #07111f;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(230,236,242,.9));
+  box-shadow: 0 34px 120px -70px rgba(37,99,255,.62);
+  transform: rotate(-1.2deg);
+}
+
+.fleetum-contract-watermark {
+  position: absolute;
+  right: -14px;
+  bottom: 34px;
+  color: rgba(37,99,255,.055);
+  font-size: 6.8rem;
+  font-weight: 950;
+  letter-spacing: -.08em;
+  pointer-events: none;
+}
+
+.fleetum-contract-paper__head,
+.fleetum-contract-summary,
+.fleetum-signature-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.fleetum-contract-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fleetum-contract-brand img {
+  width: 34px;
+  height: 34px;
+}
+
+.fleetum-contract-brand strong,
+.fleetum-contract-code strong,
+.fleetum-contract-summary strong,
+.fleetum-contract-details strong {
+  display: block;
+  color: #07111f;
+}
+
+.fleetum-contract-brand span,
+.fleetum-contract-code p,
+.fleetum-contract-summary span,
+.fleetum-contract-details small,
+.fleetum-contract-terms span,
+.fleetum-signature-row small {
+  color: #64748b;
+}
+
+.fleetum-contract-code {
+  text-align: right;
+}
+
+.fleetum-contract-code p {
+  margin: 0 0 4px;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-weight: 800;
+}
+
+.fleetum-contract-title {
+  position: relative;
+  z-index: 1;
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 22px;
+  background: rgba(255,255,255,.66);
+}
+
+.fleetum-contract-title p {
+  margin: 0;
+  color: #07111f;
+  font-size: 1.28rem;
+  font-weight: 880;
+  letter-spacing: -.03em;
+}
+
+.fleetum-contract-title span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: .84rem;
+}
+
+.fleetum-contract-summary,
+.fleetum-contract-details,
+.fleetum-contract-terms,
+.fleetum-signature-row {
+  position: relative;
+  z-index: 1;
+  margin-top: 14px;
+}
+
+.fleetum-contract-summary > div,
+.fleetum-contract-details span,
+.fleetum-contract-terms,
+.fleetum-signature-row > span {
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 18px;
+  background: rgba(255,255,255,.7);
+}
+
+.fleetum-contract-summary > div {
+  flex: 1;
+  padding: 14px;
+}
+
+.fleetum-contract-summary p,
+.fleetum-contract-terms p {
+  margin: 0 0 6px;
+  color: #2563ff;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: .68rem;
+  font-weight: 850;
+}
+
+.fleetum-contract-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fleetum-contract-details span {
+  padding: 12px;
+}
+
+.fleetum-contract-terms {
+  padding: 14px;
+}
+
+.fleetum-signature-row > span {
+  flex: 1;
+  display: grid;
+  gap: 8px;
+  min-height: 70px;
+  padding: 12px;
+}
+
+.fleetum-signature-row em {
+  display: block;
+  width: 140px;
+  height: 24px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(37,99,255,.8), transparent);
+  transform: rotate(-4deg);
+  animation: fleetumSignature 2.4s ease-in-out infinite;
+}
+
+.fleetum-contract-status {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  color: #075985;
+  background: rgba(14,165,233,.1);
+  font-size: .78rem;
+  font-weight: 850;
+}
+
+.fleetum-channel-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.fleetum-channel-grid span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border: 1px solid rgba(148,163,184,.16);
+  border-radius: 999px;
+  color: rgba(230,236,242,.82);
+  background: rgba(255,255,255,.055);
+  font-weight: 760;
+}
+
+.fleetum-dashboard-section {
+  width: min(1240px, calc(100% - 40px));
+}
+
+.fleetum-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fleetum-decision-card {
+  min-height: 154px;
+  padding: 24px;
+  border-radius: 30px;
+}
+
+.fleetum-decision-card p {
+  margin: 0;
+  color: rgba(230,236,242,.62);
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-size: .72rem;
+  font-weight: 850;
+}
+
+.fleetum-decision-card strong {
+  display: block;
+  margin-top: 18px;
+  color: #ffffff;
+  font-size: 3rem;
+  line-height: 1;
+  letter-spacing: -.06em;
+}
+
+.fleetum-chart-card {
+  grid-column: 1 / -1;
+  min-height: 260px;
+  border-radius: 34px;
+  padding: 24px;
+}
+
+.fleetum-chart-card svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.fleetum-chart-area {
+  fill: url(#fleetumChartFill);
+}
+
+.fleetum-chart-line {
+  fill: none;
+  stroke: #32ddd1;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 900;
+  stroke-dashoffset: 900;
+  animation: fleetumChartDraw 1.8s .35s ease both;
+}
+
+.fleetum-pricing-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fleetum-price-card {
+  min-height: 440px;
+  padding: 30px;
+}
+
+.fleetum-price-card.is-highlight {
+  border-color: rgba(50,221,209,.38);
+  box-shadow: 0 40px 130px -70px rgba(37,99,255,.9), 0 0 80px rgba(50,221,209,.12), inset 0 1px 0 rgba(255,255,255,.11);
+}
+
+.fleetum-price-badge {
+  display: inline-flex;
+  padding: 8px 11px;
+  border-radius: 999px;
+  color: #07111f;
+  background: linear-gradient(135deg, #32ddd1, #ffffff);
+  font-size: .74rem;
+  font-weight: 900;
+}
+
+.fleetum-price-card h3 {
+  margin: 24px 0 0;
+  color: #ffffff;
+  font-size: 1.45rem;
+}
+
+.fleetum-price {
+  margin: 18px 0 0;
+}
+
+.fleetum-price strong {
+  color: #ffffff;
+  font-size: 3.1rem;
+  letter-spacing: -.06em;
+}
+
+.fleetum-price span {
+  margin-left: 6px;
+  color: rgba(230,236,242,.56);
+}
+
+.fleetum-price-target {
+  min-height: 72px;
+  color: rgba(230,236,242,.66);
+  line-height: 1.6;
+}
+
+.fleetum-price-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 22px 0 28px;
+  padding: 0;
+  list-style: none;
+}
+
+.fleetum-price-card li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: rgba(230,236,242,.78);
+  font-weight: 650;
+}
+
+.fleetum-price-card li svg {
+  color: var(--fleetum-cyan);
+}
+
+.fleetum-final-cta {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 54px 0 90px;
+}
+
+.fleetum-final-cta__box {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(34px, 6vw, 68px);
+  border: 1px solid rgba(50,221,209,.22);
+  border-radius: 44px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(37,99,255,.34), transparent 42%),
+    radial-gradient(circle at 80% 14%, rgba(50,221,209,.18), transparent 36%),
+    linear-gradient(135deg, rgba(255,255,255,.09), rgba(255,255,255,.035));
+  box-shadow: 0 44px 150px -80px rgba(37,99,255,.78), inset 0 1px 0 rgba(255,255,255,.11);
+}
+
+.fleetum-final-cta__box span {
+  margin-inline: auto;
+}
+
+.fleetum-footer {
+  display: grid;
+  gap: 22px;
+  place-items: center;
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 0 0 46px;
+  color: rgba(230,236,242,.56);
+  text-align: center;
+}
+
+.fleetum-footer img {
+  width: 150px;
+  height: auto;
+}
+
+.fleetum-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px 24px;
+  color: rgba(230,236,242,.68);
+  font-weight: 700;
+}
+
+.fleetum-footer p {
+  margin: 0;
+}
+
+.fleetum-reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity .72s var(--fleetum-ease), transform .72s var(--fleetum-ease);
+}
+
+.fleetum-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes fleetumAmbient {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(44px, -28px, 0) scale(1.08); }
+}
+
+@keyframes fleetumStars {
+  from { transform: translateY(0); }
+  to { transform: translateY(-90px); }
+}
+
+@keyframes fleetumMockupIn {
+  from { opacity: 0; transform: rotateX(12deg) translateY(44px) scale(.96); filter: blur(18px); }
+  to { opacity: 1; transform: rotateX(7deg) translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes fleetumMockupFloat {
+  from { transform: rotateX(7deg) translateY(0); }
+  to { transform: rotateX(5deg) translateY(-12px); }
+}
+
+@keyframes fleetumChipFloat {
+  from { transform: translateY(0); }
+  to { transform: translateY(-12px); }
+}
+
+@keyframes fleetumBookingBar {
+  from { transform: scaleX(.12); opacity: 0; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+
+@keyframes fleetumLineDraw {
+  from { transform: scaleX(0); opacity: 0; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+
+@keyframes fleetumNodePulse {
+  from { box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 rgba(37,99,255,0); }
+  to { box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 42px rgba(37,99,255,.14); }
+}
+
+@keyframes fleetumChartDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fleetumSignature {
+  0%, 100% { opacity: .42; transform: rotate(-4deg) scaleX(.72); }
+  50% { opacity: 1; transform: rotate(-4deg) scaleX(1); }
+}
+
+@media (max-width: 1100px) {
+  .fleetum-site-header {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .fleetum-site-nav {
+    display: none;
+  }
+
+  .fleetum-mobile-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(148,163,184,.18);
+    border-radius: 999px;
+    color: #ffffff;
+    background: rgba(255,255,255,.055);
+  }
+
+  .fleetum-mobile-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 12px;
+    right: 12px;
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid rgba(148,163,184,.18);
+    border-radius: 24px;
+    background: rgba(5, 12, 24, 0.96);
+    box-shadow: var(--fleetum-shadow);
+  }
+
+  .fleetum-mobile-menu a {
+    padding: 12px 14px;
+    border-radius: 16px;
+    color: rgba(230,236,242,.86);
+    text-decoration: none;
+    background: rgba(255,255,255,.045);
+  }
+
+  .fleetum-product-grid,
+  .fleetum-split-section,
+  .fleetum-split-section--contracts {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-contract-paper {
+    transform: none;
+  }
+
+  .fleetum-problem-grid,
+  .fleetum-security-grid,
+  .fleetum-modules-grid,
+  .fleetum-pricing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fleetum-workflow {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .fleetum-decision-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .fleetum-hero {
+    padding: 14px 14px 62px;
+  }
+
+  .fleetum-site-header {
+    top: 10px;
+    min-height: 62px;
+    padding: 9px 10px 9px 14px;
+    border-radius: 24px;
+  }
+
+  .fleetum-site-logo img {
+    width: 122px;
+  }
+
+  .fleetum-site-actions .fleetum-btn {
+    display: none;
+  }
+
+  .fleetum-hero__content {
+    padding-top: 72px;
+  }
+
+  .fleetum-hero h1 {
+    font-size: clamp(2.65rem, 15vw, 4.6rem);
+  }
+
+  .fleetum-hero__copy > p {
+    font-size: 1rem;
+  }
+
+  .fleetum-product-shell {
+    border-radius: 28px;
+    transform: none;
+    animation: fleetumMockupInMobile .8s var(--fleetum-ease) both;
+  }
+
+  .fleetum-product-panel--kpis,
+  .fleetum-problem-grid,
+  .fleetum-security-grid,
+  .fleetum-modules-grid,
+  .fleetum-pricing-grid,
+  .fleetum-decision-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-booking-grid {
+    grid-template-columns: 1.15fr repeat(4, 1fr);
+    overflow: hidden;
+  }
+
+  .fleetum-booking-grid .fleetum-booking-cell:nth-of-type(n+6),
+  .fleetum-booking-grid .fleetum-booking-slot:nth-of-type(n+6) {
+    display: none;
+  }
+
+  .fleetum-floating-chip {
+    display: none;
+  }
+
+  .fleetum-section,
+  .fleetum-workflow-section,
+  .fleetum-dashboard-section,
+  .fleetum-final-cta,
+  .fleetum-footer {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .fleetum-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-workflow::before {
+    left: 50%;
+    right: auto;
+    top: 4%;
+    bottom: 4%;
+    width: 2px;
+    height: auto;
+    transform-origin: top;
+  }
+
+  .fleetum-calendar-head,
+  .fleetum-calendar-row {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-calendar-line {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .fleetum-contract-paper {
+    padding: 18px;
+  }
+
+  .fleetum-contract-paper__head,
+  .fleetum-contract-summary,
+  .fleetum-signature-row {
+    flex-direction: column;
+  }
+
+  .fleetum-contract-details {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .fleetum-final-cta__box {
+    border-radius: 30px;
+  }
+}
+
+@media (max-width: 430px) {
+  .fleetum-hero__actions,
+  .fleetum-final-cta__box div {
+    flex-direction: column;
+  }
+
+  .fleetum-btn {
+    width: 100%;
+  }
+
+  .fleetum-product-chrome strong {
+    display: none;
+  }
+
+  .fleetum-product-grid {
+    padding: 12px;
+  }
+
+  .fleetum-booking-preview {
+    padding: 14px;
+  }
+
+  .fleetum-section-heading h2,
+  .fleetum-showcase-copy h2,
+  .fleetum-final-cta__box h2 {
+    font-size: clamp(2rem, 13vw, 3.1rem);
+  }
+
+  .fleetum-contract-details {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fleetum-landing *,
+  .fleetum-landing *::before,
+  .fleetum-landing *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .001ms !important;
+  }
+
+  .fleetum-product-shell {
+    transform: none;
+  }
+
+  .fleetum-reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fleetumMockupInMobile {
+  from { opacity: 0; transform: translateY(28px) scale(.98); filter: blur(12px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}

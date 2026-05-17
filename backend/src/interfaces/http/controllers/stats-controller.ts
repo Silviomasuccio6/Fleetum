@@ -98,7 +98,7 @@ export class StatsController {
     const lines: string[] = [];
     const now = new Date();
 
-    lines.push(this.csvRow(["GESTIONE FERMI SAAS", "REPORT ANALYTICS BRANDIZZATO"]));
+    lines.push(this.csvRow(["FLEETUM", "REPORT ANALYTICS BRANDIZZATO"]));
     lines.push(this.csvRow(["Template", "Enterprise CSV v2"]));
     lines.push(this.csvRow(["Generato il", this.formatDateTime(now)]));
     lines.push(this.csvRow(["Tenant", tenantId]));
@@ -228,7 +228,7 @@ export class StatsController {
       ])
     );
 
-    lines.push(this.csvRow(["Fine report", "Gestione Fermi SaaS"]));
+    lines.push(this.csvRow(["Fine report", "Fleetum"]));
     return `\uFEFF${lines.join("\r\n")}`;
   }
 
@@ -372,13 +372,13 @@ export class StatsController {
 
   private async buildAnalyticsWorkbook(tenantId: string, parsed: AnalyticsQuery, result: any) {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Gestione Fermi SaaS";
-    workbook.lastModifiedBy = "Gestione Fermi SaaS";
+    workbook.creator = "Fleetum";
+    workbook.lastModifiedBy = "Fleetum";
     workbook.created = new Date();
     workbook.modified = new Date();
     const workbookMetadata = workbook as unknown as { subject?: string; title?: string };
     workbookMetadata.subject = "Analytics Enterprise Report";
-    workbookMetadata.title = "Gestione Fermi Analytics";
+    workbookMetadata.title = "Fleetum Analytics";
 
     const executive = workbook.addWorksheet("Executive Dashboard");
     this.setupWorksheet(executive, [
@@ -393,7 +393,7 @@ export class StatsController {
     ]);
     this.writeSheetTitle(
       executive,
-      "Gestione Fermi SaaS - Executive Dashboard",
+      "Fleetum - Executive Dashboard",
       `Tenant: ${tenantId} | Generato: ${this.formatDateTime(new Date())}`
     );
 

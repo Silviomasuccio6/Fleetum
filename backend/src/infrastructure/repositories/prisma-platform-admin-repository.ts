@@ -35,6 +35,17 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
           where: { deletedAt: null },
           include: { roles: { include: { role: { select: { key: true } } } } }
         },
+        tenantProfile: {
+          select: {
+            legalName: true,
+            tradeName: true,
+            vatNumber: true,
+            email: true,
+            phone: true,
+            profileCompletedAt: true
+          }
+        },
+        tenantBranding: { select: { logoFilePath: true } },
         _count: { select: { users: true, vehicles: true, stoppages: true } }
       }
     }) as unknown as PlatformTenantRow[];
@@ -44,6 +55,22 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
     return prisma.tenant.findUnique({
       where: { id: tenantId },
       select: { id: true, name: true, isActive: true }
+    });
+  }
+
+  async getTenantCompanyProfile(tenantId: string): Promise<unknown | null> {
+    return prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        tenantProfile: true,
+        tenantBranding: true,
+        tenantLegalSettings: true
+      }
     });
   }
 

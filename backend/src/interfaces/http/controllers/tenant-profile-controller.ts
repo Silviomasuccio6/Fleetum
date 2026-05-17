@@ -1,0 +1,39 @@
+import { Request, Response } from "express";
+import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
+import { sanitizeImageMetadata, validateImageMagic } from "../../../infrastructure/storage/file-security.js";
+import { AppError } from "../../../shared/errors/app-error.js";
+import { tenantCompanyProfileSchema } from "../validators/tenant-profile-validators.js";
+
+export class TenantProfileController {
+  constructor(private readonly service: TenantProfileService) {}
+
+  getProfile = async (req: Request, res: Response) => {
+    const result = await this.service.getProfile(req.auth!.tenantId);
+    res.json(result);
+  };
+
+  completeness = async (req: Request, res: Response) => {
+    const result = await this.service.getProfile(req.auth!.tenantId);
+    res.json(result.completeness);
+  };
+
+  updateProfile = async (req: Request, res: Response) => {
+    const input = tenantCompanyProfileSchema.parse(req.body);
+    const result = await this.service.updateProfile(req.auth!.tenantId, req.auth!.userId, input);
+    res.json(result);
+  };
+
+  uploadLogo = async (req: Request, res: Response) => {
+    const file = req.file;
+    if (!file) throw new AppError("Logo mancante", 400, "TENANT_LOGO_REQUIRED");
+    await validateImageMagic(file.path, file.mimetype);
+    await sanitizeImageMetadata(file.path);
+    const result = await this.service.setLogo(req.auth!.tenantId, req.auth!.userId, file);
+    res.status(201).json(result);
+  };
+
+  removeLogo = async (req: Request, res: Response) => {
+    const result = await this.service.removeLogo(req.auth!.tenantId, req.auth!.userId);
+    res.json(result);
+  };
+}

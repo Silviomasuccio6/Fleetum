@@ -2,7 +2,7 @@ import { ReminderRepository } from "../../../domain/repositories/reminder-reposi
 import { StoppageRepository } from "../../../domain/repositories/stoppage-repository.js";
 import { getSlaThresholdForPriority } from "../../services/sla-policy.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
-import { mailer } from "../../../infrastructure/email/mailer.js";
+import { emailSender } from "../../../infrastructure/email/email-sender.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { daysBetween } from "../../../shared/utils/date.js";
@@ -31,7 +31,7 @@ export class SendReminderUseCase {
     const { subject, body } = this.buildMessage(stoppage);
 
     try {
-      await mailer.sendMail({ to: recipient, subject, text: body });
+      await emailSender.send({ to: recipient, subject, text: body });
     } catch (error) {
       await this.emailQueueService.enqueue({
         tenantId,
@@ -98,7 +98,7 @@ export class SendReminderUseCase {
         : body;
 
       try {
-        await mailer.sendMail({ to: recipient, subject: finalSubject, text: finalBody });
+        await emailSender.send({ to: recipient, subject: finalSubject, text: finalBody });
       } catch (error) {
         await this.emailQueueService.enqueue({
           tenantId: stoppage.tenantId,

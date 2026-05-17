@@ -1,7 +1,9 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
+import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
+import { FleetumLogoLoader } from "../../../presentation/components/brand/fleetum-logo-loader";
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
@@ -26,6 +28,30 @@ const GoogleLogo = () => (
   </svg>
 );
 
+
+const MailIcon = () => (
+  <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
+    <path d="M4.75 6.75h14.5v10.5H4.75V6.75Z" />
+    <path d="m5.25 7.25 6.75 5.2 6.75-5.2" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
+    <path d="M7.75 10.25V8.4a4.25 4.25 0 0 1 8.5 0v1.85" />
+    <path d="M6.25 10.25h11.5v8H6.25v-8Z" />
+    <path d="M12 13.35v1.8" />
+  </svg>
+);
+
+const EyeIcon = ({ hidden }: { hidden: boolean }) => (
+  <svg className="premium-login-eye-icon" viewBox="0 0 24 24" aria-hidden>
+    <path d="M3.75 12s2.75-5.25 8.25-5.25S20.25 12 20.25 12s-2.75 5.25-8.25 5.25S3.75 12 3.75 12Z" />
+    <path d="M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+    {hidden ? <path d="M4.75 19.25 19.25 4.75" /> : null}
+  </svg>
+);
+
 const AppleLogo = () => (
   <svg className="premium-login-social-icon" viewBox="0 0 24 24" aria-hidden>
     <path
@@ -38,7 +64,7 @@ const AppleLogo = () => (
 export const LoginCard = () => {
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:4000/api";
+  const apiBaseUrl = getApiBaseUrl();
   const googleAuthUrl = (import.meta.env.VITE_GOOGLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/google`;
   const appleAuthUrl = (import.meta.env.VITE_APPLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/apple`;
 
@@ -95,7 +121,7 @@ export const LoginCard = () => {
     setLoading(true);
     try {
       const result = await authUseCases.login({ email, password });
-      setSession(result.token, result.user, remember);
+      setSession(result.user, remember);
       setSuccess(true);
       window.setTimeout(() => navigate("/dashboard"), 450);
     } catch (error) {
@@ -120,10 +146,12 @@ export const LoginCard = () => {
         onMouseLeave={resetTilt}
       >
         <div className="premium-login-card-head">
-          <div className="premium-login-card-logo">◈</div>
+          <img className="premium-login-card-logo premium-login-card-logo--image" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
+          <div className="premium-login-card-kicker">Fleetum workspace</div>
           <h2>Bentornato</h2>
-          <p>Accedi al tuo workspace</p>
+          <p>Accedi alla control room operativa della tua azienda.</p>
         </div>
+
 
         <form onSubmit={onSubmit} className="premium-login-form" noValidate>
           <div className="premium-login-social-grid">
@@ -134,7 +162,7 @@ export const LoginCard = () => {
               onClick={() => openSocialAuth("google")}
             >
               <GoogleLogo />
-              <span>Google</span>
+              <span>Continua con Google</span>
             </button>
             <button
               type="button"
@@ -143,7 +171,7 @@ export const LoginCard = () => {
               onClick={() => openSocialAuth("apple")}
             >
               <AppleLogo />
-              <span>Apple Account</span>
+              <span>Continua con Apple</span>
             </button>
           </div>
 
@@ -153,7 +181,7 @@ export const LoginCard = () => {
             Indirizzo email
           </label>
           <div className={`premium-login-field ${emailError ? "is-error" : ""} ${email && !emailError ? "is-ok" : ""}`}>
-            <span>✉</span>
+            <span className="premium-login-field-icon-wrap"><MailIcon /></span>
             <input
               id="premium-login-email"
               type="email"
@@ -169,7 +197,7 @@ export const LoginCard = () => {
             Password
           </label>
           <div className={`premium-login-field ${passwordError ? "is-error" : ""} ${password && !passwordError ? "is-ok" : ""}`}>
-            <span>🔒</span>
+            <span className="premium-login-field-icon-wrap"><LockIcon /></span>
             <input
               id="premium-login-password"
               type={pwVisible ? "text" : "password"}
@@ -184,7 +212,7 @@ export const LoginCard = () => {
               className="premium-login-eye"
               onClick={() => setPwVisible((current) => !current)}
             >
-              {pwVisible ? "🙈" : "👁"}
+              <EyeIcon hidden={pwVisible} />
             </button>
           </div>
           {passwordError && <p className="premium-login-error">{passwordError}</p>}
@@ -220,10 +248,7 @@ export const LoginCard = () => {
             <span className="premium-login-submit-shimmer" aria-hidden />
             {loading ? (
               <span className="premium-login-loading">
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 2a10 10 0 0 1 10 10" />
-                </svg>
+                <FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />
                 Accesso in corso...
               </span>
             ) : success ? (
@@ -232,6 +257,7 @@ export const LoginCard = () => {
               "Accedi al workspace"
             )}
           </button>
+
 
           <p className="premium-login-signup-text">
             Non hai un account?
@@ -243,6 +269,13 @@ export const LoginCard = () => {
             >
               Inizia gratis →
             </button>
+          </p>
+          <p className="premium-login-signup-text !mt-2 text-[11px] leading-5">
+            Accedendo confermi di aver letto l'{" "}
+            <Link className="premium-login-link" to="/privacy">
+              informativa privacy
+            </Link>
+            .
           </p>
         </form>
       </div>

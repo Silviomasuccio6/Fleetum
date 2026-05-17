@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { User } from "../../../domain/entities/models";
+import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 
 const decodeBase64Url = (input: string) => {
   const base64 = input.replace(/-/g, "+").replace(/_/g, "/");
@@ -27,17 +28,16 @@ export const SocialAuthCallbackPage = () => {
       return;
     }
 
-    const token = hashParams.get("token");
     const encodedUser = hashParams.get("user");
 
-    if (!token || !encodedUser) {
+    if (!encodedUser) {
       setError("Risposta OAuth incompleta. Riprova il login social.");
       return;
     }
 
     try {
       const user = JSON.parse(decodeBase64Url(encodedUser)) as User;
-      setSession(token, user, true);
+      setSession(user, true);
       navigate("/dashboard", { replace: true });
     } catch {
       setError("Impossibile finalizzare il login social.");
@@ -60,7 +60,7 @@ export const SocialAuthCallbackPage = () => {
             </button>
           </>
         ) : (
-          <p className="mt-3 text-sm text-slate-600">Verifica in corso, attendi un momento...</p>
+          <FleetumBlockLoader label="Verifica in corso" className="min-h-[220px]" />
         )}
       </section>
     </main>

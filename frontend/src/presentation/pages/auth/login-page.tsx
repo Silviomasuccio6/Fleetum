@@ -24,7 +24,7 @@ export const LoginPage = () => {
         password: String(formData.get("password"))
       });
       const remember = formData.get("remember") === "on";
-      setSession(result.token, result.user, remember);
+      setSession(result.user, remember);
       navigate("/dashboard");
     } catch (err) {
       setError((err as Error).message);

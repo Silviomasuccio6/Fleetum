@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookingContract,
   BookingContractStatus,
@@ -16,7 +16,7 @@ import {
 } from "../../../application/usecases/rental-bookings-usecases";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { RentalBookingMonthlyGrid } from "../../components/bookings/rental-booking-monthly-grid";
-import { PageHeader } from "../../components/layout/page-header";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
@@ -25,6 +25,7 @@ import { Select } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useRentalMonthAvailability } from "../../hooks/use-rental-month-availability";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, RotateCcw, Search, UserPlus } from "lucide-react";
 
 type Site = {
   id: string;
@@ -423,6 +424,8 @@ export const RentalBookingsPage = () => {
 
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [bookingForm, setBookingForm] = useState<BookingFormState>(() => buildBookingFormForCell());
+  const [bookingFormDirty, setBookingFormDirty] = useState(false);
+  const [bookingCloseConfirmOpen, setBookingCloseConfirmOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [customerForm, setCustomerForm] = useState<CustomerFormState>(() => defaultCustomerForm());
   const [customerUploadFiles, setCustomerUploadFiles] = useState<File[]>([]);
@@ -461,6 +464,33 @@ export const RentalBookingsPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const forceCloseBookingModal = useCallback(() => {
+    setBookingModalOpen(false);
+    setBookingCloseConfirmOpen(false);
+    setBookingFormDirty(false);
+    setVehicleSuggestOpen(false);
+    setCustomerSuggestOpen(false);
+    setVehicleActiveIdx(-1);
+    setCustomerActiveIdx(-1);
+  }, []);
+
+  const requestCloseBookingModal = useCallback(() => {
+    if (saving) return;
+    setVehicleSuggestOpen(false);
+    setCustomerSuggestOpen(false);
+    setVehicleActiveIdx(-1);
+    setCustomerActiveIdx(-1);
+    if (bookingFormDirty) {
+      setBookingCloseConfirmOpen(true);
+      return;
+    }
+    forceCloseBookingModal();
+  }, [bookingFormDirty, forceCloseBookingModal, saving]);
+
+  const markBookingFormDirty = useCallback(() => {
+    setBookingFormDirty(true);
+  }, []);
+
   const monthIso = useMemo(() => toMonthIso(monthCursor), [monthCursor]);
   const days = useMemo(() => monthDays(monthCursor), [monthCursor]);
   const monthLabel = useMemo(
@@ -474,6 +504,21 @@ export const RentalBookingsPage = () => {
     search: vehicleSearch || undefined,
     refreshKey
   });
+
+  const bookingSummaryPills = useMemo(
+    () => [
+      { label: "Veicoli", value: monthAvailability.summary.totalVehicles },
+      { label: "Occupati", value: monthAvailability.summary.bookedVehicles },
+      { label: "Liberi", value: monthAvailability.summary.availableVehicles },
+      { label: "Occupazione", value: `${monthAvailability.summary.occupancyRate}%` }
+    ],
+    [
+      monthAvailability.summary.availableVehicles,
+      monthAvailability.summary.bookedVehicles,
+      monthAvailability.summary.occupancyRate,
+      monthAvailability.summary.totalVehicles
+    ]
+  );
 
   useEffect(
     () => () => {
@@ -851,8 +896,16 @@ export const RentalBookingsPage = () => {
     };
     const onEsc = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setVehicleSuggestOpen(false);
-        setCustomerSuggestOpen(false);
+        if (bookingCloseConfirmOpen) {
+          setBookingCloseConfirmOpen(false);
+          return;
+        }
+        if (vehicleSuggestOpen || customerSuggestOpen) {
+          setVehicleSuggestOpen(false);
+          setCustomerSuggestOpen(false);
+          return;
+        }
+        requestCloseBookingModal();
       }
     };
     document.addEventListener("mousedown", onPointer);
@@ -861,7 +914,7 @@ export const RentalBookingsPage = () => {
       document.removeEventListener("mousedown", onPointer);
       document.removeEventListener("keydown", onEsc);
     };
-  }, [bookingModalOpen]);
+  }, [bookingCloseConfirmOpen, bookingModalOpen, customerSuggestOpen, requestCloseBookingModal, vehicleSuggestOpen]);
 
   useEffect(() => {
     const firstBooking = monthAvailability.data
@@ -900,6 +953,8 @@ export const RentalBookingsPage = () => {
     setCustomerActiveIdx(-1);
     setVehicleSuggestOpen(false);
     setCustomerSuggestOpen(false);
+    setBookingFormDirty(false);
+    setBookingCloseConfirmOpen(false);
     setBookingModalOpen(true);
     setError(null);
     setSuccess(null);
@@ -941,6 +996,8 @@ export const RentalBookingsPage = () => {
     setCustomerActiveIdx(-1);
     setVehicleSuggestOpen(false);
     setCustomerSuggestOpen(false);
+    setBookingFormDirty(false);
+    setBookingCloseConfirmOpen(false);
     setBookingModalOpen(true);
     setPricingQuote(null);
     setError(null);
@@ -970,6 +1027,7 @@ export const RentalBookingsPage = () => {
   };
 
   const pickVehicle = (vehicle: VehicleOption) => {
+    markBookingFormDirty();
     setBookingForm((state) => ({ ...state, vehicleId: vehicle.id }));
     setVehicleInput(`${vehicle.plate} · ${vehicle.brand} ${vehicle.model}`);
     setVehicleSuggestOpen(false);
@@ -977,6 +1035,7 @@ export const RentalBookingsPage = () => {
   };
 
   const pickCustomer = (customer: RentalCustomer) => {
+    markBookingFormDirty();
     setBookingForm((state) => ({ ...state, customerId: customer.id }));
     setCustomerInput(customerDisplayName(customer));
     setCustomerSuggestOpen(false);
@@ -1125,7 +1184,7 @@ export const RentalBookingsPage = () => {
         setPricingQuote(pricing.quote);
       }
 
-      setBookingModalOpen(false);
+      forceCloseBookingModal();
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1749,14 +1808,31 @@ export const RentalBookingsPage = () => {
   };
 
   return (
-    <section className="space-y-3">
-      <PageHeader
-        title="Rental Booking"
-        subtitle="Calendario mensile per macchina con pianificazione avanzata per sede."
-        actions={
-          <>
+    <section className="flex min-h-[calc(100vh-5.5rem)] flex-col gap-3">
+      <div className="saas-hero-header grid gap-4 rounded-2xl px-4 py-3.5 backdrop-blur lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-center sm:px-6">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold sm:text-2xl">Booking Noleggi</h1>
+          <p className="mt-1 max-w-[420px] text-sm leading-relaxed text-muted-foreground">
+            Planner mensile per macchina, sede e stato operativo.
+          </p>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-3 lg:items-end">
+          <div className="hidden flex-wrap items-center justify-start gap-2 xl:flex xl:justify-end">
+            {bookingSummaryPills.map((pill) => (
+              <span
+                key={pill.label}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border/70 bg-card/85 px-4 text-[11px] font-semibold shadow-sm"
+              >
+                <span className="text-muted-foreground">{pill.label}</span>
+                <span className="text-sm text-foreground">{pill.value}</span>
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <Button
               variant="outline"
+              className="h-11 min-w-[170px] gap-2 rounded-2xl"
               onClick={() => {
                 setCustomerForm(defaultCustomerForm());
                 setCustomerScanFiles([]);
@@ -1764,133 +1840,207 @@ export const RentalBookingsPage = () => {
                 setCustomerModalOpen(true);
               }}
             >
+              <UserPlus className="h-4 w-4" aria-hidden="true" />
               Nuovo cliente
             </Button>
-            <Button onClick={() => openCreateModalFromCell()}>Nuova prenotazione</Button>
-          </>
-        }
-      />
+            <Button className="h-11 min-w-[210px] gap-2 rounded-2xl" onClick={() => openCreateModalFromCell()}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nuova prenotazione
+            </Button>
+          </div>
+        </div>
+      </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
-      {monthAvailability.error ? <p className="text-sm text-destructive">{monthAvailability.error}</p> : null}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:hidden">
+        {bookingSummaryPills.map((pill) => (
+          <div key={pill.label} className="rounded-2xl border bg-card/85 px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{pill.label}</p>
+            <p className="mt-1 text-xl font-semibold text-foreground">{pill.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {error ? <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {success ? <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
+      {monthAvailability.error ? (
+        <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{monthAvailability.error}</p>
+      ) : null}
 
       <Card className="saas-surface">
-        <CardContent className="py-4">
-          <div className="grid gap-2 lg:grid-cols-[auto_auto_220px_1fr_180px_auto]">
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" onClick={goPrevMonth} aria-label="Mese precedente">
-                ←
+        <CardContent className="!py-4 sm:!py-4">
+          <div className="flex min-h-[52px] flex-col justify-center gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="inline-flex h-11 items-center justify-between gap-2 rounded-2xl border bg-card/75 p-1 shadow-sm xl:min-w-[300px]">
+              <Button variant="outline" size="sm" className="h-9 w-9 rounded-xl p-0" onClick={goPrevMonth} aria-label="Mese precedente">
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               </Button>
-              <div className="min-w-[170px] text-center text-sm font-semibold capitalize">{monthLabel}</div>
-              <Button variant="outline" size="sm" onClick={goNextMonth} aria-label="Mese successivo">
-                →
+              <div className="flex min-w-[170px] items-center justify-center gap-2 px-2 text-center text-sm font-semibold capitalize">
+                <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                {monthLabel}
+              </div>
+              <Button variant="outline" size="sm" className="h-9 w-9 rounded-xl p-0" onClick={goNextMonth} aria-label="Mese successivo">
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
 
-            <Select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-              <option value="">Tutte le sedi</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}{site.city ? ` · ${site.city}` : ""}
-                </option>
-              ))}
-            </Select>
+            <div className="grid flex-1 items-center gap-2 md:grid-cols-[minmax(150px,0.8fr)_minmax(150px,0.8fr)_minmax(220px,1.2fr)_auto] xl:max-w-[850px]">
+              <div className="flex items-center">
+                <Select className="h-11 rounded-xl" value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Filtra sede booking">
+                  <option value="">Tutte le sedi</option>
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}{site.city ? ` · ${site.city}` : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as RentalBookingStatus | "")}>
-              <option value="">Tutti gli stati</option>
-              {(Object.keys(BOOKING_STATUS_LABELS) as RentalBookingStatus[]).map((key) => (
-                <option key={key} value={key}>
-                  {BOOKING_STATUS_LABELS[key]}
-                </option>
-              ))}
-            </Select>
+              <Select
+                className="h-11 rounded-xl"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as RentalBookingStatus | "")}
+                aria-label="Filtra stato prenotazione"
+              >
+                <option value="">Tutti gli stati</option>
+                {(Object.keys(BOOKING_STATUS_LABELS) as RentalBookingStatus[]).map((key) => (
+                  <option key={key} value={key}>
+                    {BOOKING_STATUS_LABELS[key]}
+                  </option>
+                ))}
+              </Select>
 
-            <Input
-              value={vehicleSearch}
-              onChange={(e) => setVehicleSearch(e.target.value)}
-              placeholder="Cerca targa/modello/cliente..."
-            />
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <Input
+                  className="h-11 rounded-xl pl-9"
+                  value={vehicleSearch}
+                  onChange={(e) => setVehicleSearch(e.target.value)}
+                  placeholder="Cerca targa, modello o cliente..."
+                  aria-label="Ricerca booking"
+                />
+              </div>
 
-            <div className="rounded-md border bg-muted/20 px-2 py-1.5 text-[11px]">
-              Flotta: <strong>{monthAvailability.summary.totalVehicles}</strong> ·
-              Liberi: <strong> {monthAvailability.summary.availableVehicles}</strong> ·
-              Occupati: <strong> {monthAvailability.summary.bookedVehicles}</strong> ·
-              Occ: <strong> {monthAvailability.summary.occupancyRate}%</strong>
+              <Button
+                className="h-11 rounded-xl gap-2"
+                variant="outline"
+                onClick={() => {
+                  setSiteId("");
+                  setVehicleSearch("");
+                  setStatusFilter("");
+                }}
+              >
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                Reset
+              </Button>
             </div>
-
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSiteId("");
-                setVehicleSearch("");
-                setStatusFilter("");
-              }}
-            >
-              Reset
-            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="saas-surface">
-        <CardContent className="pt-4">
-          {monthAvailability.loading ? <p className="text-sm text-muted-foreground">Caricamento calendario...</p> : null}
-          <RentalBookingMonthlyGrid
-            monthKey={monthIso}
-            monthDays={days}
-            rows={monthAvailability.data}
-            statusFilter={statusFilter}
-            selectedBookingId={selectedBookingId}
-            onSelectBooking={(bookingId) => {
-              setSelectedBookingId(bookingId);
-              setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
-            }}
-            onEmptyCellClick={({ vehicleId, date }) => {
-              openCreateModalFromCell({ vehicleId, date });
-            }}
-            onBookingContextMenu={({ booking, x, y }) => {
-              const width = 300;
-              const height = 230;
-              const safeX = Math.max(8, Math.min(window.innerWidth - width - 8, x));
-              const safeY = Math.max(8, Math.min(window.innerHeight - height - 8, y));
-              setCtxMenu({
-                open: true,
-                x: safeX,
-                y: safeY,
-                booking
-              });
-            }}
-            getStatusClass={toBadgeClass}
-          />
-        </CardContent>
-      </Card>
+      <div className="grid min-h-[calc(100vh-22rem)] flex-1 gap-3 2xl:grid-cols-[minmax(0,1fr)_390px]">
+        <Card className="saas-surface flex min-h-[620px] flex-col overflow-hidden">
+          <CardContent className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
+            {monthAvailability.loading ? <FleetumInlineLoader label="Caricamento calendario" className="px-2 pb-2" /> : null}
+            <RentalBookingMonthlyGrid
+              className="h-full min-h-[590px]"
+              monthKey={monthIso}
+              monthDays={days}
+              rows={monthAvailability.data}
+              statusFilter={statusFilter}
+              selectedBookingId={selectedBookingId}
+              onSelectBooking={(bookingId) => {
+                setSelectedBookingId(bookingId);
+                setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
+              }}
+              onEmptyCellClick={({ vehicleId, date }) => {
+                openCreateModalFromCell({ vehicleId, date });
+              }}
+              onBookingContextMenu={({ booking, x, y }) => {
+                const width = 320;
+                const height = 265;
+                const safeX = Math.max(8, Math.min(window.innerWidth - width - 8, x));
+                const safeY = Math.max(8, Math.min(window.innerHeight - height - 8, y));
+                setCtxMenu({
+                  open: true,
+                  x: safeX,
+                  y: safeY,
+                  booking
+                });
+              }}
+              getStatusClass={toBadgeClass}
+            />
+          </CardContent>
+        </Card>
 
-      <div className="grid gap-3 xl:grid-cols-[1.05fr_0.95fr]">
-        <div
+        <aside
           ref={controlPanelRef}
-          className={`rounded-xl transition-all duration-300 ${controlPanelPulse ? "ring-2 ring-primary/60 shadow-[0_0_0_5px_rgba(109,75,191,0.08)]" : ""}`}
+          className={`min-w-0 rounded-xl transition-all duration-300 2xl:sticky 2xl:top-3 2xl:max-h-[calc(100vh-7rem)] ${
+            controlPanelPulse ? "ring-2 ring-primary/60 shadow-[0_0_0_5px_rgba(109,75,191,0.08)]" : ""
+          }`}
         >
-        <Card className="saas-surface">
-          <CardHeader className="pb-2">
+        <Card className="saas-surface flex h-full min-h-[560px] flex-col overflow-hidden">
+          <CardHeader className="border-b border-border/60 pb-3">
             <CardTitle className="text-base">Control Booking</CardTitle>
+            <p className="text-xs text-muted-foreground">Azioni rapide sulla prenotazione selezionata.</p>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
             {!selectedBooking ? (
               <p className="text-sm text-muted-foreground">Seleziona una prenotazione dal calendario.</p>
             ) : (
               <>
-                <div className="rounded-lg border bg-muted/25 p-3">
-                  <p className="text-xs text-muted-foreground">Prenotazione selezionata</p>
-                  <p className="text-sm font-semibold">{selectedBooking.code} · {selectedBooking.customerName}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedBooking.vehicle.plate} · {selectedBooking.vehicle.brand} {selectedBooking.vehicle.model}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Km uscita: <strong>{selectedBooking.pickupKm ?? "-"}</strong> · Km rientro: <strong>{selectedBooking.returnKm ?? "-"}</strong>
-                    {typeof selectedBooking.pickupKm === "number" && typeof selectedBooking.returnKm === "number"
-                      ? ` · Percorsi: ${Math.max(0, selectedBooking.returnKm - selectedBooking.pickupKm)} km`
-                      : ""}
+                <div className="rounded-2xl border bg-muted/20 p-3 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Prenotazione selezionata</p>
+                      <p className="mt-1 truncate text-sm font-semibold">{selectedBooking.customerName}</p>
+                      <p className="truncate text-xs text-muted-foreground">{selectedBooking.code}</p>
+                    </div>
+                    <div className="shrink-0 rounded-2xl border bg-card/85 px-3 py-2 text-right shadow-sm">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Targa</p>
+                      <p className="text-sm font-semibold">{selectedBooking.vehicle.plate}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 2xl:grid-cols-1">
+                    <div className="rounded-xl border bg-card/80 p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Uscita</p>
+                      <p className="mt-1 text-xs font-semibold">
+                        {new Date(selectedBooking.pickupAt).toLocaleString("it-IT", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border bg-card/80 p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rientro</p>
+                      <p className="mt-1 text-xs font-semibold">
+                        {new Date(selectedBooking.returnAt).toLocaleString("it-IT", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border bg-card/80 p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Km uscita</p>
+                      <p className="mt-1 text-xs font-semibold">{selectedBooking.pickupKm ?? "-"}</p>
+                    </div>
+                    <div className="rounded-xl border bg-card/80 p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Km rientro</p>
+                      <p className="mt-1 text-xs font-semibold">
+                        {selectedBooking.returnKm ?? "-"}
+                        {typeof selectedBooking.pickupKm === "number" && typeof selectedBooking.returnKm === "number"
+                          ? ` · ${Math.max(0, selectedBooking.returnKm - selectedBooking.pickupKm)} km`
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="mt-2 truncate text-xs text-muted-foreground">
+                    {selectedBooking.vehicle.brand} {selectedBooking.vehicle.model}
+                    {selectedBooking.vehicle.site?.name ? ` · ${selectedBooking.vehicle.site.name}` : ""}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold ${toBadgeClass(selectedBooking.status)}`}>
@@ -1949,14 +2099,14 @@ export const RentalBookingsPage = () => {
                   </div>
 
                   {contractLoading ? (
-                    <p className="text-xs text-muted-foreground">Caricamento contratto...</p>
+                    <FleetumInlineLoader label="Caricamento contratto" />
                   ) : !contract ? (
                     <div className="rounded-md border border-dashed bg-muted/15 p-3 text-xs text-muted-foreground">
                       Contratto non ancora generato per questa prenotazione.
                     </div>
                   ) : (
                     <>
-                      <div className="grid gap-2 md:grid-cols-2">
+                      <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-1">
                         <div className="space-y-1">
                           <Label>Stato documento</Label>
                           <Select
@@ -2034,7 +2184,7 @@ export const RentalBookingsPage = () => {
                         </Button>
                       </div>
 
-                      <div className="grid gap-2 lg:grid-cols-2">
+                      <div className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-1">
                         <div className="rounded-md border bg-muted/10 p-2">
                           <p className="text-[11px] font-semibold text-muted-foreground">Ultime consegne email</p>
                           <div className="mt-1.5 max-h-[110px] space-y-1 overflow-auto pr-1">
@@ -2077,7 +2227,7 @@ export const RentalBookingsPage = () => {
                   )}
                 </div>
 
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-1">
                   <div className="space-y-2 rounded-lg border p-3">
                     <Label>Workflow contratto noleggio</Label>
                     <Select value={contractTo} onChange={(e) => setContractTo(e.target.value as RentalContractStatus)}>
@@ -2159,7 +2309,8 @@ export const RentalBookingsPage = () => {
             )}
           </CardContent>
         </Card>
-        </div>
+        </aside>
+      </div>
 
         <Card className="saas-surface">
           <CardHeader className="pb-2">
@@ -2341,43 +2492,51 @@ export const RentalBookingsPage = () => {
             )}
           </CardContent>
         </Card>
-      </div>
 
       {ctxMenu.open && ctxMenu.booking ? (
         <div
           ref={ctxMenuRef}
-          className="fixed z-[120] w-[300px] rounded-xl border bg-card p-3 shadow-2xl"
+          className="fixed z-[120] w-[320px] overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_28px_80px_-38px_rgba(15,23,42,0.85)] backdrop-blur"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           role="dialog"
           aria-label="Dettaglio prenotazione rapido"
         >
-          <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Prenotazione</p>
-          <p className="text-sm font-semibold">{ctxMenu.booking.code}</p>
-          <p className="text-xs text-muted-foreground">{ctxMenu.booking.customerName}</p>
-          <p className="mt-2 text-xs">
-            Uscita:{" "}
-            <strong>
-              {new Date(ctxMenu.booking.pickupAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-            </strong>
-          </p>
-          <p className="text-xs">
-            Rientro:{" "}
-            <strong>
-              {new Date(ctxMenu.booking.returnAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-            </strong>
-          </p>
-          <p className="text-xs">
-            Km uscita: <strong>{ctxMenu.booking.pickupKm ?? "-"}</strong> · Km rientro: <strong>{ctxMenu.booking.returnKm ?? "-"}</strong>
-          </p>
-          {typeof ctxMenu.booking.pickupKm === "number" && typeof ctxMenu.booking.returnKm === "number" ? (
-            <p className="text-xs">
-              Km percorsi: <strong>{Math.max(0, ctxMenu.booking.returnKm - ctxMenu.booking.pickupKm)}</strong>
-            </p>
-          ) : null}
-          <p className="mt-1 inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-semibold">
-            {BOOKING_STATUS_LABELS[ctxMenu.booking.status]}
-          </p>
-          <div className="mt-3 flex justify-end gap-1">
+          <div className="border-b bg-muted/20 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Prenotazione</p>
+                <p className="mt-1 truncate text-sm font-semibold">{ctxMenu.booking.customerName}</p>
+                <p className="truncate text-xs text-muted-foreground">{ctxMenu.booking.code}</p>
+              </div>
+              <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${toBadgeClass(ctxMenu.booking.status)}`}>
+                {BOOKING_STATUS_LABELS[ctxMenu.booking.status]}
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2.5 px-4 py-3">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl border bg-card/80 p-2">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Uscita</p>
+                <p className="mt-1 font-semibold">
+                  {new Date(ctxMenu.booking.pickupAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+              <div className="rounded-xl border bg-card/80 p-2">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Rientro</p>
+                <p className="mt-1 font-semibold">
+                  {new Date(ctxMenu.booking.returnAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-muted/15 px-3 py-2 text-xs text-muted-foreground">
+              Km uscita: <strong className="text-foreground">{ctxMenu.booking.pickupKm ?? "-"}</strong> · Km rientro:{" "}
+              <strong className="text-foreground">{ctxMenu.booking.returnKm ?? "-"}</strong>
+              {typeof ctxMenu.booking.pickupKm === "number" && typeof ctxMenu.booking.returnKm === "number" ? (
+                <> · Percorsi: <strong className="text-foreground">{Math.max(0, ctxMenu.booking.returnKm - ctxMenu.booking.pickupKm)}</strong></>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 border-t bg-muted/10 px-4 py-3">
             <Button
               size="sm"
               variant="outline"
@@ -2391,17 +2550,21 @@ export const RentalBookingsPage = () => {
 
       {bookingModalOpen ? (
         <>
-          <div className="fixed inset-0 z-[100] bg-black/55 backdrop-blur-sm" onClick={() => setBookingModalOpen(false)} />
+          <div
+            className="fixed inset-0 z-[100] cursor-pointer bg-black/55 backdrop-blur-sm"
+            onClick={requestCloseBookingModal}
+            aria-hidden="true"
+          />
           <div className="fixed inset-0 z-[101] overflow-y-auto p-4">
             <div className="mx-auto flex min-h-full w-full max-w-4xl items-center py-4">
-            <Card className="w-full saas-surface">
+            <Card className="w-full saas-surface" onClick={(event) => event.stopPropagation()}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
                   {bookingForm.mode === "create" ? "Nuova prenotazione da calendario" : "Modifica prenotazione"}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <form className="space-y-3" onSubmit={onBookingSubmit}>
+                <form className="space-y-3" onChangeCapture={markBookingFormDirty} onSubmit={onBookingSubmit}>
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="relative space-y-1" ref={vehicleSuggestRef}>
                       <Label>Veicolo (targa/modello/sede)</Label>
@@ -2644,7 +2807,7 @@ export const RentalBookingsPage = () => {
                       <div className="rounded-lg border bg-muted/20 p-3">
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Preview pricing live</p>
-                          {pricingLoading ? <p className="text-[11px] text-muted-foreground">Calcolo...</p> : null}
+                          {pricingLoading ? <FleetumInlineLoader label="Calcolo" /> : null}
                         </div>
                         {!pricingQuote ? (
                           <p className="mt-2 text-xs text-muted-foreground">
@@ -2712,7 +2875,7 @@ export const RentalBookingsPage = () => {
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setBookingModalOpen(false)}>
+                    <Button type="button" variant="outline" onClick={requestCloseBookingModal}>
                       Annulla
                     </Button>
                     <Button type="submit" disabled={saving}>
@@ -2724,6 +2887,35 @@ export const RentalBookingsPage = () => {
             </Card>
             </div>
           </div>
+          {bookingCloseConfirmOpen ? (
+            <>
+              <div
+                className="fixed inset-0 z-[112] cursor-pointer bg-black/25 backdrop-blur-[2px]"
+                onClick={() => setBookingCloseConfirmOpen(false)}
+                aria-hidden="true"
+              />
+              <div className="fixed inset-0 z-[113] flex items-center justify-center p-4">
+                <Card className="w-full max-w-md border-border/70 bg-card shadow-[0_28px_90px_-42px_rgba(15,23,42,0.9)]">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Modifiche non salvate</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Hai modificato la prenotazione. Se esci ora, le modifiche non salvate verranno perse.
+                    </p>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setBookingCloseConfirmOpen(false)}>
+                        Continua modifica
+                      </Button>
+                      <Button type="button" variant="destructive" onClick={forceCloseBookingModal}>
+                        Esci senza salvare
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          ) : null}
         </>
       ) : null}
 

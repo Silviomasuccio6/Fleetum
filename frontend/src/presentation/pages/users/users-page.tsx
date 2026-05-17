@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { usersUseCases } from "../../../application/usecases/users-usecases";
+import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -120,7 +121,7 @@ export const UsersPage = () => {
     }
   };
 
-  if (loading) return <p className="text-sm text-muted-foreground">Caricamento utenti...</p>;
+  if (loading) return <FleetumBlockLoader label="Caricamento utenti" />;
   if (error && users.length === 0)
     return (
       <div className="space-y-3">

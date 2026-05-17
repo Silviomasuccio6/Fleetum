@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -167,7 +168,7 @@ export const GenericCrudPage = ({
         <CardContent className="space-y-3">
           <Input placeholder="Ricerca..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
 
-          {loading ? <p className="text-sm text-muted-foreground">Caricamento in corso...</p> : null}
+          {loading ? <FleetumInlineLoader label="Caricamento in corso" /> : null}
 
           <div className="space-y-3 md:hidden">
             {rows.map((row) => (

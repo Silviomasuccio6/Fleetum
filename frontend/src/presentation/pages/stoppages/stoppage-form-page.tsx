@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { usersUseCases } from "../../../application/usecases/users-usecases";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
+import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Alert } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
@@ -332,7 +333,7 @@ export const StoppageFormPage = () => {
   };
 
   if (loadingDetail) {
-    return <p className="text-sm text-muted-foreground">Caricamento fermo...</p>;
+    return <FleetumBlockLoader label="Caricamento fermo" />;
   }
 
   return (

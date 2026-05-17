@@ -599,10 +599,10 @@ export class StoppagesController {
     const lines = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Gestione Fermi//Apple Calendar Export//IT",
+      "PRODID:-//Fleetum//Apple Calendar Export//IT",
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
-      `X-WR-CALNAME:${escapeIcsText(`Gestione Fermi ${tenantId}`)}`,
+      `X-WR-CALNAME:${escapeIcsText(`Fleetum ${tenantId}`)}`,
       `X-WR-TIMEZONE:${APPLE_CALENDAR_TIMEZONE}`
     ];
 

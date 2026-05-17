@@ -3,23 +3,27 @@ import { User } from "../../domain/entities/models";
 import { tokenStorage } from "../../infrastructure/auth/token-storage";
 
 type AuthState = {
-  token: string | null;
   user: User | null;
-  setSession: (token: string, user: User, remember?: boolean) => void;
+  isAuthenticated: boolean;
+  authChecked: boolean;
+  setSession: (user: User, remember?: boolean) => void;
   setUser: (user: User | null) => void;
+  setAuthChecked: (checked: boolean) => void;
   logout: () => void;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
-  token: tokenStorage.get(),
   user: null,
-  setSession: (token, user, remember = true) => {
-    tokenStorage.set(token, remember);
-    set({ token, user });
+  isAuthenticated: false,
+  authChecked: false,
+  setSession: (user, remember = true) => {
+    tokenStorage.setRemember(remember);
+    set({ user, isAuthenticated: true, authChecked: true });
   },
-  setUser: (user) => set({ user }),
+  setUser: (user) => set({ user, isAuthenticated: Boolean(user), authChecked: true }),
+  setAuthChecked: (checked) => set({ authChecked: checked }),
   logout: () => {
     tokenStorage.clear();
-    set({ token: null, user: null });
+    set({ user: null, isAuthenticated: false, authChecked: true });
   }
 }));

@@ -1,0 +1,82 @@
+.fleetum-legal-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(37, 99, 255, .16), transparent 32%),
+    radial-gradient(circle at 86% 12%, rgba(0, 184, 169, .14), transparent 30%),
+    linear-gradient(180deg, #f8fbff, #eef6ff 48%, #f9fbff);
+  color: #07111f;
+  font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
+  padding: 28px clamp(16px, 4vw, 54px) 56px;
+}
+
+.fleetum-legal-shell { width: min(1080px, 100%); margin: 0 auto; }
+.fleetum-legal-topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.fleetum-legal-topbar a,
+.fleetum-legal-topbar button {
+  border: 1px solid rgba(226, 232, 240, .96);
+  border-radius: 999px;
+  background: rgba(255,255,255,.76);
+  color: #0f172a;
+  text-decoration: none;
+  font-weight: 800;
+  padding: 11px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 16px 36px -30px rgba(15,23,42,.72);
+}
+
+.fleetum-legal-card,
+.fleetum-demo-card {
+  border: 1px solid rgba(226, 232, 240, .92);
+  border-radius: 36px;
+  background: rgba(255,255,255,.82);
+  box-shadow: 0 34px 90px -64px rgba(15, 23, 42, .86);
+  backdrop-filter: blur(20px);
+  overflow: hidden;
+}
+
+.fleetum-legal-hero { padding: clamp(30px, 5vw, 58px); border-bottom: 1px solid rgba(226,232,240,.88); }
+.fleetum-legal-hero span,
+.fleetum-demo-copy span { color: #2563ff; text-transform: uppercase; letter-spacing: .18em; font-size: .78rem; font-weight: 950; }
+.fleetum-legal-hero h1,
+.fleetum-demo-copy h1 { margin: 14px 0; font-size: clamp(2.4rem, 6vw, 4.8rem); line-height: .96; letter-spacing: -.055em; max-width: 820px; }
+.fleetum-legal-hero p,
+.fleetum-demo-copy p { max-width: 760px; color: #475569; line-height: 1.7; font-weight: 650; }
+.fleetum-legal-hero strong { display: inline-flex; margin-top: 20px; padding: 10px 14px; border-radius: 999px; background: #eef6ff; color: #1d4ed8; }
+
+.fleetum-legal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: clamp(20px, 4vw, 38px); }
+.fleetum-legal-grid section { border: 1px solid rgba(226,232,240,.9); border-radius: 24px; background: rgba(248,251,255,.82); padding: 22px; }
+.fleetum-legal-grid svg { color: #00a89d; }
+.fleetum-legal-grid h2 { margin: 12px 0 8px; font-size: 1.08rem; }
+.fleetum-legal-grid p,
+.fleetum-legal-note p { color: #64748b; line-height: 1.65; margin: 0; }
+.fleetum-legal-note { margin: 0 clamp(20px, 4vw, 38px) clamp(20px, 4vw, 38px); padding: 20px; border-radius: 24px; background: #fff8e6; border: 1px solid rgba(245, 158, 11, .28); color: #713f12; }
+.fleetum-legal-note strong { display: block; margin-bottom: 6px; }
+
+.fleetum-demo-shell { width: min(1120px, 100%); }
+.fleetum-demo-card { display: grid; grid-template-columns: .9fr 1.1fr; gap: 0; }
+.fleetum-demo-copy { padding: clamp(30px, 5vw, 58px); background: linear-gradient(145deg, #07111f, #0b1b36 58%, #0d766f); color: #fff; }
+.fleetum-demo-copy p { color: rgba(230,236,242,.78); }
+.fleetum-demo-copy ul { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 12px; }
+.fleetum-demo-copy li { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,.86); font-weight: 750; }
+.fleetum-demo-copy svg { color: #32ddd1; }
+.fleetum-demo-form { padding: clamp(24px, 4vw, 46px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.fleetum-demo-form label { display: grid; gap: 8px; font-weight: 900; color: #334155; }
+.fleetum-demo-form input,
+.fleetum-demo-form select,
+.fleetum-demo-form textarea { width: 100%; min-height: 52px; border: 1px solid #dbe5f2; border-radius: 16px; padding: 0 15px; font: inherit; color: #07111f; background: rgba(255,255,255,.9); outline: none; }
+.fleetum-demo-form textarea { min-height: 116px; padding-top: 14px; resize: vertical; }
+.fleetum-demo-form label:has(textarea) { grid-column: 1 / -1; }
+.fleetum-demo-form button { grid-column: 1 / -1; border: 0; min-height: 56px; border-radius: 18px; color: #fff; font: inherit; font-weight: 950; cursor: pointer; background: linear-gradient(135deg, #0b1220, #2563ff 55%, #00b8a9); display: inline-flex; align-items: center; justify-content: center; gap: 9px; box-shadow: 0 24px 48px -28px rgba(37,99,255,.9); }
+.fleetum-demo-form button:disabled { opacity: .68; cursor: progress; }
+.fleetum-demo-success,
+.fleetum-demo-error { grid-column: 1 / -1; margin: 0; border-radius: 16px; padding: 13px 14px; font-weight: 850; }
+.fleetum-demo-success { background: #ecfdf5; color: #047857; }
+.fleetum-demo-error { background: #fef2f2; color: #b91c1c; }
+
+@media (max-width: 820px) {
+  .fleetum-legal-grid,
+  .fleetum-demo-card,
+  .fleetum-demo-form { grid-template-columns: 1fr; }
+}

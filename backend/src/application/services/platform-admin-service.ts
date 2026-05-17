@@ -171,6 +171,27 @@ export class PlatformAdminService {
         return {
           id: tenant.id,
           name: tenant.name,
+          company: tenant.tenantProfile
+            ? {
+                legalName: tenant.tenantProfile.legalName,
+                tradeName: tenant.tenantProfile.tradeName,
+                vatNumber: tenant.tenantProfile.vatNumber,
+                email: tenant.tenantProfile.email,
+                phone: tenant.tenantProfile.phone,
+                hasLogo: Boolean(tenant.tenantBranding?.logoFilePath),
+                profileCompleted: Boolean(tenant.tenantProfile.profileCompletedAt),
+                onboardingStatus: tenant.tenantProfile.profileCompletedAt ? "COMPLETE" : "INCOMPLETE"
+              }
+            : {
+                legalName: tenant.name,
+                tradeName: tenant.name,
+                vatNumber: null,
+                email: null,
+                phone: null,
+                hasLogo: false,
+                profileCompleted: false,
+                onboardingStatus: "MISSING"
+              },
           isActive: tenant.isActive,
           createdAt: tenant.createdAt,
           updatedAt: tenant.updatedAt,
@@ -202,6 +223,31 @@ export class PlatformAdminService {
   async listUsersGlobal() {
     const data = await this.repository.listUsersGlobal();
     return { data };
+  }
+
+  async tenantCompanyProfile(tenantId: string) {
+    const data = await this.repository.getTenantCompanyProfile(tenantId);
+    if (!data) throw new AppError("Tenant non trovato", 404, "NOT_FOUND");
+    return { data };
+  }
+
+  async tenantOnboardingStatus(tenantId: string) {
+    const data = (await this.repository.getTenantCompanyProfile(tenantId)) as any;
+    if (!data) throw new AppError("Tenant non trovato", 404, "NOT_FOUND");
+    const profile = data.tenantProfile;
+    const branding = data.tenantBranding;
+    const required = ["legalName", "vatNumber", "legalAddress", "city", "province", "postalCode", "email", "phone"];
+    const missing = profile ? required.filter((key) => !String(profile[key] ?? "").trim()) : required;
+    if (!branding?.logoFilePath) missing.push("logo");
+    return {
+      data: {
+        tenantId,
+        status: missing.length === 0 ? "COMPLETE" : "INCOMPLETE",
+        profileCompletedAt: profile?.profileCompletedAt ?? null,
+        missing,
+        percentage: Math.round(((required.length + 1 - missing.length) / (required.length + 1)) * 100)
+      }
+    };
   }
 
   async updateLicense(input: {
@@ -473,7 +519,7 @@ export class PlatformAdminService {
         mrrByPlan[plan] += revenue.estimatedMrr;
       }
 
-      if (snapshot.status === "SUSPENDED" || snapshot.status === "EXPIRED") {
+      if (snapshot.status === "SUSPENDED" || snapshot.status === "EXPIRED" || snapshot.status === "PAST_DUE" || snapshot.status === "CANCELED") {
         mrrLost += revenue.estimatedMrr;
       }
     }

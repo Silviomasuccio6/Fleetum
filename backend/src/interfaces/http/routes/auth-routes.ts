@@ -21,6 +21,8 @@ export const authRoutes = (controller: AuthController) => {
   router.post("/logout", requireAuth, requireCsrfProtection, asyncHandler(controller.logout));
   router.get("/me", requireAuth, asyncHandler(controller.me));
   router.get("/me/entitlements", requireAuth, asyncHandler(controller.entitlements));
+  router.get("/privacy/current", requireAuth, asyncHandler(controller.privacyCurrent));
+  router.post("/privacy/accept", requireAuth, requireCsrfProtection, asyncHandler(controller.privacyAccept));
   router.get("/license-status", requireAuth, asyncHandler(controller.licenseStatus));
   router.get("/sessions", requireAuth, asyncHandler(controller.sessions));
   router.post("/sessions/revoke-all", requireAuth, requireCsrfProtection, asyncHandler(controller.revokeAllSessions));

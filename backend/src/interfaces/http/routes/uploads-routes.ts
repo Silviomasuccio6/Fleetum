@@ -6,19 +6,21 @@ import { extractRegistrationDateFromBooklet } from "../../../application/service
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
-import { sanitizeImageMetadata, validateImageMagic } from "../../../infrastructure/storage/file-security.js";
+import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import {
   upload,
   uploadMaintenanceAttachments,
   uploadRentalCustomerAttachments,
   uploadVehicleBooklet
 } from "../../../infrastructure/storage/multer.js";
+import { PrismaAuditLogRepository } from "../../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
 
 const uploadRootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
+const auditRepository = new PrismaAuditLogRepository();
 const roundMoney = (value: number) => Math.round(value * 100) / 100;
 const isInvoiceAnalyzableFile = (file: Express.Multer.File) =>
   file.mimetype === "application/pdf" ||
@@ -54,19 +56,36 @@ const sendStoredFile = async (
 
 export const uploadsRoutes = () => {
   const router = Router();
-  const imageMimeSet = new Set(["image/jpeg", "image/png", "image/webp"]);
 
   const secureFiles = async (files: Express.Multer.File[]) => {
     for (const file of files) {
-      if (!imageMimeSet.has(file.mimetype)) continue;
       try {
-        await validateImageMagic(file.path, file.mimetype);
-        await sanitizeImageMetadata(file.path);
+        await validateUploadedFile(file.path, file.mimetype);
       } catch (error) {
         await fs.unlink(file.path).catch(() => undefined);
         throw error;
       }
     }
+  };
+
+  const auditFileEvent = async (
+    input: {
+      tenantId: string;
+      userId?: string | null;
+      action: string;
+      resource: string;
+      resourceId?: string | null;
+      details?: Record<string, unknown>;
+    }
+  ) => {
+    await auditRepository.create({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      action: input.action,
+      resource: input.resource,
+      resourceId: input.resourceId,
+      details: input.details
+    });
   };
 
   const unlinkStoredFile = async (filePath: string) => {
@@ -99,6 +118,15 @@ export const uploadsRoutes = () => {
         }))
       });
 
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_UPLOAD",
+        resource: "StoppagePhoto",
+        resourceId: req.params.id,
+        details: { count: files.length, category: "stoppage_photo" }
+      });
+
       res.status(201).json({ uploaded: files.length });
     })
   );
@@ -113,6 +141,14 @@ export const uploadsRoutes = () => {
         select: { filePath: true, mimeType: true }
       });
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DOWNLOAD",
+        resource: "StoppagePhoto",
+        resourceId: req.params.photoId,
+        details: { category: "stoppage_photo", mimeType: photo.mimeType }
+      });
       await sendStoredFile(res, photo);
     })
   );
@@ -130,6 +166,14 @@ export const uploadsRoutes = () => {
 
       await prisma.stoppagePhoto.delete({ where: { id: photo.id } });
       await unlinkStoredFile(photo.filePath);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DELETE",
+        resource: "StoppagePhoto",
+        resourceId: photo.id,
+        details: { category: "stoppage_photo" }
+      });
       res.status(204).send();
     })
   );
@@ -159,6 +203,15 @@ export const uploadsRoutes = () => {
         }))
       });
 
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_UPLOAD",
+        resource: "VehiclePhoto",
+        resourceId: req.params.id,
+        details: { count: files.length, category: "vehicle_photo" }
+      });
+
       res.status(201).json({ uploaded: files.length });
     })
   );
@@ -173,6 +226,14 @@ export const uploadsRoutes = () => {
         select: { filePath: true, mimeType: true }
       });
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DOWNLOAD",
+        resource: "VehiclePhoto",
+        resourceId: req.params.photoId,
+        details: { category: "vehicle_photo", mimeType: photo.mimeType }
+      });
       await sendStoredFile(res, photo);
     })
   );
@@ -190,6 +251,14 @@ export const uploadsRoutes = () => {
 
       await prisma.vehiclePhoto.delete({ where: { id: photo.id } });
       await unlinkStoredFile(photo.filePath);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DELETE",
+        resource: "VehiclePhoto",
+        resourceId: photo.id,
+        details: { category: "vehicle_photo" }
+      });
       res.status(204).send();
     })
   );
@@ -282,6 +351,21 @@ export const uploadsRoutes = () => {
         });
       }
 
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_UPLOAD",
+        resource: "VehicleBooklet",
+        resourceId: booklet.id,
+        details: {
+          category: "vehicle_booklet",
+          vehicleId: req.params.id,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          detectedRegistrationDate: detectedRegistrationDate ? detectedRegistrationDate.toISOString() : null
+        }
+      });
+
       res.status(201).json({
         booklet,
         detectedRegistrationDate: detectedRegistrationDate ? detectedRegistrationDate.toISOString() : null,
@@ -300,6 +384,14 @@ export const uploadsRoutes = () => {
         select: { filePath: true, mimeType: true }
       });
       if (!booklet) throw new AppError("Libretto non trovato", 404, "NOT_FOUND");
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DOWNLOAD",
+        resource: "VehicleBooklet",
+        resourceId: req.params.bookletId,
+        details: { category: "vehicle_booklet", mimeType: booklet.mimeType }
+      });
       await sendStoredFile(res, booklet);
     })
   );
@@ -316,6 +408,14 @@ export const uploadsRoutes = () => {
       if (!booklet) throw new AppError("Libretto non trovato", 404, "NOT_FOUND");
       await prisma.vehicleBooklet.delete({ where: { id: booklet.id } });
       await unlinkStoredFile(booklet.filePath);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DELETE",
+        resource: "VehicleBooklet",
+        resourceId: booklet.id,
+        details: { category: "vehicle_booklet" }
+      });
       res.status(204).send();
     })
   );
@@ -353,6 +453,15 @@ export const uploadsRoutes = () => {
           return { id: created.id, file };
         })
       );
+
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_UPLOAD",
+        resource: "VehicleMaintenanceAttachment",
+        resourceId: req.params.id,
+        details: { count: files.length, category: "maintenance_attachment", invoiceAnalyzableFiles }
+      });
 
       // Rispondiamo subito: l'analisi OCR/PDF avviene in background per evitare attese lunghe in UI.
       res.status(201).json({
@@ -412,6 +521,14 @@ export const uploadsRoutes = () => {
       if (!attachment) throw new AppError("Allegato non trovato", 404, "NOT_FOUND");
 
       res.setHeader("Content-Disposition", `inline; filename="${attachment.fileName.replace(/"/g, "")}"`);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DOWNLOAD",
+        resource: "VehicleMaintenanceAttachment",
+        resourceId: req.params.attachmentId,
+        details: { category: "maintenance_attachment", mimeType: attachment.mimeType }
+      });
       await sendStoredFile(res, attachment);
     })
   );
@@ -429,6 +546,14 @@ export const uploadsRoutes = () => {
 
       await prisma.vehicleMaintenanceAttachment.delete({ where: { id: attachment.id } });
       await unlinkStoredFile(attachment.filePath);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DELETE",
+        resource: "VehicleMaintenanceAttachment",
+        resourceId: attachment.id,
+        details: { category: "maintenance_attachment" }
+      });
       res.status(204).send();
     })
   );
@@ -478,6 +603,15 @@ export const uploadsRoutes = () => {
         }))
       });
 
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_UPLOAD",
+        resource: "RentalCustomerAttachment",
+        resourceId: customerId,
+        details: { count: files.length, category: category ?? "customer_attachment", linkedBooking: Boolean(bookingId) }
+      });
+
       res.status(201).json({ uploaded: files.length });
     })
   );
@@ -494,6 +628,14 @@ export const uploadsRoutes = () => {
       if (!attachment) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
 
       res.setHeader("Content-Disposition", `inline; filename="${attachment.fileName.replace(/"/g, "")}"`);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DOWNLOAD",
+        resource: "RentalCustomerAttachment",
+        resourceId: req.params.attachmentId,
+        details: { category: "customer_attachment", mimeType: attachment.mimeType }
+      });
       await sendStoredFile(res, attachment);
     })
   );
@@ -511,6 +653,14 @@ export const uploadsRoutes = () => {
 
       await prisma.rentalCustomerAttachment.delete({ where: { id: attachment.id } });
       await unlinkStoredFile(attachment.filePath);
+      await auditFileEvent({
+        tenantId,
+        userId: req.auth?.userId,
+        action: "DOCUMENT_DELETE",
+        resource: "RentalCustomerAttachment",
+        resourceId: attachment.id,
+        details: { category: "customer_attachment" }
+      });
       res.status(204).send();
     })
   );

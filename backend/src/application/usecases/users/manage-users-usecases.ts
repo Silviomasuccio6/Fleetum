@@ -94,8 +94,8 @@ export class ManageUsersUseCases {
     });
 
     const link = `${env.APP_URL}/accept-invite?token=${rawToken}`;
-    const subject = "Invito Gestione Fermi";
-    const body = `Ciao ${input.firstName},\\n\\nsei stato invitato su Gestione Fermi. Completa l'attivazione dal link:\\n${link}\\n\\nIl link scade tra 7 giorni.`;
+    const subject = "Invito Fleetum";
+    const body = `Ciao ${input.firstName},\\n\\nsei stato invitato su Fleetum. Completa l'attivazione dal link:\\n${link}\\n\\nIl link scade tra 7 giorni.`;
 
     await this.emailQueueService.enqueue({
       tenantId,

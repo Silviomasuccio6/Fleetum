@@ -1,5 +1,5 @@
 import { httpClient } from "../../infrastructure/api/http-client";
-import { tokenStorage } from "../../infrastructure/auth/token-storage";
+import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
 
 export const statsUseCases = {
   dashboard: () => httpClient.get<any>("/stats/dashboard"),
@@ -13,11 +13,9 @@ export const statsUseCases = {
     Object.entries(params ?? {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
     });
-    const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
-    const token = tokenStorage.get();
+    const base = getApiBaseUrl();
     const response = await fetch(`${base}/stats/analytics/export.xlsx?${query.toString()}`, {
-      credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      credentials: "include"
     });
     if (!response.ok) {
       let message = "Download report enterprise fallito";
@@ -41,11 +39,9 @@ export const statsUseCases = {
     Object.entries(params ?? {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
     });
-    const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
-    const token = tokenStorage.get();
+    const base = getApiBaseUrl();
     const response = await fetch(`${base}/stats/analytics/export.csv?${query.toString()}`, {
-      credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      credentials: "include"
     });
     if (!response.ok) {
       let message = "Download report fallito";

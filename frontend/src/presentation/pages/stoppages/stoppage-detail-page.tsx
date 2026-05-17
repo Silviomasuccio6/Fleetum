@@ -13,6 +13,7 @@ import { useAsync } from "../../hooks/use-async";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
 import { snackbar } from "../../../application/stores/snackbar-store";
 import { AuthenticatedPhoto } from "../../components/common/authenticated-photo";
+import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 
 export const StoppageDetailPage = () => {
   const { id = "" } = useParams();
@@ -41,7 +42,7 @@ export const StoppageDetailPage = () => {
   const escalation = (escalations.data?.data ?? []).find((x: any) => x.id === id);
   const variance = (costsVariance.data?.data ?? []).find((x: any) => x.stoppageId === id);
 
-  if (loading) return <p className="text-sm text-muted-foreground">Caricamento...</p>;
+  if (loading) return <FleetumBlockLoader label="Caricamento fermo" />;
   if (error) return <p className="text-sm text-destructive">{error}</p>;
 
   return (

@@ -1,5 +1,5 @@
 import { httpClient } from "../../infrastructure/api/http-client";
-import { tokenStorage } from "../../infrastructure/auth/token-storage";
+import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
 
 const normalizeListParams = (params: Record<string, string | number | undefined>) => {
   const rawPageSize = params.pageSize;
@@ -63,11 +63,9 @@ const uploadVehicleBooklet = (vehicleId: string, file: File) => {
 };
 const deleteVehicleBooklet = (bookletId: string) => httpClient.delete(`/uploads/vehicle-booklets/${bookletId}`);
 const downloadVehicleBooklet = async (bookletId: string) => {
-  const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
-  const token = tokenStorage.get();
+  const base = getApiBaseUrl();
   const response = await fetch(`${base}/uploads/vehicle-booklets/${bookletId}/file`, {
-    credentials: "include",
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
+    credentials: "include"
   });
   if (!response.ok) throw new Error("Download libretto fallito");
   return response.blob();
@@ -100,11 +98,9 @@ const downloadVehicleMaintenanceExport = async (
   Object.entries(params ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
   });
-  const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
-  const token = tokenStorage.get();
+  const base = getApiBaseUrl();
   const response = await fetch(`${base}/master-data/vehicle-maintenances/export.${format}?${query.toString()}`, {
-    credentials: "include",
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
+    credentials: "include"
   });
   if (!response.ok) {
     let message = "Download export manutenzioni fallito";

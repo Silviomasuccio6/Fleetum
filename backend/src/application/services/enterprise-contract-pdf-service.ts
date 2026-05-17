@@ -269,6 +269,21 @@ const maybeEmbedLogo = async (pdfDoc: PDFDocument, logoFilePath?: string | null)
   }
 };
 
+const maybeEmbedFirstExistingImage = async (pdfDoc: PDFDocument, candidates: string[]): Promise<PDFImage | null> => {
+  for (const candidate of candidates) {
+    try {
+      const absolutePath = path.resolve(process.cwd(), candidate);
+      const image = await fs.readFile(absolutePath);
+      const extension = path.extname(candidate).toLowerCase();
+      if (extension === ".png") return pdfDoc.embedPng(image);
+      if (extension === ".jpg" || extension === ".jpeg") return pdfDoc.embedJpg(image);
+    } catch {
+      // Try the next known brand asset path.
+    }
+  }
+  return null;
+};
+
 const contractSummaryClauses = (content: string) => {
   const lines = content
     .split(/\n+/)
@@ -311,6 +326,24 @@ const normalizeMultiline = (content: string) =>
     .map((line) => line.trimEnd())
     .join("\n");
 
+const isTemplateSignaturePlaceholder = (line: string) => {
+  const normalized = line.trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized.startsWith("firma cliente") ||
+    normalized.startsWith("firma operatore") ||
+    normalized.startsWith("luogo e data") ||
+    normalized === "data" ||
+    normalized.startsWith("data:")
+  );
+};
+
+const compactJoin = (...values: Array<string | null | undefined>) =>
+  values
+    .map((value) => asText(value, ""))
+    .filter(Boolean)
+    .join(" · ");
+
 export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInput): Promise<Buffer> => {
   const primaryHex = sanitizeHex(input.branding?.brandPrimary, "#1f3763");
   const accentHex = sanitizeHex(input.branding?.brandAccent, "#5b8bd9");
@@ -327,12 +360,13 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
       ? await pdfDoc.embedFont(StandardFonts.TimesRoman)
       : await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const companyName = asText(input.branding?.companyName, "Fleet Ops Suite");
+  const companyName = asText(input.branding?.companyName, "Fleetum");
   const companyAddress = asText(input.branding?.companyAddress, "Via Demo 1, 00100 Roma");
   const companyVat = asText(input.branding?.companyVat, "P.IVA 00000000000");
   const companyEmail = asText(input.branding?.companyEmail, "info@fleetops.demo");
   const companyPhone = asText(input.branding?.companyPhone, "Tel. +39 000 0000000");
 
+  let fleetumMark: PDFImage | null = null;
   const pages: PDFPage[] = [];
   const addFooter = (page: PDFPage, pageNumber: number, totalPages: number) => {
     page.drawLine({
@@ -355,6 +389,26 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
       font: regularFont,
       color: hexToRgb("#5c6e8f")
     });
+    const poweredBy = "Powered by Fleetum";
+    const poweredWidth = regularFont.widthOfTextAtSize(poweredBy, 7.2);
+    const poweredX = PAGE_W / 2 - poweredWidth / 2 + 6;
+    if (fleetumMark) {
+      const markH = 9;
+      const scaled = fleetumMark.scale(markH / fleetumMark.height);
+      page.drawImage(fleetumMark, {
+        x: poweredX - scaled.width - 4,
+        y: 21.2,
+        width: scaled.width,
+        height: scaled.height
+      });
+    }
+    page.drawText(poweredBy, {
+      x: poweredX,
+      y: 24,
+      size: 7.2,
+      font: regularFont,
+      color: hexToRgb("#7c8ba8")
+    });
   };
 
   let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
@@ -365,39 +419,57 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
   page.drawRectangle({ x: 0, y: PAGE_H - 142, width: PAGE_W, height: 142, color: hexToRgb(primaryHex) });
   page.drawRectangle({ x: 0, y: PAGE_H - 145, width: PAGE_W, height: 3, color: hexToRgb(accentHex) });
 
-  const logo = await maybeEmbedLogo(pdfDoc, input.branding?.logoFilePath);
+  fleetumMark = await maybeEmbedFirstExistingImage(pdfDoc, [
+    "../frontend/public/brand/fleetum-favicon.png",
+    "frontend/public/brand/fleetum-favicon.png",
+    "../../frontend/public/brand/fleetum-favicon.png"
+  ]);
   const signatureImage = await maybeEmbedLogo(pdfDoc, input.contract.signatureFilePath);
-  if (logo) {
-    const targetH = 44;
-    const scaled = logo.scale(targetH / logo.height);
-    page.drawImage(logo, {
-      x: MARGIN_X,
-      y: PAGE_H - 98,
-      width: scaled.width,
-      height: scaled.height
-    });
-  }
 
   page.drawText(companyName, {
-    x: MARGIN_X + 92,
+    x: MARGIN_X + 20,
     y: PAGE_H - 66,
     size: 16,
     font: boldFont,
     color: rgb(1, 1, 1)
   });
   page.drawText(`${companyAddress} · ${companyVat}`, {
-    x: MARGIN_X + 92,
+    x: MARGIN_X + 20,
     y: PAGE_H - 84,
     size: 9,
     font: regularFont,
     color: rgb(0.93, 0.95, 1)
   });
   page.drawText(`${companyEmail} · ${companyPhone}`, {
-    x: MARGIN_X + 92,
+    x: MARGIN_X + 20,
     y: PAGE_H - 98,
     size: 9,
     font: regularFont,
     color: rgb(0.93, 0.95, 1)
+  });
+  if (fleetumMark) {
+    const markH = 18;
+    const scaled = fleetumMark.scale(markH / fleetumMark.height);
+    page.drawImage(fleetumMark, {
+      x: PAGE_W - MARGIN_X - 132,
+      y: PAGE_H - 73,
+      width: scaled.width,
+      height: scaled.height
+    });
+  }
+  page.drawText("Powered by", {
+    x: PAGE_W - MARGIN_X - 106,
+    y: PAGE_H - 63,
+    size: 7.2,
+    font: regularFont,
+    color: rgb(0.78, 0.84, 0.96)
+  });
+  page.drawText("Fleetum", {
+    x: PAGE_W - MARGIN_X - 106,
+    y: PAGE_H - 78,
+    size: 13,
+    font: boldFont,
+    color: rgb(1, 1, 1)
   });
 
   page.drawText("CONTRATTO DI NOLEGGIO", {
@@ -407,16 +479,9 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     font: headingFont,
     color: hexToRgb(primaryHex)
   });
-  page.drawText(asText(input.contract.title, "Contratto standard"), {
-    x: MARGIN_X,
-    y: PAGE_H - 181,
-    size: 9.6,
-    font: regularFont,
-    color: hexToRgb("#385581")
-  });
 
   const chipText = [
-    `Booking ${asText(input.booking.code)}`,
+    `Contratto ${asText(input.booking.code)}`,
     `Prenotazione: ${labelOf(BOOKING_STATUS_LABELS, input.booking.status)}`,
     `Contratto: ${labelOf(CONTRACT_STATUS_LABELS, input.booking.contractStatus)}`
   ].join("  ·  ");
@@ -434,6 +499,16 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     size: 8.5,
     font: boldFont,
     color: hexToRgb(primaryHex)
+  });
+  const titleLines = wrapLines(asText(input.contract.title, "Contratto standard"), contentWidth - chipWidth - 18, regularFont, 9.6).slice(0, 2);
+  titleLines.forEach((line, index) => {
+    page.drawText(line, {
+      x: MARGIN_X,
+      y: PAGE_H - 181 - index * 11,
+      size: 9.6,
+      font: regularFont,
+      color: hexToRgb("#385581")
+    });
   });
 
   const createContentPage = (title = "Contratto noleggio - continua") => {
@@ -457,7 +532,9 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
   };
 
   const drawSectionTitle = (title: string, subtitle?: string) => {
-    ensureSpace(34, title);
+    const subtitleLines = subtitle ? wrapLines(subtitle, contentWidth - 20, regularFont, 8.6) : [];
+    const requiredHeight = 30 + (subtitleLines.length > 0 ? subtitleLines.length * 10 + 10 : 0);
+    ensureSpace(requiredHeight + 6, title);
     page.drawRectangle({
       x: MARGIN_X,
       y: cursorY - 22,
@@ -472,11 +549,9 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
       font: boldFont,
       color: hexToRgb(primaryHex)
     });
-    if (subtitle) {
-      const lines = wrapLines(subtitle, contentWidth - 20, regularFont, 8.6);
+    if (subtitleLines.length > 0) {
       let subtitleY = cursorY - 34;
-      for (const line of lines) {
-        ensureSpace(14, title);
+      for (const line of subtitleLines) {
         page.drawText(line, {
           x: MARGIN_X + 2,
           y: subtitleY,
@@ -485,10 +560,300 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
           color: hexToRgb("#546789")
         });
         subtitleY -= 10;
-        cursorY -= 10;
       }
     }
-    cursorY -= 28;
+    cursorY -= requiredHeight;
+  };
+
+  const drawExecutiveNotice = () => {
+    const status = labelOf(CONTRACT_STATUS_LABELS, input.contract.status ?? input.booking.contractStatus);
+    const lines = [
+      "Documento contrattuale di noleggio senza conducente. Le sezioni seguenti riepilogano parti, veicolo, periodo, condizioni economiche e sottoscrizione.",
+      `Codice: ${asText(input.booking.code)} · Stato contratto: ${status} · Template v${String(input.contract.templateVersion ?? "-")}`
+    ];
+    const wrapped = lines.flatMap((line) => wrapLines(line, contentWidth - 24, regularFont, 8.8));
+    const height = 22 + wrapped.length * 10;
+    ensureSpace(height + 8, "Sintesi contratto");
+    page.drawRectangle({
+      x: MARGIN_X,
+      y: cursorY - height,
+      width: contentWidth,
+      height,
+      color: hexToRgb("#f5f8ff")
+    });
+    page.drawRectangle({
+      x: MARGIN_X,
+      y: cursorY - height,
+      width: 3,
+      height,
+      color: hexToRgb(accentHex)
+    });
+    page.drawText("RIEPILOGO CONTRATTO", {
+      x: MARGIN_X + 12,
+      y: cursorY - 15,
+      size: 8.4,
+      font: boldFont,
+      color: hexToRgb(primaryHex)
+    });
+    let lineY = cursorY - 29;
+    for (const line of wrapped) {
+      page.drawText(line, {
+        x: MARGIN_X + 12,
+        y: lineY,
+        size: 8.8,
+        font: regularFont,
+        color: hexToRgb("#34486a")
+      });
+      lineY -= 10;
+    }
+    cursorY -= height + 12;
+  };
+
+  const drawPremiumSection = (title: string) => {
+    ensureSpace(34, title);
+    page.drawRectangle({
+      x: MARGIN_X,
+      y: cursorY - 24,
+      width: contentWidth,
+      height: 24,
+      color: hexToRgb("#f6f9ff")
+    });
+    page.drawRectangle({
+      x: MARGIN_X,
+      y: cursorY - 24,
+      width: 4,
+      height: 24,
+      color: hexToRgb(accentHex)
+    });
+    page.drawText(title.toUpperCase(), {
+      x: MARGIN_X + 13,
+      y: cursorY - 15,
+      size: 8.7,
+      font: boldFont,
+      color: hexToRgb(primaryHex)
+    });
+    cursorY -= 38;
+  };
+
+  const drawPremiumCard = (x: number, y: number, width: number, height: number, title?: string) => {
+    page.drawRectangle({
+      x,
+      y: y - height,
+      width,
+      height,
+      color: rgb(1, 1, 1),
+      borderColor: hexToRgb("#d8e0ee"),
+      borderWidth: 0.8
+    });
+    if (title) {
+      page.drawText(title.toUpperCase(), {
+        x: x + 12,
+        y: y - 18,
+        size: 7.6,
+        font: boldFont,
+        color: hexToRgb("#687893")
+      });
+    }
+  };
+
+  const drawPremiumLabelValue = (
+    label: string,
+    value: string,
+    x: number,
+    y: number,
+    width: number,
+    options?: { strong?: boolean; lines?: number }
+  ) => {
+    page.drawText(label.toUpperCase(), {
+      x,
+      y: y + 12,
+      size: 6.8,
+      font: boldFont,
+      color: hexToRgb("#6b7890")
+    });
+    const lines = wrapLines(asText(value), width, options?.strong ? boldFont : regularFont, options?.strong ? 9.5 : 9).slice(
+      0,
+      options?.lines ?? 2
+    );
+    lines.forEach((line, index) => {
+      page.drawText(line, {
+        x,
+        y: y - index * 10.5,
+        size: index === 0 && options?.strong ? 9.5 : 9,
+        font: index === 0 && options?.strong ? boldFont : regularFont,
+        color: hexToRgb("#182338")
+      });
+    });
+  };
+
+  const drawPremiumParties = (leftTitle: string, leftItems: InfoItem[], rightTitle: string, rightItems: InfoItem[]) => {
+    drawPremiumSection("Parti contrattuali");
+    const gap = 14;
+    const cardWidth = (contentWidth - gap) / 2;
+    const cardHeight = 170;
+    ensureSpace(cardHeight + 12, "Parti contrattuali");
+    const topY = cursorY;
+    drawPremiumCard(MARGIN_X, topY, cardWidth, cardHeight, leftTitle);
+    drawPremiumCard(MARGIN_X + cardWidth + gap, topY, cardWidth, cardHeight, rightTitle);
+    const drawColumn = (x: number, items: InfoItem[]) => {
+      let localY = topY - 44;
+      for (const item of items.slice(0, 5)) {
+        drawPremiumLabelValue(item.label, item.value, x + 14, localY, cardWidth - 28, { strong: item.emphasize });
+        localY -= 31;
+      }
+    };
+    drawColumn(MARGIN_X, leftItems);
+    drawColumn(MARGIN_X + cardWidth + gap, rightItems);
+    cursorY -= cardHeight + 18;
+  };
+
+  const drawPremiumVehiclePeriod = () => {
+    if (cursorY - 166 < MARGIN_BOTTOM) {
+      createContentPage("Veicolo e condizioni economiche");
+    }
+    drawPremiumSection("Veicolo e periodo di noleggio");
+    const cardHeight = 114;
+    ensureSpace(cardHeight + 12, "Veicolo e periodo di noleggio");
+    const topY = cursorY;
+    drawPremiumCard(MARGIN_X, topY, contentWidth, cardHeight);
+    const col = (contentWidth - 56) / 3;
+    drawPremiumLabelValue(
+      "Veicolo",
+      `${asText(input.booking.vehicle?.brand)} ${asText(input.booking.vehicle?.model)}`,
+      MARGIN_X + 18,
+      topY - 40,
+      col,
+      { strong: true }
+    );
+    drawPremiumLabelValue("Targa", asText(input.booking.vehicle?.plate), MARGIN_X + 18 + col, topY - 40, col, { strong: true });
+    drawPremiumLabelValue("Codice", asText(input.booking.code), MARGIN_X + 18 + col * 2, topY - 40, col, { strong: true });
+    drawPremiumLabelValue("Uscita", `${formatDateTime(input.booking.pickupAt)} · ${asText(input.booking.pickupLocation)}`, MARGIN_X + 18, topY - 88, col);
+    drawPremiumLabelValue("Rientro", `${formatDateTime(input.booking.returnAt)} · ${asText(input.booking.returnLocation)}`, MARGIN_X + 18 + col, topY - 88, col);
+    drawPremiumLabelValue(
+      "Km",
+      `${formatNumber(input.booking.pickupKm)} uscita · ${formatNumber(input.booking.returnKm)} rientro · ${formatNumber(traveledKm)} percorsi`,
+      MARGIN_X + 18 + col * 2,
+      topY - 88,
+      col
+    );
+    cursorY -= cardHeight + 18;
+  };
+
+  const drawPremiumEconomicTable = (items: Array<[string, string, string, boolean?]>) => {
+    const rowHeight = 21;
+    const cardHeight = 20 + items.length * rowHeight;
+    if (cursorY - (38 + cardHeight + 12) < MARGIN_BOTTOM) {
+      createContentPage("Condizioni economiche");
+    }
+    drawPremiumSection("Condizioni economiche");
+    ensureSpace(cardHeight + 12, "Condizioni economiche");
+    const topY = cursorY;
+    drawPremiumCard(MARGIN_X, topY, contentWidth, cardHeight);
+    page.drawText("Voce", { x: MARGIN_X + 16, y: topY - 18, size: 6.8, font: boldFont, color: hexToRgb("#7a879b") });
+    page.drawText("Dettaglio", { x: MARGIN_X + 188, y: topY - 18, size: 6.8, font: boldFont, color: hexToRgb("#7a879b") });
+    page.drawText("Importo / regola", {
+      x: PAGE_W - MARGIN_X - 104,
+      y: topY - 18,
+      size: 6.8,
+      font: boldFont,
+      color: hexToRgb("#7a879b")
+    });
+    let rowY = topY - 38;
+    for (const [label, description, value, important] of items) {
+      page.drawText(label, { x: MARGIN_X + 16, y: rowY, size: 9, font: boldFont, color: hexToRgb("#182338") });
+      page.drawText(description, { x: MARGIN_X + 188, y: rowY, size: 8.7, font: regularFont, color: hexToRgb("#66758d") });
+      const valueWidth = boldFont.widthOfTextAtSize(value, 9);
+      page.drawText(value, {
+        x: PAGE_W - MARGIN_X - 16 - valueWidth,
+        y: rowY,
+        size: 9,
+        font: boldFont,
+        color: important ? hexToRgb("#0f7a4d") : hexToRgb("#182338")
+      });
+      page.drawLine({
+        start: { x: MARGIN_X + 16, y: rowY - 8 },
+        end: { x: PAGE_W - MARGIN_X - 16, y: rowY - 8 },
+        thickness: 0.45,
+        color: hexToRgb("#e2e8f3")
+      });
+      rowY -= rowHeight;
+    }
+    cursorY -= cardHeight + 18;
+  };
+
+  const drawPremiumClauses = (clauses: Array<[string, string]>) => {
+    drawPremiumSection("Clausole principali");
+    const cardHeight = 282;
+    ensureSpace(cardHeight + 12, "Clausole principali");
+    const topY = cursorY;
+    drawPremiumCard(MARGIN_X, topY, contentWidth, cardHeight);
+    let localY = topY - 34;
+    for (const [title, body] of clauses) {
+      page.drawText(title, { x: MARGIN_X + 16, y: localY, size: 9.4, font: boldFont, color: hexToRgb(primaryHex) });
+      localY -= 13;
+      for (const line of wrapLines(body, contentWidth - 32, regularFont, 8.4).slice(0, 2)) {
+        page.drawText(line, { x: MARGIN_X + 16, y: localY, size: 8.4, font: regularFont, color: hexToRgb("#536177") });
+        localY -= 10;
+      }
+      localY -= 10;
+    }
+    cursorY -= cardHeight + 18;
+  };
+
+  const drawPremiumDeliverySummary = () => {
+    drawPremiumSection("Riepilogo consegna");
+    const cardHeight = 66;
+    ensureSpace(cardHeight + 12, "Riepilogo consegna");
+    const topY = cursorY;
+    drawPremiumCard(MARGIN_X, topY, contentWidth, cardHeight);
+    drawPremiumLabelValue("Stato veicolo", "Da verbale/allegati di consegna", MARGIN_X + 16, topY - 38, 150, { strong: true });
+    drawPremiumLabelValue("Dotazioni", "Chiavi, documenti veicolo, triangolo, giubbotto, kit emergenza", MARGIN_X + 190, topY - 38, 230);
+    drawPremiumLabelValue("Note", "Eventuali danni o anomalie devono essere riportati prima dell'uscita.", MARGIN_X + 16, topY - 64, 460);
+    cursorY -= cardHeight + 18;
+  };
+
+  const drawKeyFacts = (items: InfoItem[]) => {
+    const gap = 8;
+    const cardWidth = (contentWidth - gap * (items.length - 1)) / items.length;
+    const cardHeight = 48;
+    ensureSpace(cardHeight + 14, "Riepilogo contratto");
+    items.forEach((item, index) => {
+      const x = MARGIN_X + index * (cardWidth + gap);
+      page.drawRectangle({
+        x,
+        y: cursorY - cardHeight,
+        width: cardWidth,
+        height: cardHeight,
+        color: hexToRgb(index === 0 ? "#edf4ff" : "#f8faff")
+      });
+      page.drawRectangle({
+        x,
+        y: cursorY - cardHeight,
+        width: 2.4,
+        height: cardHeight,
+        color: hexToRgb(index === 0 ? accentHex : "#d7e0f2")
+      });
+      page.drawText(item.label.toUpperCase(), {
+        x: x + 9,
+        y: cursorY - 14,
+        size: 6.9,
+        font: boldFont,
+        color: hexToRgb("#6c7d98")
+      });
+      const valueLines = wrapLines(item.value, cardWidth - 18, item.emphasize ? boldFont : regularFont, item.emphasize ? 10 : 9.1).slice(0, 2);
+      let valueY = cursorY - 30;
+      for (const line of valueLines) {
+        page.drawText(line, {
+          x: x + 9,
+          y: valueY,
+          size: item.emphasize ? 10 : 9.1,
+          font: item.emphasize ? boldFont : regularFont,
+          color: hexToRgb("#182946")
+        });
+        valueY -= 11;
+      }
+    });
+    cursorY -= cardHeight + 14;
   };
 
   const drawInfoGrid = (items: InfoItem[], columns = 2) => {
@@ -542,6 +907,94 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     }
   };
 
+  const measureInfoColumnHeight = (items: InfoItem[]) => {
+    if (items.length === 0) return 30;
+    let total = 22; // compact section badge/header
+    for (const item of items) {
+      const labelLines = wrapLines(item.label.toUpperCase(), (contentWidth - 10) / 2 - 12, boldFont, 7.2);
+      const valueLines = wrapLines(asText(item.value), (contentWidth - 10) / 2 - 12, item.emphasize ? boldFont : regularFont, 9.2);
+      const rowHeight = 7 + labelLines.length * 7 + 2 + valueLines.length * 9 + 4;
+      total += rowHeight + 3;
+    }
+    return total;
+  };
+
+  const drawInfoColumnAt = (x: number, width: number, topY: number, title: string, items: InfoItem[]) => {
+    let localY = topY;
+    page.drawRectangle({
+      x,
+      y: localY - 18,
+      width,
+      height: 18,
+      color: hexToRgb("#eef3ff")
+    });
+    page.drawText(title.toUpperCase(), {
+      x: x + 8,
+      y: localY - 12.5,
+      size: 8.3,
+      font: boldFont,
+      color: hexToRgb(primaryHex)
+    });
+    localY -= 22;
+
+    for (const item of items) {
+      const labelLines = wrapLines(item.label.toUpperCase(), width - 12, boldFont, 7.2);
+      const valueLines = wrapLines(asText(item.value), width - 12, item.emphasize ? boldFont : regularFont, 9.2);
+      const rowHeight = 7 + labelLines.length * 7 + 2 + valueLines.length * 9 + 4;
+
+      page.drawRectangle({
+        x,
+        y: localY - rowHeight + 2,
+        width,
+        height: rowHeight,
+        color: hexToRgb(item.emphasize ? "#edf4ff" : "#f8faff")
+      });
+
+      let lineY = localY - 6;
+      for (const line of labelLines) {
+        page.drawText(line, {
+          x: x + 6,
+          y: lineY,
+          size: 6.8,
+          font: boldFont,
+          color: hexToRgb("#64789b")
+        });
+        lineY -= 7;
+      }
+      lineY -= 1;
+      for (const line of valueLines) {
+        page.drawText(line, {
+          x: x + 6,
+          y: lineY,
+          size: 8.6,
+          font: item.emphasize ? boldFont : regularFont,
+          color: hexToRgb("#1f2f4d")
+        });
+        lineY -= 9;
+      }
+
+      localY -= rowHeight + 3;
+    }
+
+    return topY - localY;
+  };
+
+  const drawPartiesSideBySide = (leftTitle: string, leftItems: InfoItem[], rightTitle: string, rightItems: InfoItem[]) => {
+    const columnGap = 10;
+    const columnWidth = (contentWidth - columnGap) / 2;
+    const leftHeight = measureInfoColumnHeight(leftItems);
+    const rightHeight = measureInfoColumnHeight(rightItems);
+    const neededHeight = Math.max(leftHeight, rightHeight) + 4;
+
+    ensureSpace(neededHeight, "Parti contrattuali");
+    const topY = cursorY;
+
+    drawInfoColumnAt(MARGIN_X, columnWidth, topY, leftTitle, leftItems);
+    drawInfoColumnAt(MARGIN_X + columnWidth + columnGap, columnWidth, topY, rightTitle, rightItems);
+
+    cursorY -= neededHeight;
+  };
+
   const drawBullets = (title: string, bullets: string[]) => {
     drawSectionTitle(title);
     const list = bullets.length > 0 ? bullets : ["Nessuna clausola disponibile."];
@@ -575,6 +1028,8 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
   const drawSignatures = () => {
     drawSectionTitle("Sottoscrizione");
     const signedAt = input.contract.signedAt ?? input.booking.contractSignedAt;
+    const signedDateLabel = formatDate(signedAt ?? new Date());
+    const signedPlaceLabel = asText(input.booking.returnLocation, input.booking.pickupLocation);
     const statement = signedAt
       ? `Firma registrata il ${formatDateTime(signedAt)}.`
       : "Con la firma il cliente dichiara di aver letto e accettato tutte le condizioni contrattuali.";
@@ -591,68 +1046,105 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
       cursorY -= 11;
     }
     cursorY -= 6;
-    ensureSpace(72, "Sottoscrizione");
+    ensureSpace(126, "Sottoscrizione");
+    const cardTopY = cursorY;
+    const cardHeight = 110;
+    page.drawRectangle({
+      x: MARGIN_X,
+      y: cardTopY - cardHeight,
+      width: contentWidth,
+      height: cardHeight,
+      color: rgb(1, 1, 1),
+      borderColor: hexToRgb("#d8e0ee"),
+      borderWidth: 0.8
+    });
     const leftX = MARGIN_X;
-    const rightX = PAGE_W - MARGIN_X - 220;
-    page.drawText("Luogo e data", { x: leftX, y: cursorY, size: 8.8, font: boldFont, color: hexToRgb("#546988") });
-    page.drawLine({
-      start: { x: leftX, y: cursorY - 8 },
-      end: { x: leftX + 180, y: cursorY - 8 },
-      thickness: 0.8,
-      color: hexToRgb("#96a8c7")
+    const clientX = MARGIN_X + 225;
+    const operatorX = MARGIN_X + 390;
+    page.drawText("Luogo e data", { x: leftX + 16, y: cardTopY - 32, size: 8.4, font: boldFont, color: hexToRgb("#546988") });
+    page.drawText(`${signedPlaceLabel} · ${signedDateLabel}`, {
+      x: leftX + 16,
+      y: cardTopY - 55,
+      size: 8.4,
+      font: regularFont,
+      color: hexToRgb("#3f5478")
     });
-    page.drawText("Firma cliente", { x: rightX, y: cursorY, size: 8.8, font: boldFont, color: hexToRgb("#546988") });
-    page.drawLine({
-      start: { x: rightX, y: cursorY - 8 },
-      end: { x: rightX + 180, y: cursorY - 8 },
-      thickness: 0.8,
-      color: hexToRgb("#96a8c7")
-    });
-    page.drawRectangle({
-      x: rightX + 2,
-      y: cursorY - 58,
-      width: 176,
-      height: 44,
-      color: hexToRgb("#f7faff")
-    });
-    page.drawRectangle({
-      x: rightX + 2,
-      y: cursorY - 58,
-      width: 176,
-      height: 44,
-      borderColor: hexToRgb("#c8d4ea"),
-      borderWidth: 0.6
-    });
+    page.drawText("Firma cliente", { x: clientX, y: cardTopY - 32, size: 8.4, font: boldFont, color: hexToRgb("#546988") });
     if (signatureImage) {
       const targetHeight = 36;
       const scaled = signatureImage.scale(targetHeight / signatureImage.height);
-      const maxWidth = 170;
+      const maxWidth = 138;
       const drawWidth = Math.min(maxWidth, scaled.width);
       const drawHeight = (scaled.height * drawWidth) / scaled.width;
       page.drawImage(signatureImage, {
-        x: rightX + 5 + (maxWidth - drawWidth) / 2,
-        y: cursorY - 56 + (40 - drawHeight) / 2,
+        x: clientX + (maxWidth - drawWidth) / 2,
+        y: cardTopY - 75,
         width: drawWidth,
         height: drawHeight
       });
     } else {
       page.drawText("Nessuna firma grafica", {
-        x: rightX + 38,
-        y: cursorY - 37,
+        x: clientX + 10,
+        y: cardTopY - 64,
         size: 8.2,
         font: regularFont,
         color: hexToRgb("#7c8ba8")
       });
     }
-    cursorY -= 60;
-    page.drawText("Firma operatore", { x: rightX, y: cursorY, size: 8.8, font: boldFont, color: hexToRgb("#546988") });
-    page.drawLine({
-      start: { x: rightX, y: cursorY - 8 },
-      end: { x: rightX + 180, y: cursorY - 8 },
-      thickness: 0.8,
-      color: hexToRgb("#96a8c7")
+    page.drawText("Firma operatore", { x: operatorX, y: cardTopY - 32, size: 8.4, font: boldFont, color: hexToRgb("#546988") });
+    page.drawText(companyName, {
+      x: operatorX,
+      y: cardTopY - 64,
+      size: 8.2,
+      font: regularFont,
+      color: hexToRgb("#3f5478")
     });
-    cursorY -= 24;
+    cursorY -= cardHeight + 12;
+  };
+
+  const drawConditionsSignatureBlock = () => {
+    const signedAt = input.contract.signedAt ?? input.booking.contractSignedAt;
+    const signedDateLabel = formatDate(signedAt ?? new Date());
+    const signedPlaceLabel = asText(input.booking.returnLocation, input.booking.pickupLocation);
+    ensureSpace(94, "Condizioni generali di noleggio");
+
+    const leftX = MARGIN_X;
+    const rightX = PAGE_W - MARGIN_X - 220;
+    page.drawText("Sottoscrizione finale contratto", {
+      x: MARGIN_X,
+      y: cursorY - 20,
+      size: 8.8,
+      font: boldFont,
+      color: hexToRgb(primaryHex)
+    });
+
+    const baseY = cursorY - 38;
+    page.drawText("Data", { x: leftX, y: baseY, size: 8.6, font: boldFont, color: hexToRgb("#546988") });
+    page.drawText(`${signedPlaceLabel} · ${signedDateLabel}`, {
+      x: leftX,
+      y: baseY - 20,
+      size: 8.2,
+      font: regularFont,
+      color: hexToRgb("#3f5478")
+    });
+
+    page.drawText("Firma cliente", { x: rightX, y: baseY, size: 8.6, font: boldFont, color: hexToRgb("#546988") });
+
+    if (signatureImage) {
+      const targetHeight = 24;
+      const scaled = signatureImage.scale(targetHeight / signatureImage.height);
+      const maxWidth = 172;
+      const drawWidth = Math.min(maxWidth, scaled.width);
+      const drawHeight = (scaled.height * drawWidth) / scaled.width;
+      page.drawImage(signatureImage, {
+        x: rightX + (maxWidth - drawWidth) / 2,
+        y: baseY - 36 + (24 - drawHeight) / 2,
+        width: drawWidth,
+        height: drawHeight
+      });
+    }
+
+    cursorY -= 92;
   };
 
   const companyCustomer = isCorporateCustomer(input.booking);
@@ -660,11 +1152,15 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     .filter(Boolean)
     .join(" ")
     .trim();
+  const naturalPersonName = fullCustomerName(input.booking);
+  const contractRelationship = companyCustomer
+    ? "Societa locatrice / persona giuridica cliente con conducente fisico autorizzato"
+    : "Societa locatrice / persona fisica cliente e conducente principale";
   const traveledKm = kmTravelled(input.booking.pickupKm, input.booking.returnKm);
   const snapshot = input.booking.pricingSnapshot;
 
   const partyLessor: InfoItem[] = [
-    { label: "Locatore", value: companyName },
+    { label: "Societa", value: companyName },
     { label: "Sede", value: companyAddress },
     { label: "P.IVA", value: companyVat },
     { label: "Email", value: companyEmail },
@@ -673,30 +1169,22 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
 
   const partyCustomer: InfoItem[] = companyCustomer
     ? [
-        { label: "Tipo intestatario", value: "Persona giuridica" },
         { label: "Ragione sociale", value: asText(input.booking.customer?.companyName, input.booking.customerName) },
-        { label: "Forma giuridica", value: asText(input.booking.customer?.companyLegalForm) },
         {
           label: "Partita IVA / CF",
           value: `${asText(input.booking.customer?.companyVatNumber)} / ${asText(input.booking.customer?.companyTaxCode)}`
         },
         { label: "Sede legale", value: asText(input.booking.customer?.companyLegalAddress) },
-        { label: "PEC / SDI / REA", value: `${asText(input.booking.customer?.companyPec)} · ${asText(input.booking.customer?.companySdi)} · ${asText(input.booking.customer?.companyRea)}` },
+        { label: "PEC / SDI", value: `${asText(input.booking.customer?.companyPec)} · ${asText(input.booking.customer?.companySdi)}` },
         {
           label: "Legale rappresentante",
           value: `${legalRep || "-"} (${asText(input.booking.customer?.legalRepRole)})`
-        },
-        {
-          label: "Contatti referente",
-          value: `${asText(input.booking.customer?.legalRepEmail, input.booking.customerEmail)} · ${asText(input.booking.customer?.legalRepPhone, input.booking.customerPhone)}`
         }
       ]
     : [
-        { label: "Tipo intestatario", value: "Persona fisica" },
         { label: "Nominativo", value: fullCustomerName(input.booking) },
         { label: "Codice fiscale", value: asText(input.booking.customer?.taxCode) },
         { label: "Data e luogo nascita", value: `${formatDate(input.booking.customer?.dateOfBirth)} · ${asText(input.booking.customer?.placeOfBirth)}` },
-        { label: "Nazionalita", value: asText(input.booking.customer?.nationality) },
         { label: "Residenza", value: asText(input.booking.customer?.residenceAddress) },
         {
           label: "Documento identita",
@@ -705,10 +1193,29 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
         {
           label: "Patente",
           value: `${asText(input.booking.customer?.drivingLicenseNumber)} · cat. ${asText(input.booking.customer?.drivingLicenseCategory)} · scad. ${formatDate(input.booking.customer?.drivingLicenseExpiresAt)}`
+        }
+      ];
+
+  const driverItems: InfoItem[] = companyCustomer
+    ? [
+        { label: "Conducente/referente principale", value: legalRep || "Da indicare e verificare prima della consegna" },
+        { label: "Codice fiscale conducente", value: asText(input.booking.customer?.legalRepTaxCode) },
+        {
+          label: "Contatti conducente/referente",
+          value: compactJoin(input.booking.customer?.legalRepEmail, input.booking.customer?.legalRepPhone) || asText(input.booking.customerPhone)
         },
         {
-          label: "Contatti",
-          value: `${asText(input.booking.customer?.email, input.booking.customerEmail)} · ${asText(input.booking.customer?.phone, input.booking.customerPhone)}`
+          label: "Conducenti aggiuntivi",
+          value: "Ammessi solo se identificati e autorizzati prima della consegna."
+        }
+      ]
+    : [
+        { label: "Conducente principale", value: naturalPersonName },
+        { label: "Patente", value: compactJoin(input.booking.customer?.drivingLicenseNumber, `cat. ${asText(input.booking.customer?.drivingLicenseCategory)}`, `scad. ${formatDate(input.booking.customer?.drivingLicenseExpiresAt)}`) },
+        { label: "Documento", value: compactJoin(input.booking.customer?.documentType, input.booking.customer?.documentNumber, `scad. ${formatDate(input.booking.customer?.documentExpiresAt)}`) },
+        {
+          label: "Conducenti aggiuntivi",
+          value: "Validi solo se registrati dal Locatore con documento e patente."
         }
       ];
 
@@ -731,86 +1238,85 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     { label: "Stato prenotazione", value: labelOf(BOOKING_STATUS_LABELS, input.booking.status) },
     { label: "Stato contratto", value: labelOf(CONTRACT_STATUS_LABELS, input.contract.status ?? input.booking.contractStatus), emphasize: true },
     { label: "Template versione", value: String(input.contract.templateVersion ?? "-") },
-    { label: "Creato il", value: formatDateTime(input.contract.createdAt) },
-    { label: "Ultimo aggiornamento", value: formatDateTime(input.contract.updatedAt) },
     { label: "Ultimo invio", value: formatDateTime(input.contract.lastSentAt) },
     { label: "Firmato il", value: formatDateTime(input.contract.signedAt ?? input.booking.contractSignedAt) },
-    { label: "Destinatario email", value: asText(input.contract.emailTo, input.booking.customerEmail) },
-    {
-      label: "Ultima delivery",
-      value: input.contract.latestDelivery
-        ? `${labelOf(DELIVERY_CHANNEL_LABELS, input.contract.latestDelivery.channel)} · ${labelOf(DELIVERY_STATUS_LABELS, input.contract.latestDelivery.status)} · ${formatDateTime(input.contract.latestDelivery.sentAt ?? input.contract.latestDelivery.createdAt)}`
-        : "-"
-    },
     {
       label: "Firma grafica",
       value: signatureImage ? `Acquisita (${formatNumber(input.contract.signatureSizeBytes)} bytes)` : "Non acquisita"
-    },
-    { label: "Dettaglio errore delivery", value: asText(input.contract.latestDelivery?.errorMessage) }
+    }
   ];
 
   const economicItems: InfoItem[] = [
     { label: "Totale previsto", value: formatMoney(snapshot?.expectedTotal ?? input.booking.expectedTotal), emphasize: true },
     { label: "Totale finale", value: formatMoney(snapshot?.finalTotal ?? input.booking.finalTotal), emphasize: true },
-    { label: "Subtotale previsto", value: formatMoney(snapshot?.expectedSubtotal) },
-    { label: "IVA prevista", value: formatMoney(snapshot?.expectedTaxAmount) },
-    { label: "Subtotale finale", value: formatMoney(snapshot?.finalSubtotal) },
-    { label: "IVA finale", value: formatMoney(snapshot?.finalTaxAmount) },
     { label: "Listino", value: asText(snapshot?.priceListName) },
     { label: "Pacchetto km", value: asText(snapshot?.pricePackageName) },
     { label: "Policy km extra", value: asText(snapshot?.extraKmPolicyName) },
-    { label: "Tariffa base", value: `${formatMoney(snapshot?.baseRateAmount)} (${labelOf(BASE_RATE_UNIT_LABELS, snapshot?.baseRateUnit)})` },
-    { label: "Regola overflow ore", value: labelOf(OVERFLOW_RULE_LABELS, snapshot?.hourOverflowRule) },
-    { label: "IVA % / Sconto %", value: `${formatNumber(snapshot?.vatRate, 2)} / ${formatNumber(snapshot?.discountPercent, 2)}` },
-    { label: "Giorni addebitati", value: formatNumber(snapshot?.daysCharged, 2) },
     { label: "Km inclusi totali", value: formatNumber(snapshot?.includedKmTotal) },
-    { label: "Km stimati / reali", value: `${formatNumber(snapshot?.estimatedKm)} / ${formatNumber(snapshot?.actualKm)}` },
-    { label: "Extra km stimati / reali", value: `${formatNumber(snapshot?.extraKmEstimated)} / ${formatNumber(snapshot?.extraKmActual)}` },
-    { label: "Costo extra km stimato / reale", value: `${formatMoney(snapshot?.extraKmEstimatedCost)} / ${formatMoney(snapshot?.extraKmActualCost)}` },
-    { label: "Note pricing", value: asText(snapshot?.notes) }
+    { label: "IVA % / Sconto %", value: `${formatNumber(snapshot?.vatRate, 2)} / ${formatNumber(snapshot?.discountPercent, 2)}` }
   ];
 
-  drawSectionTitle("Parti contrattuali", "Anagrafica completa delle parti coinvolte nel noleggio.");
-  drawInfoGrid(partyLessor, 2);
-  drawSectionTitle(companyCustomer ? "Intestatario giuridico" : "Intestatario persona fisica");
-  drawInfoGrid(partyCustomer, 2);
+  drawPremiumParties(
+    "Locatore",
+    partyLessor,
+    companyCustomer ? "Intestatario giuridico" : "Intestatario persona fisica",
+    partyCustomer
+  );
 
-  drawSectionTitle("Dettaglio noleggio e veicolo");
-  drawInfoGrid(rentalDetails, 2);
+  drawPremiumVehiclePeriod();
 
-  drawSectionTitle("Stato operativo contratto");
-  drawInfoGrid(contractStatusItems, 2);
+  drawPremiumEconomicTable([
+    ["Listino applicato", asText(snapshot?.priceListName), `${formatMoney(snapshot?.baseRateAmount)} / ${labelOf(BASE_RATE_UNIT_LABELS, snapshot?.baseRateUnit)}`],
+    ["Pacchetto km", asText(snapshot?.pricePackageName), `${formatNumber(snapshot?.includedKmTotal)} km inclusi`],
+    ["Extra km", asText(snapshot?.extraKmPolicyName), `${formatNumber(snapshot?.extraKmActual ?? snapshot?.extraKmEstimated)} km`],
+    ["Totale previsto", "IVA inclusa salvo extra, danni o rettifiche", formatMoney(snapshot?.expectedTotal ?? input.booking.expectedTotal), true],
+    ["Totale finale", "Valore consuntivo se disponibile", formatMoney(snapshot?.finalTotal ?? input.booking.finalTotal), true]
+  ]);
 
-  drawSectionTitle("Riepilogo economico e pricing");
-  drawInfoGrid(economicItems, 2);
-
-  drawBullets("Condizioni principali in sintesi", contractSummaryClauses(input.contract.content));
+  createContentPage("Condizioni, responsabilita e firme");
+  page.drawText("CONDIZIONI, RESPONSABILITA E FIRME", {
+    x: MARGIN_X,
+    y: PAGE_H - 66,
+    size: 17,
+    font: boldFont,
+    color: hexToRgb(primaryHex)
+  });
+  page.drawText("Sintesi operativa delle condizioni principali. Il template puo essere personalizzato dalla societa di noleggio.", {
+    x: MARGIN_X,
+    y: PAGE_H - 84,
+    size: 8.8,
+    font: regularFont,
+    color: hexToRgb("#66758d")
+  });
+  cursorY = PAGE_H - 120;
+  drawPremiumClauses([
+    [
+      "1. Uso del veicolo",
+      "Il Cliente utilizza il veicolo con diligenza, nel rispetto del Codice della Strada, delle condizioni del Locatore e dei limiti assicurativi."
+    ],
+    [
+      "2. Danni, sinistri e furto",
+      "Ogni danno, sinistro, furto o evento rilevante deve essere comunicato tempestivamente alla societa di noleggio e documentato secondo procedura."
+    ],
+    [
+      "3. Multe, pedaggi e oneri",
+      "Multe, pedaggi, ZTL, parcheggi e ogni onere generato durante il periodo di noleggio restano a carico del Cliente o conducente."
+    ],
+    [
+      "4. Ritardo riconsegna",
+      "La riconsegna oltre l'orario previsto puo comportare addebiti aggiuntivi secondo listino e regole di tolleranza indicate."
+    ],
+    [
+      "5. Privacy e trattamento dati",
+      "I dati sono trattati per gestione contrattuale, amministrativa, sicurezza, tutela dei diritti e obblighi normativi."
+    ],
+    [
+      "6. Firma elettronica",
+      "La firma acquisita digitalmente viene associata al contratto con timestamp e riferimento tecnico interno, ove disponibile."
+    ]
+  ]);
+  drawPremiumDeliverySummary();
   drawSignatures();
-
-  createContentPage("Condizioni generali di noleggio");
-  drawSectionTitle("Testo integrale condizioni", "Di seguito il testo completo del contratto in vigore.");
-  const fullText = normalizeMultiline(input.contract.content);
-  const paragraphs = fullText
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.replace(/\n/g, " ").trim())
-    .filter(Boolean);
-  const resolvedParagraphs = paragraphs.length > 0 ? paragraphs : ["Nessuna condizione disponibile nel template contratto."];
-
-  for (const paragraph of resolvedParagraphs) {
-    const paragraphLines = wrapLines(paragraph, contentWidth, regularFont, 9);
-    ensureSpace(paragraphLines.length * 11 + 8, "Condizioni generali di noleggio");
-    for (const line of paragraphLines) {
-      page.drawText(line, {
-        x: MARGIN_X,
-        y: cursorY,
-        size: 9,
-        font: regularFont,
-        color: hexToRgb("#263754")
-      });
-      cursorY -= 11;
-    }
-    cursorY -= 4;
-  }
 
   const totalPages = pages.length;
   pages.forEach((entry, index) => addFooter(entry, index + 1, totalPages));

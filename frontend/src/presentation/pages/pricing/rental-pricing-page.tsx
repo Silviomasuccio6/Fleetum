@@ -7,6 +7,7 @@ import {
   RentalPricingScope
 } from "../../../application/usecases/rental-bookings-usecases";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -584,7 +585,9 @@ export const RentalPricingPage = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-xs text-muted-foreground">Caricamento listini...</TableCell>
+                  <TableCell colSpan={7} className="py-8 text-center">
+                    <FleetumInlineLoader label="Caricamento listini" />
+                  </TableCell>
                 </TableRow>
               ) : lists.length === 0 ? (
                 <TableRow>
