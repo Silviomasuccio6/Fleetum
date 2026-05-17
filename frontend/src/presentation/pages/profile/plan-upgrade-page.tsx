@@ -73,6 +73,7 @@ export const PlanUpgradePage = () => {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const currentPlan = loading ? null : plan;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
+  const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
 
   const planCards = useMemo(
     () =>
@@ -130,6 +131,15 @@ export const PlanUpgradePage = () => {
           </div>
         </CardContent>
       </Card>
+
+      {welcomeStatus === "billing" ? (
+        <Card className="border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
+          <CardContent className="py-4 text-sm">
+            <strong>Account creato.</strong> Hai gia una prova gratuita di 14 giorni attiva: se vuoi abbonarti subito,
+            scegli un piano e apriremo il checkout Stripe in sicurezza.
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div
         className="flex justify-center"

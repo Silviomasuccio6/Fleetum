@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { User } from "../../../domain/entities/models";
 import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
+import { getSafeReturnTo } from "../../routes/safe-return-to";
 
 const decodeBase64Url = (input: string) => {
   const base64 = input.replace(/-/g, "+").replace(/_/g, "/");
@@ -37,8 +38,9 @@ export const SocialAuthCallbackPage = () => {
 
     try {
       const user = JSON.parse(decodeBase64Url(encodedUser)) as User;
+      const returnTo = getSafeReturnTo(hashParams.get("returnTo"));
       setSession(user, true);
-      navigate("/dashboard", { replace: true });
+      navigate(returnTo, { replace: true });
     } catch {
       setError("Impossibile finalizzare il login social.");
     }

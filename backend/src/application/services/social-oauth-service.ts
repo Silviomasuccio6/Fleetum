@@ -48,6 +48,7 @@ type StatePayload = {
   provider: SocialProvider;
   nonce: string;
   intent: OAuthIntent;
+  returnTo?: string;
 };
 
 const OAUTH_TIMEOUT_MS = 12000;
@@ -55,8 +56,8 @@ const OAUTH_TIMEOUT_MS = 12000;
 export class SocialOAuthService {
   private appleJwksCache: { keys: AppleJwk[]; expiresAt: number } | null = null;
 
-  createState(provider: SocialProvider, intent: OAuthIntent = "login") {
-    return jwt.sign({ provider, nonce: randomUUID(), intent } satisfies StatePayload, env.JWT_SECRET, {
+  createState(provider: SocialProvider, intent: OAuthIntent = "login", returnTo?: string) {
+    return jwt.sign({ provider, nonce: randomUUID(), intent, returnTo } satisfies StatePayload, env.JWT_SECRET, {
       expiresIn: "10m"
     });
   }
