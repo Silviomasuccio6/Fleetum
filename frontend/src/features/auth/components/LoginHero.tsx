@@ -1,35 +1,38 @@
 const CHIPS = [
-  { color: "#34d399", label: "99.9% Uptime" },
-  { color: "#818cf8", label: "SOC 2 Type II" },
-  { color: "#22d3ee", label: "GDPR Ready" }
+  { color: "#2563ff", label: "Booking live" },
+  { color: "#00b8a9", label: "Contratti smart" },
+  { color: "#4b8cff", label: "Fleet control" }
 ];
 
 const AVATARS = [
-  { initials: "MT", from: "#6366f1", to: "#818cf8" },
-  { initials: "SL", from: "#10b981", to: "#2dd4bf" },
-  { initials: "AP", from: "#f59e0b", to: "#fcd34d" },
-  { initials: "NV", from: "#f43f5e", to: "#fb7185" }
+  { initials: "MT", from: "#2563ff", to: "#4b8cff" },
+  { initials: "SL", from: "#00b8a9", to: "#32ddd1" },
+  { initials: "AP", from: "#07111f", to: "#2563ff" },
+  { initials: "NV", from: "#0b1220", to: "#00b8a9" }
+];
+
+const PREVIEW_ROWS = [
+  { plate: "GF100AA", status: "Prenotata", tone: "blue" },
+  { plate: "GF101AB", status: "Rientro 18:30", tone: "teal" },
+  { plate: "GF102AC", status: "Revisione OK", tone: "navy" }
 ];
 
 export const LoginHero = () => (
   <aside className="premium-login-side premium-login-side--left">
     <div className="premium-login-logo-row">
-      <div className="premium-login-logo-icon">◈</div>
-      <span className="premium-login-logo-text">
-        Fleet<span>Ops</span>
-      </span>
+      <img className="premium-login-logo-wordmark" src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" />
     </div>
 
     <div className="premium-login-hero-copy">
-      <div className="premium-login-pill">
-        <span className="premium-login-pill-dot" /> Analytics Platform
+      <div className="premium-login-pill premium-login-pill--live">
+        <span className="premium-login-pill-dot" /> SaaS operativo per autonoleggi
       </div>
       <h1 className="premium-login-hero-title">
-        Il tuo business<br />
-        <span>in tempo reale.</span>
+        La control room<br />
+        <span>per noleggi e flotta.</span>
       </h1>
       <p className="premium-login-hero-subtitle">
-        Dashboard intelligenti, metriche precise e insight azionabili. Tutto in un'unica piattaforma.
+        Booking mensile per macchina, contratti digitali, clienti, manutenzioni e scadenze in un unico workspace enterprise.
       </p>
 
       <div className="premium-login-chip-list">
@@ -40,6 +43,32 @@ export const LoginHero = () => (
           </div>
         ))}
       </div>
+
+      <section className="premium-login-preview-card" aria-label="Anteprima operativa Fleetum">
+        <div className="premium-login-preview-card__head">
+          <div>
+            <p>Live planner</p>
+            <strong>Oggi · 27 veicoli monitorati</strong>
+          </div>
+          <span>98%</span>
+        </div>
+        <div className="premium-login-preview-chart" aria-hidden>
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+        </div>
+        <div className="premium-login-preview-list">
+          {PREVIEW_ROWS.map((row) => (
+            <div key={row.plate} className={`premium-login-preview-row premium-login-preview-row--${row.tone}`}>
+              <span>{row.plate}</span>
+              <em>{row.status}</em>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
 
     <div className="premium-login-social-proof">
@@ -61,7 +90,7 @@ export const LoginHero = () => (
       <div>
         <div className="premium-login-stars">★★★★★</div>
         <p>
-          <strong>+2.400 team</strong> già a bordo
+          <strong>Fleetum</strong> workspace cloud-ready
         </p>
       </div>
     </div>

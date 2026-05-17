@@ -8,6 +8,7 @@ import {
   RentalContractsMonitoringTimelineItem
 } from "../../../application/usecases/rental-bookings-usecases";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
+import { FleetumBlockLoader, FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -15,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Input } from "../../components/ui/input";
 import { Select } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { cn } from "../../../lib/utils";
 
 const PAGE_SIZE = 20;
 const currency = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
@@ -75,6 +77,39 @@ const contractCodeBySite = (row: RentalContractsMonitoringItem) => {
     .slice(0, 4);
   const prefix = normalized || "SEDE";
   return `${prefix}-${row.booking.code}`;
+};
+
+const ContractsKpiCard = ({
+  title,
+  value,
+  hint,
+  valueTone = "default"
+}: {
+  title: string;
+  value: number;
+  hint: string;
+  valueTone?: "default" | "success" | "danger" | "warning";
+}) => {
+  const valueClassName =
+    valueTone === "success"
+      ? "text-emerald-600 dark:text-emerald-300"
+      : valueTone === "danger"
+        ? "text-rose-600 dark:text-rose-300"
+        : valueTone === "warning"
+          ? "text-amber-600 dark:text-amber-300"
+          : "text-foreground";
+
+  return (
+    <Card className="saas-surface dashboard-enterprise-kpi min-h-[138px]">
+      <CardContent className="flex min-h-[138px] flex-col justify-center gap-2 px-5 py-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{title}</p>
+        <p className={cn("font-display text-[clamp(1.8rem,2.2vw,2.25rem)] font-semibold leading-none tracking-tight", valueClassName)}>
+          {value}
+        </p>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </CardContent>
+    </Card>
+  );
 };
 
 export const RentalContractsPage = () => {
@@ -254,8 +289,8 @@ export const RentalContractsPage = () => {
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(ratio, ratio);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, width, height);
+    // Keep pixel buffer transparent so exported PNG blends with PDF signature box colors.
+    ctx.clearRect(0, 0, width, height);
     ctx.strokeStyle = "#1f2937";
     ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
@@ -435,7 +470,7 @@ export const RentalContractsPage = () => {
   };
 
   return (
-    <section className="space-y-3">
+    <section className="dashboard-enterprise space-y-4">
       <PageHeader
         title="Contratti Noleggio"
         subtitle="Monitoraggio operativo contratti, invii multicanale e collegamenti rapidi con booking/clienti."
@@ -444,31 +479,36 @@ export const RentalContractsPage = () => {
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
 
-      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
-        <Card className="saas-surface"><CardContent className="py-3"><p className="text-[11px] uppercase text-muted-foreground">Da inviare</p><p className="text-2xl font-semibold">{kpis.contractsToSend}</p></CardContent></Card>
-        <Card className="saas-surface"><CardContent className="py-3"><p className="text-[11px] uppercase text-muted-foreground">Inviati oggi</p><p className="text-2xl font-semibold">{kpis.sentToday}</p></CardContent></Card>
-        <Card className="saas-surface"><CardContent className="py-3"><p className="text-[11px] uppercase text-muted-foreground">Firmati</p><p className="text-2xl font-semibold">{kpis.signed}</p></CardContent></Card>
-        <Card className="saas-surface"><CardContent className="py-3"><p className="text-[11px] uppercase text-muted-foreground">In errore</p><p className="text-2xl font-semibold">{kpis.inError}</p></CardContent></Card>
-        <Card className="saas-surface"><CardContent className="py-3"><p className="text-[11px] uppercase text-muted-foreground">Uscite oggi</p><p className="text-2xl font-semibold">{kpis.exitsToday}</p></CardContent></Card>
-        <Card className="saas-surface"><CardContent className="py-3"><p className="text-[11px] uppercase text-muted-foreground">Rientri oggi</p><p className="text-2xl font-semibold">{kpis.returnsToday}</p></CardContent></Card>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <ContractsKpiCard title="Da inviare" value={kpis.contractsToSend} hint="Contratti pronti ma non ancora inviati" valueTone="warning" />
+        <ContractsKpiCard title="Inviati oggi" value={kpis.sentToday} hint="Invii completati nelle ultime 24h" />
+        <ContractsKpiCard title="Firmati" value={kpis.signed} hint="Contratti con firma acquisita" valueTone="success" />
+        <ContractsKpiCard title="In errore" value={kpis.inError} hint="Invii o firme con esito KO" valueTone="danger" />
+        <ContractsKpiCard title="Uscite oggi" value={kpis.exitsToday} hint="Noleggi con handover in giornata" />
+        <ContractsKpiCard title="Rientri oggi" value={kpis.returnsToday} hint="Veicoli attesi al rientro oggi" />
       </div>
 
-      <Card className="saas-surface">
-        <CardContent className="space-y-2 py-4">
-          <div className="grid gap-2 xl:grid-cols-[1fr_160px_180px_180px_200px_auto]">
+      <Card className="saas-surface dashboard-enterprise-card">
+        <CardContent className="space-y-3 px-4 py-4 md:px-5">
+          <div className="grid items-center gap-3 xl:grid-cols-[minmax(260px,1.25fr)_160px_190px_190px_210px_auto]">
             <Input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Cerca cliente, targa, codice booking..."
+              className="h-10"
             />
-            <Select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)}>
+            <Select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)} className="h-10">
               <option value="all">Periodo: tutto</option>
               <option value="7d">Periodo: 7gg</option>
               <option value="30d">Periodo: 30gg</option>
               <option value="90d">Periodo: 90gg</option>
               <option value="custom">Periodo: custom</option>
             </Select>
-            <Select value={contractStatus} onChange={(event) => setContractStatus(event.target.value as "" | BookingContractStatus)}>
+            <Select
+              value={contractStatus}
+              onChange={(event) => setContractStatus(event.target.value as "" | BookingContractStatus)}
+              className="h-10"
+            >
               <option value="">Contratto: tutti</option>
               <option value="DRAFT">Bozza</option>
               <option value="READY">Pronto</option>
@@ -476,94 +516,109 @@ export const RentalContractsPage = () => {
               <option value="SIGNED">Firmato</option>
               <option value="ERROR">Errore</option>
             </Select>
-            <Select value={bookingStatus} onChange={(event) => setBookingStatus(event.target.value as "" | RentalBookingStatus)}>
+            <Select
+              value={bookingStatus}
+              onChange={(event) => setBookingStatus(event.target.value as "" | RentalBookingStatus)}
+              className="h-10"
+            >
               <option value="">Prenotazione: tutti</option>
               {Object.entries(BOOKING_STATUS_LABELS).map(([key, label]) => (
                 <option key={key} value={key}>{label}</option>
               ))}
             </Select>
-            <Select value={siteId} onChange={(event) => setSiteId(event.target.value)}>
+            <Select value={siteId} onChange={(event) => setSiteId(event.target.value)} className="h-10">
               <option value="">Tutte le sedi</option>
               {sites.map((site) => (
                 <option key={site.id} value={site.id}>{site.name}{site.city ? ` · ${site.city}` : ""}</option>
               ))}
             </Select>
-            <Button variant="outline" onClick={() => void loadContracts(page)}>Aggiorna</Button>
+            <Button variant="outline" className="h-10 whitespace-nowrap px-4" onClick={() => void loadContracts(page)}>
+              Aggiorna
+            </Button>
           </div>
 
           {period === "custom" ? (
-            <div className="grid gap-2 sm:grid-cols-2 xl:w-[420px]">
-              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+            <div className="grid gap-3 sm:grid-cols-2 xl:max-w-[460px]">
+              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-10" />
+              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-10" />
             </div>
           ) : null}
         </CardContent>
       </Card>
 
-      <div className="space-y-3">
-        <Card className="saas-surface">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Elenco contratti</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Table className="text-[11px]">
+      <Card className="saas-surface dashboard-enterprise-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Elenco contratti</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 pt-0">
+          <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="py-1.5 text-[10px]">Contratto</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Cliente</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Veicolo</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Uscita</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Rientro</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Stati</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Ultimo invio</TableHead>
-                  <TableHead className="py-1.5 text-[10px]">Azioni</TableHead>
+                  <TableHead className="py-2">Contratto</TableHead>
+                  <TableHead className="py-2">Cliente</TableHead>
+                  <TableHead className="py-2">Veicolo</TableHead>
+                  <TableHead className="py-2">Uscita</TableHead>
+                  <TableHead className="py-2">Rientro</TableHead>
+                  <TableHead className="py-2">Stati</TableHead>
+                  <TableHead className="py-2">Ultimo invio</TableHead>
+                  <TableHead className="py-2 text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={8} className="text-center text-xs text-muted-foreground">Caricamento contratti...</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center">
+                      <FleetumInlineLoader label="Caricamento contratti" />
+                    </TableCell>
+                  </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow><TableCell colSpan={8} className="text-center text-xs text-muted-foreground">Nessun contratto trovato.</TableCell></TableRow>
                 ) : rows.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell className="py-1.5 align-top">
+                    <TableCell className="py-2.5 align-top">
                       <p className="font-medium leading-tight">{contractCodeBySite(row)}</p>
-                      <p className="text-[10px] leading-tight text-muted-foreground">{row.booking.code}</p>
+                      <p className="text-[11px] leading-tight text-muted-foreground">{row.booking.code}</p>
                     </TableCell>
-                    <TableCell className="py-1.5 align-top">
+                    <TableCell className="py-2.5 align-top">
                       <button
                         type="button"
-                        className="text-left text-[11px] leading-tight transition-colors hover:text-primary hover:underline"
+                        className="text-left text-sm leading-tight transition-colors hover:text-primary hover:underline"
                         onClick={() => row.booking.customer?.id && navigate(`/anagrafiche/clienti?customerId=${row.booking.customer.id}`)}
                       >
                         {row.booking.customerName}
                       </button>
                     </TableCell>
-                    <TableCell className="py-1.5 align-top">
+                    <TableCell className="py-2.5 align-top">
                       <p className="font-medium leading-tight">{row.booking.vehicle?.plate || "-"}</p>
-                      <p className="text-[10px] leading-tight text-muted-foreground">{row.booking.vehicle?.brand || "-"} {row.booking.vehicle?.model || ""}</p>
+                      <p className="text-[11px] leading-tight text-muted-foreground">{row.booking.vehicle?.brand || "-"} {row.booking.vehicle?.model || ""}</p>
                     </TableCell>
-                    <TableCell className="py-1.5 align-top text-[10px] leading-tight">{formatWhen(row.booking.pickupAt)}</TableCell>
-                    <TableCell className="py-1.5 align-top text-[10px] leading-tight">{formatWhen(row.booking.returnAt)}</TableCell>
-                    <TableCell className="py-1.5 align-top">
-                      <div className="flex flex-wrap gap-1">
+                    <TableCell className="py-2.5 align-top text-[11px] leading-tight">{formatWhen(row.booking.pickupAt)}</TableCell>
+                    <TableCell className="py-2.5 align-top text-[11px] leading-tight">{formatWhen(row.booking.returnAt)}</TableCell>
+                    <TableCell className="py-2.5 align-top">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant={toBadgeVariant(row.status)}>{CONTRACT_STATUS_LABELS[row.status]}</Badge>
                         <Badge variant={toBadgeVariant(row.booking.status)}>{BOOKING_STATUS_LABELS[row.booking.status]}</Badge>
                       </div>
                     </TableCell>
-                    <TableCell className="py-1.5 align-top">
+                    <TableCell className="py-2.5 align-top">
                       {row.latestDelivery ? (
-                        <div className="space-y-0 text-[10px] leading-tight">
+                        <div className="space-y-0.5 text-[11px] leading-tight">
                           <p>{row.latestDelivery.channel} · {row.latestDelivery.status}</p>
                           <p className="text-muted-foreground">{formatWhen(row.latestDelivery.sentAt || row.latestDelivery.createdAt)}</p>
                         </div>
                       ) : (
-                        <span className="text-[10px] text-muted-foreground">-</span>
+                        <span className="text-[11px] text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="py-1.5 align-top">
-                      <div className="flex flex-wrap gap-1">
-                        <Button size="sm" className="h-6 px-1.5 text-[10px]" variant="outline" onClick={() => openActionPanel(row)} disabled={actionBusyId === row.id}>
+                    <TableCell className="py-2.5 align-top">
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          className="h-8 min-w-[90px] px-3 text-xs"
+                          variant="outline"
+                          onClick={() => openActionPanel(row)}
+                          disabled={actionBusyId === row.id}
+                        >
                           Azioni
                         </Button>
                       </div>
@@ -573,44 +628,53 @@ export const RentalContractsPage = () => {
               </TableBody>
             </Table>
 
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Pagina {page} / {totalPages} · Totale {total}</span>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((prev) => prev - 1)}>Precedente</Button>
-                <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((prev) => prev + 1)}>Successiva</Button>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span className="leading-none">Pagina {page} / {totalPages} · Totale {total}</span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-8 min-w-[96px]" disabled={page <= 1} onClick={() => setPage((prev) => prev - 1)}>
+                Precedente
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 min-w-[96px]"
+                disabled={page >= totalPages}
+                onClick={() => setPage((prev) => prev + 1)}
+              >
+                Successiva
+              </Button>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
 
-      <Card className="saas-surface mt-4">
-        <CardHeader className="pb-2">
+      <Card className="saas-surface dashboard-enterprise-card mt-4">
+        <CardHeader className="pb-3">
           <CardTitle className="text-base">Timeline operativa</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3 pt-0">
           {timeline.length === 0 ? (
             <p className="text-xs text-muted-foreground">Nessun evento recente.</p>
           ) : (
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {timeline.map((item, idx) => (
-                <article key={`${item.type}-${item.bookingId}-${idx}`} className="rounded-lg border bg-card/70 px-2 py-1.5">
+                <article key={`${item.type}-${item.bookingId}-${idx}`} className="dashboard-enterprise-item rounded-xl border bg-card/70 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <Badge variant={item.type === "DELIVERY" ? "secondary" : "outline"}>
                       {item.type === "PICKUP" ? "Uscita" : item.type === "RETURN" ? "Rientro" : `Invio ${item.channel ?? ""}`}
                     </Badge>
                     <span className="text-[11px] text-muted-foreground">{formatWhen(item.occurredAt)}</span>
                   </div>
-                  <p className="mt-1 text-xs font-medium">{item.bookingCode} · {item.customerName}</p>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="mt-1.5 text-sm font-medium leading-tight">{item.bookingCode} · {item.customerName}</p>
+                  <p className="text-xs text-muted-foreground">
                     {(item.vehicle?.plate ?? "-")} {item.vehicle?.brand ?? ""} {item.vehicle?.model ?? ""}
                   </p>
                   {item.type === "DELIVERY" ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {item.recipient || "-"} · {item.deliveryStatus || "-"}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       Stato prenotazione: {item.bookingStatus ? BOOKING_STATUS_LABELS[item.bookingStatus] : "-"}
                     </p>
                   )}
@@ -640,7 +704,7 @@ export const RentalContractsPage = () => {
             <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_230px]">
               <div className="rounded-xl border bg-muted/20 p-2">
                 {actionPanelPreviewLoading ? (
-                  <div className="flex h-[68vh] items-center justify-center text-sm text-muted-foreground">Caricamento anteprima PDF...</div>
+                  <FleetumBlockLoader label="Caricamento anteprima PDF" className="h-[68vh] min-h-0" />
                 ) : actionPanelPreviewError ? (
                   <div className="flex h-[68vh] flex-col items-center justify-center gap-3">
                     <p className="text-sm text-destructive">{actionPanelPreviewError}</p>

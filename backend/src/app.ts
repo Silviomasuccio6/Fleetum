@@ -45,19 +45,17 @@ morgan.token("safe-url", (req) => {
   return sanitizeRequestUrl(originalUrl);
 });
 
-const getAllowedOrigins = (corsOrigin: string) => {
-  const localDevOrigins =
-    env.NODE_ENV === "production"
-      ? []
-      : ["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173", "http://127.0.0.1:5174"];
+const localTenantOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const localPlatformOrigins = ["http://localhost:5174", "http://127.0.0.1:5174"];
+
+const getAllowedOrigins = (corsOrigin: string, localOrigins: string[]) => {
+  const devOrigins = env.NODE_ENV === "production" ? [] : localOrigins;
 
   return Array.from(
     new Set(
       [
         corsOrigin,
-        env.CORS_ORIGIN,
-        env.PLATFORM_CORS_ORIGIN,
-        ...localDevOrigins
+        ...devOrigins
       ].filter(Boolean)
     )
   );
@@ -65,8 +63,8 @@ const getAllowedOrigins = (corsOrigin: string) => {
 
 const healthPaths = new Set(["/api/health", "/api/ready", "/platform-api/health", "/platform-api/ready"]);
 
-const applyCommon = (app: express.Express, corsOrigin: string) => {
-  const allowedOrigins = getAllowedOrigins(corsOrigin);
+const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: string[]) => {
+  const allowedOrigins = getAllowedOrigins(corsOrigin, localDevOrigins);
   const styleSrc = env.NODE_ENV === "production" ? ["'self'"] : ["'self'", "'unsafe-inline'"];
 
   app.set("etag", false);
@@ -123,7 +121,14 @@ const applyCommon = (app: express.Express, corsOrigin: string) => {
     })
   );
 
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({
+    limit: "1mb",
+    verify: (req, _res, buf) => {
+      if ((req as express.Request).originalUrl === "/api/billing/webhook") {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      }
+    }
+  }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   app.use(requestContext);
   app.use(
@@ -135,7 +140,7 @@ const applyCommon = (app: express.Express, corsOrigin: string) => {
 
 export const createApp = () => {
   const app = express();
-  applyCommon(app, env.CORS_ORIGIN);
+  applyCommon(app, env.CORS_ORIGIN, localTenantOrigins);
   app.use("/api", apiRouter);
   app.use(notFoundHandler);
   app.use(errorHandler);
@@ -144,10 +149,10 @@ export const createApp = () => {
 
 export const createPlatformApp = () => {
   const app = express();
-  applyCommon(app, env.PLATFORM_CORS_ORIGIN);
+  applyCommon(app, env.PLATFORM_CORS_ORIGIN, localPlatformOrigins);
   app.use(createPlatformIpAllowlist(platformAlertService));
   app.get("/platform-api/health", (_req, res) =>
-    res.json({ ok: true, service: "fermi-platform-api", timestamp: new Date().toISOString() })
+    res.json({ ok: true, service: "fleetum-platform-api", timestamp: new Date().toISOString() })
   );
   app.get("/platform-api/ready", async (_req, res) => {
     try {

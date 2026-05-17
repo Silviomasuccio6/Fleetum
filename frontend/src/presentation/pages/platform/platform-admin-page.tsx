@@ -25,6 +25,7 @@ import {
   QuickAction
 } from "../../../application/usecases/platform/platform-admin-usecases";
 import { snackbar } from "../../../application/stores/snackbar-store";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PlatformEventItem } from "../../components/platform/platform-event-item";
 import { PlatformKpiCard } from "../../components/platform/platform-kpi-card";
 import { Badge } from "../../components/ui/badge";
@@ -51,6 +52,16 @@ import {
 type TenantRow = {
   id: string;
   name: string;
+  company?: {
+    legalName?: string | null;
+    tradeName?: string | null;
+    vatNumber?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    hasLogo?: boolean;
+    profileCompleted?: boolean;
+    onboardingStatus?: "COMPLETE" | "INCOMPLETE" | "MISSING";
+  } | null;
   owner: { firstName: string; lastName: string; email: string } | null;
   isActive: boolean;
   usersCount?: number;
@@ -114,7 +125,9 @@ const actionLabels: Record<QuickAction, string> = {
 const statusBadgeVariant = (status?: LicenseStatus) => {
   if (status === "ACTIVE") return "success" as const;
   if (status === "TRIAL") return "secondary" as const;
+  if (status === "PAST_DUE") return "warning" as const;
   if (status === "EXPIRED") return "destructive" as const;
+  if (status === "CANCELED") return "destructive" as const;
   return "warning" as const;
 };
 
@@ -123,6 +136,8 @@ const licenseStatusLabel = (status?: LicenseStatus) => {
   if (status === "SUSPENDED") return "Sospesa";
   if (status === "EXPIRED") return "Scaduta";
   if (status === "TRIAL") return "Trial";
+  if (status === "PAST_DUE") return "Pagamento fallito";
+  if (status === "CANCELED") return "Cancellata";
   return "Sconosciuta";
 };
 
@@ -374,7 +389,10 @@ export const PlatformAdminPage = () => {
     const q = search.trim().toLowerCase();
     return tenants.filter((tenant) => {
       const owner = tenant.owner ? `${tenant.owner.firstName} ${tenant.owner.lastName} ${tenant.owner.email}` : "";
-      const matchesSearch = q.length === 0 || `${tenant.name} ${owner}`.toLowerCase().includes(q);
+      const company = tenant.company
+        ? `${tenant.company.legalName ?? ""} ${tenant.company.tradeName ?? ""} ${tenant.company.vatNumber ?? ""} ${tenant.company.email ?? ""}`
+        : "";
+      const matchesSearch = q.length === 0 || `${tenant.name} ${owner} ${company}`.toLowerCase().includes(q);
       const licenseStatus = tenant.license?.status ?? "ACTIVE";
       const matchesLicense = licenseFilter === "ALL" || licenseStatus === licenseFilter;
       const tenantState = tenant.isActive ? "ACTIVE" : "INACTIVE";
@@ -459,7 +477,7 @@ export const PlatformAdminPage = () => {
     () =>
       tenants.filter((tenant) => {
         const licenseStatus = tenant.license?.status ?? "ACTIVE";
-        return !tenant.isActive || licenseStatus === "SUSPENDED" || licenseStatus === "EXPIRED" || isExpiringSoon(tenant.license?.expiresAt);
+        return !tenant.isActive || licenseStatus === "SUSPENDED" || licenseStatus === "EXPIRED" || licenseStatus === "PAST_DUE" || licenseStatus === "CANCELED" || isExpiringSoon(tenant.license?.expiresAt);
       }).length,
     [tenants]
   );
@@ -657,6 +675,8 @@ export const PlatformAdminPage = () => {
       if (!tenant.isActive) score += 2;
       const licenseStatus = tenant.license?.status ?? "ACTIVE";
       if (licenseStatus === "SUSPENDED") score += 5;
+      if (licenseStatus === "PAST_DUE") score += 5;
+      if (licenseStatus === "CANCELED") score += 5;
       if (licenseStatus === "EXPIRED") score += 4;
       if (isExpiringSoon(tenant.license?.expiresAt)) score += 3;
       return score;
@@ -1004,6 +1024,8 @@ export const PlatformAdminPage = () => {
                   <option value="SUSPENDED">SUSPENDED</option>
                   <option value="EXPIRED">EXPIRED</option>
                   <option value="TRIAL">TRIAL</option>
+                  <option value="PAST_DUE">PAST_DUE</option>
+                  <option value="CANCELED">CANCELED</option>
                 </Select>
                 <Select value={tenantStatusFilter} onChange={(e) => setTenantStatusFilter(e.target.value as "ALL" | "ACTIVE" | "INACTIVE")}>
                   <option value="ALL">Clienti: tutti</option>
@@ -1031,7 +1053,7 @@ export const PlatformAdminPage = () => {
                 <Table className="platform-tenant-table table-fixed [&_th]:py-1.5 [&_td]:py-1.5">
                   <TableHeader className="platform-table-header sticky top-0 z-20 backdrop-blur">
                     <TableRow className="border-b border-border/70">
-                      <TableHead className="w-[16%]">Cliente</TableHead>
+                      <TableHead className="w-[16%]">Cliente / profilo</TableHead>
                       <TableHead className="w-[19%]">Owner</TableHead>
                       <TableHead className="w-[16%]">Piano</TableHead>
                       <TableHead className="w-[11%] text-center">Stato licenza</TableHead>
@@ -1071,12 +1093,18 @@ export const PlatformAdminPage = () => {
                         const selectedPlan = planDrafts[tenant.id] ?? currentPlan;
                         const licenseStatus = tenant.license?.status ?? "ACTIVE";
                         const hasPlanChanges = hasPlanChange(currentPlan, selectedPlan);
+                        const profileComplete = tenant.company?.profileCompleted;
+                        const companyName = tenant.company?.legalName || tenant.company?.tradeName || tenant.name;
 
                         return (
                           <TableRow key={tenant.id} className="platform-tenant-row">
                             <TableCell className="platform-tenant-cell break-words">
                               <div className="space-y-1">
-                                <p className="font-semibold text-foreground">{tenant.name}</p>
+                                <p className="font-semibold text-foreground">{companyName}</p>
+                                {companyName !== tenant.name ? <p className="text-xs text-muted-foreground">{tenant.name}</p> : null}
+                                <Badge variant={profileComplete ? "success" : "warning"} className="text-[10px]">
+                                  {profileComplete ? "Profilo completo" : "Profilo incompleto"}
+                                </Badge>
                                 <p className="text-xs text-muted-foreground">ID: {tenant.id}</p>
                               </div>
                             </TableCell>
@@ -1205,6 +1233,8 @@ export const PlatformAdminPage = () => {
                       <option value="TRIAL">TRIAL</option>
                       <option value="SUSPENDED">SUSPENDED</option>
                       <option value="EXPIRED">EXPIRED</option>
+                      <option value="PAST_DUE">PAST_DUE</option>
+                      <option value="CANCELED">CANCELED</option>
                     </Select>
                   </div>
                   <div className="grid gap-1.5">
@@ -1449,7 +1479,7 @@ export const PlatformAdminPage = () => {
                 </p>
               </>
             ) : (
-              <p className="text-sm text-muted-foreground">Caricamento report ricavi...</p>
+              <FleetumInlineLoader label="Caricamento report ricavi" />
             )}
           </CardContent>
         </Card>

@@ -1,5 +1,5 @@
 import { env } from "../../shared/config/env.js";
-import { mailer } from "../../infrastructure/email/mailer.js";
+import { emailSender } from "../../infrastructure/email/email-sender.js";
 
 export type PlatformAlertType =
   | "PLATFORM_LOGIN_LOCKED"
@@ -40,7 +40,7 @@ export class PlatformAlertService {
 
     for (const recipient of this.recipients) {
       try {
-        await mailer.sendMail({
+        await emailSender.send({
           to: recipient,
           subject,
           text: lines.join("\n")

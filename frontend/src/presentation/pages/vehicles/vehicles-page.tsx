@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { FileText, Trash2, Upload, X } from "lucide-react";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -340,7 +341,7 @@ export const VehiclesPage = () => {
             placeholder="Cerca per targa, marca, modello, sede..."
           />
 
-          {loading ? <p className="text-sm text-muted-foreground">Caricamento in corso...</p> : null}
+          {loading ? <FleetumInlineLoader label="Caricamento veicoli" /> : null}
 
           <div className="space-y-3 md:hidden">
             {vehicles.map((vehicle) => (

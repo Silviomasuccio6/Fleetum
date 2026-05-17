@@ -1,4 +1,5 @@
 import { BookingContractStatus, RentalCustomerContractTimelineItem } from "../../../application/usecases/rental-bookings-usecases";
+import { FleetumInlineLoader } from "../brand/fleetum-logo-loader";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -124,7 +125,7 @@ export const CustomerContractsTimeline = ({
           </div>
         </div>
 
-        {loading ? <p className="text-xs text-muted-foreground">Caricamento timeline contratti...</p> : null}
+        {loading ? <FleetumInlineLoader label="Caricamento timeline contratti" /> : null}
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
         {items.length === 0 ? (

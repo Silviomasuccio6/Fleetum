@@ -5,6 +5,7 @@ import { useMouseParallax } from "../../../features/auth/hooks/useMouseParallax"
 import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
 import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
 import { platformAdminUseCases } from "../../../application/usecases/platform/platform-admin-usecases";
+import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
 import "../../../features/auth/premium-login.css";
 
 const TRUST_ITEMS = [
@@ -109,9 +110,9 @@ export const PlatformAdminLoginPage = () => {
       <main className="premium-login-grid">
         <aside className="premium-login-side premium-login-side--left">
           <div className="premium-login-logo-row">
-            <span className="premium-login-logo-icon">◈</span>
+            <img className="premium-login-logo-mark" src="/brand/fleetum-symbol-color.svg" alt="" />
             <span className="premium-login-logo-text">
-              Platform<span>Console</span>
+              Fleetum<span> Platform</span>
             </span>
           </div>
 
@@ -148,7 +149,7 @@ export const PlatformAdminLoginPage = () => {
         <div className="premium-login-card-wrap">
           <section className={`premium-login-card ${shake ? "animate-shake" : ""}`}>
             <header className="premium-login-card-head">
-              <div className="premium-login-card-logo">◈</div>
+              <img className="premium-login-card-logo premium-login-card-logo--image" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
               <h2>Login Console Platform</h2>
               <p>Accedi all'area riservata amministrativa</p>
             </header>
@@ -213,10 +214,7 @@ export const PlatformAdminLoginPage = () => {
                 <span className="premium-login-submit-shimmer" />
                 {loading ? (
                   <span className="premium-login-loading">
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 2a10 10 0 0 1 10 10" />
-                    </svg>
+                    <FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />
                     Verifica credenziali...
                   </span>
                 ) : (

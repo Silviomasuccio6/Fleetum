@@ -1,5 +1,5 @@
 import { httpClient } from "../../infrastructure/api/http-client";
-import { tokenStorage } from "../../infrastructure/auth/token-storage";
+import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
 
 export type RentalBookingStatus =
   | "DRAFT"
@@ -374,7 +374,7 @@ export type RentalPricingQuote = {
   };
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
+const API_BASE_URL = getApiBaseUrl();
 
 export const rentalBookingsUseCases = {
   list: (params: Record<string, string | number | undefined>) =>
@@ -486,6 +486,20 @@ export const rentalBookingsUseCases = {
           brand: string;
           model: string;
           currentKm?: number | null;
+          maintenanceIntervalKm?: number | null;
+          revisionDueAt?: string | null;
+          deadlineStatus?: {
+            maintenance: {
+              status: "OK" | "DUE_SOON" | "EXPIRED";
+              label: string;
+              detail: string;
+            };
+            revision: {
+              status: "OK" | "DUE_SOON" | "EXPIRED";
+              label: string;
+              detail: string;
+            };
+          };
           site?: { id: string; name: string; city?: string | null };
         };
         bookings: Array<{
@@ -739,20 +753,16 @@ export const rentalBookingsUseCases = {
   deleteCustomerAttachment: (attachmentId: string) =>
     httpClient.delete(`/uploads/rental-customer-attachments/${attachmentId}`),
   downloadCustomerAttachment: async (attachmentId: string) => {
-    const token = tokenStorage.get();
     const response = await fetch(`${API_BASE_URL}/uploads/rental-customer-attachments/${attachmentId}/file`, {
-      credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      credentials: "include"
     });
     if (!response.ok) throw new Error("Download allegato cliente fallito");
     return response.blob();
   },
   downloadContractPdf: async (bookingId: string) => {
-    const token = tokenStorage.get();
     const response = await fetch(`${API_BASE_URL}/rental-bookings/${bookingId}/contract/pdf?t=${Date.now()}`, {
       credentials: "include",
-      cache: "no-store",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      cache: "no-store"
     });
     if (!response.ok) throw new Error("Download contratto fallito");
     return response.blob();
@@ -780,10 +790,8 @@ export const rentalBookingsUseCases = {
   },
   removeDefaultContractTemplateLogo: () => httpClient.delete("/contract-templates/default/logo"),
   downloadDefaultContractTemplateLogo: async () => {
-    const token = tokenStorage.get();
     const response = await fetch(`${API_BASE_URL}/contract-templates/default/logo/file`, {
-      credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      credentials: "include"
     });
     if (!response.ok) throw new Error("Logo template non disponibile");
     return response.blob();

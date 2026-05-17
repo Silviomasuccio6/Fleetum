@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { FeatureKey } from "../../domain/constants/entitlements";
+import { FleetumLogoLoader } from "../components/brand/fleetum-logo-loader";
 import { useEntitlements } from "../hooks/use-entitlements";
 
 type FeatureProtectedRouteProps = {
@@ -11,7 +12,12 @@ export const FeatureProtectedRoute = ({ feature, children }: FeatureProtectedRou
   const { loading, can } = useEntitlements();
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Verifica feature disponibili...</p>;
+    return (
+      <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <FleetumLogoLoader size="md" variant="light" />
+        Verifica feature disponibili
+      </div>
+    );
   }
 
   if (!can(feature)) {

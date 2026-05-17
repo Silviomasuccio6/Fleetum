@@ -30,6 +30,18 @@ export class PlatformAdminController {
     res.json(result);
   };
 
+  tenantProfile = async (req: Request, res: Response) => {
+    const tenantId = tenantIdSchema.parse(req.params.id);
+    const result = await this.service.tenantCompanyProfile(tenantId);
+    res.json(result);
+  };
+
+  tenantOnboardingStatus = async (req: Request, res: Response) => {
+    const tenantId = tenantIdSchema.parse(req.params.id);
+    const result = await this.service.tenantOnboardingStatus(tenantId);
+    res.json(result);
+  };
+
   recentEvents = async (req: Request, res: Response) => {
     const query = recentEventsQuerySchema.parse(req.query);
     const result = await this.service.listRecentEvents(query.limit);

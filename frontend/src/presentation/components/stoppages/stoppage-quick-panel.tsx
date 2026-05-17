@@ -4,6 +4,7 @@ import { masterDataUseCases } from "../../../application/usecases/master-data-us
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
 import { usersUseCases } from "../../../application/usecases/users-usecases";
 import { stoppageStatusOptions } from "../../../domain/constants/stoppage-status";
+import { FleetumInlineLoader } from "../brand/fleetum-logo-loader";
 import { StoppageStatusBadge } from "./status-badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -383,7 +384,7 @@ export const StoppageQuickPanel = ({
         <div className="h-[calc(100%-108px)] overflow-auto px-4 py-4">
           {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
           {!detail && mode !== "create" ? (
-            <p className="text-sm text-muted-foreground">Caricamento...</p>
+            <FleetumInlineLoader label="Caricamento fermo" />
           ) : tab === "detail" ? (
             <div className="space-y-3">
               <div className="rounded-lg border p-3">

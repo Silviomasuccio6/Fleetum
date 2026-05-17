@@ -26,37 +26,42 @@ function useCountUp(target: number, duration = 2000, startDelay = 500) {
 }
 
 export const LoginStats = () => {
-  const mrrRef = useCountUp(84200);
-  const usersRef = useCountUp(2847);
+  const bookingsRef = useCountUp(248);
+  const contractsRef = useCountUp(96);
 
   return (
     <aside className="premium-login-side premium-login-side--right">
+      <article className="premium-login-command-card" data-cursor="hover">
+        <p className="premium-login-stat-label">CONTROL ROOM</p>
+        <p className="premium-login-feature-title">Tutto quello che serve prima che diventi urgente.</p>
+        <div className="premium-login-command-grid">
+          <span>Booking</span>
+          <span>Contratti</span>
+          <span>Clienti</span>
+          <span>Scadenze</span>
+        </div>
+      </article>
+
       <article className="premium-login-stat-card premium-login-stat-card--violet" data-cursor="hover">
-        <p className="premium-login-stat-label">MRR QUESTO MESE</p>
+        <p className="premium-login-stat-label">PRENOTAZIONI MESE</p>
         <p className="premium-login-stat-value">
-          €<span ref={mrrRef}>0</span>
+          <span ref={bookingsRef}>0</span>
         </p>
-        <p className="premium-login-stat-delta">↑ +18.4% vs mese scorso</p>
+        <p className="premium-login-stat-delta">↑ pianificazione live per sede e veicolo</p>
       </article>
 
       <article className="premium-login-stat-card premium-login-stat-card--cyan" data-cursor="hover">
-        <p className="premium-login-stat-label">UTENTI ATTIVI</p>
+        <p className="premium-login-stat-label">CONTRATTI DIGITALI</p>
         <p className="premium-login-stat-value">
-          <span ref={usersRef}>0</span>
+          <span ref={contractsRef}>0</span>%
         </p>
-        <p className="premium-login-stat-delta">↑ +6.2% questa settimana</p>
-      </article>
-
-      <article className="premium-login-stat-card premium-login-stat-card--emerald" data-cursor="hover">
-        <p className="premium-login-stat-label">UPTIME</p>
-        <p className="premium-login-stat-value">99.9%</p>
-        <p className="premium-login-stat-delta">↑ 42 giorni consecutivi</p>
+        <p className="premium-login-stat-delta">↑ PDF, email, WhatsApp e firma</p>
       </article>
 
       <article className="premium-login-feature-callout" data-cursor="hover">
-        <p className="premium-login-stat-label">NUOVO · FEATURE</p>
-        <p className="premium-login-feature-title">AI Insights ora disponibile</p>
-        <p className="premium-login-feature-subtitle">Analisi predittiva powered by GPT</p>
+        <p className="premium-login-stat-label">SECURITY LAYER</p>
+        <p className="premium-login-feature-title">Workspace sicuro e privacy</p>
+        <p className="premium-login-feature-subtitle">Pensato per aziende che devono scalare senza perdere controllo.</p>
       </article>
     </aside>
   );

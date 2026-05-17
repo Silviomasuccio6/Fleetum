@@ -1,10 +1,14 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CircleCheck, ShieldCheck, Sparkles } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { type CSSProperties, type ReactNode, FormEvent, useEffect, useMemo, useState } from "react";
+import { AtSign, Briefcase, Building2, CircleCheck, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, ShieldCheck, Sparkles, Star, User } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useMouseParallax } from "../../../features/auth/hooks/useMouseParallax";
 import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
 import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
+import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
+import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
+import { FleetumLanguageSwitcher } from "../../components/i18n/fleetum-language-switcher";
+import { translateText, useFleetumLanguage } from "../../i18n/fleetum-language";
 import "../../../features/auth/premium-login.css";
 
 const TRUST_ITEMS = [
@@ -25,6 +29,21 @@ const FLOATING_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
   delay: `${(index % 7) * 0.6}s`,
   duration: `${6 + (index % 5) * 1.2}s`
 }));
+
+const SIGNUP_STEPS = [
+  {
+    title: "Azienda",
+    subtitle: "Dati tenant e fiscali"
+  },
+  {
+    title: "Referente",
+    subtitle: "Admin iniziale"
+  },
+  {
+    title: "Conferma",
+    subtitle: "Branding e privacy"
+  }
+];
 
 
 
@@ -58,26 +77,53 @@ const AppleLogo = () => (
   </svg>
 );
 
+
+const FieldIcon = ({ children }: { children: ReactNode }) => (
+  <span className="premium-login-field-icon-wrap">{children}</span>
+);
+
 const initialForm = {
   tenantName: "",
+  legalForm: "",
+  vatNumber: "",
+  taxCode: "",
+  pec: "",
+  sdiCode: "",
+  legalAddress: "",
+  city: "",
+  province: "",
+  postalCode: "",
+  country: "IT",
+  companyPhone: "",
+  companyEmail: "",
+  website: "",
   firstName: "",
   lastName: "",
+  adminPhone: "",
+  adminRole: "",
   email: "",
-  password: ""
+  password: "",
+  primaryColor: "#21375d",
+  accentColor: "#5d82c2"
 };
 
 export const SignupPage = () => {
   const navigate = useNavigate();
   const { nx, ny } = useMouseParallax();
+  const { language } = useFleetumLanguage();
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
 
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:4000/api";
+  const apiBaseUrl = getApiBaseUrl();
   const googleAuthUrl = (import.meta.env.VITE_GOOGLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/google`;
   const appleAuthUrl = (import.meta.env.VITE_APPLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/apple`;
+
 
   useEffect(() => {
     const previousTheme = document.documentElement.getAttribute("data-theme");
@@ -106,10 +152,54 @@ export const SignupPage = () => {
     window.location.href = target.toString();
   };
 
+  const isEmailValid = form.email.trim().includes("@");
+  const isPasswordStrong =
+    form.password.length >= 8 &&
+    /[A-Z]/.test(form.password) &&
+    /\d/.test(form.password) &&
+    /[^A-Za-z0-9]/.test(form.password);
+
+  const stepIsValid = [
+    form.tenantName.trim().length >= 2,
+    form.firstName.trim().length > 1 && form.lastName.trim().length > 1 && isEmailValid && isPasswordStrong,
+    privacyAccepted
+  ][currentStep];
+
+  const stepErrors = [
+    "Inserisci almeno il nome azienda per continuare.",
+    "Completa nome, cognome, email valida e una password sicura.",
+    "Per creare l'account devi confermare la presa visione dell'informativa privacy."
+  ];
+  const signupProgress = Math.round(((currentStep + 1) / SIGNUP_STEPS.length) * 100);
+  const signupProgressStyle = { "--signup-progress": `${signupProgress}%` } as CSSProperties;
+
+  const goToNextStep = () => {
+    setError(null);
+    setTenantId(null);
+
+    if (!stepIsValid) {
+      setError(stepErrors[currentStep]);
+      return;
+    }
+
+    setCurrentStep((step) => Math.min(step + 1, SIGNUP_STEPS.length - 1));
+  };
+
+  const goToPreviousStep = () => {
+    setError(null);
+    setCurrentStep((step) => Math.max(step - 1, 0));
+  };
+
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setTenantId(null);
+
+    if (!privacyAccepted) {
+      setError("Per creare l'account devi confermare la presa visione dell'informativa privacy.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -118,10 +208,40 @@ export const SignupPage = () => {
         firstName: form.firstName,
         lastName: form.lastName,
         email: form.email,
-        password: form.password
+        password: form.password,
+        phone: form.adminPhone,
+        adminRole: form.adminRole,
+        privacyAccepted,
+        company: {
+          legalName: form.tenantName,
+          tradeName: form.tenantName,
+          legalForm: form.legalForm,
+          vatNumber: form.vatNumber,
+          taxCode: form.taxCode,
+          pec: form.pec,
+          sdiCode: form.sdiCode,
+          legalAddress: form.legalAddress,
+          city: form.city,
+          province: form.province,
+          postalCode: form.postalCode,
+          country: form.country,
+          phone: form.companyPhone,
+          email: form.companyEmail || form.email,
+          website: form.website,
+          adminFirstName: form.firstName,
+          adminLastName: form.lastName,
+          adminEmail: form.email,
+          adminPhone: form.adminPhone,
+          adminRole: form.adminRole,
+          primaryColor: form.primaryColor,
+          accentColor: form.accentColor
+        }
       });
       setTenantId(result.tenantId);
+      setRegisteredEmail(form.email);
       setForm(initialForm);
+      setPrivacyAccepted(false);
+      setCurrentStep(SIGNUP_STEPS.length - 1);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -129,9 +249,19 @@ export const SignupPage = () => {
     }
   };
 
+  const startAnotherSignup = () => {
+    setTenantId(null);
+    setRegisteredEmail(null);
+    setError(null);
+    setForm(initialForm);
+    setPrivacyAccepted(false);
+    setCurrentStep(0);
+  };
+
   return (
     <div className="premium-login-root">
       <div className="premium-login-bg-gradient" style={backgroundTransform} aria-hidden />
+      <FleetumLanguageSwitcher />
 
       <ParticleCanvas />
       <MagneticOrbs />
@@ -156,10 +286,7 @@ export const SignupPage = () => {
       <main className="premium-login-grid">
         <aside className="premium-login-side premium-login-side--left">
           <div className="premium-login-logo-row">
-            <span className="premium-login-logo-icon">◈</span>
-            <span className="premium-login-logo-text">
-              Fleet Ops<span> Suite</span>
-            </span>
+            <img className="premium-login-logo-wordmark" src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" />
           </div>
 
           <div className="premium-login-hero-copy">
@@ -192,14 +319,34 @@ export const SignupPage = () => {
           </ul>
         </aside>
 
-        <section className="premium-login-card-wrap">
-          <div className="premium-login-card">
+        <section className="premium-login-card-wrap premium-login-card-wrap--signup">
+          <div className="premium-login-card premium-login-card--signup">
             <div className="premium-login-card-head">
-              <div className="premium-login-card-logo">◈</div>
+              <img className="premium-login-card-logo premium-login-card-logo--image" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
               <h2>Crea account</h2>
               <p>Avvia il tuo ambiente con credenziali admin iniziali</p>
             </div>
 
+            {tenantId ? (
+              <div className="premium-signup-success">
+                <div className="premium-signup-success__icon">✓</div>
+                <p className="premium-signup-success__eyebrow">Tenant creato correttamente</p>
+                <h3>Workspace pronto</h3>
+                <p>
+                  Il tenant <strong>{tenantId}</strong> è stato creato. Ora puoi accedere con l'email admin
+                  {registeredEmail ? <strong> {registeredEmail}</strong> : null}.
+                </p>
+                <div className="premium-signup-success__actions">
+                  <button type="button" className="premium-login-submit" onClick={() => navigate("/login")}>
+                    <span className="premium-login-submit-shimmer" aria-hidden />
+                    Vai al login
+                  </button>
+                  <button type="button" className="premium-login-social-btn justify-center" onClick={startAnotherSignup}>
+                    Crea un altro tenant
+                  </button>
+                </div>
+              </div>
+            ) : (
             <form onSubmit={onSubmit} className="premium-login-form" noValidate>
               <div className="premium-login-social-grid">
                 <button
@@ -209,7 +356,7 @@ export const SignupPage = () => {
                   onClick={() => openSocialAuth("google")}
                 >
                   <GoogleLogo />
-                  <span>Sign in with Google</span>
+                  <span>Continua con Google</span>
                 </button>
                 <button
                   type="button"
@@ -218,86 +365,408 @@ export const SignupPage = () => {
                   onClick={() => openSocialAuth("apple")}
                 >
                   <AppleLogo />
-                  <span>Sign in with Apple</span>
+                  <span>Continua con Apple</span>
                 </button>
               </div>
 
               <div className="premium-login-divider">o continua con registrazione</div>
 
-              <label className="premium-login-field-label" htmlFor="signup-tenantName">Nome azienda</label>
-              <div className={`premium-login-field ${form.tenantName ? "is-ok" : ""}`}>
-                <span>🏢</span>
-                <input
-                  id="signup-tenantName"
-                  name="tenantName"
-                  value={form.tenantName}
-                  onChange={(event) => setForm((current) => ({ ...current, tenantName: event.target.value }))}
-                  placeholder="Es. Fleet Ops Italia"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <label className="premium-login-field-label" htmlFor="signup-firstName">Nome</label>
-                  <div className={`premium-login-field ${form.firstName ? "is-ok" : ""}`}>
-                    <span>👤</span>
-                    <input
-                      id="signup-firstName"
-                      name="firstName"
-                      value={form.firstName}
-                      onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
-                      placeholder="Nome"
-                      required
-                    />
-                  </div>
+              <div className="premium-signup-stepper" style={signupProgressStyle} aria-label="Avanzamento registrazione">
+                <div className="premium-signup-stepper__meta">
+                  <span>Registrazione guidata</span>
+                  <strong>{translateText(`${signupProgress}% completato`, language)}</strong>
                 </div>
+                <div className="premium-signup-stepper__track" aria-hidden>
+                  <span />
+                </div>
+                <div className="premium-signup-stepper__steps">
+                  {SIGNUP_STEPS.map((signupStep, index) => {
+                    const isActive = currentStep === index;
+                    const isDone = currentStep > index;
 
-                <div>
-                  <label className="premium-login-field-label" htmlFor="signup-lastName">Cognome</label>
-                  <div className={`premium-login-field ${form.lastName ? "is-ok" : ""}`}>
-                    <span>👤</span>
-                    <input
-                      id="signup-lastName"
-                      name="lastName"
-                      value={form.lastName}
-                      onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
-                      placeholder="Cognome"
-                      required
-                    />
-                  </div>
+                    return (
+                      <button
+                        key={signupStep.title}
+                        type="button"
+                        className={`premium-signup-stepper__step ${isActive ? "is-active" : ""} ${isDone ? "is-done" : ""}`}
+                        aria-current={isActive ? "step" : undefined}
+                        onClick={() => {
+                          if (index < currentStep) {
+                            setError(null);
+                            setCurrentStep(index);
+                          }
+                        }}
+                      >
+                        <span className="premium-signup-stepper__dot">{isDone ? "✓" : index + 1}</span>
+                        <span className="premium-signup-stepper__copy">
+                          <span>{signupStep.title}</span>
+                          <small>{signupStep.subtitle}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <label className="premium-login-field-label" htmlFor="signup-email">Email</label>
-              <div className={`premium-login-field ${form.email.includes("@") ? "is-ok" : ""}`}>
-                <span>✉</span>
-                <input
-                  id="signup-email"
-                  name="email"
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                  placeholder="admin@azienda.com"
-                  autoComplete="email"
-                  required
-                />
-              </div>
+              {currentStep === 0 ? (
+                <div className="rounded-2xl border border-white/60 bg-white/45 p-3 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Step 1 · Dati aziendali
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="md:col-span-2">
+                      <label className="premium-login-field-label" htmlFor="signup-tenantName">Nome azienda</label>
+                      <div className={`premium-login-field ${form.tenantName ? "is-ok" : ""}`}>
+                        <FieldIcon><Building2 /></FieldIcon>
+                        <input
+                          id="signup-tenantName"
+                          name="tenantName"
+                          value={form.tenantName}
+                          onChange={(event) => setForm((current) => ({ ...current, tenantName: event.target.value }))}
+                          placeholder="Es. Fleetum Italia"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-vatNumber">Partita IVA</label>
+                      <div className={`premium-login-field ${form.vatNumber.length === 11 ? "is-ok" : ""}`}>
+                        <FieldIcon><Briefcase /></FieldIcon>
+                        <input
+                          id="signup-vatNumber"
+                          name="vatNumber"
+                          value={form.vatNumber}
+                          onChange={(event) => setForm((current) => ({ ...current, vatNumber: event.target.value.replace(/\s+/g, "") }))}
+                          placeholder="11 cifre"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-legalForm">Forma giuridica</label>
+                      <div className={`premium-login-field ${form.legalForm ? "is-ok" : ""}`}>
+                        <FieldIcon><Scale /></FieldIcon>
+                        <input
+                          id="signup-legalForm"
+                          name="legalForm"
+                          value={form.legalForm}
+                          onChange={(event) => setForm((current) => ({ ...current, legalForm: event.target.value }))}
+                          placeholder="SRL, SPA, ditta individuale..."
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-taxCode">Codice fiscale azienda</label>
+                      <div className={`premium-login-field ${form.taxCode ? "is-ok" : ""}`}>
+                        <FieldIcon><Hash /></FieldIcon>
+                        <input
+                          id="signup-taxCode"
+                          name="taxCode"
+                          value={form.taxCode}
+                          onChange={(event) => setForm((current) => ({ ...current, taxCode: event.target.value.toUpperCase() }))}
+                          placeholder="Opzionale"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-companyEmail">Email aziendale</label>
+                      <div className={`premium-login-field ${form.companyEmail.includes("@") ? "is-ok" : ""}`}>
+                        <FieldIcon><Mail /></FieldIcon>
+                        <input
+                          id="signup-companyEmail"
+                          name="companyEmail"
+                          type="email"
+                          value={form.companyEmail}
+                          onChange={(event) => setForm((current) => ({ ...current, companyEmail: event.target.value }))}
+                          placeholder="info@azienda.com"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-companyPhone">Telefono aziendale</label>
+                      <div className={`premium-login-field ${form.companyPhone ? "is-ok" : ""}`}>
+                        <FieldIcon><Phone /></FieldIcon>
+                        <input
+                          id="signup-companyPhone"
+                          name="companyPhone"
+                          value={form.companyPhone}
+                          onChange={(event) => setForm((current) => ({ ...current, companyPhone: event.target.value }))}
+                          placeholder="+39..."
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-website">Sito web</label>
+                      <div className={`premium-login-field ${form.website ? "is-ok" : ""}`}>
+                        <FieldIcon><Globe /></FieldIcon>
+                        <input
+                          id="signup-website"
+                          name="website"
+                          value={form.website}
+                          onChange={(event) => setForm((current) => ({ ...current, website: event.target.value }))}
+                          placeholder="https://azienda.it"
+                        />
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="premium-login-field-label" htmlFor="signup-legalAddress">Sede legale</label>
+                      <div className={`premium-login-field ${form.legalAddress ? "is-ok" : ""}`}>
+                        <FieldIcon><MapPin /></FieldIcon>
+                        <input
+                          id="signup-legalAddress"
+                          name="legalAddress"
+                          value={form.legalAddress}
+                          onChange={(event) => setForm((current) => ({ ...current, legalAddress: event.target.value }))}
+                          placeholder="Via, numero civico"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1.55fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,0.65fr)]">
+                      <div className="min-w-0">
+                        <label className="premium-login-field-label" htmlFor="signup-city">Comune</label>
+                        <div className={`premium-login-field ${form.city ? "is-ok" : ""}`}>
+                          <FieldIcon><Map /></FieldIcon>
+                          <input
+                            id="signup-city"
+                            name="city"
+                            value={form.city}
+                            onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
+                            placeholder="Comune"
+                          />
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <label className="premium-login-field-label" htmlFor="signup-province">Prov.</label>
+                        <div className={`premium-login-field ${form.province ? "is-ok" : ""}`}>
+                          <input
+                            id="signup-province"
+                            name="province"
+                            value={form.province}
+                            onChange={(event) => setForm((current) => ({ ...current, province: event.target.value.toUpperCase() }))}
+                            placeholder="NA"
+                          />
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <label className="premium-login-field-label" htmlFor="signup-postalCode">CAP</label>
+                        <div className={`premium-login-field ${form.postalCode ? "is-ok" : ""}`}>
+                          <input
+                            id="signup-postalCode"
+                            name="postalCode"
+                            value={form.postalCode}
+                            onChange={(event) => setForm((current) => ({ ...current, postalCode: event.target.value }))}
+                            placeholder="80100"
+                          />
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <label className="premium-login-field-label" htmlFor="signup-country">Paese</label>
+                        <div className={`premium-login-field ${form.country ? "is-ok" : ""}`}>
+                          <input
+                            id="signup-country"
+                            name="country"
+                            value={form.country}
+                            onChange={(event) => setForm((current) => ({ ...current, country: event.target.value.toUpperCase() }))}
+                            placeholder="IT"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-pec">PEC</label>
+                      <div className={`premium-login-field ${form.pec.includes("@") ? "is-ok" : ""}`}>
+                        <FieldIcon><AtSign /></FieldIcon>
+                        <input
+                          id="signup-pec"
+                          name="pec"
+                          type="email"
+                          value={form.pec}
+                          onChange={(event) => setForm((current) => ({ ...current, pec: event.target.value }))}
+                          placeholder="pec@azienda.it"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-sdiCode">Codice SDI</label>
+                      <div className={`premium-login-field ${form.sdiCode.length === 7 ? "is-ok" : ""}`}>
+                        <FieldIcon><Hash /></FieldIcon>
+                        <input
+                          id="signup-sdiCode"
+                          name="sdiCode"
+                          value={form.sdiCode}
+                          onChange={(event) => setForm((current) => ({ ...current, sdiCode: event.target.value.toUpperCase() }))}
+                          placeholder="7 caratteri"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
-              <label className="premium-login-field-label" htmlFor="signup-password">Password</label>
-              <div className={`premium-login-field ${form.password.length >= 8 ? "is-ok" : ""}`}>
-                <span>🔒</span>
-                <input
-                  id="signup-password"
-                  name="password"
-                  type="password"
-                  value={form.password}
-                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                  placeholder="Minimo 8 caratteri"
-                  autoComplete="new-password"
-                  required
-                />
-              </div>
+              {currentStep === 1 ? (
+                <div className="rounded-2xl border border-white/60 bg-white/45 p-3 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Step 2 · Referente e accesso admin
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-firstName">Nome</label>
+                      <div className={`premium-login-field ${form.firstName ? "is-ok" : ""}`}>
+                        <FieldIcon><User /></FieldIcon>
+                        <input
+                          id="signup-firstName"
+                          name="firstName"
+                          value={form.firstName}
+                          onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
+                          placeholder="Nome"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-lastName">Cognome</label>
+                      <div className={`premium-login-field ${form.lastName ? "is-ok" : ""}`}>
+                        <FieldIcon><User /></FieldIcon>
+                        <input
+                          id="signup-lastName"
+                          name="lastName"
+                          value={form.lastName}
+                          onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
+                          placeholder="Cognome"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-adminPhone">Telefono referente</label>
+                      <div className={`premium-login-field ${form.adminPhone ? "is-ok" : ""}`}>
+                        <FieldIcon><Phone /></FieldIcon>
+                        <input
+                          id="signup-adminPhone"
+                          name="adminPhone"
+                          value={form.adminPhone}
+                          onChange={(event) => setForm((current) => ({ ...current, adminPhone: event.target.value }))}
+                          placeholder="+39..."
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-adminRole">Ruolo in azienda</label>
+                      <div className={`premium-login-field ${form.adminRole ? "is-ok" : ""}`}>
+                        <FieldIcon><Star /></FieldIcon>
+                        <input
+                          id="signup-adminRole"
+                          name="adminRole"
+                          value={form.adminRole}
+                          onChange={(event) => setForm((current) => ({ ...current, adminRole: event.target.value }))}
+                          placeholder="Owner, admin, operations..."
+                        />
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="premium-login-field-label" htmlFor="signup-email">Email login</label>
+                      <div className={`premium-login-field ${isEmailValid ? "is-ok" : ""}`}>
+                        <FieldIcon><Mail /></FieldIcon>
+                        <input
+                          id="signup-email"
+                          name="email"
+                          type="email"
+                          value={form.email}
+                          onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                          placeholder="admin@azienda.com"
+                          autoComplete="email"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="premium-login-field-label" htmlFor="signup-password">Password</label>
+                      <div className={`premium-login-field ${isPasswordStrong ? "is-ok" : ""}`}>
+                        <FieldIcon><Lock /></FieldIcon>
+                        <input
+                          id="signup-password"
+                          name="password"
+                          type="password"
+                          value={form.password}
+                          onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                          placeholder="Min. 8 caratteri, maiuscola, numero e simbolo"
+                          autoComplete="new-password"
+                          required
+                        />
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Usa almeno 8 caratteri con una maiuscola, un numero e un simbolo.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {currentStep === 2 ? (
+                <div className="rounded-2xl border border-white/60 bg-white/45 p-3 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Step 3 · Conferma workspace
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Azienda</p>
+                      <p className="mt-2 text-base font-semibold text-slate-900">{form.tenantName || "Non indicata"}</p>
+                      <p className="mt-1 text-sm text-slate-500">{form.companyEmail || form.email || "Email non indicata"}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Admin</p>
+                      <p className="mt-2 text-base font-semibold text-slate-900">
+                        {[form.firstName, form.lastName].filter(Boolean).join(" ") || "Non indicato"}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">{form.email || "Email login non indicata"}</p>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-primaryColor">Colore primario</label>
+                      <div className={`premium-login-field ${form.primaryColor ? "is-ok" : ""}`}>
+                        <FieldIcon><Palette style={{ color: form.primaryColor }} /></FieldIcon>
+                        <input
+                          id="signup-primaryColor"
+                          name="primaryColor"
+                          type="text"
+                          value={form.primaryColor}
+                          onChange={(event) => setForm((current) => ({ ...current, primaryColor: event.target.value }))}
+                          placeholder="#21375d"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="premium-login-field-label" htmlFor="signup-accentColor">Colore accento</label>
+                      <div className={`premium-login-field ${form.accentColor ? "is-ok" : ""}`}>
+                        <FieldIcon><Palette style={{ color: form.accentColor }} /></FieldIcon>
+                        <input
+                          id="signup-accentColor"
+                          name="accentColor"
+                          type="text"
+                          value={form.accentColor}
+                          onChange={(event) => setForm((current) => ({ ...current, accentColor: event.target.value }))}
+                          placeholder="#5d82c2"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="premium-login-check mt-4 items-start" htmlFor="signup-privacy">
+                    <input
+                      id="signup-privacy"
+                      type="checkbox"
+                      checked={privacyAccepted}
+                      onChange={(event) => setPrivacyAccepted(event.target.checked)}
+                      required
+                    />
+                    <span className="leading-5">
+                      Ho letto l'{" "}
+                      <Link className="premium-login-link" to="/privacy" target="_blank" rel="noreferrer">
+                        informativa privacy
+                      </Link>{" "}
+                      e confermo la presa visione.
+                    </span>
+                  </label>
+                </div>
+              ) : null}
 
               {tenantId ? (
                 <p className="premium-login-error premium-login-error--block" style={{ color: "#065f46", background: "rgba(209,250,229,0.8)", borderColor: "rgba(16,185,129,0.45)" }}>
@@ -307,26 +776,44 @@ export const SignupPage = () => {
 
               {error ? <p className="premium-login-error premium-login-error--block">{error}</p> : null}
 
-              <button type="submit" className="premium-login-submit" disabled={loading}>
-                <span className="premium-login-submit-shimmer" aria-hidden />
-                {loading ? (
-                  <span className="premium-login-loading">
-                    <svg viewBox="0 0 24 24" aria-hidden>
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 2a10 10 0 0 1 10 10" />
-                    </svg>
-                    Creazione account...
-                  </span>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                {currentStep > 0 ? (
+                  <button
+                    type="button"
+                    className="premium-login-social-btn justify-center"
+                    onClick={goToPreviousStep}
+                    disabled={loading}
+                  >
+                    Indietro
+                  </button>
+                ) : null}
+
+                {currentStep < SIGNUP_STEPS.length - 1 ? (
+                  <button type="button" className="premium-login-submit" onClick={goToNextStep}>
+                    <span className="premium-login-submit-shimmer" aria-hidden />
+                    {currentStep === 0 ? "Continua con referente" : "Continua alla conferma"}
+                  </button>
                 ) : (
-                  "Crea account"
+                  <button type="submit" className="premium-login-submit" disabled={loading}>
+                    <span className="premium-login-submit-shimmer" aria-hidden />
+                    {loading ? (
+                      <span className="premium-login-loading">
+                        <FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />
+                        Creazione account...
+                      </span>
+                    ) : (
+                      "Crea account"
+                    )}
+                  </button>
                 )}
-              </button>
+              </div>
 
               <p className="premium-login-signup-text">
                 Hai già un account?
                 <button type="button" className="premium-login-link" onClick={() => navigate("/login")}>Vai al login →</button>
               </p>
             </form>
+            )}
           </div>
         </section>
 

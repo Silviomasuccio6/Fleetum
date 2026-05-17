@@ -1,4 +1,4 @@
-import { StoppageStatus } from "@prisma/client";
+import { BookingContractStatus, RentalBookingStatus, StoppageStatus } from "@prisma/client";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 
 type AnalyticsFilters = {
@@ -15,6 +15,22 @@ type AnalyticsFilters = {
 const dayMs = 86400000;
 
 const daysDiff = (from: Date, to: Date) => Math.max(0, (to.getTime() - from.getTime()) / dayMs);
+
+const startOfDay = (value: Date) => {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const endOfDay = (value: Date) => {
+  const next = new Date(value);
+  next.setHours(23, 59, 59, 999);
+  return next;
+};
+
+const dateKey = (value: Date) => value.toISOString().slice(0, 10);
+
+const roundMoney = (value: number) => Number(value.toFixed(2));
 
 const percentile = (sorted: number[], p: number) => {
   if (!sorted.length) return 0;
@@ -33,8 +49,20 @@ export class GetDashboardStatsUseCase {
   async dashboardOverview(tenantId: string) {
     const now = new Date();
     const last30 = new Date(now.getTime() - 30 * dayMs);
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
 
-    const [stoppages, users, reminders] = await Promise.all([
+    const [
+      stoppages,
+      users,
+      reminders,
+      rentalVehicles,
+      rentalBookings,
+      bookingContracts,
+      contractDeliveries
+    ] = await Promise.all([
       prisma.stoppage.findMany({
         where: { tenantId, deletedAt: null },
         include: {
@@ -61,6 +89,84 @@ export class GetDashboardStatsUseCase {
             }
           }
         }
+      }),
+      prisma.vehicle.findMany({
+        where: { tenantId, deletedAt: null, isActive: true },
+        select: {
+          id: true,
+          plate: true,
+          brand: true,
+          model: true,
+          currentKm: true,
+          maintenanceIntervalKm: true,
+          revisionDueAt: true,
+          maintenances: {
+            where: { deletedAt: null },
+            orderBy: [{ performedAt: "desc" }, { createdAt: "desc" }],
+            take: 1,
+            select: { kmAtService: true, performedAt: true }
+          }
+        }
+      }),
+      prisma.rentalBooking.findMany({
+        where: {
+          tenantId,
+          deletedAt: null,
+          pickupAt: { lte: monthEnd },
+          returnAt: { gte: new Date(todayStart.getTime() - 30 * dayMs) }
+        },
+        orderBy: [{ pickupAt: "asc" }, { createdAt: "asc" }],
+        include: {
+          vehicle: { select: { id: true, plate: true, brand: true, model: true, currentKm: true, maintenanceIntervalKm: true, revisionDueAt: true } },
+          customer: {
+            select: {
+              id: true,
+              customerType: true,
+              firstName: true,
+              lastName: true,
+              companyName: true,
+              email: true,
+              phone: true,
+              drivingLicenseNumber: true,
+              documentNumber: true,
+              companyVatNumber: true
+            }
+          },
+          pricingSnapshot: {
+            select: {
+              expectedTotal: true,
+              finalTotal: true,
+              extraKmEstimated: true,
+              extraKmActual: true,
+              extraKmEstimatedCost: true,
+              extraKmActualCost: true,
+              daysCharged: true
+            }
+          },
+          contract: {
+            select: {
+              id: true,
+              status: true,
+              lastSentAt: true,
+              signedAt: true,
+              deliveries: {
+                orderBy: { createdAt: "desc" },
+                take: 1,
+                select: { channel: true, status: true, sentAt: true, errorMessage: true, createdAt: true }
+              }
+            }
+          }
+        }
+      }),
+      prisma.bookingContract.findMany({
+        where: { tenantId, deletedAt: null },
+        select: { id: true, status: true, createdAt: true, updatedAt: true, lastSentAt: true, signedAt: true }
+      }),
+      prisma.bookingContractDelivery.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: { id: true, channel: true, status: true, sentAt: true, errorMessage: true, createdAt: true, bookingId: true }
       })
     ]);
 
@@ -112,6 +218,183 @@ export class GetDashboardStatsUseCase {
       .sort((a, b) => (a.severity < b.severity ? 1 : -1))
       .slice(0, 8);
 
+    const activeRentalStatuses = new Set<RentalBookingStatus>([
+      "DRAFT",
+      "QUOTED",
+      "HOLD",
+      "CONFIRMED",
+      "CONTRACT_SIGNED",
+      "READY_FOR_HANDOVER",
+      "IN_RENT"
+    ]);
+    const closedRentalStatuses = new Set<RentalBookingStatus>(["CLOSED", "CANCELED", "NO_SHOW"]);
+    const occupiedToday = rentalBookings.filter(
+      (booking) => !closedRentalStatuses.has(booking.status) && booking.pickupAt <= todayEnd && booking.returnAt >= todayStart
+    );
+    const pickupsToday = rentalBookings.filter((booking) => booking.pickupAt >= todayStart && booking.pickupAt <= todayEnd);
+    const returnsToday = rentalBookings.filter((booking) => booking.returnAt >= todayStart && booking.returnAt <= todayEnd);
+    const overdueReturns = rentalBookings.filter(
+      (booking) => booking.returnAt < now && !closedRentalStatuses.has(booking.status)
+    );
+    const monthBookings = rentalBookings.filter((booking) => booking.pickupAt <= monthEnd && booking.returnAt >= monthStart);
+
+    const expectedRevenueMonth = monthBookings.reduce(
+      (acc, booking) => acc + (booking.pricingSnapshot?.expectedTotal ?? booking.expectedTotal ?? 0),
+      0
+    );
+    const finalRevenueMonth = monthBookings.reduce(
+      (acc, booking) => acc + (booking.pricingSnapshot?.finalTotal ?? booking.finalTotal ?? 0),
+      0
+    );
+    const revenueBookings = monthBookings.filter((booking) => (booking.pricingSnapshot?.expectedTotal ?? booking.expectedTotal ?? 0) > 0);
+    const rentedDaysMonth = monthBookings.reduce((acc, booking) => acc + daysDiff(booking.pickupAt, booking.returnAt), 0);
+
+    const contractStatusDistribution = Object.values(BookingContractStatus).map((status) => ({
+      status,
+      count: bookingContracts.filter((contract) => contract.status === status).length
+    }));
+    const deliveryFailures = contractDeliveries.filter((delivery) => delivery.status === "FAILED");
+
+    const isMaintenanceCritical = (vehicle: {
+      currentKm: number | null;
+      maintenanceIntervalKm: number | null;
+      maintenances: Array<{ kmAtService: number | null }>;
+    }) => {
+      const interval = vehicle.maintenanceIntervalKm ?? 0;
+      const currentKm = vehicle.currentKm ?? 0;
+      const lastKm = vehicle.maintenances[0]?.kmAtService ?? 0;
+      if (!interval || !currentKm || !lastKm) return { status: "OK" as const, remainingKm: null as number | null };
+      const remainingKm = lastKm + interval - currentKm;
+      const warningKm = Math.min(1000, Math.floor(interval * 0.08));
+      return {
+        status: remainingKm <= 0 ? ("EXPIRED" as const) : remainingKm <= warningKm ? ("DUE_SOON" as const) : ("OK" as const),
+        remainingKm
+      };
+    };
+
+    const isRevisionCritical = (revisionDueAt: Date | null) => {
+      if (!revisionDueAt) return { status: "OK" as const, days: null as number | null };
+      const days = Math.ceil((startOfDay(revisionDueAt).getTime() - todayStart.getTime()) / dayMs);
+      return {
+        status: days <= 0 ? ("EXPIRED" as const) : days <= 30 ? ("DUE_SOON" as const) : ("OK" as const),
+        days
+      };
+    };
+
+    const vehicleDeadlineMap = new Map(
+      rentalVehicles.map((vehicle) => [
+        vehicle.id,
+        {
+          maintenance: isMaintenanceCritical(vehicle),
+          revision: isRevisionCritical(vehicle.revisionDueAt)
+        }
+      ])
+    );
+
+    const criticalBookings = rentalBookings
+      .flatMap((booking) => {
+        const items: Array<{ type: string; reason: string; severity: "HIGH" | "MEDIUM"; booking: typeof booking }> = [];
+        const customer = booking.customer;
+        const deadline = vehicleDeadlineMap.get(booking.vehicleId);
+        const hasCompleteCustomer =
+          customer &&
+          Boolean(customer.email || customer.phone) &&
+          Boolean(
+            customer.customerType === "PERSONA_GIURIDICA"
+              ? customer.companyName && customer.companyVatNumber
+              : customer.firstName && customer.lastName && customer.drivingLicenseNumber
+          );
+
+        if (booking.returnAt < now && !closedRentalStatuses.has(booking.status)) {
+          items.push({ type: "OVERDUE_RETURN", reason: "Rientro scaduto", severity: "HIGH", booking });
+        }
+        if (booking.contractRequired && !booking.contract) {
+          items.push({ type: "MISSING_CONTRACT", reason: "Contratto mancante", severity: "HIGH", booking });
+        }
+        if (booking.contractRequired && booking.contract && booking.contract.status !== "SIGNED") {
+          items.push({ type: "CONTRACT_NOT_SIGNED", reason: "Contratto non firmato", severity: "MEDIUM", booking });
+        }
+        if (booking.contract?.deliveries?.[0]?.status === "FAILED") {
+          items.push({ type: "CONTRACT_DELIVERY_FAILED", reason: "Invio contratto fallito", severity: "HIGH", booking });
+        }
+        if (deadline?.maintenance.status === "EXPIRED" || deadline?.maintenance.status === "DUE_SOON") {
+          items.push({
+            type: deadline.maintenance.status === "EXPIRED" ? "VEHICLE_MAINTENANCE_EXPIRED" : "VEHICLE_MAINTENANCE_DUE_SOON",
+            reason: deadline.maintenance.status === "EXPIRED" ? "Manutenzione scaduta" : "Manutenzione in scadenza",
+            severity: deadline.maintenance.status === "EXPIRED" ? "HIGH" : "MEDIUM",
+            booking
+          });
+        }
+        if (deadline?.revision.status === "EXPIRED" || deadline?.revision.status === "DUE_SOON") {
+          items.push({
+            type: deadline.revision.status === "EXPIRED" ? "VEHICLE_REVISION_EXPIRED" : "VEHICLE_REVISION_DUE_SOON",
+            reason: deadline.revision.status === "EXPIRED" ? "Revisione scaduta" : "Revisione in scadenza",
+            severity: deadline.revision.status === "EXPIRED" ? "HIGH" : "MEDIUM",
+            booking
+          });
+        }
+        if (booking.status === "CLOSED" && booking.returnKm === null) {
+          items.push({ type: "MISSING_RETURN_KM", reason: "Km rientro mancanti", severity: "MEDIUM", booking });
+        }
+        if (!hasCompleteCustomer) {
+          items.push({ type: "INCOMPLETE_CUSTOMER_PROFILE", reason: "Anagrafica cliente incompleta", severity: "MEDIUM", booking });
+        }
+        return items;
+      })
+      .slice(0, 10)
+      .map((item) => ({
+        type: item.type,
+        reason: item.reason,
+        severity: item.severity,
+        bookingId: item.booking.id,
+        code: item.booking.code,
+        customer: item.booking.customerName,
+        vehicle: `${item.booking.vehicle.plate} · ${item.booking.vehicle.brand} ${item.booking.vehicle.model}`,
+        pickupAt: item.booking.pickupAt,
+        returnAt: item.booking.returnAt,
+        status: item.booking.status,
+        contractStatus: item.booking.contract?.status ?? item.booking.contractStatus
+      }));
+
+    const trendStart = startOfDay(new Date(now.getTime() - 29 * dayMs));
+    const trendRange: string[] = [];
+    for (let cursor = new Date(trendStart); cursor <= todayEnd; cursor = new Date(cursor.getTime() + dayMs)) {
+      trendRange.push(dateKey(cursor));
+    }
+    const bookingTrend = trendRange.map((day) => ({
+      day,
+      created: rentalBookings.filter((booking) => dateKey(booking.createdAt) === day).length,
+      pickups: rentalBookings.filter((booking) => dateKey(booking.pickupAt) === day).length,
+      returns: rentalBookings.filter((booking) => dateKey(booking.returnAt) === day).length
+    }));
+
+    const utilizationTrend = trendRange.map((day) => {
+      const dayStart = new Date(`${day}T00:00:00.000Z`);
+      const dayEnd = new Date(`${day}T23:59:59.999Z`);
+      const occupied = rentalBookings.filter(
+        (booking) => !closedRentalStatuses.has(booking.status) && booking.pickupAt <= dayEnd && booking.returnAt >= dayStart
+      ).length;
+      return {
+        day,
+        utilization: rentalVehicles.length ? Number(((occupied / rentalVehicles.length) * 100).toFixed(1)) : 0,
+        occupied
+      };
+    });
+
+    const topVehicleMap = new Map<string, { plate: string; model: string; occupiedDays: number; revenue: number }>();
+    for (const booking of monthBookings) {
+      const key = booking.vehicleId;
+      const item = topVehicleMap.get(key) ?? {
+        plate: booking.vehicle.plate,
+        model: `${booking.vehicle.brand} ${booking.vehicle.model}`.trim(),
+        occupiedDays: 0,
+        revenue: 0
+      };
+      item.occupiedDays += daysDiff(booking.pickupAt, booking.returnAt);
+      item.revenue += booking.pricingSnapshot?.finalTotal ?? booking.finalTotal ?? booking.pricingSnapshot?.expectedTotal ?? booking.expectedTotal ?? 0;
+      topVehicleMap.set(key, item);
+    }
+
     return {
       kpis: {
         totalStoppages: stoppages.length,
@@ -138,6 +421,73 @@ export class GetDashboardStatsUseCase {
           plate: x.stoppage.vehicle.plate
         })),
         alerts
+      },
+      booking: {
+        kpis: {
+          totalRentalVehicles: rentalVehicles.length,
+          availableToday: Math.max(0, rentalVehicles.length - occupiedToday.length),
+          occupiedToday: occupiedToday.length,
+          activeBookings: rentalBookings.filter((booking) => activeRentalStatuses.has(booking.status)).length,
+          pickupsToday: pickupsToday.length,
+          returnsToday: returnsToday.length,
+          utilizationRateToday: rentalVehicles.length ? Number(((occupiedToday.length / rentalVehicles.length) * 100).toFixed(1)) : 0,
+          overdueReturns: overdueReturns.length
+        },
+        contractKpis: {
+          toGenerate: rentalBookings.filter((booking) => booking.contractRequired && !booking.contract).length,
+          toSend: bookingContracts.filter((contract) => contract.status === "READY" && !contract.lastSentAt).length,
+          sentToday: contractDeliveries.filter((delivery) => delivery.status === "SENT" && delivery.sentAt && delivery.sentAt >= todayStart && delivery.sentAt <= todayEnd).length,
+          signed: bookingContracts.filter((contract) => contract.status === "SIGNED").length,
+          errors: bookingContracts.filter((contract) => contract.status === "ERROR").length + deliveryFailures.length,
+          unsigned: bookingContracts.filter((contract) => contract.status !== "SIGNED").length
+        },
+        economicKpis: {
+          expectedRevenueMonth: roundMoney(expectedRevenueMonth),
+          finalRevenueMonth: roundMoney(finalRevenueMonth),
+          averageTicket: revenueBookings.length ? roundMoney(expectedRevenueMonth / revenueBookings.length) : 0,
+          revenuePerVehicle: rentalVehicles.length ? roundMoney(expectedRevenueMonth / rentalVehicles.length) : 0,
+          revenuePerRentalDay: rentedDaysMonth ? roundMoney(expectedRevenueMonth / rentedDaysMonth) : 0,
+          extraKmEstimated: monthBookings.reduce((acc, booking) => acc + (booking.pricingSnapshot?.extraKmEstimated ?? 0), 0),
+          extraKmActual: monthBookings.reduce((acc, booking) => acc + (booking.pricingSnapshot?.extraKmActual ?? 0), 0)
+        },
+        charts: {
+          trend: bookingTrend,
+          utilization: utilizationTrend,
+          contractStatusDistribution,
+          topVehicles: Array.from(topVehicleMap.values())
+            .sort((a, b) => b.occupiedDays - a.occupiedDays)
+            .slice(0, 8)
+            .map((item) => ({ ...item, occupiedDays: Number(item.occupiedDays.toFixed(1)), revenue: roundMoney(item.revenue) }))
+        },
+        lists: {
+          nextPickups: rentalBookings
+            .filter((booking) => booking.pickupAt >= now)
+            .slice(0, 6)
+            .map((booking) => ({
+              id: booking.id,
+              code: booking.code,
+              customer: booking.customerName,
+              vehicle: `${booking.vehicle.plate} · ${booking.vehicle.brand} ${booking.vehicle.model}`,
+              pickupAt: booking.pickupAt,
+              status: booking.status,
+              contractStatus: booking.contract?.status ?? booking.contractStatus
+            })),
+          nextReturns: rentalBookings
+            .filter((booking) => booking.returnAt >= now)
+            .sort((a, b) => a.returnAt.getTime() - b.returnAt.getTime())
+            .slice(0, 6)
+            .map((booking) => ({
+              id: booking.id,
+              code: booking.code,
+              customer: booking.customerName,
+              vehicle: `${booking.vehicle.plate} · ${booking.vehicle.brand} ${booking.vehicle.model}`,
+              returnAt: booking.returnAt,
+              returnKm: booking.returnKm,
+              status: booking.status,
+              contractStatus: booking.contract?.status ?? booking.contractStatus
+            })),
+          criticalBookings
+        }
       }
     };
   }

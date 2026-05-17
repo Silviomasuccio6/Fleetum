@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: ["main"]
@@ -70,6 +74,12 @@ jobs:
 
       - name: Frontend tests
         run: npx tsx --test frontend/tests/*.test.ts
+
+      - name: Public SEO artifacts smoke
+        run: |
+          test -f frontend/public/robots.txt
+          test -f frontend/public/sitemap.xml
+          grep -q "fleetum.it/demo" frontend/public/sitemap.xml
 
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high

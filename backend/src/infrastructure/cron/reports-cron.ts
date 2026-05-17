@@ -124,7 +124,7 @@ export const startReportsCron = (emailQueue: EmailQueueService): ScheduledTask =
         const closureRate = total > 0 ? ((closedLast30 / total) * 100).toFixed(2) : "0.00";
         const format = settings?.reportStyle === "BASIC" ? "BASIC" : "EXECUTIVE";
         const subjectPrefix = format === "EXECUTIVE" ? "[Executive Report]" : "[Report]";
-        const subject = `${subjectPrefix} Gestione Fermi - ${now.toISOString().slice(0, 10)}`;
+        const subject = `${subjectPrefix} Fleetum - ${now.toISOString().slice(0, 10)}`;
         const body =
           format === "EXECUTIVE"
             ? `Executive Report (ultimo 30 giorni)\n\nTenant: ${tenantId}\nData: ${now.toISOString()}\n\nKPI CORE\n- Totale fermi: ${total}\n- Fermi aperti: ${open}\n- Critici aperti: ${critical}\n- Overdue > 30gg: ${overdue}\n- Chiusi ultimo 30gg: ${closedLast30}\n- Closure rate stimato: ${closureRate}%\n\nREMINDER\n- Reminder inviati: ${reminders}\n- Reminder falliti: ${remindersFailed}\n- Failure rate: ${reminderFailureRate}%\n\nPREVENTIVA\n- Veicoli monitorati: ${preventiveDaysDue}\n- Veicoli con km valorizzato: ${preventiveKmDue}\n\nTOP OFFICINE (volume)\n${topWorkshopsLines || "- Nessun dato"}\n\nNote: per dettaglio completo usa dashboard/statistiche del gestionale.`

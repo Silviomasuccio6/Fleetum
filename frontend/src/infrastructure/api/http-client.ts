@@ -3,8 +3,9 @@ import { snackbar } from "../../application/stores/snackbar-store";
 import { useAuthStore } from "../../application/stores/auth-store";
 import { ApiRepository } from "../../domain/repositories/api-repository";
 import { tokenStorage } from "../auth/token-storage";
+import { getApiBaseUrl } from "./api-base-url";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
+const API_BASE_URL = getApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -14,7 +15,7 @@ const api = axios.create({
 let lastToastAt = 0;
 const TOAST_COOLDOWN_MS = 5000;
 const AUTH_ROUTES = ["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password", "/auth/accept-invite", "/auth/refresh"];
-let refreshPromise: Promise<{ token?: string; user?: unknown; csrfToken?: string } | null> | null = null;
+let refreshPromise: Promise<{ user?: unknown; csrfToken?: string } | null> | null = null;
 
 const getCookieValue = (name: string) => {
   const raw = document.cookie
@@ -38,25 +39,15 @@ const tryRefreshSession = async () => {
   refreshPromise = (async () => {
     try {
       const remember = tokenStorage.shouldRemember();
-      const refreshToken = tokenStorage.getRefresh();
-      const refreshRes = await axios.post(
-        `${API_BASE_URL}/auth/refresh`,
-        refreshToken ? { refreshToken } : {},
-        { timeout: 15000, withCredentials: true }
-      );
+      const refreshRes = await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { timeout: 15000, withCredentials: true });
 
-      const nextToken = refreshRes.data?.token as string | undefined;
       const nextUser = refreshRes.data?.user;
       const csrfToken = typeof refreshRes.data?.csrfToken === "string" ? refreshRes.data.csrfToken : undefined;
 
-      if (nextToken) {
-        tokenStorage.set(nextToken, remember);
-        if (nextUser) useAuthStore.getState().setSession(nextToken, nextUser as any, remember);
-        else useAuthStore.setState({ token: nextToken });
-      }
+      if (nextUser) useAuthStore.getState().setSession(nextUser as any, remember);
 
       if (csrfToken) tokenStorage.setCsrf(csrfToken, remember);
-      return { token: nextToken, user: nextUser, csrfToken };
+      return { user: nextUser, csrfToken };
     } catch {
       return null;
     } finally {
@@ -68,14 +59,10 @@ const tryRefreshSession = async () => {
 };
 
 api.interceptors.request.use(async (config) => {
-  const token = tokenStorage.get();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-
   if (isStateChangingMethod(config.method)) {
     let csrfToken = readCsrfToken();
     if (!csrfToken) {
       const refreshed = await tryRefreshSession();
-      if (refreshed?.token) config.headers.Authorization = `Bearer ${refreshed.token}`;
       csrfToken = refreshed?.csrfToken ?? readCsrfToken();
     }
     if (csrfToken) config.headers["X-CSRF-Token"] = csrfToken;
@@ -98,15 +85,18 @@ api.interceptors.response.use(
     const apiDetails = error.response?.data?.details as Record<string, unknown> | undefined;
     const requestUrl = String(originalRequest.url ?? "");
     const isAuthRoute = AUTH_ROUTES.some((route) => requestUrl.startsWith(route));
+    const isSilentSessionCheck = requestUrl.startsWith("/auth/me");
 
     const licenseMessage =
       apiErrorCode === "LICENSE_EXPIRED"
         ? "Licenza scaduta. Rinnova per continuare."
         : apiErrorCode === "LICENSE_SUSPENDED"
           ? "Licenza sospesa. Contatta il supporto."
-          : apiErrorCode === "TENANT_INACTIVE"
-            ? "Tenant disattivato. Contatta l'amministratore."
-            : null;
+          : apiErrorCode === "LICENSE_CANCELED"
+            ? "Abbonamento cancellato. Riattiva il piano per continuare."
+            : apiErrorCode === "TENANT_INACTIVE"
+              ? "Tenant disattivato. Contatta l'amministratore."
+              : null;
 
     const planLimitMessage =
       apiErrorCode === "PLAN_LIMIT"
@@ -120,8 +110,8 @@ api.interceptors.response.use(
       try {
         originalRequest._retry = true;
         const refreshed = await tryRefreshSession();
-        if (refreshed?.token) {
-          originalRequest.headers = { ...(originalRequest.headers ?? {}), Authorization: `Bearer ${refreshed.token}` };
+        if (refreshed) {
+          originalRequest.headers = { ...(originalRequest.headers ?? {}) };
           if (isStateChangingMethod(originalRequest.method)) {
             const csrfToken = refreshed.csrfToken ?? readCsrfToken();
             if (csrfToken) originalRequest.headers["X-CSRF-Token"] = csrfToken;
@@ -148,8 +138,7 @@ api.interceptors.response.use(
       if (csrfToken) {
         originalRequest.headers = {
           ...(originalRequest.headers ?? {}),
-          "X-CSRF-Token": csrfToken,
-          ...(refreshed?.token ? { Authorization: `Bearer ${refreshed.token}` } : {})
+          "X-CSRF-Token": csrfToken
         };
         return api.request(originalRequest);
       }
@@ -165,7 +154,7 @@ api.interceptors.response.use(
       (isNetwork ? "Backend non raggiungibile. Verifica API e connessione." : "Errore di rete");
 
     const now = Date.now();
-    if (now - lastToastAt > TOAST_COOLDOWN_MS) {
+    if (!isSilentSessionCheck && now - lastToastAt > TOAST_COOLDOWN_MS) {
       snackbar.error(message);
       lastToastAt = now;
     }

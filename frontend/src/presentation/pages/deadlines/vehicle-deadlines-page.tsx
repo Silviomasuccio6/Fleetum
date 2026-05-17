@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CalendarPlus } from "lucide-react";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { CardStat } from "../../components/common/table";
 import { PageHeader } from "../../components/layout/page-header";
 import { Badge } from "../../components/ui/badge";
@@ -190,7 +191,7 @@ export const VehicleDeadlinesPage = () => {
               placeholder="Giorni avviso revisione"
             />
             <Button variant="outline" onClick={() => void load()} disabled={loading}>
-              {loading ? "Aggiornamento..." : "Aggiorna scadenziario"}
+              {loading ? <FleetumInlineLoader label="Aggiornamento" /> : "Aggiorna scadenziario"}
             </Button>
           </div>
         </CardContent>
@@ -210,7 +211,7 @@ export const VehicleDeadlinesPage = () => {
           <CardTitle className="text-base">Elenco scadenze</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {loading ? <p className="text-sm text-muted-foreground">Caricamento in corso...</p> : null}
+          {loading ? <FleetumInlineLoader label="Caricamento scadenziario" /> : null}
 
           <div className="space-y-3 md:hidden">
             {activeAlerts.map((row) => (

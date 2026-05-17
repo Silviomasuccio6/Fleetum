@@ -10,6 +10,7 @@ import { AuthSessionService } from "../../../application/services/auth-session-s
 import { AuthThreatDetectionService } from "../../../application/services/auth-threat-detection-service.js";
 import { LicensePolicyService } from "../../../application/services/license-policy-service.js";
 import { OAuthIntent, SocialOAuthService } from "../../../application/services/social-oauth-service.js";
+import { PrivacyNoticeService } from "../../../application/services/privacy-notice-service.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import {
@@ -42,12 +43,22 @@ export class AuthController {
     private readonly licensePolicyService: LicensePolicyService,
     private readonly authSessionService: AuthSessionService,
     private readonly authThreatDetectionService: AuthThreatDetectionService,
-    private readonly socialOAuthService: SocialOAuthService
+    private readonly socialOAuthService: SocialOAuthService,
+    private readonly privacyNoticeService: PrivacyNoticeService
   ) {}
 
   signup = async (req: Request, res: Response) => {
     const input = signupSchema.parse(req.body);
     const result = await this.signupUseCase.execute(input);
+    if (input.privacyAccepted) {
+      await this.privacyNoticeService.accept({
+        tenantId: result.tenantId,
+        userId: result.user.id,
+        source: "signup",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"]
+      });
+    }
     res.status(201).json(result);
   };
 
@@ -65,7 +76,6 @@ export class AuthController {
       setCsrfCookie(res, csrfToken);
       await this.authThreatDetectionService.onSuccess(req.ip, input.email);
       res.json({
-        token: result.token,
         refreshExpiresAt: result.refreshExpiresAt,
         user: result.user,
         csrfToken
@@ -131,6 +141,28 @@ export class AuthController {
     });
   };
 
+  privacyCurrent = async (req: Request, res: Response) => {
+    const result = await this.privacyNoticeService.getCurrentForUser(req.auth?.tenantId, req.auth?.userId);
+    res.json(result);
+  };
+
+  privacyAccept = async (req: Request, res: Response) => {
+    const input = z
+      .object({
+        source: z.enum(["banner", "signup", "profile", "contract", "manual"]).optional().default("banner")
+      })
+      .optional()
+      .parse(req.body);
+    const result = await this.privacyNoticeService.accept({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId,
+      source: input?.source ?? "banner",
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"]
+    });
+    res.json(result);
+  };
+
   updateProfile = async (req: Request, res: Response) => {
     const input = updateProfileSchema.parse(req.body);
     const result = await this.manageProfileUseCase.updateProfile(req.auth!.tenantId, req.auth!.userId, input);
@@ -173,7 +205,6 @@ export class AuthController {
     setRefreshCookie(res, refreshed.refreshToken, refreshed.refreshExpiresAt);
     setCsrfCookie(res, csrfToken);
     res.json({
-      token: refreshed.accessToken,
       refreshExpiresAt: refreshed.refreshExpiresAt,
       user: refreshed.user,
       csrfToken
@@ -249,7 +280,6 @@ export class AuthController {
       }
 
       const payload = new URLSearchParams();
-      payload.set("token", session.token);
       payload.set("refreshExpiresAt", session.refreshExpiresAt);
       payload.set("user", Buffer.from(JSON.stringify(session.user), "utf-8").toString("base64url"));
       const csrfToken = issueCsrfToken();

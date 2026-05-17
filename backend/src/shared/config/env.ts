@@ -14,6 +14,7 @@ const TEST_PLATFORM_JWT_SECRET =
   "test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000";
 const TEST_PLATFORM_ADMIN_PASSWORD = "ci-platform-admin-password-0000";
 const TEST_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/fermi_ci?schema=public";
+const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "smtp").toLowerCase();
 
 const toInt = (value: string, name: string) => {
   const n = Number(value);
@@ -64,6 +65,10 @@ if (PLATFORM_ADMIN_PASSWORD.length < 20) {
   throw new Error("PLATFORM_ADMIN_PASSWORD must be at least 20 chars");
 }
 
+if (!["smtp", "resend"].includes(EMAIL_PROVIDER)) {
+  throw new Error("EMAIL_PROVIDER must be smtp or resend");
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   PORT: toInt(process.env.PORT ?? "4000", "PORT"),
@@ -95,13 +100,18 @@ export const env = {
   APPLE_REDIRECT_URI: process.env.APPLE_REDIRECT_URI ?? `${BACKEND_PUBLIC_URL}/api/auth/apple/callback`,
 
   UPLOAD_DIR: process.env.UPLOAD_DIR ?? "uploads",
+  PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
+  PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
 
-  SMTP_HOST: required("SMTP_HOST", isCiOrTest ? "localhost" : undefined),
+  EMAIL_PROVIDER: EMAIL_PROVIDER as "smtp" | "resend",
+  SMTP_HOST: required("SMTP_HOST", EMAIL_PROVIDER === "resend" || isCiOrTest ? "localhost" : undefined),
   SMTP_PORT: toInt(process.env.SMTP_PORT ?? "465", "SMTP_PORT"),
   SMTP_SECURE: toBool(process.env.SMTP_SECURE ?? "true"),
-  SMTP_USER: required("SMTP_USER", isCiOrTest ? "ci@example.local" : undefined),
-  SMTP_PASS: required("SMTP_PASS", isCiOrTest ? "ci-smtp-pass-placeholder" : undefined),
+  SMTP_USER: required("SMTP_USER", EMAIL_PROVIDER === "resend" || isCiOrTest ? "ci@example.local" : undefined),
+  SMTP_PASS: required("SMTP_PASS", EMAIL_PROVIDER === "resend" || isCiOrTest ? "ci-smtp-pass-placeholder" : undefined),
   SMTP_FROM: process.env.SMTP_FROM ?? "",
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  RESEND_FROM: process.env.RESEND_FROM ?? process.env.SMTP_FROM ?? "Fleetum <onboarding@resend.dev>",
 
   CRON_REMINDER_SCHEDULE: process.env.CRON_REMINDER_SCHEDULE ?? "*/10 * * * *",
   SLA_PRIORITY_THRESHOLDS:
@@ -114,5 +124,15 @@ export const env = {
   PLATFORM_ALERT_EMAILS: toCsvList(process.env.PLATFORM_ALERT_EMAILS),
   PLATFORM_LOGIN_MAX_ATTEMPTS: toInt(process.env.PLATFORM_LOGIN_MAX_ATTEMPTS ?? "5", "PLATFORM_LOGIN_MAX_ATTEMPTS"),
   PLATFORM_LOGIN_WINDOW_MS: toInt(process.env.PLATFORM_LOGIN_WINDOW_MS ?? String(15 * 60 * 1000), "PLATFORM_LOGIN_WINDOW_MS"),
-  PLATFORM_LOGIN_LOCK_MS: toInt(process.env.PLATFORM_LOGIN_LOCK_MS ?? String(30 * 60 * 1000), "PLATFORM_LOGIN_LOCK_MS")
+  PLATFORM_LOGIN_LOCK_MS: toInt(process.env.PLATFORM_LOGIN_LOCK_MS ?? String(30 * 60 * 1000), "PLATFORM_LOGIN_LOCK_MS"),
+
+  BILLING_TRIAL_DAYS: toInt(process.env.BILLING_TRIAL_DAYS ?? "14", "BILLING_TRIAL_DAYS"),
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+  STRIPE_PRICE_STARTER_MONTHLY: process.env.STRIPE_PRICE_STARTER_MONTHLY,
+  STRIPE_PRICE_STARTER_YEARLY: process.env.STRIPE_PRICE_STARTER_YEARLY,
+  STRIPE_PRICE_PRO_MONTHLY: process.env.STRIPE_PRICE_PRO_MONTHLY,
+  STRIPE_PRICE_PRO_YEARLY: process.env.STRIPE_PRICE_PRO_YEARLY,
+  STRIPE_PRICE_ENTERPRISE_MONTHLY: process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY,
+  STRIPE_PRICE_ENTERPRISE_YEARLY: process.env.STRIPE_PRICE_ENTERPRISE_YEARLY
 } as const;

@@ -44,25 +44,25 @@
   }
 
   .dark {
-    --background: 223 36% 10%;
-    --foreground: 210 40% 95%;
-    --card: 224 30% 14%;
+    --background: 216 38% 12%;
+    --foreground: 214 52% 96%;
+    --card: 218 34% 17%;
     --card-foreground: 210 40% 95%;
-    --primary: 212 93% 60%;
-    --primary-foreground: 222 45% 10%;
-    --secondary: 223 23% 20%;
+    --primary: 216 100% 64%;
+    --primary-foreground: 220 46% 7%;
+    --secondary: 218 28% 21%;
     --secondary-foreground: 210 40% 95%;
-    --muted: 223 23% 18%;
-    --muted-foreground: 215 20% 76%;
+    --muted: 218 27% 20%;
+    --muted-foreground: 215 24% 78%;
     --accent: 167 74% 45%;
-    --accent-foreground: 222 45% 10%;
+    --accent-foreground: 220 46% 7%;
     --destructive: 0 72% 55%;
     --destructive-foreground: 210 40% 98%;
-    --border: 223 20% 25%;
-    --input: 223 20% 25%;
-    --ring: 212 93% 60%;
-    --shadow-soft: 0 12px 28px -20px rgb(2 6 23 / 0.58);
-    --shadow-strong: 0 30px 64px -36px rgb(2 6 23 / 0.76);
+    --border: 216 26% 34%;
+    --input: 216 26% 34%;
+    --ring: 216 100% 64%;
+    --shadow-soft: 0 18px 34px -26px rgb(0 0 0 / 0.72);
+    --shadow-strong: 0 36px 78px -42px rgb(0 0 0 / 0.86);
     --cal-bg-0: #161425;
     --cal-bg-1: #1d1a31;
     --cal-bg-2: #26223b;
@@ -99,9 +99,10 @@
 
   .dark body {
     background-image:
-      radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.2), transparent 30%),
-      radial-gradient(circle at 100% 0%, rgba(45, 212, 191, 0.16), transparent 35%),
-      linear-gradient(to bottom, #0f172a, #0b1220);
+      radial-gradient(circle at 8% -4%, rgba(37, 99, 255, 0.4), transparent 36%),
+      radial-gradient(circle at 94% 0%, rgba(0, 184, 169, 0.28), transparent 38%),
+      radial-gradient(circle at 54% 102%, rgba(75, 140, 255, 0.22), transparent 40%),
+      linear-gradient(150deg, #101d31 0%, #0f2137 44%, #132b45 100%);
   }
 
   h1,
@@ -1006,15 +1007,15 @@
   }
 
   .dark .post-login-shell {
-    --g-bg: #060912;
-    --g-surf: rgba(17, 23, 39, 0.9);
-    --g-surf-2: rgba(15, 23, 42, 0.72);
-    --g-border: rgba(148, 163, 184, 0.26);
-    --g-border-strong: rgba(99, 102, 241, 0.46);
-    --g-text: #f0f4ff;
-    --g-text-soft: rgba(240, 244, 255, 0.63);
-    --g-shadow: 0 1px 3px rgba(0, 0, 0, 0.22), 0 14px 28px rgba(0, 0, 0, 0.24);
-    --g-shadow-hover: 0 8px 20px rgba(0, 0, 0, 0.34), 0 26px 52px rgba(0, 0, 0, 0.35);
+    --g-bg: #101d31;
+    --g-surf: rgba(30, 46, 75, 0.88);
+    --g-surf-2: rgba(26, 45, 74, 0.78);
+    --g-border: rgba(169, 188, 222, 0.34);
+    --g-border-strong: rgba(105, 166, 255, 0.6);
+    --g-text: #f6f9ff;
+    --g-text-soft: rgba(226, 236, 249, 0.68);
+    --g-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 18px 42px rgba(0, 0, 0, 0.28);
+    --g-shadow-hover: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 24px 54px rgba(0, 0, 0, 0.38), 0 22px 48px rgba(37, 99, 255, 0.16);
   }
 
   .post-login-shell .post-login-shell__content {
@@ -1041,7 +1042,13 @@
   }
 
   .dark .post-login-shell .saas-topbar {
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.86));
+    background:
+      radial-gradient(circle at 74% 0%, rgba(37, 99, 255, 0.18), transparent 36%),
+      linear-gradient(180deg, rgba(26, 42, 69, 0.94), rgba(18, 35, 59, 0.88));
+    border-bottom-color: rgba(151, 174, 212, 0.36) !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 18px 38px -30px rgba(0, 0, 0, 0.8);
   }
 
   .post-login-shell .topbar-controls-zone {
@@ -1167,7 +1174,26 @@
   }
 
   .dark .post-login-shell .g-sidebar {
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(10, 16, 30, 0.84)) !important;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(37, 99, 255, 0.24), transparent 38%),
+      radial-gradient(circle at 95% 22%, rgba(0, 184, 169, 0.14), transparent 34%),
+      linear-gradient(180deg, rgba(24, 41, 68, 0.93), rgba(17, 33, 57, 0.9)) !important;
+    box-shadow:
+      1px 0 0 rgba(255, 255, 255, 0.04) inset,
+      16px 0 38px -32px rgba(0, 0, 0, 0.88);
+  }
+
+  .dark .post-login-shell .g-nav-active {
+    background:
+      linear-gradient(135deg, rgba(37, 99, 255, 0.2), rgba(0, 184, 169, 0.12)) !important;
+    color: #dbeafe !important;
+    box-shadow:
+      inset 0 0 0 1px rgba(75, 140, 255, 0.36),
+      0 12px 24px -20px rgba(37, 99, 255, 0.7);
+  }
+
+  .dark .post-login-shell .g-section-label {
+    color: rgba(226, 236, 249, 0.5);
   }
 
   .post-login-shell .g-section-label {
@@ -1212,7 +1238,19 @@
   .dark .post-login-shell .saas-floating-panel,
   .dark .post-login-shell .saas-chart-shell,
   .dark .post-login-shell .saas-kpi-card {
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.84)) !important;
+    background:
+      linear-gradient(180deg, rgba(31, 49, 78, 0.88), rgba(20, 38, 64, 0.82)) !important;
+    border-color: rgba(169, 188, 222, 0.34) !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.045) inset,
+      0 18px 46px -34px rgba(0, 0, 0, 0.82) !important;
+  }
+
+  .dark .post-login-shell .saas-hero-header {
+    background:
+      radial-gradient(circle at 12% 0%, rgba(37, 99, 255, 0.32), transparent 42%),
+      radial-gradient(circle at 92% 100%, rgba(0, 184, 169, 0.22), transparent 40%),
+      linear-gradient(180deg, rgba(34, 55, 87, 0.94), rgba(23, 42, 70, 0.88)) !important;
   }
 
   .post-login-shell .g-card-anim,
@@ -1361,11 +1399,13 @@
 
   .dark .post-login-shell .dashboard-enterprise .dashboard-enterprise-kpi,
   .dark .post-login-shell .dashboard-enterprise .dashboard-enterprise-card {
-    border-color: rgba(148, 163, 184, 0.26) !important;
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.93), rgba(15, 23, 42, 0.86)) !important;
+    border-color: rgba(154, 174, 209, 0.3) !important;
+    background:
+      radial-gradient(circle at 82% 0%, rgba(37, 99, 255, 0.09), transparent 30%),
+      linear-gradient(180deg, rgba(35, 55, 87, 0.94), rgba(24, 43, 70, 0.88)) !important;
     box-shadow:
-      0 1px 0 rgba(148, 163, 184, 0.16) inset,
-      0 18px 32px -24px rgba(2, 6, 23, 0.64) !important;
+      0 1px 0 rgba(255, 255, 255, 0.07) inset,
+      0 18px 34px -24px rgba(0, 0, 0, 0.54) !important;
   }
 
   .dark .post-login-shell .dashboard-enterprise .dashboard-enterprise-kpi:hover,
@@ -1382,9 +1422,94 @@
   }
 
   .dark .post-login-shell .dashboard-enterprise .dashboard-enterprise-item {
-    border-color: rgba(148, 163, 184, 0.26) !important;
-    background: rgba(15, 23, 42, 0.68) !important;
-    box-shadow: 0 10px 20px -18px rgba(2, 6, 23, 0.68);
+    border-color: rgba(154, 174, 209, 0.24) !important;
+    background: rgba(29, 49, 79, 0.74) !important;
+    box-shadow: 0 10px 20px -18px rgba(0, 0, 0, 0.58);
+  }
+
+  .dark .post-login-shell .dashboard-enterprise .dashboard-enterprise-item:hover {
+    border-color: rgba(75, 140, 255, 0.42) !important;
+    background: rgba(18, 29, 51, 0.82) !important;
+    box-shadow:
+      0 14px 28px -22px rgba(0, 0, 0, 0.88),
+      0 12px 26px -24px rgba(37, 99, 255, 0.72);
+  }
+
+  .dark .post-login-shell input,
+  .dark .post-login-shell select,
+  .dark .post-login-shell textarea,
+  .dark .post-login-shell [role="combobox"] {
+    background-color: rgba(24, 43, 70, 0.78) !important;
+    border-color: rgba(169, 188, 222, 0.34) !important;
+    color: #f6f9ff !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 10px 24px -22px rgba(0, 0, 0, 0.9);
+  }
+
+  .dark .post-login-shell input::placeholder,
+  .dark .post-login-shell textarea::placeholder {
+    color: rgba(226, 236, 249, 0.42) !important;
+  }
+
+  .dark .post-login-shell input:hover,
+  .dark .post-login-shell select:hover,
+  .dark .post-login-shell textarea:hover,
+  .dark .post-login-shell [role="combobox"]:hover {
+    border-color: rgba(75, 140, 255, 0.42) !important;
+  }
+
+  .dark .post-login-shell input:focus,
+  .dark .post-login-shell select:focus,
+  .dark .post-login-shell textarea:focus,
+  .dark .post-login-shell [role="combobox"]:focus {
+    border-color: rgba(75, 140, 255, 0.68) !important;
+    box-shadow:
+      0 0 0 3px rgba(37, 99, 255, 0.18),
+      0 12px 28px -22px rgba(0, 0, 0, 0.92) !important;
+  }
+
+  .dark .post-login-shell table {
+    color: rgba(246, 249, 255, 0.92);
+  }
+
+  .dark .post-login-shell th {
+    background: rgba(6, 12, 23, 0.78) !important;
+    color: rgba(226, 236, 249, 0.7) !important;
+    border-color: rgba(139, 159, 194, 0.22) !important;
+  }
+
+  .dark .post-login-shell td {
+    border-color: rgba(139, 159, 194, 0.16) !important;
+  }
+
+  .dark .post-login-shell .g-table tr:hover td,
+  .dark .post-login-shell tr:hover td {
+    background: rgba(37, 99, 255, 0.08) !important;
+  }
+
+  .dark .post-login-shell .text-muted-foreground {
+    color: rgba(226, 236, 249, 0.64) !important;
+  }
+
+  .dark .post-login-shell .topbar-controls-zone button,
+  .dark .post-login-shell .topbar-controls-zone [role="button"],
+  .dark .post-login-shell .topbar-controls-zone .premium-language-switcher {
+    border-color: rgba(154, 174, 209, 0.34) !important;
+    background: rgba(24, 43, 70, 0.74) !important;
+    color: #f6f9ff !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.07) inset,
+      0 12px 28px -24px rgba(0, 0, 0, 0.9);
+  }
+
+  .dark .post-login-shell .saas-floating-panel {
+    background:
+      linear-gradient(180deg, rgba(31, 51, 82, 0.98), rgba(20, 39, 67, 0.96)) !important;
+    border-color: rgba(169, 188, 222, 0.36) !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 32px 70px -34px rgba(0, 0, 0, 0.92) !important;
   }
 
   @keyframes dashboardCardIn {
@@ -1651,6 +1776,16 @@
     background: rgba(99, 102, 241, 0.24);
   }
 
+  .dark .post-login-shell .g-scroll::-webkit-scrollbar-thumb,
+  .dark .post-login-shell *::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(75, 140, 255, 0.34);
+  }
+
+  .dark .post-login-shell *::-webkit-scrollbar-track {
+    background: rgba(7, 17, 31, 0.28);
+  }
+
   .post-login-shell .recharts-cartesian-grid line {
     stroke: rgba(99, 102, 241, 0.12);
   }
@@ -1700,7 +1835,21 @@
   }
 
   .dark .post-login-shell .recharts-default-tooltip {
-    background: rgba(15, 23, 42, 0.94) !important;
+    background: rgba(9, 17, 32, 0.96) !important;
+    border-color: rgba(75, 140, 255, 0.32) !important;
+    color: #f6f9ff !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 18px 42px -26px rgba(0, 0, 0, 0.94) !important;
+  }
+
+  .dark .post-login-shell .recharts-cartesian-grid line {
+    stroke: rgba(139, 159, 194, 0.13);
+  }
+
+  .dark .post-login-shell .recharts-text,
+  .dark .post-login-shell .recharts-label {
+    fill: rgba(226, 236, 249, 0.72);
   }
 
   .g-blob,
@@ -3075,6 +3224,91 @@
       animation: none !important;
       transition: none !important;
       transform: none !important;
+    }
+  }
+}
+
+@layer components {
+  .fleetum-landing {
+    font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+    background:
+      radial-gradient(circle at 12% 8%, rgba(37, 99, 255, 0.14), transparent 34%),
+      radial-gradient(circle at 84% 12%, rgba(0, 184, 169, 0.16), transparent 32%),
+      linear-gradient(180deg, #f8fbff 0%, #eef6ff 52%, #f8fbff 100%);
+  }
+
+  .fleetum-landing-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background-image:
+      linear-gradient(rgba(37, 99, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 184, 169, 0.06) 1px, transparent 1px);
+    background-size: 76px 76px;
+    mask-image: linear-gradient(to bottom, black, transparent 88%);
+  }
+
+  .fleetum-landing-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(115deg, transparent 0 57%, rgba(37, 99, 255, 0.09) 57% 64%, transparent 64%),
+      radial-gradient(circle at 70% 34%, rgba(255, 255, 255, 0.9), transparent 26%);
+    pointer-events: none;
+  }
+
+  .fleetum-landing-orb {
+    position: absolute;
+    z-index: -1;
+    border-radius: 999px;
+    filter: blur(24px);
+    opacity: 0.72;
+    animation: fleetumLandingFloat 11s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+
+  .fleetum-landing-orb--one {
+    left: 4%;
+    top: 16%;
+    width: 280px;
+    height: 280px;
+    background: rgba(37, 99, 255, 0.18);
+  }
+
+  .fleetum-landing-orb--two {
+    right: 8%;
+    top: 22%;
+    width: 340px;
+    height: 340px;
+    background: rgba(0, 184, 169, 0.14);
+    animation-delay: -3s;
+  }
+
+  .fleetum-product-frame::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(37, 99, 255, 0.28), rgba(0, 184, 169, 0.22), rgba(255, 255, 255, 0.74));
+    opacity: 0.95;
+  }
+
+  @keyframes fleetumLandingFloat {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    100% {
+      transform: translate3d(18px, -24px, 0) scale(1.08);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fleetum-landing-orb {
+      animation: none;
     }
   }
 }

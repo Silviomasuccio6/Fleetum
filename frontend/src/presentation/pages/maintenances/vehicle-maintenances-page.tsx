@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, ExternalLink, FileImage, FileText, Trash2, X } from "lucide-react";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
-import { tokenStorage } from "../../../infrastructure/auth/token-storage";
+import { FleetumBlockLoader, FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Alert } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
@@ -12,6 +12,7 @@ import { Select } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Textarea } from "../../components/ui/textarea";
 import { useEntitlements } from "../../hooks/use-entitlements";
+import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 
 type Vehicle = {
   id: string;
@@ -44,7 +45,7 @@ type VehicleMaintenance = {
 };
 
 const PAGE_SIZE = 20;
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
+const API_BASE_URL = getApiBaseUrl();
 const euroFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
 const pad = (value: number) => String(value).padStart(2, "0");
@@ -441,11 +442,9 @@ export const VehicleMaintenancesPage = () => {
         setPreviewObjectUrl(null);
       }
 
-      const token = tokenStorage.get();
       const response = await fetch(attachmentUrl(attachment.id), {
         method: "GET",
-        credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined
+        credentials: "include"
       });
       if (!response.ok) {
         throw new Error(`PREVIEW_FETCH_FAILED_${response.status}`);
@@ -578,7 +577,7 @@ export const VehicleMaintenancesPage = () => {
             </Select>
           </div>
 
-          {loading ? <p className="text-sm text-muted-foreground">Caricamento in corso...</p> : null}
+          {loading ? <FleetumInlineLoader label="Caricamento manutenzioni" /> : null}
           {rowsWithoutAttachments.length > 0 ? (
             <Alert className="border-amber-300/70 bg-amber-50/75 text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
               <div className="flex items-start gap-2">
@@ -971,7 +970,7 @@ export const VehicleMaintenancesPage = () => {
               <div className="bg-muted/20 p-3">
                 {previewLoading ? (
                   <div className="grid h-[36vh] place-items-center rounded-lg border bg-card">
-                    <p className="text-sm text-muted-foreground">Caricamento anteprima...</p>
+                    <FleetumBlockLoader label="Caricamento anteprima" className="min-h-0" />
                   </div>
                 ) : previewError ? (
                   <div className="grid h-[36vh] place-items-center rounded-lg border bg-card">

@@ -12,11 +12,11 @@ import {
 } from "../../domain/constants/entitlements";
 
 export const useEntitlements = () => {
-  const token = useAuthStore((state) => state.token);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const { plan, priceMonthly, features, loading, loaded, error, setLoading, setEntitlements, setError, reset } = useEntitlementsStore();
 
   useEffect(() => {
-    if (!token) {
+    if (!isAuthenticated) {
       reset();
       return;
     }
@@ -58,7 +58,7 @@ export const useEntitlements = () => {
     return () => {
       active = false;
     };
-  }, [token, loaded, loading, reset, setEntitlements, setError, setLoading]);
+  }, [isAuthenticated, loaded, loading, reset, setEntitlements, setError, setLoading]);
 
   const can = useCallback((feature: FeatureKey) => hasFeature(plan, feature), [plan]);
   const requiredPlan = useCallback((feature: FeatureKey) => getRequiredPlanForFeature(feature), []);

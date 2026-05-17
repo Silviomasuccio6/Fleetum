@@ -1,10 +1,15 @@
 import { z } from "zod";
+import { signupCompanySchema } from "./tenant-profile-validators.js";
 
 export const signupSchema = z.object({
   tenantName: z.string().min(2),
   firstName: z.string().min(2),
   lastName: z.string().min(2),
   email: z.string().email(),
+  phone: z.string().max(40).optional(),
+  adminRole: z.string().max(80).optional(),
+  privacyAccepted: z.boolean().optional().default(false),
+  company: signupCompanySchema.optional(),
   password: z
     .string()
     .min(8)

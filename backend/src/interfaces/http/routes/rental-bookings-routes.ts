@@ -32,6 +32,7 @@ export const rentalBookingsRoutes = (controller: RentalBookingsController) => {
   router.get("/:id/contract/pdf", requirePermissions("vehicles:read"), asyncHandler(controller.downloadContractPdf));
   router.post("/:id/contract/email", requirePermissions("vehicles:write"), asyncHandler(controller.sendContractEmail));
   router.post("/:id/contract/whatsapp", requirePermissions("vehicles:write"), asyncHandler(controller.sendContractWhatsapp));
+  router.post("/:id/contract/share/revoke", requirePermissions("vehicles:write"), asyncHandler(controller.revokeContractShareLinks));
   router.post("/:id/contract/mark-signed", requirePermissions("vehicles:write"), asyncHandler(controller.markContractSigned));
   router.get("/:id/pricing", requirePermissions("vehicles:read"), asyncHandler(controller.getPricing));
   router.patch("/:id/pricing", requirePermissions("vehicles:write"), asyncHandler(controller.updatePricing));

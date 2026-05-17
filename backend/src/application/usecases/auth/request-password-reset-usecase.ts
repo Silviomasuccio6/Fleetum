@@ -17,7 +17,7 @@ export class RequestPasswordResetUseCase {
       await prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash, expiresAt } });
 
       const link = `${env.APP_URL}/reset-password?token=${rawToken}`;
-      const subject = "Reset password - Gestione Fermi";
+      const subject = "Reset password - Fleetum";
       const body = `Ciao ${user.firstName},\n\nusa questo link per reimpostare la password (valido 30 minuti):\n${link}\n\nSe non hai richiesto il reset, ignora questa email.`;
 
       await this.emailQueueService.enqueue({

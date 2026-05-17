@@ -476,7 +476,7 @@ export class MasterDataController {
     );
     const totalAttachments = rows.reduce((acc, row) => acc + row.attachmentsCount, 0);
 
-    lines.push(this.csvRow(["GESTIONE FERMI SAAS", "REPORT MANUTENZIONI"]));
+    lines.push(this.csvRow(["FLEETUM", "REPORT MANUTENZIONI"]));
     lines.push(this.csvRow(["Template", "Enterprise Maintenance CSV v1"]));
     lines.push(this.csvRow(["Generato il", this.formatDateTime(new Date())]));
     lines.push(this.csvRow(["Tenant", tenantId]));
@@ -556,13 +556,13 @@ export class MasterDataController {
 
   private async buildVehicleMaintenanceWorkbook(tenantId: string, parsed: MaintenanceExportQuery, rows: MaintenanceExportRow[]) {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Gestione Fermi SaaS";
-    workbook.lastModifiedBy = "Gestione Fermi SaaS";
+    workbook.creator = "Fleetum";
+    workbook.lastModifiedBy = "Fleetum";
     workbook.created = new Date();
     workbook.modified = new Date();
     const workbookMetadata = workbook as unknown as { subject?: string; title?: string };
     workbookMetadata.subject = "Maintenance Enterprise Report";
-    workbookMetadata.title = "Gestione Fermi Manutenzioni";
+    workbookMetadata.title = "Fleetum Manutenzioni";
 
     const totalCost = this.roundTo2(rows.reduce((acc, row) => acc + (row.cost ?? 0), 0));
     const totalInvoiceAmount = this.roundTo2(rows.reduce((acc, row) => acc + row.invoiceTotalAmount, 0));

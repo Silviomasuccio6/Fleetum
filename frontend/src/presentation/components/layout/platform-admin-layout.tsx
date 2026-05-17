@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, BarChart3, Building2, ChevronDown, Lock, Menu, ShieldCheck, SlidersHorizontal, Users } from "lucide-react";
+import { Activity, BarChart3, Building2, ChevronDown, Lock, Menu, SlidersHorizontal, Users } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { platformAdminUseCases } from "../../../application/usecases/platform/platform-admin-usecases";
 import { ThemeMode, getStoredTheme, setTheme } from "../../../infrastructure/theme/theme-manager";
@@ -139,7 +139,7 @@ export const PlatformAdminLayout = () => {
             </div>
 
             <div className="grid h-9 w-9 place-items-center rounded-lg border bg-muted text-foreground">
-              <ShieldCheck className="h-4 w-4" />
+              <img src="/brand/fleetum-symbol-color.svg" alt="" className="h-6 w-6 object-contain" />
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold uppercase tracking-[0.14em] text-foreground">Platform Console</p>

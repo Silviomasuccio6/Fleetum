@@ -1,0 +1,17 @@
+<svg width="560" height="140" viewBox="0 0 560 140" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Fleetum logo">
+  <defs>
+    <linearGradient id="fleetumTop" x1="43" y1="18" x2="177" y2="52" gradientUnits="userSpaceOnUse"><stop stop-color="#2563FF"/><stop offset="1" stop-color="#4B8CFF"/></linearGradient>
+    <linearGradient id="fleetumMid" x1="35" y1="70" x2="150" y2="98" gradientUnits="userSpaceOnUse"><stop stop-color="#00B8A9"/><stop offset="1" stop-color="#32DDD1"/></linearGradient>
+    <linearGradient id="fleetumLow" x1="26" y1="109" x2="94" y2="143" gradientUnits="userSpaceOnUse"><stop stop-color="#00B8A9"/><stop offset="1" stop-color="#2563FF"/></linearGradient>
+    <filter id="fleetumShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#2563FF" flood-opacity="0.16"/></filter>
+  </defs>
+  <g filter="url(#fleetumShadow)" transform="translate(0 -10)">
+    <path d="M42 52C46 34 59 25 78 25H179C174 47 160 59 138 59H78C63 59 51 67 42 84V52Z" fill="url(#fleetumTop)"/>
+    <path d="M34 101C41 83 55 75 75 75H154C150 96 136 107 116 107H74C60 107 48 116 34 135V101Z" fill="url(#fleetumMid)"/>
+    <path d="M27 153C34 133 47 124 64 124H96C92 145 80 156 63 156H27V153Z" fill="url(#fleetumLow)"/>
+    <path d="M78 91C78 101 72 107 65 112C58 117 55 125 55 134V150" stroke="#E6ECF2" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="78" cy="91" r="10" fill="#E6ECF2"/>
+    <circle cx="55" cy="150" r="7" fill="#00B8A9"/>
+  </g>
+  <text x="220" y="87" font-family="Inter, Manrope, Avenir Next, Helvetica Neue, Arial, sans-serif" font-size="72" font-weight="750" letter-spacing="-4.5" fill="#07111F">Fleetum</text>
+</svg>

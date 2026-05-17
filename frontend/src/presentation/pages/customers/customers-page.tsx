@@ -9,6 +9,7 @@ import {
   RentalCustomerRegistryItem,
   rentalBookingsUseCases
 } from "../../../application/usecases/rental-bookings-usecases";
+import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -612,8 +613,8 @@ export const CustomersPage = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-xs text-muted-foreground">
-                    Caricamento clienti...
+                  <TableCell colSpan={8} className="py-8 text-center">
+                    <FleetumInlineLoader label="Caricamento clienti" />
                   </TableCell>
                 </TableRow>
               ) : rows.length === 0 ? (
@@ -702,7 +703,7 @@ export const CustomersPage = () => {
               </div>
             </div>
 
-            {detailLoading ? <p className="text-sm text-muted-foreground">Caricamento profilo cliente...</p> : null}
+            {detailLoading ? <FleetumInlineLoader label="Caricamento profilo cliente" /> : null}
             {detailError ? <p className="mb-2 text-sm text-destructive">{detailError}</p> : null}
 
             <div className="space-y-3">

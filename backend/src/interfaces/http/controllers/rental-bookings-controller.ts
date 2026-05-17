@@ -25,6 +25,7 @@ import {
   computeRentalQuote,
   toSafeNonNegativeInt
 } from "../../../application/services/rental-pricing-service.js";
+import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
 import {
   bookingContractEmailSchema,
   bookingContractWhatsappSchema,
@@ -136,8 +137,20 @@ const vehicleSelect = {
   model: true,
   currentKm: true,
   maintenanceIntervalKm: true,
+  revisionDueAt: true,
   site: { select: { id: true, name: true, city: true } }
 } as const;
+
+const monthAvailabilityVehicleSelect = {
+  ...vehicleSelect,
+  revisionDueAt: true,
+  maintenances: {
+    where: { deletedAt: null },
+    orderBy: [{ performedAt: "desc" }, { createdAt: "desc" }] as Prisma.VehicleMaintenanceOrderByWithRelationInput[],
+    take: 1,
+    select: { kmAtService: true, performedAt: true }
+  }
+};
 
 const withDefined = <T extends Record<string, unknown>>(input: T): Partial<T> =>
   Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
@@ -160,6 +173,96 @@ const customerDisplayName = (input: {
   return personName || companyName || "Cliente";
 };
 
+const startOfToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const vehicleMaintenanceDeadlineStatus = (vehicle: {
+  currentKm?: number | null;
+  maintenanceIntervalKm?: number | null;
+  maintenances?: Array<{ kmAtService: number | null; performedAt: Date }>;
+}) => {
+  const intervalKm = typeof vehicle.maintenanceIntervalKm === "number" ? vehicle.maintenanceIntervalKm : null;
+  const currentKm = typeof vehicle.currentKm === "number" ? vehicle.currentKm : null;
+  const baselineKm = typeof vehicle.maintenances?.[0]?.kmAtService === "number" ? vehicle.maintenances[0]!.kmAtService : null;
+
+  if (!intervalKm || intervalKm <= 0 || currentKm == null) {
+    return {
+      status: "OK" as const,
+      label: "Manutenzione ok",
+      detail: "Intervallo manutenzione non configurato"
+    };
+  }
+
+  const kmDrivenSinceMaintenance =
+    baselineKm != null && currentKm >= baselineKm
+      ? Math.max(0, currentKm - baselineKm)
+      : ((currentKm % intervalKm) + intervalKm) % intervalKm;
+  const remainingKm = intervalKm - kmDrivenSinceMaintenance;
+  const warningKm = Math.min(1000, Math.floor(intervalKm * 0.08));
+
+  if (remainingKm <= 0) {
+    return {
+      status: "EXPIRED" as const,
+      label: "Manutenzione scaduta",
+      detail: `Da fare subito · ${Math.abs(remainingKm)} km oltre soglia`
+    };
+  }
+
+  if (remainingKm <= warningKm) {
+    return {
+      status: "DUE_SOON" as const,
+      label: "Manutenzione in scadenza",
+      detail: `${remainingKm} km residui`
+    };
+  }
+
+  return {
+    status: "OK" as const,
+    label: "Manutenzione ok",
+    detail: `${remainingKm} km residui`
+  };
+};
+
+const vehicleRevisionDeadlineStatus = (revisionDueAt?: Date | null) => {
+  if (!revisionDueAt) {
+    return {
+      status: "OK" as const,
+      label: "Revisione ok",
+      detail: "Scadenza revisione non configurata"
+    };
+  }
+
+  const today = startOfToday();
+  const due = new Date(revisionDueAt);
+  due.setHours(0, 0, 0, 0);
+  const days = Math.ceil((due.getTime() - today.getTime()) / 86400000);
+
+  if (days <= 0) {
+    return {
+      status: "EXPIRED" as const,
+      label: "Revisione scaduta",
+      detail: days === 0 ? "Scade oggi" : `Scaduta da ${Math.abs(days)} giorni`
+    };
+  }
+
+  if (days <= 30) {
+    return {
+      status: "DUE_SOON" as const,
+      label: "Revisione in scadenza",
+      detail: `${days} giorni residui`
+    };
+  }
+
+  return {
+    status: "OK" as const,
+    label: "Revisione ok",
+    detail: `Scadenza ${due.toLocaleDateString("it-IT", { month: "2-digit", year: "numeric" })}`
+  };
+};
+
 const customerPrimaryDocument = (input: {
   customerType?: string | null;
   companyVatNumber?: string | null;
@@ -173,7 +276,10 @@ const customerPrimaryDocument = (input: {
 };
 
 export class RentalBookingsController {
-  constructor(private readonly emailQueueService: EmailQueueService = new EmailQueueService()) {}
+  constructor(
+    private readonly emailQueueService: EmailQueueService = new EmailQueueService(),
+    private readonly tenantProfileService: TenantProfileService = new TenantProfileService()
+  ) {}
 
   private readonly uploadRootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 
@@ -368,6 +474,18 @@ export class RentalBookingsController {
     });
   }
 
+  private withTenantEmailSignature(body: string, companyName?: string | null, replyTo?: string | null) {
+    const brand = normalizeText(companyName);
+    if (!brand) return body;
+    const alreadySigned = body.toLowerCase().includes(brand.toLowerCase());
+    if (alreadySigned) return body;
+
+    const lines = [body.trimEnd(), "", brand];
+    const email = normalizeText(replyTo);
+    if (email) lines.push(email);
+    return lines.join("\n");
+  }
+
   private async getOrCreateDefaultTemplate(tenantId: string, userId?: string) {
     const existing = await prisma.contractTemplate.findFirst({
       where: { tenantId, isDefault: true, deletedAt: null },
@@ -376,6 +494,7 @@ export class RentalBookingsController {
     if (existing) return existing;
 
     const defaults = defaultContractTemplate();
+    const tenantBranding = await this.tenantProfileService.contractBranding(tenantId);
     return prisma.contractTemplate.create({
       data: {
         tenantId,
@@ -383,14 +502,16 @@ export class RentalBookingsController {
         content: defaults.content,
         emailSubject: defaults.emailSubject,
         emailBody: defaults.emailBody,
-        companyName: "Fleet Ops Suite",
-        companyAddress: "Via Demo 1, 00100 Roma",
-        companyVat: "P.IVA 00000000000",
-        companyEmail: "contratti@fleetops.demo",
-        companyPhone: "+39 000 0000000",
-        brandPrimary: "#21375d",
-        brandAccent: "#5d82c2",
-        brandFont: "helvetica",
+        companyName: tenantBranding.companyName ?? "Fleetum",
+        companyAddress: tenantBranding.companyAddress ?? "Via Demo 1, 00100 Roma",
+        companyVat: tenantBranding.companyVat ?? "P.IVA 00000000000",
+        companyEmail: tenantBranding.companyEmail ?? "contratti@fleetops.demo",
+        companyPhone: tenantBranding.companyPhone ?? "+39 000 0000000",
+        logoFilePath: tenantBranding.logoFilePath,
+        logoFileName: tenantBranding.logoFileName,
+        brandPrimary: tenantBranding.brandPrimary ?? "#21375d",
+        brandAccent: tenantBranding.brandAccent ?? "#5d82c2",
+        brandFont: tenantBranding.brandFont ?? "helvetica",
         version: 1,
         isDefault: true,
         createdByUserId: userId
@@ -566,6 +687,36 @@ export class RentalBookingsController {
     return `${env.BACKEND_PUBLIC_URL}/api/contracts/public/${encodeURIComponent(token)}`;
   }
 
+  private async assertPublicContractLinkActive(input: { tenantId: string; bookingId: string; token: string }) {
+    const shareUrl = this.buildPublicContractUrl(input.token);
+    const deliveries = await prisma.bookingContractDelivery.findMany({
+      where: {
+        tenantId: input.tenantId,
+        bookingId: input.bookingId,
+        channel: "WHATSAPP"
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { id: true, details: true }
+    });
+
+    const matching = deliveries.find((delivery) => {
+      const details = delivery.details && typeof delivery.details === "object" && !Array.isArray(delivery.details)
+        ? (delivery.details as Record<string, unknown>)
+        : {};
+      return details.shareUrl === shareUrl;
+    });
+
+    if (!matching) return;
+
+    const details = matching.details && typeof matching.details === "object" && !Array.isArray(matching.details)
+      ? (matching.details as Record<string, unknown>)
+      : {};
+    if (typeof details.revokedAt === "string" && details.revokedAt) {
+      throw new AppError("Link contratto revocato", 410, "CONTRACT_SHARE_LINK_REVOKED");
+    }
+  }
+
   private async upsertBookingContractFromTemplate(input: {
     tenantId: string;
     bookingId: string;
@@ -665,6 +816,21 @@ export class RentalBookingsController {
       : null;
 
     try {
+      const tenantBranding = await this.tenantProfileService.contractBranding(contract.tenantId);
+      const templateBranding = contract.template
+        ? {
+            companyName: contract.template.companyName,
+            companyAddress: contract.template.companyAddress,
+            companyVat: contract.template.companyVat,
+            companyEmail: contract.template.companyEmail,
+            companyPhone: contract.template.companyPhone,
+            logoFilePath: contract.template.logoFilePath,
+            logoFileName: contract.template.logoFileName,
+            brandPrimary: contract.template.brandPrimary,
+            brandAccent: contract.template.brandAccent,
+            brandFont: contract.template.brandFont
+          }
+        : {};
       return await buildEnterpriseContractPdf({
         contract: {
           title: contract.title,
@@ -711,20 +877,7 @@ export class RentalBookingsController {
           contractSignedAt: contract.booking.contractSignedAt,
           pricingSnapshot: contract.booking.pricingSnapshot
         },
-        branding: contract.template
-          ? {
-              companyName: contract.template.companyName,
-              companyAddress: contract.template.companyAddress,
-              companyVat: contract.template.companyVat,
-              companyEmail: contract.template.companyEmail,
-              companyPhone: contract.template.companyPhone,
-              logoFilePath: contract.template.logoFilePath,
-              logoFileName: contract.template.logoFileName,
-              brandPrimary: contract.template.brandPrimary,
-              brandAccent: contract.template.brandAccent,
-              brandFont: contract.template.brandFont
-            }
-          : null
+        branding: { ...templateBranding, ...tenantBranding }
       });
     } catch {
       return buildSimplePdfBuffer(contract.title, contract.content);
@@ -1766,6 +1919,9 @@ export class RentalBookingsController {
     const payload = bookingContractEmailSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
     const dictionary = this.buildContractContext(contract.booking as Awaited<ReturnType<RentalBookingsController["getBookingOrThrow"]>>);
+    const tenantBranding = await this.tenantProfileService.contractBranding(tenantId);
+    const senderName = tenantBranding.companyName ?? undefined;
+    const replyTo = tenantBranding.companyEmail ?? undefined;
 
     const recipient =
       payload.to ??
@@ -1777,9 +1933,11 @@ export class RentalBookingsController {
     const subject = payload.subject
       ? sanitizeTemplateInput(payload.subject)
       : renderContractTemplate(contract.emailSubject ?? "Contratto noleggio {{booking.code}}", dictionary);
-    const body = payload.body
-      ? sanitizeTemplateInput(payload.body)
-      : renderContractTemplate(contract.emailBody ?? "In allegato il contratto.", dictionary);
+    const body = this.withTenantEmailSignature(
+      payload.body ? sanitizeTemplateInput(payload.body) : renderContractTemplate(contract.emailBody ?? "In allegato il contratto.", dictionary),
+      senderName,
+      replyTo
+    );
 
     const duplicateDelivery = idempotencyKey
       ? await this.findDuplicateContractDelivery({
@@ -1829,7 +1987,7 @@ export class RentalBookingsController {
       }
     });
 
-    await this.emailQueueService.enqueue({
+    const queuedEmail = await this.emailQueueService.enqueue({
       tenantId,
       type: "BOOKING_CONTRACT",
       recipient,
@@ -1840,6 +1998,8 @@ export class RentalBookingsController {
         bookingId: contract.bookingId,
         contractId: contract.id,
         contractDeliveryId: delivery.id,
+        fromName: senderName,
+        replyTo,
         attachments: [
           {
             filename,
@@ -1849,6 +2009,20 @@ export class RentalBookingsController {
         ]
       }
     });
+
+    await this.emailQueueService.processPending(new Date(), { ids: [queuedEmail.id], take: 1 });
+    const processedDelivery = await prisma.bookingContractDelivery.findUnique({
+      where: { id: delivery.id },
+      select: { status: true, errorMessage: true, sentAt: true }
+    });
+
+    if (processedDelivery?.status === "FAILED") {
+      throw new AppError(
+        processedDelivery.errorMessage ?? "Invio email contratto fallito",
+        502,
+        "CONTRACT_EMAIL_FAILED"
+      );
+    }
 
     await prisma.bookingContract.update({
       where: { id: contract.id },
@@ -1876,7 +2050,12 @@ export class RentalBookingsController {
       })
     });
 
-    res.status(201).json({ queued: true, deliveryId: delivery.id });
+    res.status(201).json({
+      queued: processedDelivery?.status !== "SENT",
+      deliveryId: delivery.id,
+      status: processedDelivery?.status ?? "PENDING",
+      sentAt: processedDelivery?.sentAt ?? null
+    });
   };
 
   sendContractWhatsapp = async (req: Request, res: Response) => {
@@ -2104,15 +2283,101 @@ export class RentalBookingsController {
   };
 
   downloadContractPdfPublic = async (req: Request, res: Response) => {
-    const decoded = this.verifyPublicContractToken(req.params.token);
+    const token = req.params.token;
+    const decoded = this.verifyPublicContractToken(token);
+    await this.assertPublicContractLinkActive({ tenantId: decoded.tenantId, bookingId: decoded.bookingId, token });
     const contract = await this.getContractOrThrow(decoded.tenantId, decoded.bookingId);
     const pdfBuffer = await this.buildContractPdf(contract);
     const filename = this.contractFileName(contract.booking.code, contract.booking.customerName);
+
+    await this.logContractEvent({
+      tenantId: decoded.tenantId,
+      bookingId: decoded.bookingId,
+      contractId: contract.id,
+      type: "PUBLIC_PDF_DOWNLOADED",
+      message: "Contratto scaricato tramite link pubblico sicuro",
+      details: {
+        requestId: req.requestId ?? undefined,
+        expiresAt: new Date(decoded.exp).toISOString()
+      }
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: decoded.tenantId,
+        userId: null,
+        action: "PUBLIC_CONTRACT_DOWNLOAD",
+        resource: "BookingContract",
+        resourceId: contract.id,
+        details: {
+          bookingId: decoded.bookingId,
+          requestId: req.requestId ?? null,
+          expiresAt: new Date(decoded.exp).toISOString()
+        }
+      }
+    });
 
     res.setHeader("Cache-Control", "private, no-store, max-age=0");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename=\"${filename}\"`);
     res.send(pdfBuffer);
+  };
+
+  revokeContractShareLinks = async (req: Request, res: Response) => {
+    const tenantId = req.auth!.tenantId;
+    const actorUserId = req.auth?.userId;
+    const contract = await this.getContractOrThrow(tenantId, req.params.id);
+    const deliveries = await prisma.bookingContractDelivery.findMany({
+      where: {
+        tenantId,
+        contractId: contract.id,
+        channel: "WHATSAPP"
+      },
+      select: { id: true, details: true }
+    });
+
+    const revokedAt = new Date().toISOString();
+    let revoked = 0;
+    for (const delivery of deliveries) {
+      const details = delivery.details && typeof delivery.details === "object" && !Array.isArray(delivery.details)
+        ? { ...(delivery.details as Record<string, unknown>) }
+        : {};
+      if (details.shareUrl && !details.revokedAt) {
+        await prisma.bookingContractDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            details: {
+              ...details,
+              revokedAt,
+              revokedByUserId: actorUserId ?? null
+            } as Prisma.InputJsonValue
+          }
+        });
+        revoked += 1;
+      }
+    }
+
+    await this.logContractEvent({
+      tenantId,
+      bookingId: contract.bookingId,
+      contractId: contract.id,
+      actorUserId,
+      type: "PUBLIC_LINKS_REVOKED",
+      message: "Link pubblici contratto revocati",
+      details: { revoked, revokedAt }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: actorUserId ?? null,
+        action: "PUBLIC_CONTRACT_LINKS_REVOKED",
+        resource: "BookingContract",
+        resourceId: contract.id,
+        details: { bookingId: contract.bookingId, revoked, revokedAt }
+      }
+    });
+
+    res.json({ revoked, revokedAt });
   };
 
   getDefaultContractTemplate = async (req: Request, res: Response) => {
@@ -3287,7 +3552,7 @@ export class RentalBookingsController {
         ...(parsed.siteId ? { siteId: parsed.siteId } : {})
       },
       orderBy: [{ plate: "asc" }],
-      select: vehicleSelect
+      select: monthAvailabilityVehicleSelect
     });
 
     const vehicleIds = vehicles.map((vehicle) => vehicle.id);
@@ -3417,7 +3682,13 @@ export class RentalBookingsController {
     const data = vehicles.map((vehicle) => {
       const rows = byVehicle.get(vehicle.id) ?? [];
       return {
-        vehicle,
+        vehicle: {
+          ...vehicle,
+          deadlineStatus: {
+            maintenance: vehicleMaintenanceDeadlineStatus(vehicle),
+            revision: vehicleRevisionDeadlineStatus(vehicle.revisionDueAt)
+          }
+        },
         bookings: rows.map((booking) => ({
           ...booking,
           customerName: booking.customer ? fullCustomerName({ firstName: booking.customer.firstName, lastName: booking.customer.lastName }) : booking.customerName

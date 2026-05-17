@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { snackbar } from "../../../application/stores/snackbar-store";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
+import { FleetumInlineLoader } from "../brand/fleetum-logo-loader";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CalendarToolbar } from "./CalendarToolbar";
@@ -8,6 +9,7 @@ import { EventPopup } from "./EventPopup";
 import { CalendarEvent } from "./calendar-types";
 import { useCalendar } from "./hooks/useCalendar";
 import { useEvents } from "./hooks/useEvents";
+import { getApiOrigin } from "../../../infrastructure/api/api-base-url";
 import { DayView } from "./views/DayView";
 import { MonthView } from "./views/MonthView";
 import { WeekView } from "./views/WeekView";
@@ -70,14 +72,7 @@ export const CalendarShell = () => {
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [appleImporting, setAppleImporting] = useState(false);
   const [appleImportUrl, setAppleImportUrl] = useState("");
-  const apiOrigin = useMemo(() => {
-    const raw = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:4000/api";
-    try {
-      return new URL(raw).origin;
-    } catch {
-      return window.location.origin;
-    }
-  }, []);
+  const apiOrigin = useMemo(() => getApiOrigin(), []);
 
   const range = useMemo(() => {
     if (curView === "day") {
@@ -445,7 +440,7 @@ export const CalendarShell = () => {
             />
           ) : null}
 
-          {loading ? <div className="calendar-loading">Sync live...</div> : null}
+          {loading ? <div className="calendar-loading"><FleetumInlineLoader label="Sync live" /></div> : null}
           {loading && !visibleEvents.length ? (
             <div className="calendar-skeleton" aria-hidden="true">
               <span />

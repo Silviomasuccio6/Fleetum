@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
 import { stoppageStatusOptions } from "../../../domain/constants/stoppage-status";
+import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { EmptyState } from "../../components/common/table";
 import { PremiumLockGate } from "../../components/common/premium-lock-gate";
 import { PageHeader } from "../../components/layout/page-header";
@@ -133,7 +134,7 @@ export const StoppagesListPage = () => {
     }
   };
 
-  if (loading) return <p className="text-sm text-muted-foreground">Caricamento...</p>;
+  if (loading) return <FleetumBlockLoader label="Caricamento fermi" />;
   if (error)
     return (
       <div className="space-y-3">
@@ -145,7 +146,7 @@ export const StoppagesListPage = () => {
   return (
     <section className="space-y-3">
       <PageHeader
-        title="Gestione Fermi"
+        title="Fermi Tecnici"
         subtitle="Controlla stato, priorità, reminder e assegnazioni da una vista centralizzata."
         actions={
           <>

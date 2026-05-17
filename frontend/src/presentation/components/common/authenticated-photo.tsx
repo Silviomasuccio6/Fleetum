@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { tokenStorage } from "../../../infrastructure/auth/token-storage";
+import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 
 type AuthenticatedPhotoProps = {
   photoId: string;
@@ -8,7 +8,7 @@ type AuthenticatedPhotoProps = {
   className?: string;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
+const API_BASE_URL = getApiBaseUrl();
 
 const buildPhotoEndpoint = (kind: "stoppage" | "vehicle", photoId: string) => {
   const base = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
@@ -27,22 +27,12 @@ export const AuthenticatedPhoto = ({ photoId, kind, alt, className }: Authentica
     let active = true;
     const controller = new AbortController();
 
-    const token = tokenStorage.get();
-    if (!token) {
-      setFailed(true);
-      return () => {
-        controller.abort();
-      };
-    }
-
     setSrc(null);
     setFailed(false);
 
     void fetch(endpoint, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
+      credentials: "include",
       signal: controller.signal
     })
       .then(async (response) => {

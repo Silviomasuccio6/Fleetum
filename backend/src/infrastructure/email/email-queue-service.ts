@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma/client.js";
-import { mailer } from "./mailer.js";
+import { emailSender } from "./email-sender.js";
 
 export type QueueEmailInput = {
   tenantId?: string;
@@ -17,7 +17,7 @@ export const hashToken = (token: string) => crypto.createHash("sha256").update(t
 
 export class EmailQueueService {
   async enqueue(input: QueueEmailInput) {
-    await prisma.emailQueue.create({
+    return prisma.emailQueue.create({
       data: {
         tenantId: input.tenantId,
         type: input.type,
@@ -29,17 +29,23 @@ export class EmailQueueService {
     });
   }
 
-  async processPending(now = new Date()) {
+  async processPending(now = new Date(), options: { ids?: string[]; take?: number } = {}) {
     const pending = await prisma.emailQueue.findMany({
-      where: { status: "PENDING", nextAttemptAt: { lte: now } },
+      where: {
+        status: "PENDING",
+        nextAttemptAt: { lte: now },
+        ...(options.ids?.length ? { id: { in: options.ids } } : {})
+      },
       orderBy: { createdAt: "asc" },
-      take: 30
+      take: options.take ?? 30
     });
 
     for (const item of pending) {
       const meta = (item.meta ?? {}) as Record<string, unknown>;
       try {
         const rawAttachments = Array.isArray(meta.attachments) ? meta.attachments : [];
+        const fromName = typeof meta.fromName === "string" ? meta.fromName : undefined;
+        const replyTo = typeof meta.replyTo === "string" ? meta.replyTo : undefined;
         const attachments = rawAttachments
           .map((x) => x as { filename?: string; contentBase64?: string; contentType?: string })
           .filter((x) => x.filename && x.contentBase64)
@@ -49,7 +55,7 @@ export class EmailQueueService {
             contentType: x.contentType ? String(x.contentType) : undefined
           }));
 
-        await mailer.sendMail({ to: item.recipient, subject: item.subject, text: item.body, attachments });
+        const sent = await emailSender.send({ to: item.recipient, subject: item.subject, text: item.body, fromName, replyTo, attachments });
 
         // Mark as sent immediately after SMTP success to avoid duplicate sends on DB side-effects failures.
         await prisma.emailQueue.update({
@@ -76,7 +82,9 @@ export class EmailQueueService {
                 message: `Contratto inviato a ${item.recipient}`,
                 details: {
                   deliveryId: String(meta.contractDeliveryId),
-                  queueEmailId: item.id
+                  queueEmailId: item.id,
+                  emailProvider: sent.provider,
+                  providerMessageId: sent.id
                 }
               }
             });
@@ -122,30 +130,33 @@ export class EmailQueueService {
           }
         });
 
-        if (meta.contractDeliveryId && meta.contractId && meta.bookingId && meta.tenantId && !hasAttemptsLeft) {
+        if (meta.contractDeliveryId && meta.contractId && meta.bookingId && meta.tenantId) {
           try {
             await prisma.bookingContractDelivery.update({
               where: { id: String(meta.contractDeliveryId) },
               data: { status: "FAILED", errorMessage: (error as Error).message }
             });
-            await prisma.bookingContract.update({
-              where: { id: String(meta.contractId) },
-              data: { status: "ERROR", errorMessage: (error as Error).message }
-            });
-            await prisma.bookingContractEvent.create({
-              data: {
-                tenantId: String(meta.tenantId),
-                bookingId: String(meta.bookingId),
-                contractId: String(meta.contractId),
-                type: "EMAIL_FAILED",
-                message: `Invio contratto fallito verso ${item.recipient}`,
-                details: {
-                  deliveryId: String(meta.contractDeliveryId),
-                  queueEmailId: item.id,
-                  error: (error as Error).message
+
+            if (!hasAttemptsLeft) {
+              await prisma.bookingContract.update({
+                where: { id: String(meta.contractId) },
+                data: { status: "ERROR", errorMessage: (error as Error).message }
+              });
+              await prisma.bookingContractEvent.create({
+                data: {
+                  tenantId: String(meta.tenantId),
+                  bookingId: String(meta.bookingId),
+                  contractId: String(meta.contractId),
+                  type: "EMAIL_FAILED",
+                  message: `Invio contratto fallito verso ${item.recipient}`,
+                  details: {
+                    deliveryId: String(meta.contractDeliveryId),
+                    queueEmailId: item.id,
+                    error: (error as Error).message
+                  }
                 }
-              }
-            });
+              });
+            }
           } catch {
             // no-op
           }

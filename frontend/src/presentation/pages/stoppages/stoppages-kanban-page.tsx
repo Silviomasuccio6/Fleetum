@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
+import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { useAsync } from "../../hooks/use-async";
@@ -32,7 +33,7 @@ export const StoppagesKanbanPage = () => {
     setRefreshTick((x) => x + 1);
   };
 
-  if (loading) return <p className="text-sm text-muted-foreground">Caricamento kanban...</p>;
+  if (loading) return <FleetumBlockLoader label="Caricamento kanban" />;
   if (error) return <p className="text-sm text-destructive">{error}</p>;
 
   return (
