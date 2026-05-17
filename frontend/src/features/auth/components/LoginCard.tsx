@@ -147,9 +147,8 @@ export const LoginCard = () => {
       >
         <div className="premium-login-card-head">
           <img className="premium-login-card-logo premium-login-card-logo--image" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
-          <div className="premium-login-card-kicker">Fleetum workspace</div>
           <h2>Bentornato</h2>
-          <p>Accedi alla control room operativa della tua azienda.</p>
+          <p>Accedi al tuo workspace</p>
         </div>
 
 
@@ -162,7 +161,7 @@ export const LoginCard = () => {
               onClick={() => openSocialAuth("google")}
             >
               <GoogleLogo />
-              <span>Continua con Google</span>
+              <span>Google</span>
             </button>
             <button
               type="button"
@@ -171,7 +170,7 @@ export const LoginCard = () => {
               onClick={() => openSocialAuth("apple")}
             >
               <AppleLogo />
-              <span>Continua con Apple</span>
+              <span>Apple Account</span>
             </button>
           </div>
 
@@ -254,7 +253,7 @@ export const LoginCard = () => {
             ) : success ? (
               "✓ Accesso effettuato"
             ) : (
-              "Accedi al workspace"
+              "Accedi"
             )}
           </button>
 

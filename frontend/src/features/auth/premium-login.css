@@ -1981,3 +1981,55 @@
   height: 1.05rem;
   stroke-width: 1.9;
 }
+
+
+/* Clean tenant login rollback */
+.premium-login-root--clean {
+  --font-display: "Manrope", "Inter", "Segoe UI", sans-serif;
+  --font-body: "Inter", "Segoe UI", sans-serif;
+  background: #f6f9ff;
+}
+
+.premium-login-root--clean .premium-login-bg-gradient {
+  background:
+    radial-gradient(46% 42% at 12% 14%, rgba(37, 99, 255, 0.18), transparent 76%),
+    radial-gradient(44% 40% at 92% 12%, rgba(0, 184, 169, 0.14), transparent 76%),
+    linear-gradient(145deg, #ffffff 0%, #f7faff 46%, #eef5ff 100%);
+}
+
+.premium-login-root--clean .premium-login-card {
+  overflow: visible;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 25px 50px rgba(37, 99, 235, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+}
+
+.premium-login-root--clean .premium-login-card::before,
+.premium-login-root--clean .premium-login-card::after,
+.premium-login-root--clean .premium-login-aurora,
+.premium-login-root--clean .premium-login-spotlight {
+  display: none;
+}
+
+.premium-login-root--clean .premium-login-card-logo {
+  width: 3rem;
+  height: 3rem;
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.20);
+  animation: floatLogo 4s ease-in-out infinite;
+}
+
+.premium-login-root--clean .premium-login-card-logo--image {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.premium-login-root--clean .premium-login-social-btn,
+.premium-login-root--clean .premium-login-field,
+.premium-login-root--clean .premium-login-submit {
+  box-shadow: none;
+}
+
+.premium-login-root--clean .premium-login-submit {
+  min-height: 3.1rem;
+}

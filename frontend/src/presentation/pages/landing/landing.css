@@ -18,6 +18,8 @@
   --fleetum-shadow: 0 34px 110px -70px rgba(0, 0, 0, 0.86);
   --fleetum-glow: 0 0 70px rgba(37, 99, 255, 0.24), 0 0 120px rgba(0, 184, 169, 0.11);
   --fleetum-ease: cubic-bezier(.2, .82, .2, 1);
+  --fleetum-font-sans: "Inter", "Manrope", "Segoe UI", sans-serif;
+  --fleetum-font-display: "Manrope", "Inter", "Segoe UI", sans-serif;
   min-height: 100vh;
   overflow: hidden;
   color: var(--fleetum-ink);
@@ -26,7 +28,7 @@
     radial-gradient(circle at 8% 20%, rgba(0, 184, 169, 0.16), transparent 30rem),
     radial-gradient(circle at 92% 16%, rgba(75, 140, 255, 0.18), transparent 30rem),
     linear-gradient(180deg, #040812 0%, #07111f 38%, #050a14 100%);
-  font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
+  font-family: var(--fleetum-font-sans);
 }
 
 .fleetum-landing *,
@@ -301,6 +303,7 @@
 }
 
 .fleetum-hero h1 {
+  font-family: var(--fleetum-font-display);
   margin: 0 auto;
   max-width: 980px;
   color: #ffffff;
@@ -662,6 +665,7 @@
 .fleetum-section-heading h2,
 .fleetum-showcase-copy h2,
 .fleetum-final-cta__box h2 {
+  font-family: var(--fleetum-font-display);
   margin: 0;
   color: #ffffff;
   font-size: clamp(2.25rem, 4.2vw, 4.55rem);
@@ -1528,6 +1532,7 @@
 }
 
 .fleetum-ops-copy h2 {
+  font-family: var(--fleetum-font-display);
   margin: 0;
   color: #ffffff;
   font-size: clamp(2.15rem, 4vw, 4.2rem);
