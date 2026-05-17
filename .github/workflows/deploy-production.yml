@@ -93,7 +93,27 @@ jobs:
 
       - name: Production health checks
         run: |
-          curl -fsS --max-time 20 https://api.fleetum.it/api/health
-          curl -fsS --max-time 20 https://fleetum.it/ | grep -q "Fleetum"
+          for i in {1..12}; do
+            if curl -fsS --max-time 20 https://api.fleetum.it/api/health; then
+              break
+            fi
+            if [ "$i" = "12" ]; then
+              echo "Backend health check failed after retries" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          for i in {1..12}; do
+            if curl -fsS --max-time 20 https://fleetum.it/ | grep -q "Fleetum"; then
+              break
+            fi
+            if [ "$i" = "12" ]; then
+              echo "Frontend health check failed after retries" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
           curl -fsS --max-time 20 https://fleetum.it/robots.txt | grep -q "Sitemap"
           curl -fsS --max-time 20 https://fleetum.it/sitemap.xml | grep -q "fleetum.it/demo"
