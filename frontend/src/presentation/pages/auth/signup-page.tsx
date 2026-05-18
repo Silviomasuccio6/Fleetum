@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
+import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
+import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
 import "../../../features/auth/premium-login.css";
 
 const SIGNUP_STEPS = [
@@ -236,6 +238,31 @@ export const SignupPage = () => {
 
   return (
     <div className="premium-login-root premium-login-root--clean">
+      <div className="premium-login-bg-gradient" aria-hidden />
+      <div className="premium-login-aurora" aria-hidden>
+        <span className="premium-login-aurora__beam premium-login-aurora__beam--one" />
+        <span className="premium-login-aurora__beam premium-login-aurora__beam--two" />
+        <span className="premium-login-aurora__beam premium-login-aurora__beam--three" />
+      </div>
+      <ParticleCanvas />
+      <MagneticOrbs />
+      <div className="premium-login-grid-overlay" aria-hidden />
+      <div className="premium-login-noise-overlay" aria-hidden />
+      <div className="premium-login-floating-layer" aria-hidden>
+        {Array.from({ length: 18 }, (_, index) => (
+          <span
+            key={index}
+            className="premium-login-floating-dot"
+            style={{
+              left: `${8 + ((index * 17) % 86)}%`,
+              top: `${10 + ((index * 23) % 78)}%`,
+              animationDuration: `${7 + (index % 5)}s`,
+              animationDelay: `${index * 0.42}s`
+            }}
+          />
+        ))}
+      </div>
+      <div className="premium-login-spotlight" aria-hidden />
       <main className="premium-login-auth-shell">
         <section className="premium-login-card-wrap premium-login-card-wrap--signup">
           <div className="premium-login-card premium-login-card--signup">

@@ -2049,16 +2049,35 @@
   --font-body: "Inter", "Segoe UI", sans-serif;
   overflow-x: hidden;
   background:
-    radial-gradient(circle at 50% 0%, rgba(37, 99, 255, 0.05), transparent 22rem),
-    linear-gradient(180deg, #fbfdff 0%, #f4f7fb 100%);
+    radial-gradient(circle at 16% 14%, rgba(37, 99, 255, 0.13), transparent 32%),
+    radial-gradient(circle at 86% 18%, rgba(0, 184, 169, 0.12), transparent 30%),
+    linear-gradient(135deg, #f8fbff 0%, #eef6ff 44%, #f7fbff 100%);
 }
 
 .premium-login-root--clean .premium-login-bg-gradient,
+.premium-login-root--clean .premium-login-aurora,
+.premium-login-root--clean .premium-login-canvas,
+.premium-login-root--clean .premium-login-orb,
 .premium-login-root--clean .premium-login-grid-overlay,
 .premium-login-root--clean .premium-login-noise-overlay,
 .premium-login-root--clean .premium-login-floating-layer,
-.premium-login-root--clean canvas {
-  display: none !important;
+.premium-login-root--clean .premium-login-spotlight {
+  display: block;
+}
+
+.premium-login-root--clean .premium-login-bg-gradient {
+  background:
+    radial-gradient(42% 38% at 10% 14%, rgba(37, 99, 255, 0.32), transparent 78%),
+    radial-gradient(42% 40% at 92% 14%, rgba(0, 184, 169, 0.25), transparent 78%),
+    radial-gradient(44% 38% at 48% 98%, rgba(75, 140, 255, 0.20), transparent 74%),
+    linear-gradient(145deg, #ffffff 0%, #f4f9ff 44%, #edf7ff 100%);
+}
+
+.premium-login-root--clean .premium-login-auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .premium-login-root--clean .premium-login-card-wrap {
