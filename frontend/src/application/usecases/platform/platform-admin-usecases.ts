@@ -94,7 +94,7 @@ export const platformAdminUseCases = {
     });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Login platform fallito");
-    platformAuthStorage.set(data.token);
+    if (data.token) platformAuthStorage.set(data.token);
     return data;
   },
   logout: () => platformAuthStorage.clear(),

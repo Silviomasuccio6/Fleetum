@@ -13,6 +13,7 @@ import {
   PlatformLicense,
   PlatformLicenseStatus
 } from "../../domain/repositories/platform-admin-repository.js";
+import { emailSender } from "../../infrastructure/email/email-sender.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { PlatformAlertService } from "./platform-alert-service.js";
@@ -95,6 +96,40 @@ const constantTimeEqual = (left: string, right: string) => {
   return crypto.timingSafeEqual(leftHash, rightHash);
 };
 
+const PLATFORM_OTP_TTL_MS = 8 * 60 * 1000;
+const platformOtpChallenges = new Map<string, { codeHash: string; expiresAt: number; attempts: number }>();
+
+const maskEmail = (email: string) => email.replace(/^(.{2}).*(@.*)$/, "$1***$2");
+
+const createOtpCode = () => crypto.randomInt(100_000, 1_000_000).toString();
+
+const createOtpKey = (email: string, ip: string) => `${email}:${ip}`;
+
+const platformOtpEmailHtml = (code: string) => `
+  <div style="margin:0;padding:0;background:#07111f;font-family:Inter,Manrope,Arial,sans-serif;color:#e6ecf2;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:radial-gradient(circle at 20% 0%,rgba(37,99,255,.35),transparent 34rem),radial-gradient(circle at 80% 8%,rgba(0,184,169,.22),transparent 30rem),#07111f;padding:40px 16px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;border:1px solid rgba(230,236,242,.14);border-radius:28px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.035));box-shadow:0 28px 90px rgba(0,0,0,.38);">
+          <tr><td style="padding:30px 32px 12px;">
+            <div style="font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:#32ddd1;font-weight:800;">Fleetum Platform Console</div>
+            <h1 style="margin:16px 0 10px;font-size:30px;line-height:1.1;letter-spacing:-.04em;color:#fff;">Codice di verifica amministratore</h1>
+            <p style="margin:0;color:#a7b3c7;font-size:15px;line-height:1.65;">Usa questo codice per completare l'accesso alla Platform Console founder-only. Il codice scade tra 8 minuti.</p>
+          </td></tr>
+          <tr><td style="padding:18px 32px 28px;">
+            <div style="border:1px solid rgba(50,221,209,.28);border-radius:22px;background:rgba(5,12,24,.72);padding:24px;text-align:center;">
+              <div style="font-size:13px;text-transform:uppercase;letter-spacing:.22em;color:#8ea3c4;font-weight:800;">OTP</div>
+              <div style="margin-top:10px;font-size:42px;letter-spacing:.20em;color:#fff;font-weight:900;font-family:Menlo,Consolas,monospace;">${code}</div>
+            </div>
+          </td></tr>
+          <tr><td style="padding:0 32px 32px;">
+            <p style="margin:0;color:#7f8da6;font-size:13px;line-height:1.6;">Se non sei stato tu, cambia subito la password platform e verifica i log di accesso. Non inoltrare questo codice.</p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </div>
+`;
+
 export class PlatformAdminService {
   constructor(
     private readonly repository: PlatformAdminRepository,
@@ -108,10 +143,8 @@ export class PlatformAdminService {
 
     const emailOk = constantTimeEqual(normalizedEmail, env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase());
     const passwordOk = constantTimeEqual(input.password, env.PLATFORM_ADMIN_PASSWORD);
-    const otpRequired = Boolean(env.PLATFORM_ADMIN_OTP);
-    const otpOk = !otpRequired || constantTimeEqual(input.otp ?? "", env.PLATFORM_ADMIN_OTP!);
 
-    if (!emailOk || !passwordOk || !otpOk) {
+    if (!emailOk || !passwordOk) {
       const failure = await this.loginGuard.registerFailure(input.ip, normalizedEmail);
 
       if (failure.locked) {
@@ -132,6 +165,58 @@ export class PlatformAdminService {
 
       throw new AppError("Credenziali platform admin non valide", 401, "UNAUTHORIZED");
     }
+
+    const challengeKey = createOtpKey(normalizedEmail, input.ip);
+    const challenge = platformOtpChallenges.get(challengeKey);
+
+    if (!input.otp) {
+      const code = createOtpCode();
+      platformOtpChallenges.set(challengeKey, {
+        codeHash: crypto.createHash("sha256").update(code).digest("hex"),
+        expiresAt: Date.now() + PLATFORM_OTP_TTL_MS,
+        attempts: 0
+      });
+
+      await emailSender.send({
+        to: env.PLATFORM_ADMIN_EMAIL,
+        subject: "Codice accesso Platform Console Fleetum",
+        text: [
+          "Fleetum Platform Console",
+          `Codice OTP: ${code}`,
+          "Scadenza: 8 minuti.",
+          "Se non sei stato tu, verifica subito la sicurezza dell'account platform."
+        ].join("\n"),
+        html: platformOtpEmailHtml(code),
+        fromName: "Fleetum Security"
+      });
+
+      return {
+        requiresOtp: true,
+        message: `Codice di verifica inviato a ${maskEmail(env.PLATFORM_ADMIN_EMAIL)}`
+      };
+    }
+
+    if (!challenge || challenge.expiresAt < Date.now()) {
+      platformOtpChallenges.delete(challengeKey);
+      throw new AppError("Codice OTP scaduto. Richiedi un nuovo codice.", 401, "PLATFORM_OTP_EXPIRED");
+    }
+
+    if (challenge.attempts >= 5) {
+      platformOtpChallenges.delete(challengeKey);
+      await this.loginGuard.registerFailure(input.ip, normalizedEmail);
+      throw new AppError("Troppi tentativi OTP. Richiedi un nuovo codice.", 401, "PLATFORM_OTP_LOCKED");
+    }
+
+    const otpHash = crypto.createHash("sha256").update(input.otp).digest("hex");
+    const otpOk = constantTimeEqual(otpHash, challenge.codeHash);
+
+    if (!otpOk) {
+      challenge.attempts += 1;
+      platformOtpChallenges.set(challengeKey, challenge);
+      throw new AppError("Codice OTP non valido", 401, "PLATFORM_OTP_INVALID");
+    }
+
+    platformOtpChallenges.delete(challengeKey);
 
     await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
 

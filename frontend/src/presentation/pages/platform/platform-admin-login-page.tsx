@@ -32,6 +32,8 @@ export const PlatformAdminLoginPage = () => {
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [otpRequested, setOtpRequested] = useState(false);
   const [loading, setLoading] = useState(false);
   const [shake, setShake] = useState(false);
 
@@ -59,11 +61,18 @@ export const PlatformAdminLoginPage = () => {
     }
 
     setError(null);
+    setNotice(null);
     setLoading(true);
 
     try {
       const normalizedOtp = otp.trim();
-      await platformAdminUseCases.login({ email, password, otp: normalizedOtp ? normalizedOtp : undefined });
+      const result = await platformAdminUseCases.login({ email, password, otp: normalizedOtp ? normalizedOtp : undefined });
+      if (result?.requiresOtp) {
+        setOtpRequested(true);
+        setNotice(result.message ?? "Codice OTP inviato alla mail platform.");
+        setOtp("");
+        return;
+      }
       navigate("/console");
     } catch (e) {
       setError((e as Error).message);
@@ -121,7 +130,7 @@ export const PlatformAdminLoginPage = () => {
               </div>
 
               <label className="premium-login-field-label" htmlFor="platform-otp">
-                OTP (se abilitato)
+                Codice OTP email
               </label>
               <div className="premium-login-field">
                 <span className="premium-login-field-icon-wrap"><OtpIcon /></span>
@@ -134,11 +143,12 @@ export const PlatformAdminLoginPage = () => {
                   maxLength={6}
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="123456"
+                  placeholder={otpRequested ? "Codice ricevuto via email" : "Richiedilo con email e password"}
                   autoComplete="one-time-code"
                 />
               </div>
 
+              {notice ? <p className="premium-login-success premium-login-error--block">{notice}</p> : null}
               {error ? <p className="premium-login-error premium-login-error--block">{error}</p> : null}
 
               <button className="premium-login-submit" type="submit" disabled={loading}>
@@ -146,10 +156,10 @@ export const PlatformAdminLoginPage = () => {
                 {loading ? (
                   <span className="premium-login-loading">
                     <FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />
-                    Verifica credenziali...
+                    {otpRequested ? "Verifica codice..." : "Invio codice..."}
                   </span>
                 ) : (
-                  "Accedi alla Console"
+                  otpRequested ? "Verifica OTP e accedi" : "Invia codice OTP"
                 )}
               </button>
             </form>
