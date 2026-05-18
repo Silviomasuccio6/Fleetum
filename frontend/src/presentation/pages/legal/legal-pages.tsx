@@ -150,7 +150,7 @@ export const DemoRequestPage = () => {
         <section className="fleetum-demo-card">
           <div className="fleetum-demo-copy">
             <div className="fleetum-demo-brand">
-              <img src="/brand/fleetum-logo-horizontal-dark.svg" alt="Fleetum" />
+              <img src="/brand/fleetum-wordmark-dark-bg.svg" alt="Fleetum" />
               <strong>Demo operativa</strong>
             </div>
             <span>Control room per autonoleggi</span>

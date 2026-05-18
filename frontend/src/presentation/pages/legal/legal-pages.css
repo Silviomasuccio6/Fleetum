@@ -116,10 +116,11 @@
   margin-bottom: clamp(38px, 8vw, 82px);
 }
 .fleetum-demo-brand img {
-  width: 148px;
-  max-width: 45%;
+  width: clamp(152px, 16vw, 182px);
+  max-width: 52%;
   height: auto;
-  filter: brightness(0) invert(1) drop-shadow(0 16px 28px rgba(0,0,0,.22));
+  object-fit: contain;
+  filter: drop-shadow(0 16px 28px rgba(0,0,0,.22));
 }
 .fleetum-demo-brand strong {
   display: inline-flex;
