@@ -181,7 +181,7 @@ export const PlatformAdminLoginPage = () => {
               {notice ? <p className="premium-login-success premium-login-error--block">{notice}</p> : null}
               {error ? <p className="premium-login-error premium-login-error--block">{error}</p> : null}
 
-              <button className="premium-login-submit" type="submit" disabled={loading}>
+              <button className="premium-login-submit" type="submit" disabled={loading || (otpRequested && otp.length !== 6)}>
                 <span className="premium-login-submit-shimmer" />
                 {loading ? (
                   <span className="premium-login-loading">
