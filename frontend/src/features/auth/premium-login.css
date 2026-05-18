@@ -744,6 +744,17 @@
   border: 1px solid rgba(251, 113, 133, 0.38);
 }
 
+.premium-login-success {
+  margin: 0;
+  color: #047857;
+  font-size: 0.72rem;
+  animation: fadeIn 0.2s ease;
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.75rem;
+  background: rgba(209, 250, 229, 0.76);
+  border: 1px solid rgba(16, 185, 129, 0.34);
+}
+
 .premium-login-row {
   display: flex;
   align-items: center;
