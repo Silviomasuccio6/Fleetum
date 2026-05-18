@@ -363,10 +363,16 @@
 }
 
 .fleetum-product-orbit {
+  --tilt-x: 0deg;
+  --tilt-y: 0deg;
+  --tilt-z: 0px;
+  --glow-x: 50%;
+  --glow-y: 18%;
   position: relative;
   max-width: 1080px;
   margin: 0 auto;
   perspective: 1400px;
+  transform-style: preserve-3d;
 }
 
 .fleetum-product-shell {
@@ -379,9 +385,15 @@
     linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.035)),
     #07111f;
   box-shadow: var(--fleetum-shadow), var(--fleetum-glow), inset 0 1px 0 rgba(255,255,255,0.1);
-  transform: rotateX(7deg);
+  transform:
+    perspective(1400px)
+    rotateX(calc(7deg + var(--tilt-x)))
+    rotateY(var(--tilt-y))
+    translate3d(0, 0, var(--tilt-z));
   transform-origin: top center;
-  animation: fleetumMockupIn .95s .15s var(--fleetum-ease) both, fleetumMockupFloat 7s 1.2s ease-in-out infinite alternate;
+  transition: transform .42s cubic-bezier(.22, 1, .36, 1), box-shadow .42s cubic-bezier(.22, 1, .36, 1);
+  animation: fleetumMockupIn .95s .15s var(--fleetum-ease) both;
+  will-change: transform;
 }
 
 .fleetum-product-shell::before {
@@ -392,6 +404,20 @@
   background:
     radial-gradient(circle at 20% 0%, rgba(37,99,255,0.22), transparent 32%),
     radial-gradient(circle at 82% 16%, rgba(50,221,209,0.14), transparent 34%);
+}
+
+.fleetum-product-shell::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at var(--glow-x) var(--glow-y), rgba(50, 221, 209, .18), transparent 30%),
+    radial-gradient(circle at var(--glow-x) var(--glow-y), rgba(37, 99, 255, .20), transparent 44%);
+  opacity: .82;
+  mix-blend-mode: screen;
+  transition: opacity .42s cubic-bezier(.22, 1, .36, 1);
 }
 
 .fleetum-product-chrome {
@@ -1631,13 +1657,8 @@
 }
 
 @keyframes fleetumMockupIn {
-  from { opacity: 0; transform: rotateX(12deg) translateY(44px) scale(.96); filter: blur(18px); }
-  to { opacity: 1; transform: rotateX(7deg) translateY(0) scale(1); filter: blur(0); }
-}
-
-@keyframes fleetumMockupFloat {
-  from { transform: rotateX(7deg) translateY(0); }
-  to { transform: rotateX(5deg) translateY(-12px); }
+  from { opacity: 0; filter: blur(18px); }
+  to { opacity: 1; filter: blur(0); }
 }
 
 @keyframes fleetumChipFloat {
@@ -1916,6 +1937,16 @@
 
   .fleetum-ops-card {
     min-height: 118px;
+  }
+}
+
+@media (pointer: coarse) {
+  .fleetum-product-shell {
+    transform: none;
+  }
+
+  .fleetum-product-shell::after {
+    opacity: .45;
   }
 }
 

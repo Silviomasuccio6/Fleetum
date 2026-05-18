@@ -60,7 +60,17 @@ export class EmailQueueService {
         // Mark as sent immediately after SMTP success to avoid duplicate sends on DB side-effects failures.
         await prisma.emailQueue.update({
           where: { id: item.id },
-          data: { status: "SENT", attempts: { increment: 1 }, lastError: null }
+          data: {
+            status: "SENT",
+            attempts: { increment: 1 },
+            lastError: null,
+            meta: {
+              ...meta,
+              emailProvider: sent.provider,
+              providerMessageId: sent.id,
+              sentAt: new Date().toISOString()
+            } as Prisma.InputJsonValue
+          }
         });
 
         if (meta.contractDeliveryId && meta.contractId && meta.bookingId && meta.tenantId) {
