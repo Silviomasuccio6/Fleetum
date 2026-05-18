@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type SVGProps } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent, type ReactNode, type SVGProps } from "react";
 import {
   ArrowRight,
   BarChart3,
@@ -83,7 +83,7 @@ const Reveal = ({ children, className = "", delay = 0 }: RevealProps) => {
 
 const CountUp = ({ value, suffix = "" }: { value: number; suffix?: string }) => {
   const { ref, visible } = useScrollReveal<HTMLSpanElement>();
-  const [current, setCurrent] = useState(0);
+  const [current, setCurrent] = useState(value);
 
   useEffect(() => {
     if (!visible) return;
@@ -95,12 +95,13 @@ const CountUp = ({ value, suffix = "" }: { value: number; suffix?: string }) => 
 
     const duration = 950;
     const start = performance.now();
+    const startValue = Math.max(1, Math.round(value * 0.72));
     let frame = 0;
 
     const tick = (time: number) => {
       const progress = Math.min(1, (time - start) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setCurrent(Math.round(value * eased));
+      setCurrent(Math.round(startValue + (value - startValue) * eased));
       if (progress < 1) frame = requestAnimationFrame(tick);
     };
 
@@ -109,6 +110,47 @@ const CountUp = ({ value, suffix = "" }: { value: number; suffix?: string }) => 
   }, [value, visible]);
 
   return <span ref={ref}>{current}{suffix}</span>;
+};
+
+const usePremiumTilt = <T extends HTMLElement>() => {
+  const ref = useRef<T | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+  }, []);
+
+  const setNeutral = () => {
+    const node = ref.current;
+    if (!node) return;
+    node.style.setProperty("--tilt-x", "0deg");
+    node.style.setProperty("--tilt-y", "0deg");
+    node.style.setProperty("--tilt-z", "0px");
+    node.style.setProperty("--glow-x", "50%");
+    node.style.setProperty("--glow-y", "18%");
+  };
+
+  const onPointerMove = (event: PointerEvent<T>) => {
+    if (event.pointerType !== "mouse") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const node = ref.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      node.style.setProperty("--tilt-x", `${(0.5 - y) * 7.5}deg`);
+      node.style.setProperty("--tilt-y", `${(x - 0.5) * 9}deg`);
+      node.style.setProperty("--tilt-z", "10px");
+      node.style.setProperty("--glow-x", `${x * 100}%`);
+      node.style.setProperty("--glow-y", `${y * 100}%`);
+    });
+  };
+
+  return { ref, onPointerMove, onPointerLeave: setNeutral };
 };
 
 const LandingSeo = () => {
@@ -272,9 +314,16 @@ const TrustPill = ({ children }: { children: ReactNode }) => (
 const ProductMockup = () => {
   const rows = ["GF100AA", "GF101AB", "GF102AC", "GF103AD", "GF104AE"];
   const days = [12, 13, 14, 15, 16, 17, 18];
+  const tilt = usePremiumTilt<HTMLDivElement>();
 
   return (
-    <div className="fleetum-product-orbit" aria-label="Anteprima control room Fleetum">
+    <div
+      ref={tilt.ref}
+      className="fleetum-product-orbit"
+      aria-label="Anteprima control room Fleetum"
+      onPointerMove={tilt.onPointerMove}
+      onPointerLeave={tilt.onPointerLeave}
+    >
       <div className="fleetum-product-shell">
         <div className="fleetum-product-chrome">
           <span />
@@ -286,19 +335,19 @@ const ProductMockup = () => {
           <div className="fleetum-product-panel fleetum-product-panel--kpis">
             <div>
               <p>Disponibili oggi</p>
-              <strong><CountUp value={74} suffix="%" /></strong>
-              <small>mezzi liberi, prenotati e in rientro</small>
+              <strong><CountUp value={68} suffix="%" /></strong>
+              <small>veicoli liberi per sede e fascia oraria</small>
             </div>
             <div>
               <p>Ricavi mese</p>
-              <strong><CountUp value={38} suffix="k" /></strong>
+              <strong>€ <CountUp value={42} suffix=".8k" /></strong>
               <small>stima booking + consuntivo rientri</small>
             </div>
           </div>
           <div className="fleetum-product-panel fleetum-product-panel--alerts">
-            <span><FileCheck2 className="h-4 w-4" /> 8 contratti da firmare</span>
-            <span><Clock3 className="h-4 w-4" /> 12 rientri oggi · 2 in ritardo</span>
-            <span><Wrench className="h-4 w-4" /> 3 manutenzioni prima dell'uscita</span>
+            <span><FileCheck2 className="h-4 w-4" /> 4 contratti da firmare</span>
+            <span><Clock3 className="h-4 w-4" /> 7 rientri oggi · 2 da presidiare</span>
+            <span><Wrench className="h-4 w-4" /> 2 manutenzioni critiche</span>
           </div>
           <div className="fleetum-booking-preview">
             <div className="fleetum-booking-preview__head">

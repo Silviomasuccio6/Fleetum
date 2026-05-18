@@ -196,17 +196,27 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
   await emailQueueService.processPending(new Date(), { ids: [queuedEmail.id], take: 1 });
   const processed = await prisma.emailQueue.findUnique({
     where: { id: queuedEmail.id },
-    select: { status: true, lastError: true }
+    select: { status: true, lastError: true, meta: true }
   });
-  if (processed?.status === "FAILED") {
+  if (!processed || processed.status !== "SENT") {
     throw new AppError(
-      processed.lastError ?? "Invio richiesta demo non riuscito. Riprova tra poco.",
+      processed?.lastError ?? "Invio richiesta demo non riuscito. Riprova tra poco.",
       502,
       "DEMO_EMAIL_FAILED"
     );
   }
 
-  res.status(202).json({ ok: true, message: "Richiesta demo ricevuta" });
+  const emailMeta = (processed.meta ?? {}) as Record<string, unknown>;
+  res.status(202).json({
+    ok: true,
+    message: "Richiesta demo ricevuta",
+    delivery: {
+      status: processed.status,
+      queueEmailId: queuedEmail.id,
+      provider: typeof emailMeta.emailProvider === "string" ? emailMeta.emailProvider : null,
+      providerMessageId: typeof emailMeta.providerMessageId === "string" ? emailMeta.providerMessageId : null
+    }
+  });
 }));
 
 apiRouter.get("/calendar/apple/feed.ics", asyncHandler(stoppagesController.appleCalendarFeedPublic));
