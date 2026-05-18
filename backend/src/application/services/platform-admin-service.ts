@@ -103,7 +103,7 @@ const maskEmail = (email: string) => email.replace(/^(.{2}).*(@.*)$/, "$1***$2")
 
 const createOtpCode = () => crypto.randomInt(100_000, 1_000_000).toString();
 
-const createOtpKey = (email: string, ip: string) => `${email}:${ip}`;
+const createOtpKey = (email: string) => email;
 
 const platformOtpEmailHtml = (code: string) => `
   <div style="margin:0;padding:0;background:#07111f;font-family:Inter,Manrope,Arial,sans-serif;color:#e6ecf2;">
@@ -111,7 +111,7 @@ const platformOtpEmailHtml = (code: string) => `
       <tr><td align="center">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;border:1px solid rgba(230,236,242,.14);border-radius:28px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.035));box-shadow:0 28px 90px rgba(0,0,0,.38);">
           <tr><td style="padding:30px 32px 12px;">
-            <div style="font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:#32ddd1;font-weight:800;">Fleetum Platform Console</div>
+            <div style="display:inline-block;border:1px solid rgba(75,140,255,.38);border-radius:999px;background:rgba(37,99,255,.16);padding:8px 12px;font-size:12px;letter-spacing:.20em;text-transform:uppercase;color:#ffffff;font-weight:900;">Fleetum Platform Console</div>
             <h1 style="margin:16px 0 10px;font-size:30px;line-height:1.1;letter-spacing:-.04em;color:#fff;">Codice di verifica amministratore</h1>
             <p style="margin:0;color:#a7b3c7;font-size:15px;line-height:1.65;">Usa questo codice per completare l'accesso alla Platform Console founder-only. Il codice scade tra 8 minuti.</p>
           </td></tr>
@@ -166,7 +166,7 @@ export class PlatformAdminService {
       throw new AppError("Credenziali platform admin non valide", 401, "UNAUTHORIZED");
     }
 
-    const challengeKey = createOtpKey(normalizedEmail, input.ip);
+    const challengeKey = createOtpKey(normalizedEmail);
     const challenge = platformOtpChallenges.get(challengeKey);
 
     if (!input.otp) {
