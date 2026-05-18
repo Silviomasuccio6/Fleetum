@@ -23,7 +23,8 @@ export const publicDemoRequestSchema = z.object({
   phone: optionalCleanText(40),
   fleetSize: z.enum(["1-10", "11-30", "31-80", "80+"]).optional(),
   message: z.string().trim().max(1200).optional().transform((value) => value?.replace(/[<>]/g, "").trim()),
-  source: z.string().trim().max(80).optional().default("fleetum.it")
+  source: z.string().trim().max(80).optional().default("fleetum.it"),
+  websiteUrl: z.string().trim().max(0).optional()
 });
 
 export type PublicDemoRequestInput = z.infer<typeof publicDemoRequestSchema>;

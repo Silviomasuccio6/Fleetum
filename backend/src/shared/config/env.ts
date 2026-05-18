@@ -112,6 +112,7 @@ export const env = {
   SMTP_FROM: process.env.SMTP_FROM ?? "",
   RESEND_API_KEY: process.env.RESEND_API_KEY,
   RESEND_FROM: process.env.RESEND_FROM ?? process.env.SMTP_FROM ?? "Fleetum <onboarding@resend.dev>",
+  DEMO_LEAD_RECIPIENT_EMAIL: process.env.DEMO_LEAD_RECIPIENT_EMAIL,
 
   CRON_REMINDER_SCHEDULE: process.env.CRON_REMINDER_SCHEDULE ?? "*/10 * * * *",
   SLA_PRIORITY_THRESHOLDS:

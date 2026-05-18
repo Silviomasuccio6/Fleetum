@@ -166,6 +166,7 @@ export const DemoRequestPage = () => {
             <label>Dimensione flotta<select name="fleetSize" defaultValue=""><option value="" disabled>Seleziona</option>{fleetSizes.map((size) => <option key={size} value={size}>{size} veicoli</option>)}</select></label>
             <label>Messaggio<textarea name="message" maxLength={1200} placeholder="Raccontaci cosa vuoi gestire meglio: booking, contratti, scadenze, sedi..." /></label>
             <input type="hidden" name="source" value="fleetum.it/demo" />
+            <input className="fleetum-demo-honeypot" type="text" name="websiteUrl" tabIndex={-1} autoComplete="off" aria-hidden="true" />
             <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Invio in corso..." : "Richiedi demo"} <Mail size={16} /></button>
             {status === "success" ? <p className="fleetum-demo-success">Richiesta ricevuta. Ti ricontatteremo a breve.</p> : null}
             {status === "error" ? <p className="fleetum-demo-error">{error}</p> : null}

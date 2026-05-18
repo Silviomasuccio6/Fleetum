@@ -27,6 +27,7 @@ import { SettingsService } from "../../../application/services/settings-service.
 import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { env } from "../../../shared/config/env.js";
+import { AppError } from "../../../shared/errors/app-error.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { PrismaAuditLogRepository } from "../../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { PrismaNotificationsRepository } from "../../../infrastructure/repositories/prisma-notifications-repository.js";
@@ -107,7 +108,7 @@ const publicDemoRateLimit = rateLimit({
 });
 
 const demoLeadRecipient = () =>
-  process.env.DEMO_LEAD_RECIPIENT_EMAIL || process.env.PLATFORM_ALERT_EMAILS?.split(",").map((x) => x.trim()).find(Boolean) || env.PLATFORM_ADMIN_EMAIL;
+  env.DEMO_LEAD_RECIPIENT_EMAIL || process.env.PLATFORM_ALERT_EMAILS?.split(",").map((x) => x.trim()).find(Boolean) || env.PLATFORM_ADMIN_EMAIL;
 
 const signupUseCase = new SignupUseCase(userRepo);
 const loginUseCase = new LoginUseCase(userRepo, tokenService, licensePolicyService, authSessionService);
@@ -175,7 +176,7 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
     `Data: ${new Date().toISOString()}`
   ].filter(Boolean).join("\n");
 
-  await emailQueueService.enqueue({
+  const queuedEmail = await emailQueueService.enqueue({
     type: "PUBLIC_DEMO_REQUEST",
     recipient,
     subject: `Nuova demo Fleetum - ${input.companyName}`,
@@ -191,6 +192,19 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
       fromName: "Fleetum"
     }
   });
+
+  await emailQueueService.processPending(new Date(), { ids: [queuedEmail.id], take: 1 });
+  const processed = await prisma.emailQueue.findUnique({
+    where: { id: queuedEmail.id },
+    select: { status: true, lastError: true }
+  });
+  if (processed?.status === "FAILED") {
+    throw new AppError(
+      processed.lastError ?? "Invio richiesta demo non riuscito. Riprova tra poco.",
+      502,
+      "DEMO_EMAIL_FAILED"
+    );
+  }
 
   res.status(202).json({ ok: true, message: "Richiesta demo ricevuta" });
 }));
