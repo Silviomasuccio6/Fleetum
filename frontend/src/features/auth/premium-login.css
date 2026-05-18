@@ -755,6 +755,58 @@
   border: 1px solid rgba(16, 185, 129, 0.34);
 }
 
+.premium-login-otp-panel {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid rgba(37, 99, 255, 0.16);
+  border-radius: 1rem;
+  padding: 0.9rem;
+  background:
+    radial-gradient(circle at 12% 20%, rgba(37, 99, 255, 0.13), transparent 14rem),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(239, 246, 255, 0.86));
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
+}
+
+.premium-login-otp-kicker {
+  color: #2563ff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.premium-login-otp-panel strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.premium-login-otp-panel p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.premium-login-field--otp input {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.premium-login-secondary-action {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 0.2rem 0;
+}
+
+.premium-login-secondary-action:hover {
+  color: #2563ff;
+}
+
 .premium-login-row {
   display: flex;
   align-items: center;
