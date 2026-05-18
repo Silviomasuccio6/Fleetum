@@ -1,6 +1,11 @@
 import { platformAuthStorage } from "../../../infrastructure/platform/platform-auth-storage";
 
-const apiBase = import.meta.env.VITE_PLATFORM_API_BASE_URL || "http://127.0.0.1:4100/platform-api";
+const configuredApiBase = import.meta.env.VITE_PLATFORM_API_BASE_URL || "/platform-api";
+const isBrowser = typeof window !== "undefined";
+const isLocalPlatformHost = isBrowser && ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const apiBase = configuredApiBase.includes("127.0.0.1") || configuredApiBase.includes("localhost")
+  ? (isLocalPlatformHost ? configuredApiBase : "/platform-api")
+  : configuredApiBase;
 
 type PlatformApiError = Error & { status?: number; code?: string };
 
