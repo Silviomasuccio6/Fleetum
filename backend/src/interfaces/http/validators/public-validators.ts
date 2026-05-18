@@ -16,13 +16,18 @@ const optionalCleanText = (max: number) =>
     .optional()
     .transform((value) => (value ? value.replace(/[<>\r\n]/g, " ").replace(/\s+/g, " ").trim() : undefined));
 
+const emptyToUndefined = (value: unknown) => (typeof value === "string" && value.trim() === "" ? undefined : value);
+
 export const publicDemoRequestSchema = z.object({
   companyName: cleanText(120),
   fullName: cleanText(100),
   email: z.string().trim().email().max(160).transform((value) => value.toLowerCase()),
   phone: optionalCleanText(40),
-  fleetSize: z.enum(["1-10", "11-30", "31-80", "80+"]).optional(),
-  message: z.string().trim().max(1200).optional().transform((value) => value?.replace(/[<>]/g, "").trim()),
+  fleetSize: z.preprocess(emptyToUndefined, z.enum(["1-10", "11-30", "31-80", "80+"]).optional()),
+  message: z.preprocess(
+    emptyToUndefined,
+    z.string().trim().max(1200).optional().transform((value) => value?.replace(/[<>]/g, "").trim())
+  ),
   source: z.string().trim().max(80).optional().default("fleetum.it"),
   websiteUrl: z.string().trim().max(0).optional()
 });
