@@ -18,6 +18,19 @@ test("public demo request accepts valid B2B lead", () => {
   assert.equal(parsed.fleetSize, "11-30");
 });
 
+test("public demo request treats optional empty fields as missing", () => {
+  const parsed = publicDemoRequestSchema.parse({
+    companyName: "Autonoleggio Demo",
+    fullName: "Mario Rossi",
+    email: "mario.rossi@example.com",
+    fleetSize: "",
+    message: ""
+  });
+
+  assert.equal(parsed.fleetSize, undefined);
+  assert.equal(parsed.message, undefined);
+});
+
 test("public demo request rejects invalid email and unsafe oversize payload", () => {
   assert.throws(() => {
     publicDemoRequestSchema.parse({

@@ -124,7 +124,9 @@ export const DemoRequestPage = () => {
     setStatus("loading");
     setError("");
     const form = new FormData(formElement);
-    const payload = Object.fromEntries(form.entries());
+    const payload = Object.fromEntries(
+      Array.from(form.entries()).filter(([, value]) => typeof value !== "string" || value.trim() !== "")
+    );
 
     try {
       const response = await fetch(`${apiBaseUrl}/public/demo-request`, {
@@ -132,7 +134,12 @@ export const DemoRequestPage = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) throw new Error("Richiesta non inviata. Riprova tra poco.");
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null);
+        throw new Error(
+          problem?.message || problem?.error || "Richiesta non inviata. Riprova tra poco."
+        );
+      }
       setStatus("success");
       formElement.reset();
     } catch (err) {
