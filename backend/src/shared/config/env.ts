@@ -34,7 +34,7 @@ const parseTrustProxy = (value?: string): boolean | number | string => {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
   if (["0", "false", "no", "off"].includes(normalized)) return false;
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["1", "true", "yes", "on"].includes(normalized)) return 1;
   const asNumber = Number(normalized);
   if (Number.isInteger(asNumber) && asNumber >= 0) return asNumber;
   return value;
