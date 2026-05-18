@@ -68,6 +68,7 @@
 .fleetum-demo-form textarea { width: 100%; min-height: 52px; border: 1px solid #dbe5f2; border-radius: 16px; padding: 0 15px; font: inherit; color: #07111f; background: rgba(255,255,255,.9); outline: none; }
 .fleetum-demo-form textarea { min-height: 116px; padding-top: 14px; resize: vertical; }
 .fleetum-demo-form label:has(textarea) { grid-column: 1 / -1; }
+.fleetum-demo-honeypot { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .fleetum-demo-form button { grid-column: 1 / -1; border: 0; min-height: 56px; border-radius: 18px; color: #fff; font: inherit; font-weight: 950; cursor: pointer; background: linear-gradient(135deg, #0b1220, #2563ff 55%, #00b8a9); display: inline-flex; align-items: center; justify-content: center; gap: 9px; box-shadow: 0 24px 48px -28px rgba(37,99,255,.9); }
 .fleetum-demo-form button:disabled { opacity: .68; cursor: progress; }
 .fleetum-demo-success,
