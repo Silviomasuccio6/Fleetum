@@ -149,16 +149,42 @@ export const DemoRequestPage = () => {
         </div>
         <section className="fleetum-demo-card">
           <div className="fleetum-demo-copy">
-            <span>Demo Fleetum</span>
-            <h1>Vediamo insieme se Fleetum e adatto al tuo autonoleggio.</h1>
-            <p>Compila il form: riceviamo la richiesta, ti ricontattiamo e prepariamo una demo mirata su booking, contratti, clienti, flotta e scadenze.</p>
+            <div className="fleetum-demo-brand">
+              <img src="/brand/fleetum-logo-horizontal-dark.svg" alt="Fleetum" />
+              <strong>Demo operativa</strong>
+            </div>
+            <span>Control room per autonoleggi</span>
+            <h1>Scopri se Fleetum e adatto alla tua flotta.</h1>
+            <p>
+              Una sessione mirata per capire come centralizzare booking, contratti digitali, clienti,
+              veicoli, manutenzioni e scadenze dentro un flusso operativo unico.
+            </p>
+            <div className="fleetum-demo-proof-grid" aria-label="Aree coperte dalla demo Fleetum">
+              <article>
+                <strong>Booking</strong>
+                <small>Vista mensile per veicolo, sedi, stati e disponibilita.</small>
+              </article>
+              <article>
+                <strong>Contratti</strong>
+                <small>PDF, firma, invio email e storico collegato al cliente.</small>
+              </article>
+              <article>
+                <strong>Flotta</strong>
+                <small>Scadenze, manutenzioni, rientri e criticita operative.</small>
+              </article>
+            </div>
             <ul>
+              <li><Check size={16} /> Demo costruita sui tuoi processi reali</li>
               <li><Check size={16} /> Nessun impegno commerciale automatico</li>
-              <li><Check size={16} /> Demo costruita sui tuoi processi</li>
-              <li><Check size={16} /> Risposta via email o telefono</li>
+              <li><Check size={16} /> Risposta da Fleetum via email o telefono</li>
             </ul>
           </div>
           <form className="fleetum-demo-form" onSubmit={submit}>
+            <div className="fleetum-demo-form-head">
+              <span>Richiedi una demo</span>
+              <h2>Parliamo del tuo autonoleggio</h2>
+              <p>Lasciaci i dati principali: ti ricontattiamo per preparare una demo utile, non generica.</p>
+            </div>
             <label>Azienda<input name="companyName" required maxLength={120} placeholder="Es. Autonoleggio Demo" /></label>
             <label>Nome e cognome<input name="fullName" required maxLength={100} placeholder="Mario Rossi" /></label>
             <label>Email<input name="email" type="email" required maxLength={160} placeholder="nome@azienda.it" /></label>
@@ -168,6 +194,9 @@ export const DemoRequestPage = () => {
             <input type="hidden" name="source" value="fleetum.it/demo" />
             <input className="fleetum-demo-honeypot" type="text" name="websiteUrl" tabIndex={-1} autoComplete="off" aria-hidden="true" />
             <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Invio in corso..." : "Richiedi demo"} <Mail size={16} /></button>
+            <p className="fleetum-demo-privacy-note">
+              Usiamo questi dati solo per ricontattarti sulla richiesta demo. Nessuna iscrizione automatica a newsletter.
+            </p>
             {status === "success" ? <p className="fleetum-demo-success">Richiesta ricevuta. Ti ricontatteremo a breve.</p> : null}
             {status === "error" ? <p className="fleetum-demo-error">{error}</p> : null}
           </form>

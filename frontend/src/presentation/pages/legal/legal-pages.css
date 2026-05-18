@@ -70,14 +70,141 @@
 .fleetum-legal-note { margin: 0 clamp(20px, 4vw, 38px) clamp(20px, 4vw, 38px); padding: 20px; border-radius: 24px; background: #fff8e6; border: 1px solid rgba(245, 158, 11, .28); color: #713f12; }
 .fleetum-legal-note strong { display: block; margin-bottom: 6px; }
 
-.fleetum-demo-shell { width: min(1120px, 100%); }
-.fleetum-demo-card { display: grid; grid-template-columns: .9fr 1.1fr; gap: 0; }
-.fleetum-demo-copy { padding: clamp(30px, 5vw, 58px); background: linear-gradient(145deg, #07111f, #0b1b36 58%, #0d766f); color: #fff; }
+.fleetum-demo-shell { width: min(1180px, 100%); }
+.fleetum-demo-page {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(37, 99, 255, .18), transparent 32%),
+    radial-gradient(circle at 86% 12%, rgba(0, 184, 169, .16), transparent 30%),
+    linear-gradient(180deg, #f8fbff, #eef6ff 48%, #f9fbff);
+}
+.fleetum-demo-card {
+  display: grid;
+  grid-template-columns: minmax(0, .96fr) minmax(440px, 1.04fr);
+  gap: 0;
+  border-radius: 40px;
+  box-shadow:
+    0 38px 110px -72px rgba(7, 17, 31, .88),
+    0 0 0 1px rgba(255,255,255,.74) inset;
+}
+.fleetum-demo-copy {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(34px, 5vw, 64px);
+  background:
+    radial-gradient(circle at 12% 6%, rgba(37, 99, 255, .52), transparent 34%),
+    radial-gradient(circle at 92% 12%, rgba(0, 184, 169, .32), transparent 30%),
+    linear-gradient(145deg, #07111f, #0b1b36 58%, #0d766f);
+  color: #fff;
+}
+.fleetum-demo-copy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(230,236,242,.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230,236,242,.055) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(to bottom, black, transparent 92%);
+}
+.fleetum-demo-copy > * { position: relative; z-index: 1; }
+.fleetum-demo-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: clamp(38px, 8vw, 82px);
+}
+.fleetum-demo-brand img {
+  width: 148px;
+  max-width: 45%;
+  height: auto;
+  filter: brightness(0) invert(1) drop-shadow(0 16px 28px rgba(0,0,0,.22));
+}
+.fleetum-demo-brand strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(230,236,242,.18);
+  background: rgba(255,255,255,.08);
+  color: rgba(230,236,242,.88);
+  padding: 0 13px;
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
 .fleetum-demo-copy p { color: rgba(230,236,242,.78); }
+.fleetum-demo-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 28px;
+}
+.fleetum-demo-proof-grid article {
+  min-height: 128px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(230,236,242,.14);
+  background: rgba(255,255,255,.075);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+.fleetum-demo-proof-grid strong,
+.fleetum-demo-proof-grid small {
+  display: block;
+}
+.fleetum-demo-proof-grid strong {
+  margin-bottom: 8px;
+  font-family: var(--fleetum-demo-font-display);
+  font-size: .94rem;
+  letter-spacing: -.02em;
+}
+.fleetum-demo-proof-grid small {
+  color: rgba(230,236,242,.68);
+  font-size: .78rem;
+  line-height: 1.45;
+}
 .fleetum-demo-copy ul { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 12px; }
 .fleetum-demo-copy li { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,.86); font-weight: 650; letter-spacing: -0.012em; }
 .fleetum-demo-copy svg { color: #32ddd1; }
-.fleetum-demo-form { padding: clamp(24px, 4vw, 46px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.fleetum-demo-form {
+  position: relative;
+  padding: clamp(28px, 4.4vw, 54px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center;
+  gap: 16px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(37, 99, 255, .08), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,251,255,.9));
+}
+.fleetum-demo-form-head {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+}
+.fleetum-demo-form-head span {
+  color: #2563ff;
+  text-transform: uppercase;
+  letter-spacing: .15em;
+  font-size: .7rem;
+  font-weight: 800;
+}
+.fleetum-demo-form-head h2 {
+  margin: 8px 0 6px;
+  font-family: var(--fleetum-demo-font-display);
+  font-size: clamp(1.7rem, 2.7vw, 2.45rem);
+  line-height: 1.03;
+  letter-spacing: -.045em;
+  color: #07111f;
+}
+.fleetum-demo-form-head p {
+  margin: 0;
+  max-width: 33rem;
+  color: #64748b;
+  font-size: .95rem;
+  line-height: 1.58;
+  letter-spacing: -.012em;
+}
 .fleetum-demo-form label {
   display: grid;
   gap: 8px;
@@ -110,6 +237,14 @@
 .fleetum-demo-honeypot { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .fleetum-demo-form button { grid-column: 1 / -1; border: 0; min-height: 56px; border-radius: 18px; color: #fff; font-family: var(--fleetum-demo-font-sans); font-size: .95rem; font-weight: 760; letter-spacing: -0.012em; cursor: pointer; background: linear-gradient(135deg, #0b1220, #2563ff 55%, #00b8a9); display: inline-flex; align-items: center; justify-content: center; gap: 9px; box-shadow: 0 24px 48px -28px rgba(37,99,255,.9); }
 .fleetum-demo-form button:disabled { opacity: .68; cursor: progress; }
+.fleetum-demo-privacy-note {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  color: #64748b;
+  font-size: .76rem;
+  line-height: 1.5;
+  text-align: center;
+}
 .fleetum-demo-success,
 .fleetum-demo-error { grid-column: 1 / -1; margin: 0; border-radius: 16px; padding: 13px 14px; font-weight: 700; letter-spacing: -0.01em; }
 .fleetum-demo-success { background: #ecfdf5; color: #047857; }
@@ -119,4 +254,7 @@
   .fleetum-legal-grid,
   .fleetum-demo-card,
   .fleetum-demo-form { grid-template-columns: 1fr; }
+
+  .fleetum-demo-proof-grid { grid-template-columns: 1fr; }
+  .fleetum-demo-brand { margin-bottom: 42px; }
 }
