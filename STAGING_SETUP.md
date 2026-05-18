@@ -16,7 +16,7 @@ Copia `backend/.env.example` in `backend/.env` e imposta almeno:
 - `BACKEND_PUBLIC_URL=https://api-staging.tuo-dominio.it`
 - `CORS_ORIGIN=https://staging.tuo-dominio.it`
 - `PLATFORM_CORS_ORIGIN=https://platform-staging.tuo-dominio.it`
-- `TRUST_PROXY=true` (se dietro reverse proxy)
+- `TRUST_PROXY=1` (se dietro un reverse proxy, ad esempio Caddy/Nginx)
 - Segreti robusti e univoci (`JWT_SECRET`, `PLATFORM_JWT_SECRET`, password admin)
 
 ## 3) Configurazione ambiente frontend (staging)
