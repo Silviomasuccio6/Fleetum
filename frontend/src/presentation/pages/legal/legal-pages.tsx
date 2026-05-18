@@ -120,9 +120,10 @@ export const DemoRequestPage = () => {
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setStatus("loading");
     setError("");
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const payload = Object.fromEntries(form.entries());
 
     try {
@@ -133,7 +134,7 @@ export const DemoRequestPage = () => {
       });
       if (!response.ok) throw new Error("Richiesta non inviata. Riprova tra poco.");
       setStatus("success");
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (err) {
       setStatus("error");
       setError(err instanceof Error ? err.message : "Errore durante l'invio.");
