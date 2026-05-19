@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, Check, Crown, Lock, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Check, Crown, Download, FileText, Lock, Sparkles } from "lucide-react";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import {
   FeatureKey,
@@ -32,6 +32,9 @@ const formatPrice = (value: number) =>
     currency: "EUR",
     maximumFractionDigits: 0
   }).format(value);
+const formatMoney = (value: number, currency = "EUR") =>
+  new Intl.NumberFormat("it-IT", { style: "currency", currency, minimumFractionDigits: 2 }).format(value);
+const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString("it-IT") : "-");
 
 const getPlanAccent = (plan: SaasPlan) => {
   if (plan === "STARTER") {
@@ -71,6 +74,17 @@ export const PlanUpgradePage = () => {
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<Array<{
+    id: string;
+    invoiceNumber: string;
+    issueDate: string;
+    dueDate: string;
+    periodStart: string;
+    periodEnd: string;
+    status: string;
+    total: number;
+    currency: string;
+  }>>([]);
   const currentPlan = loading ? null : plan;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
@@ -96,6 +110,12 @@ export const PlanUpgradePage = () => {
       }),
     [currentPlan]
   );
+
+  useEffect(() => {
+    billingUseCases.listInvoices()
+      .then((result) => setInvoices(result.data))
+      .catch(() => setInvoices([]));
+  }, []);
 
   return (
     <section className="space-y-5">
@@ -286,6 +306,59 @@ export const PlanUpgradePage = () => {
           <CardContent className="py-4 text-sm font-semibold">{checkoutError}</CardContent>
         </Card>
       ) : null}
+
+      <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .34s both" }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4 text-primary" />
+            Fatture e documenti di cortesia
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {invoices.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border/80 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
+              Nessuna fattura disponibile. Quando Fleetum emette un documento per il tuo tenant, lo trovi qui.
+            </div>
+          ) : (
+            <div className="overflow-auto rounded-2xl border border-border/70">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Numero</TableHead>
+                    <TableHead>Periodo</TableHead>
+                    <TableHead>Scadenza</TableHead>
+                    <TableHead>Totale</TableHead>
+                    <TableHead>Stato</TableHead>
+                    <TableHead>PDF</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((invoice) => (
+                    <TableRow key={invoice.id}>
+                      <TableCell className="font-semibold">{invoice.invoiceNumber}</TableCell>
+                      <TableCell>{formatDate(invoice.periodStart)} - {formatDate(invoice.periodEnd)}</TableCell>
+                      <TableCell>{formatDate(invoice.dueDate)}</TableCell>
+                      <TableCell>{formatMoney(invoice.total, invoice.currency)}</TableCell>
+                      <TableCell>{invoice.status}</TableCell>
+                      <TableCell>
+                        <a
+                          className="inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-input bg-background px-3 text-xs font-semibold hover:bg-muted"
+                          href={billingUseCases.invoicePdfUrl(invoice.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Scarica
+                        </a>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .4s both" }}>
         <CardHeader>

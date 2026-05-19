@@ -46,6 +46,7 @@ export class EmailQueueService {
         const rawAttachments = Array.isArray(meta.attachments) ? meta.attachments : [];
         const fromName = typeof meta.fromName === "string" ? meta.fromName : undefined;
         const replyTo = typeof meta.replyTo === "string" ? meta.replyTo : undefined;
+        const html = typeof meta.html === "string" ? meta.html : undefined;
         const attachments = rawAttachments
           .map((x) => x as { filename?: string; contentBase64?: string; contentType?: string })
           .filter((x) => x.filename && x.contentBase64)
@@ -55,7 +56,7 @@ export class EmailQueueService {
             contentType: x.contentType ? String(x.contentType) : undefined
           }));
 
-        const sent = await emailSender.send({ to: item.recipient, subject: item.subject, text: item.body, fromName, replyTo, attachments });
+        const sent = await emailSender.send({ to: item.recipient, subject: item.subject, text: item.body, html, fromName, replyTo, attachments });
 
         // Mark as sent immediately after SMTP success to avoid duplicate sends on DB side-effects failures.
         await prisma.emailQueue.update({
@@ -125,6 +126,27 @@ export class EmailQueueService {
             // Do not throw: email already sent, avoid queue retry duplicates.
           }
         }
+
+        if (meta.invoiceDeliveryId && meta.invoiceId) {
+          try {
+            await prisma.invoiceDelivery.update({
+              where: { id: String(meta.invoiceDeliveryId) },
+              data: {
+                status: "SENT",
+                provider: sent.provider,
+                providerMessageId: sent.id,
+                sentAt: new Date(),
+                errorMessage: null
+              }
+            });
+            await prisma.invoice.update({
+              where: { id: String(meta.invoiceId) },
+              data: { status: "SENT", sentAt: new Date() }
+            });
+          } catch {
+            // Email already sent: avoid duplicate queue retry because of accounting side effects.
+          }
+        }
       } catch (error) {
         const nextAttempts = item.attempts + 1;
         const hasAttemptsLeft = nextAttempts < item.maxAttempts;
@@ -165,6 +187,26 @@ export class EmailQueueService {
                     error: (error as Error).message
                   }
                 }
+              });
+            }
+          } catch {
+            // no-op
+          }
+        }
+
+        if (meta.invoiceDeliveryId && meta.invoiceId) {
+          try {
+            await prisma.invoiceDelivery.update({
+              where: { id: String(meta.invoiceDeliveryId) },
+              data: {
+                status: "FAILED",
+                errorMessage: (error as Error).message
+              }
+            });
+            if (!hasAttemptsLeft) {
+              await prisma.invoice.update({
+                where: { id: String(meta.invoiceId) },
+                data: { status: "ERROR" }
               });
             }
           } catch {

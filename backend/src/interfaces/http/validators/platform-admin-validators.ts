@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const tenantIdSchema = z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9_-]+$/);
+export const invoiceIdSchema = z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9_-]+$/);
 
 export const platformLoginSchema = z.object({
   email: z.string().email().max(320),
@@ -31,6 +32,10 @@ export const quickLicenseActionSchema = z.object({
     "DEACTIVATE_TENANT",
     "REACTIVATE_TENANT"
   ])
+});
+
+export const updateInvoiceStatusSchema = z.object({
+  status: z.enum(["DRAFT", "GENERATED", "SENT", "PAID", "OVERDUE", "VOID", "ERROR"])
 });
 
 export const recentEventsQuerySchema = z.object({

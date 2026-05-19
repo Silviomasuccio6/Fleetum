@@ -18,6 +18,7 @@ import { AuditService } from "../../../application/services/audit-service.js";
 import { AuthSessionService } from "../../../application/services/auth-session-service.js";
 import { AuthThreatDetectionService } from "../../../application/services/auth-threat-detection-service.js";
 import { BillingService } from "../../../application/services/billing-service.js";
+import { InvoiceService } from "../../../application/services/invoice-service.js";
 import { LicensePolicyService } from "../../../application/services/license-policy-service.js";
 import { NotificationsService } from "../../../application/services/notifications-service.js";
 import { PrivacyComplianceService } from "../../../application/services/privacy-compliance-service.js";
@@ -85,6 +86,7 @@ const reminderRepo = new PrismaReminderRepository();
 const auditRepo = new PrismaAuditLogRepository();
 const notificationsRepo = new PrismaNotificationsRepository();
 const emailQueueService = new EmailQueueService();
+const invoiceService = new InvoiceService(emailQueueService);
 const settingsService = new SettingsService(auditRepo);
 const auditService = new AuditService(auditRepo);
 const billingService = new BillingService(auditRepo);
@@ -141,7 +143,7 @@ const authController = new AuthController(
     socialOAuthService,
     privacyNoticeService
 );
-const billingController = new BillingController(billingService);
+const billingController = new BillingController(billingService, invoiceService);
 const usersController = new UsersController(usersUseCases);
 const masterDataController = new MasterDataController(
   sitesUseCases,

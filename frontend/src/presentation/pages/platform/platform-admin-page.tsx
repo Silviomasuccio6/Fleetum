@@ -6,9 +6,12 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  Download,
+  FileText,
   PanelLeftClose,
   RefreshCcw,
   Search,
+  Send,
   ShieldAlert,
   SlidersHorizontal,
   Sparkles,
@@ -20,6 +23,7 @@ import {
 import {
   LicenseStatus,
   PlatformDashboardLiveMetrics,
+  PlatformInvoice,
   platformAdminUseCases,
   PlatformRevenueMetrics,
   QuickAction
@@ -109,7 +113,7 @@ type PlanConfirmState = {
 
 type RowActionSelection = QuickAction | "";
 
-type PlatformSectionId = "overview" | "clients" | "revenue" | "events" | "tools";
+type PlatformSectionId = "overview" | "clients" | "billing" | "revenue" | "events" | "tools";
 type RevenueRange = "2W" | "1M" | "6M" | "1Y";
 
 const actionLabels: Record<QuickAction, string> = {
@@ -166,6 +170,10 @@ const formatCurrency = (value: number) =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(value);
 const formatCurrencyCompact = (value: number) =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", notation: "compact", maximumFractionDigits: 1 }).format(value);
+const formatInvoicePeriod = (start?: string, end?: string) => {
+  if (!start || !end) return "-";
+  return `${formatDate(start)} - ${formatDate(end)}`;
+};
 
 const toMonthKey = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
 const isDayPeriodKey = (periodKey: string) => /^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(periodKey);
@@ -210,6 +218,24 @@ const timeAgo = (iso: string) => {
   return `${d}g fa`;
 };
 
+const invoiceStatusLabel = (status: PlatformInvoice["status"]) => {
+  if (status === "GENERATED") return "Generata";
+  if (status === "SENT") return "Inviata";
+  if (status === "PAID") return "Pagata";
+  if (status === "OVERDUE") return "Scaduta";
+  if (status === "VOID") return "Annullata";
+  if (status === "ERROR") return "Errore";
+  return "Bozza";
+};
+
+const invoiceStatusVariant = (status: PlatformInvoice["status"]) => {
+  if (status === "PAID") return "success" as const;
+  if (status === "SENT" || status === "GENERATED") return "secondary" as const;
+  if (status === "OVERDUE") return "warning" as const;
+  if (status === "ERROR" || status === "VOID") return "destructive" as const;
+  return "secondary" as const;
+};
+
 const useCountUp = (target: number, duration = 560) => {
   const [value, setValue] = useState(target);
 
@@ -239,6 +265,7 @@ export const PlatformAdminPage = () => {
   const sidebarStorageKey = "platform_sidebar_hidden";
 
   const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [invoices, setInvoices] = useState<PlatformInvoice[]>([]);
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [search, setSearch] = useState("");
@@ -251,6 +278,7 @@ export const PlatformAdminPage = () => {
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [planConfirmState, setPlanConfirmState] = useState<PlanConfirmState>(null);
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({});
+  const [invoiceLoading, setInvoiceLoading] = useState<Record<string, boolean>>({});
   const [rowFeedback, setRowFeedback] = useState<Record<string, { type: "success" | "error" | "loading"; message: string }>>({});
   const [rowActionDrafts, setRowActionDrafts] = useState<Record<string, RowActionSelection>>({});
   const [planDrafts, setPlanDrafts] = useState<Record<string, PlanTier>>({});
@@ -288,13 +316,15 @@ export const PlatformAdminPage = () => {
     if (options?.silent) setRefreshing(true);
 
     try {
-      const [tenantData, userData, eventData, revenueData] = await Promise.all([
+      const [tenantData, invoiceData, userData, eventData, revenueData] = await Promise.all([
         platformAdminUseCases.listTenants(),
+        platformAdminUseCases.listInvoices(),
         platformAdminUseCases.listUsers(),
         platformAdminUseCases.listRecentEvents(20),
         platformAdminUseCases.revenueMetrics(revenueQuery)
       ]);
       setTenants(tenantData.data);
+      setInvoices(invoiceData.data);
       setUsers(userData.data);
       setEvents(eventData.data);
       setRevenueReport(revenueData);
@@ -354,7 +384,7 @@ export const PlatformAdminPage = () => {
 
   useEffect(() => {
     const isSectionId = (value: unknown): value is PlatformSectionId =>
-      value === "overview" || value === "clients" || value === "revenue" || value === "events" || value === "tools";
+      value === "overview" || value === "clients" || value === "billing" || value === "revenue" || value === "events" || value === "tools";
 
     const onSetSection = (event: Event) => {
       const payload = (event as CustomEvent<{ section?: unknown }>).detail;
@@ -588,6 +618,65 @@ export const PlatformAdminPage = () => {
     setRowActionDrafts((old) => ({ ...old, [tenant.id]: "" }));
   };
 
+  const generateInvoice = async (tenant: TenantRow) => {
+    setInvoiceLoading((old) => ({ ...old, [tenant.id]: true }));
+    try {
+      const result = await platformAdminUseCases.generateInvoice(tenant.id);
+      snackbar.success(`Fattura ${result.data.invoiceNumber} generata`);
+      setInvoices((old) => [result.data, ...old]);
+      setActiveSection("billing");
+    } catch (err) {
+      if (handlePlatformAuthError(err)) return;
+      snackbar.error((err as Error).message);
+    } finally {
+      setInvoiceLoading((old) => ({ ...old, [tenant.id]: false }));
+    }
+  };
+
+  const sendInvoice = async (invoice: PlatformInvoice) => {
+    setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+    try {
+      const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id);
+      snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
+      setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
+    } catch (err) {
+      if (handlePlatformAuthError(err)) return;
+      snackbar.error((err as Error).message);
+      void load({ silent: true });
+    } finally {
+      setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
+    }
+  };
+
+  const markInvoicePaid = async (invoice: PlatformInvoice) => {
+    setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+    try {
+      const result = await platformAdminUseCases.updateInvoiceStatus(invoice.id, "PAID");
+      snackbar.success(`Fattura ${result.data.invoiceNumber} marcata pagata`);
+      setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
+    } catch (err) {
+      if (handlePlatformAuthError(err)) return;
+      snackbar.error((err as Error).message);
+    } finally {
+      setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
+    }
+  };
+
+  const downloadInvoice = async (invoice: PlatformInvoice) => {
+    try {
+      const blob = await platformAdminUseCases.downloadInvoicePdf(invoice.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${invoice.invoiceNumber}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (handlePlatformAuthError(err)) return;
+      snackbar.error((err as Error).message);
+    }
+  };
+
   const onLicenseSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingTenant) return;
@@ -623,6 +712,7 @@ export const PlatformAdminPage = () => {
   const sectionDescription: Record<PlatformSectionId, string> = {
     overview: "Dashboard premium con live users, MRR e stato operativo",
     clients: "Gestione clienti, piani, licenze e quick action",
+    billing: "Fatture SaaS, PDF, invio email e stato delivery",
     revenue: "MRR, breakdown piani, trend e export finanziario",
     events: "Audit operativo, eventi recenti e watchlist",
     tools: "Azioni globali e scorciatoie di controllo"
@@ -654,6 +744,13 @@ export const PlatformAdminPage = () => {
       description: "MRR e trend economico",
       icon: BarChart3,
       badge: String(revenueActiveTenants)
+    },
+    {
+      id: "billing",
+      label: "Billing",
+      description: "Fatture e invii email",
+      icon: FileText,
+      badge: String(invoices.length)
     },
     {
       id: "events",
@@ -1182,6 +1279,16 @@ export const PlatformAdminPage = () => {
                                   >
                                     Esegui
                                   </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={!!invoiceLoading[tenant.id]}
+                                    className="h-7 w-full min-w-0 text-[11px]"
+                                    onClick={() => generateInvoice(tenant)}
+                                  >
+                                    <FileText className="h-3.5 w-3.5" />
+                                    {invoiceLoading[tenant.id] ? "Genero..." : "Invia fattura"}
+                                  </Button>
                                 </div>
                                 {feedback ? (
                                   <p
@@ -1273,6 +1380,149 @@ export const PlatformAdminPage = () => {
               </CardContent>
             </Card>
           ) : null}
+        </div>
+      ) : null}
+
+      {activeSection === "billing" ? (
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Fatture</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{invoices.length}</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Inviate</p>
+                <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">
+                  {invoices.filter((invoice) => invoice.status === "SENT" || invoice.status === "PAID").length}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Da inviare</p>
+                <p className="mt-2 text-2xl font-semibold text-amber-600 dark:text-amber-300">
+                  {invoices.filter((invoice) => invoice.status === "GENERATED").length}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Totale documenti</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">
+                  {formatCurrency(invoices.reduce((sum, invoice) => sum + invoice.total, 0))}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="platform-main-card platform-main-surface">
+            <CardHeader className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base text-foreground">
+                    <FileText className="h-4 w-4 text-primary" />
+                    Fatture SaaS Fleetum
+                  </CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Genera PDF premium, invia via email e traccia lo stato delivery. I PDF sono copie di cortesia se non emessi via SDI.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => load({ silent: true })}>
+                  <RefreshCcw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  Aggiorna
+                </Button>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {invoices.length === 0 ? (
+                <div className="grid place-items-center gap-3 rounded-2xl border border-dashed border-border/80 bg-card/50 py-12 text-center">
+                  <FileText className="h-7 w-7 text-muted-foreground" />
+                  <div>
+                    <p className="font-semibold text-foreground">Nessuna fattura generata</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Apri Clienti e usa “Genera fattura” sulla riga tenant.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-auto rounded-2xl border border-border/70">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Numero</TableHead>
+                        <TableHead>Tenant</TableHead>
+                        <TableHead>Periodo</TableHead>
+                        <TableHead>Totale</TableHead>
+                        <TableHead>Stato</TableHead>
+                        <TableHead>Delivery</TableHead>
+                        <TableHead>Azioni</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {invoices.map((invoice) => {
+                        const latestDelivery = invoice.deliveries[0];
+                        const busy = !!invoiceLoading[invoice.id];
+                        return (
+                          <TableRow key={invoice.id}>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-semibold text-foreground">{invoice.invoiceNumber}</p>
+                                <p className="text-xs text-muted-foreground">Emessa {formatDate(invoice.issueDate)}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-medium text-foreground">{invoice.billingName}</p>
+                                <p className="text-xs text-muted-foreground">{invoice.billingEmail ?? invoice.tenantName}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {formatInvoicePeriod(invoice.periodStart, invoice.periodEnd)}
+                            </TableCell>
+                            <TableCell className="font-semibold text-foreground">{formatCurrency(invoice.total)}</TableCell>
+                            <TableCell>
+                              <Badge variant={invoiceStatusVariant(invoice.status)}>{invoiceStatusLabel(invoice.status)}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              {latestDelivery ? (
+                                <div className="space-y-1">
+                                  <Badge variant={latestDelivery.status === "SENT" ? "success" : latestDelivery.status === "FAILED" ? "destructive" : "secondary"}>
+                                    {latestDelivery.status}
+                                  </Badge>
+                                  <p className="text-xs text-muted-foreground">{latestDelivery.providerMessageId ?? latestDelivery.errorMessage ?? latestDelivery.recipient}</p>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Non inviata</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1.5">
+                                <Button size="sm" variant="outline" disabled={busy} onClick={() => downloadInvoice(invoice)}>
+                                  <Download className="h-3.5 w-3.5" />
+                                  PDF
+                                </Button>
+                                <Button size="sm" disabled={busy || !invoice.billingEmail} onClick={() => sendInvoice(invoice)}>
+                                  <Send className="h-3.5 w-3.5" />
+                                  {invoice.status === "SENT" ? "Reinvia" : "Invia"}
+                                </Button>
+                                {invoice.status !== "PAID" ? (
+                                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => markInvoicePaid(invoice)}>
+                                    Pagata
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       ) : null}
 

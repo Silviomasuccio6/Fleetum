@@ -6,6 +6,9 @@ export const billingRoutes = (controller: BillingController) => {
   const router = Router();
   router.post("/checkout-session", asyncHandler(controller.createCheckoutSession));
   router.get("/local-complete", asyncHandler(controller.localComplete));
+  router.get("/invoices", asyncHandler(controller.invoices));
+  router.get("/invoices/:invoiceId", asyncHandler(controller.invoice));
+  router.get("/invoices/:invoiceId/pdf", asyncHandler(controller.invoicePdf));
   return router;
 };
 

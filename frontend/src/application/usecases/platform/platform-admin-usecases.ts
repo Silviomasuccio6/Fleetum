@@ -77,6 +77,48 @@ export type PlatformDashboardLiveMetrics = {
   month: string;
 };
 
+export type PlatformInvoice = {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  invoiceNumber: string;
+  issueDate: string;
+  dueDate: string;
+  periodStart: string;
+  periodEnd: string;
+  status: "DRAFT" | "GENERATED" | "SENT" | "PAID" | "OVERDUE" | "VOID" | "ERROR";
+  currency: string;
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  billingName: string;
+  billingEmail?: string | null;
+  sentAt?: string | null;
+  createdAt: string;
+  deliveries: Array<{
+    id: string;
+    channel: "EMAIL";
+    recipient: string;
+    status: "PENDING" | "SENT" | "FAILED";
+    provider?: string | null;
+    providerMessageId?: string | null;
+    errorMessage?: string | null;
+    sentAt?: string | null;
+    createdAt: string;
+  }>;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+    taxRate: number;
+    taxAmount: number;
+    total: number;
+  }>;
+};
+
 const toPlatformError = (response: Response, payload: any, fallback: string): PlatformApiError => {
   const error = new Error(payload?.message || fallback) as PlatformApiError;
   error.status = response.status;
@@ -205,5 +247,45 @@ export const platformAdminUseCases = {
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Azione rapida fallita");
     return data;
+  },
+  listInvoices: async () => {
+    const response = await fetch(`${apiBase}/invoices`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare fatture");
+    return data as { data: PlatformInvoice[] };
+  },
+  generateInvoice: async (tenantId: string) => {
+    const response = await fetch(`${apiBase}/tenants/${tenantId}/invoices/generate`, {
+      method: "POST",
+      headers: { ...authHeaders() }
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Generazione fattura fallita");
+    return data as { data: PlatformInvoice };
+  },
+  sendInvoiceEmail: async (invoiceId: string) => {
+    const response = await fetch(`${apiBase}/invoices/${invoiceId}/send-email`, {
+      method: "POST",
+      headers: { ...authHeaders() }
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Invio fattura fallito");
+    return data as { data: PlatformInvoice };
+  },
+  updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
+    const response = await fetch(`${apiBase}/invoices/${invoiceId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ status })
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Aggiornamento stato fattura fallito");
+    return data as { data: PlatformInvoice };
+  },
+  invoicePdfUrl: (invoiceId: string) => `${apiBase}/invoices/${invoiceId}/pdf`,
+  downloadInvoicePdf: async (invoiceId: string) => {
+    const response = await fetch(`${apiBase}/invoices/${invoiceId}/pdf`, { headers: { ...authHeaders() } });
+    await throwIfNotOk(response, "Download PDF fattura fallito");
+    return response.blob();
   }
 };

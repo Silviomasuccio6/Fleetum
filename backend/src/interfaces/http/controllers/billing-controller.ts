@@ -1,9 +1,14 @@
 import { Request, Response } from "express";
 import { BillingService } from "../../../application/services/billing-service.js";
+import { InvoiceService } from "../../../application/services/invoice-service.js";
 import { checkoutSessionSchema, localCompleteSchema } from "../validators/billing-validators.js";
+import { invoiceIdSchema } from "../validators/platform-admin-validators.js";
 
 export class BillingController {
-  constructor(private readonly billingService: BillingService) {}
+  constructor(
+    private readonly billingService: BillingService,
+    private readonly invoiceService: InvoiceService
+  ) {}
 
   createCheckoutSession = async (req: Request, res: Response) => {
     const input = checkoutSessionSchema.parse(req.body);
@@ -34,5 +39,24 @@ export class BillingController {
       body: req.body
     });
     res.json(result);
+  };
+
+  invoices = async (req: Request, res: Response) => {
+    const result = await this.invoiceService.listTenantInvoices(req.auth!.tenantId);
+    res.json(result);
+  };
+
+  invoice = async (req: Request, res: Response) => {
+    const invoiceId = invoiceIdSchema.parse(req.params.invoiceId);
+    const result = await this.invoiceService.getTenantInvoice(req.auth!.tenantId, invoiceId);
+    res.json(result);
+  };
+
+  invoicePdf = async (req: Request, res: Response) => {
+    const invoiceId = invoiceIdSchema.parse(req.params.invoiceId);
+    const pdf = await this.invoiceService.pdfBufferForTenant(req.auth!.tenantId, invoiceId);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename=\"fleetum-${invoiceId}.pdf\"`);
+    res.send(pdf);
   };
 }
