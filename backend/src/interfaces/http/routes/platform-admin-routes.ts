@@ -9,6 +9,13 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
 
   router.post("/auth/login", platformAuthRateLimit, asyncHandler(controller.login));
   router.get("/tenants", requirePlatformAuth, asyncHandler(controller.tenants));
+  router.get("/invoices", requirePlatformAuth, asyncHandler(controller.invoices));
+  router.get("/tenants/:tenantId/invoices", requirePlatformAuth, asyncHandler(controller.tenantInvoices));
+  router.post("/tenants/:tenantId/invoices/generate", requirePlatformAuth, asyncHandler(controller.generateInvoice));
+  router.get("/invoices/:invoiceId", requirePlatformAuth, asyncHandler(controller.invoice));
+  router.get("/invoices/:invoiceId/pdf", requirePlatformAuth, asyncHandler(controller.invoicePdf));
+  router.post("/invoices/:invoiceId/send-email", requirePlatformAuth, asyncHandler(controller.sendInvoiceEmail));
+  router.patch("/invoices/:invoiceId/status", requirePlatformAuth, asyncHandler(controller.updateInvoiceStatus));
   router.get("/tenants/:id/profile", requirePlatformAuth, asyncHandler(controller.tenantProfile));
   router.get("/tenants/:id/onboarding-status", requirePlatformAuth, asyncHandler(controller.tenantOnboardingStatus));
   router.get("/users", requirePlatformAuth, asyncHandler(controller.users));
