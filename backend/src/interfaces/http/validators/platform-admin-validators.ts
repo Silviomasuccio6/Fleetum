@@ -46,3 +46,13 @@ export const revenueReportQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
   months: z.coerce.number().int().min(2).max(12).default(12)
 });
+
+export const platformRangeQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(30)
+});
+
+export const updateDemoLeadSchema = z.object({
+  status: z.enum(["NEW", "CONTACTED", "QUALIFIED", "WON", "LOST", "SPAM"])
+});
+
+export const demoLeadIdSchema = z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9_-]+$/);

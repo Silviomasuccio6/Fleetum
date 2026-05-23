@@ -1,4 +1,5 @@
 import rateLimit from "express-rate-limit";
+import crypto from "node:crypto";
 import { Router } from "express";
 import { AcceptInviteUseCase } from "../../../application/usecases/auth/accept-invite-usecase.js";
 import { LoginUseCase } from "../../../application/usecases/auth/login-usecase.js";
@@ -56,7 +57,7 @@ import { requireAuth } from "../middlewares/auth.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
 import { createRequireFeature } from "../middlewares/feature-entitlements.js";
 import { requireValidLicense } from "../middlewares/license-guard.js";
-import { publicDemoRequestSchema } from "../validators/public-validators.js";
+import { publicAnalyticsEventSchema, publicDemoRequestSchema } from "../validators/public-validators.js";
 import { authRoutes } from "./auth-routes.js";
 import { auditRoutes } from "./audit-routes.js";
 import { billingRoutes, billingWebhookRoutes } from "./billing-routes.js";
@@ -109,8 +110,39 @@ const publicDemoRateLimit = rateLimit({
   message: { message: "Troppe richieste demo. Riprova tra qualche minuto.", error: "DEMO_RATE_LIMIT" }
 });
 
+const publicAnalyticsRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Troppe richieste analytics.", error: "ANALYTICS_RATE_LIMIT" }
+});
+
 const demoLeadRecipient = () =>
   env.DEMO_LEAD_RECIPIENT_EMAIL || process.env.PLATFORM_ALERT_EMAILS?.split(",").map((x) => x.trim()).find(Boolean) || env.PLATFORM_ADMIN_EMAIL;
+
+const privacyHash = (value?: string | null) => {
+  if (!value) return undefined;
+  const salt = env.JWT_SECRET.slice(0, 32);
+  return crypto.createHash("sha256").update(`${salt}:${value}`).digest("hex");
+};
+
+const detectDevice = (userAgent = "") => {
+  const ua = userAgent.toLowerCase();
+  if (/ipad|tablet/.test(ua)) return "tablet";
+  if (/mobile|iphone|android/.test(ua)) return "mobile";
+  if (!ua) return "unknown";
+  return "desktop";
+};
+
+const detectBrowser = (userAgent = "") => {
+  const ua = userAgent.toLowerCase();
+  if (ua.includes("edg/")) return "Edge";
+  if (ua.includes("chrome/") && !ua.includes("chromium")) return "Chrome";
+  if (ua.includes("safari/") && !ua.includes("chrome/")) return "Safari";
+  if (ua.includes("firefox/")) return "Firefox";
+  return "Other";
+};
 
 const signupUseCase = new SignupUseCase(userRepo);
 const loginUseCase = new LoginUseCase(userRepo, tokenService, licensePolicyService, authSessionService);
@@ -163,9 +195,61 @@ const tenantProfileController = new TenantProfileController(tenantProfileService
 
 export const apiRouter = Router();
 apiRouter.get("/health", (_req, res) => res.json({ ok: true, service: "fleetum-backend", timestamp: new Date().toISOString() }));
+apiRouter.post("/public/analytics/event", publicAnalyticsRateLimit, asyncHandler(async (req, res) => {
+  const input = publicAnalyticsEventSchema.parse(req.body);
+  const userAgent = req.headers["user-agent"] ?? "";
+  await prisma.websiteEvent.create({
+    data: {
+      eventType: input.eventType,
+      path: input.path,
+      referrer: input.referrer,
+      utmSource: input.utmSource,
+      utmMedium: input.utmMedium,
+      utmCampaign: input.utmCampaign,
+      sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined,
+      ipHash: privacyHash(req.ip),
+      userAgentHash: privacyHash(String(userAgent)),
+      deviceType: detectDevice(String(userAgent)),
+      browser: detectBrowser(String(userAgent)),
+      metadata: input.metadata ? (input.metadata as any) : undefined
+    }
+  });
+  res.status(202).json({ ok: true });
+}));
+
 apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (req, res) => {
   const input = publicDemoRequestSchema.parse(req.body);
   const recipient = demoLeadRecipient();
+  const lead = await prisma.demoLead.create({
+    data: {
+      companyName: input.companyName,
+      fullName: input.fullName,
+      email: input.email,
+      phone: input.phone,
+      fleetSize: input.fleetSize,
+      message: input.message,
+      source: input.source,
+      referrer: input.referrer,
+      utmSource: input.utmSource,
+      utmMedium: input.utmMedium,
+      utmCampaign: input.utmCampaign
+    }
+  });
+  await prisma.websiteEvent.create({
+    data: {
+      eventType: "DEMO_FORM_SUBMIT",
+      path: "/demo",
+      referrer: input.referrer,
+      utmSource: input.utmSource,
+      utmMedium: input.utmMedium,
+      utmCampaign: input.utmCampaign,
+      ipHash: privacyHash(req.ip),
+      userAgentHash: privacyHash(String(req.headers["user-agent"] ?? "")),
+      deviceType: detectDevice(String(req.headers["user-agent"] ?? "")),
+      browser: detectBrowser(String(req.headers["user-agent"] ?? "")),
+      metadata: { source: input.source, leadId: lead.id }
+    }
+  });
   const body = [
     "Nuova richiesta demo Fleetum",
     `Azienda: ${input.companyName}`,
@@ -200,6 +284,13 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
     where: { id: queuedEmail.id },
     select: { status: true, lastError: true, meta: true }
   });
+  await prisma.demoLead.update({
+    where: { id: lead.id },
+    data: {
+      emailQueueId: queuedEmail.id,
+      emailDeliveryStatus: processed?.status ?? "UNKNOWN"
+    }
+  });
   if (!processed || processed.status !== "SENT") {
     throw new AppError(
       processed?.lastError ?? "Invio richiesta demo non riuscito. Riprova tra poco.",
@@ -215,6 +306,7 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
     delivery: {
       status: processed.status,
       queueEmailId: queuedEmail.id,
+      leadId: lead.id,
       provider: typeof emailMeta.emailProvider === "string" ? emailMeta.emailProvider : null,
       providerMessageId: typeof emailMeta.providerMessageId === "string" ? emailMeta.providerMessageId : null
     }

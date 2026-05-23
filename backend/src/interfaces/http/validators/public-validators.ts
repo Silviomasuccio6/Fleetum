@@ -29,7 +29,34 @@ export const publicDemoRequestSchema = z.object({
     z.string().trim().max(1200).optional().transform((value) => value?.replace(/[<>]/g, "").trim())
   ),
   source: z.string().trim().max(80).optional().default("fleetum.it"),
+  referrer: z.preprocess(emptyToUndefined, z.string().trim().max(500).optional()),
+  utmSource: z.preprocess(emptyToUndefined, z.string().trim().max(120).optional()),
+  utmMedium: z.preprocess(emptyToUndefined, z.string().trim().max(120).optional()),
+  utmCampaign: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
   websiteUrl: z.string().trim().max(0).optional()
 });
 
 export type PublicDemoRequestInput = z.infer<typeof publicDemoRequestSchema>;
+
+export const publicAnalyticsEventSchema = z.object({
+  eventType: z.enum([
+    "PAGE_VIEW",
+    "CTA_CLICK",
+    "DEMO_FORM_VIEW",
+    "DEMO_FORM_SUBMIT",
+    "SIGNUP_VIEW",
+    "SIGNUP_STARTED",
+    "SIGNUP_COMPLETED",
+    "LOGIN_CLICK",
+    "PRICING_VIEW"
+  ]),
+  path: z.string().trim().min(1).max(240).transform((value) => value.replace(/[<>\r\n]/g, "")),
+  referrer: z.preprocess(emptyToUndefined, z.string().trim().max(500).optional()),
+  utmSource: z.preprocess(emptyToUndefined, z.string().trim().max(120).optional()),
+  utmMedium: z.preprocess(emptyToUndefined, z.string().trim().max(120).optional()),
+  utmCampaign: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
+  sessionId: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
+  metadata: z.record(z.string(), z.unknown()).optional()
+});
+
+export type PublicAnalyticsEventInput = z.infer<typeof publicAnalyticsEventSchema>;
