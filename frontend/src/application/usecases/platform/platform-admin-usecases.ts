@@ -119,6 +119,90 @@ export type PlatformInvoice = {
   }>;
 };
 
+export type PlatformOverview = {
+  generatedAt: string;
+  windowDays: number;
+  kpis: {
+    tenantsTotal: number;
+    activeTenants: number;
+    trialActive: number;
+    trialExpiring: number;
+    suspendedLicenses: number;
+    mrrEstimated: number;
+    demoRequests: number;
+    signups: number;
+    websiteVisits: number;
+    visitToDemoRate: number;
+    invoicesToSend: number;
+    invoiceErrors: number;
+    emailErrors: number;
+  };
+  revenueByPlan: Record<string, { tenants: number; mrr: number }>;
+  alerts: Array<{ type: string; severity: "LOW" | "MEDIUM" | "HIGH"; label: string }>;
+  recentAudit: Array<{ id: string; tenantId: string; tenantName: string; action: string; resource: string; resourceId?: string | null; createdAt: string }>;
+};
+
+export type PlatformWebsiteAnalytics = {
+  generatedAt: string;
+  windowDays: number;
+  totals: {
+    events: number;
+    pageViews: number;
+    uniqueVisitors: number;
+    ctaClicks: number;
+    demoSubmits: number;
+    signupCompleted: number;
+    visitToDemoRate: number;
+    demoToSignupRate: number;
+  };
+  trend: Array<{ date: string; pageViews: number; ctaClicks: number; demoSubmits: number; signups: number }>;
+  topPages: Array<{ label: string; value: number }>;
+  topReferrers: Array<{ label: string; value: number }>;
+  deviceBreakdown: Array<{ label: string; value: number }>;
+  browserBreakdown: Array<{ label: string; value: number }>;
+  eventCounts: Record<string, number>;
+};
+
+export type PlatformDemoLead = {
+  id: string;
+  companyName: string;
+  fullName: string;
+  email: string;
+  emailMasked?: string | null;
+  phone?: string | null;
+  fleetSize?: string | null;
+  message?: string | null;
+  source: string;
+  status: "NEW" | "CONTACTED" | "QUALIFIED" | "WON" | "LOST" | "SPAM";
+  referrer?: string | null;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  emailQueueId?: string | null;
+  emailDeliveryStatus?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  contactedAt?: string | null;
+  archivedAt?: string | null;
+};
+
+export type PlatformSystemHealth = {
+  generatedAt: string;
+  api: { status: string; responseTimeMs: number };
+  db: { status: string };
+  email: { status: string; provider: string; pending: number; failed: number };
+  stripe: { status: string };
+  storage: { status: string; uploadDir: string };
+  invoices: { errors: number };
+};
+
+export type PlatformSecurityOverview = {
+  generatedAt: string;
+  auth: { otpEmail: string | null; tokenTtl: string; blockedLoginStates: number };
+  controls: { ipAllowlist: string; corsOrigin: string };
+  recentEvents: Array<{ id: string; action: string; tenantName: string; createdAt: string; resource: string; resourceId?: string | null }>;
+};
+
 const toPlatformError = (response: Response, payload: any, fallback: string): PlatformApiError => {
   const error = new Error(payload?.message || fallback) as PlatformApiError;
   error.status = response.status;
@@ -150,6 +234,46 @@ export const platformAdminUseCases = {
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare tenant");
     return data as { data: any[] };
+  },
+  overview: async (days = 30) => {
+    const response = await fetch(`${apiBase}/overview?days=${days}`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare overview platform");
+    return data as { data: PlatformOverview };
+  },
+  websiteAnalytics: async (days = 30) => {
+    const response = await fetch(`${apiBase}/analytics/website?days=${days}`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare analytics sito");
+    return data as { data: PlatformWebsiteAnalytics };
+  },
+  listDemoLeads: async () => {
+    const response = await fetch(`${apiBase}/demo-leads`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare richieste demo");
+    return data as { data: PlatformDemoLead[] };
+  },
+  updateDemoLead: async (id: string, status: PlatformDemoLead["status"]) => {
+    const response = await fetch(`${apiBase}/demo-leads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ status })
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Aggiornamento lead demo fallito");
+    return data as { data: PlatformDemoLead };
+  },
+  systemHealth: async () => {
+    const response = await fetch(`${apiBase}/system-health`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare system health");
+    return data as { data: PlatformSystemHealth };
+  },
+  securityOverview: async () => {
+    const response = await fetch(`${apiBase}/security`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare security overview");
+    return data as { data: PlatformSecurityOverview };
   },
   listUsers: async () => {
     const response = await fetch(`${apiBase}/users`, { headers: { ...authHeaders() } });

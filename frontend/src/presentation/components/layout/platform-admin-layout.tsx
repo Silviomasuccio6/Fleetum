@@ -1,25 +1,31 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, BarChart3, Building2, ChevronDown, Lock, Menu, SlidersHorizontal, Users } from "lucide-react";
+import { Activity, BarChart3, Building2, ChevronDown, FileText, Globe2, LayoutDashboard, Lock, Menu, Settings, ShieldCheck, SlidersHorizontal, UserRoundCheck, Users } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { platformAdminUseCases } from "../../../application/usecases/platform/platform-admin-usecases";
 import { ThemeMode, getStoredTheme, setTheme } from "../../../infrastructure/theme/theme-manager";
 import { PlatformThemeToggle } from "../platform/platform-theme-toggle";
 import { Button } from "../ui/button";
 
-type PlatformSection = "overview" | "clients" | "revenue" | "events" | "tools";
+type PlatformSection = "overview" | "tenants" | "plans" | "billing" | "analytics" | "leads" | "users" | "audit" | "health" | "security" | "settings";
 
 export const PlatformAdminLayout = () => {
   const navigate = useNavigate();
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getStoredTheme());
   const [consoleMenuOpen, setConsoleMenuOpen] = useState(false);
-  const [activeSectionLabel, setActiveSectionLabel] = useState("Clienti");
+  const [activeSectionLabel, setActiveSectionLabel] = useState("Overview");
   const consoleMenuRef = useRef<HTMLDivElement | null>(null);
   const sectionLabel: Record<PlatformSection, string> = {
-    overview: "Dashboard",
-    clients: "Clienti",
-    revenue: "Ricavi",
-    events: "Eventi & Audit",
-    tools: "Strumenti"
+    overview: "Overview",
+    tenants: "Tenants",
+    plans: "Licenze & Piani",
+    billing: "Billing & Fatture",
+    analytics: "Website Analytics",
+    leads: "Demo Leads",
+    users: "Utenti",
+    audit: "Eventi & Audit",
+    health: "System Health",
+    security: "Security",
+    settings: "Impostazioni"
   };
   const consoleMenuItems: Array<{
     section: PlatformSection;
@@ -27,11 +33,17 @@ export const PlatformAdminLayout = () => {
     description: string;
     icon: any;
   }> = [
-    { section: "clients", label: "Clienti", description: "Gestione clienti e licenze", icon: Building2 },
-    { section: "overview", label: "Dashboard", description: "KPI globali e live", icon: Users },
-    { section: "revenue", label: "Ricavi", description: "Trend e performance economica", icon: BarChart3 },
-    { section: "events", label: "Eventi", description: "Audit operativo", icon: Activity },
-    { section: "tools", label: "Strumenti", description: "Azioni e utilità", icon: SlidersHorizontal }
+    { section: "overview", label: "Overview", description: "Control room globale", icon: LayoutDashboard },
+    { section: "tenants", label: "Tenants", description: "Clienti e workspace", icon: Building2 },
+    { section: "plans", label: "Licenze & Piani", description: "MRR e piani SaaS", icon: BarChart3 },
+    { section: "billing", label: "Billing", description: "Fatture e delivery", icon: FileText },
+    { section: "analytics", label: "Analytics", description: "Sito e funnel", icon: Globe2 },
+    { section: "leads", label: "Demo Leads", description: "CRM commerciale", icon: UserRoundCheck },
+    { section: "users", label: "Utenti", description: "Utenti globali", icon: Users },
+    { section: "audit", label: "Audit", description: "Eventi platform", icon: Activity },
+    { section: "health", label: "Health", description: "API, DB, email", icon: SlidersHorizontal },
+    { section: "security", label: "Security", description: "OTP e controlli", icon: ShieldCheck },
+    { section: "settings", label: "Settings", description: "Config platform", icon: Settings }
   ];
 
   useEffect(() => {

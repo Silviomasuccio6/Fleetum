@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import "./landing.css";
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>;
@@ -769,22 +770,28 @@ const LandingFooter = () => {
   );
 };
 
-export const LandingPage = () => (
-  <main className="fleetum-landing">
-    <LandingSeo />
-    <HeroSection />
-    <ProofBarSection />
-    <ProblemSection />
-    <PersonaSection />
-    <WorkflowSection />
-    <BookingControlRoomSection />
-    <ContractsShowcaseSection />
-    <ModulesSection />
-    <OperationalControlSection />
-    <DashboardIntelligenceSection />
-    <SecuritySection />
-    <PricingSection />
-    <FinalCtaSection />
-    <LandingFooter />
-  </main>
-);
+export const LandingPage = () => {
+  useEffect(() => {
+    trackPublicEvent("PAGE_VIEW", { page: "landing" });
+  }, []);
+
+  return (
+    <main className="fleetum-landing">
+      <LandingSeo />
+      <HeroSection />
+      <ProofBarSection />
+      <ProblemSection />
+      <PersonaSection />
+      <WorkflowSection />
+      <BookingControlRoomSection />
+      <ContractsShowcaseSection />
+      <ModulesSection />
+      <OperationalControlSection />
+      <DashboardIntelligenceSection />
+      <SecuritySection />
+      <PricingSection />
+      <FinalCtaSection />
+      <LandingFooter />
+    </main>
+  );
+};

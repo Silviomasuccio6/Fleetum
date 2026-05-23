@@ -6,15 +6,23 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  Database,
   Download,
   FileText,
+  Globe2,
+  KeyRound,
+  LayoutDashboard,
+  Mail,
   PanelLeftClose,
   RefreshCcw,
   Search,
   Send,
+  Server,
   ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  UserRoundCheck,
   Users,
   X,
   XCircle,
@@ -23,9 +31,14 @@ import {
 import {
   LicenseStatus,
   PlatformDashboardLiveMetrics,
+  PlatformDemoLead,
   PlatformInvoice,
+  PlatformOverview,
   platformAdminUseCases,
   PlatformRevenueMetrics,
+  PlatformSecurityOverview,
+  PlatformSystemHealth,
+  PlatformWebsiteAnalytics,
   QuickAction
 } from "../../../application/usecases/platform/platform-admin-usecases";
 import { snackbar } from "../../../application/stores/snackbar-store";
@@ -113,7 +126,7 @@ type PlanConfirmState = {
 
 type RowActionSelection = QuickAction | "";
 
-type PlatformSectionId = "overview" | "clients" | "billing" | "revenue" | "events" | "tools";
+type PlatformSectionId = "overview" | "tenants" | "plans" | "billing" | "analytics" | "leads" | "users" | "audit" | "health" | "security" | "settings";
 type RevenueRange = "2W" | "1M" | "6M" | "1Y";
 
 const actionLabels: Record<QuickAction, string> = {
@@ -236,6 +249,29 @@ const invoiceStatusVariant = (status: PlatformInvoice["status"]) => {
   return "secondary" as const;
 };
 
+const leadStatusLabel = (status: PlatformDemoLead["status"]) => {
+  if (status === "NEW") return "Nuovo";
+  if (status === "CONTACTED") return "Contattato";
+  if (status === "QUALIFIED") return "Qualificato";
+  if (status === "WON") return "Convertito";
+  if (status === "LOST") return "Perso";
+  return "Spam";
+};
+
+const leadStatusVariant = (status: PlatformDemoLead["status"]) => {
+  if (status === "NEW") return "warning" as const;
+  if (status === "CONTACTED" || status === "QUALIFIED") return "secondary" as const;
+  if (status === "WON") return "success" as const;
+  return "destructive" as const;
+};
+
+const operationalStatusVariant = (status?: string) => {
+  if (!status) return "secondary" as const;
+  if (["UP", "CONFIGURED", "SMTP", "LOCAL"].includes(status)) return "success" as const;
+  if (["NOT_CONFIGURED", "MISSING_KEY"].includes(status)) return "warning" as const;
+  return "destructive" as const;
+};
+
 const useCountUp = (target: number, duration = 560) => {
   const [value, setValue] = useState(target);
 
@@ -268,6 +304,12 @@ export const PlatformAdminPage = () => {
   const [invoices, setInvoices] = useState<PlatformInvoice[]>([]);
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
+  const [overview, setOverview] = useState<PlatformOverview | null>(null);
+  const [websiteAnalytics, setWebsiteAnalytics] = useState<PlatformWebsiteAnalytics | null>(null);
+  const [demoLeads, setDemoLeads] = useState<PlatformDemoLead[]>([]);
+  const [systemHealth, setSystemHealth] = useState<PlatformSystemHealth | null>(null);
+  const [securityOverview, setSecurityOverview] = useState<PlatformSecurityOverview | null>(null);
+  const [selectedTenant, setSelectedTenant] = useState<TenantRow | null>(null);
   const [search, setSearch] = useState("");
   const [licenseFilter, setLicenseFilter] = useState<"ALL" | LicenseStatus>("ALL");
   const [tenantStatusFilter, setTenantStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
@@ -286,7 +328,7 @@ export const PlatformAdminPage = () => {
   const [revenueRange, setRevenueRange] = useState<RevenueRange>("1Y");
   const [revenueReport, setRevenueReport] = useState<PlatformRevenueMetrics | null>(null);
   const [dashboardLive, setDashboardLive] = useState<PlatformDashboardLiveMetrics | null>(null);
-  const [activeSection, setActiveSection] = useState<PlatformSectionId>("clients");
+  const [activeSection, setActiveSection] = useState<PlatformSectionId>("overview");
   const [sidebarHidden, setSidebarHidden] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     return localStorage.getItem(sidebarStorageKey) !== "0";
@@ -316,18 +358,28 @@ export const PlatformAdminPage = () => {
     if (options?.silent) setRefreshing(true);
 
     try {
-      const [tenantData, invoiceData, userData, eventData, revenueData] = await Promise.all([
+      const [tenantData, invoiceData, userData, eventData, revenueData, overviewData, analyticsData, demoLeadData, healthData, securityData] = await Promise.all([
         platformAdminUseCases.listTenants(),
         platformAdminUseCases.listInvoices(),
         platformAdminUseCases.listUsers(),
         platformAdminUseCases.listRecentEvents(20),
-        platformAdminUseCases.revenueMetrics(revenueQuery)
+        platformAdminUseCases.revenueMetrics(revenueQuery),
+        platformAdminUseCases.overview(30),
+        platformAdminUseCases.websiteAnalytics(30),
+        platformAdminUseCases.listDemoLeads(),
+        platformAdminUseCases.systemHealth(),
+        platformAdminUseCases.securityOverview()
       ]);
       setTenants(tenantData.data);
       setInvoices(invoiceData.data);
       setUsers(userData.data);
       setEvents(eventData.data);
       setRevenueReport(revenueData);
+      setOverview(overviewData.data);
+      setWebsiteAnalytics(analyticsData.data);
+      setDemoLeads(demoLeadData.data);
+      setSystemHealth(healthData.data);
+      setSecurityOverview(securityData.data);
       void loadDashboardLive({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
@@ -384,7 +436,17 @@ export const PlatformAdminPage = () => {
 
   useEffect(() => {
     const isSectionId = (value: unknown): value is PlatformSectionId =>
-      value === "overview" || value === "clients" || value === "billing" || value === "revenue" || value === "events" || value === "tools";
+      value === "overview" ||
+      value === "tenants" ||
+      value === "plans" ||
+      value === "billing" ||
+      value === "analytics" ||
+      value === "leads" ||
+      value === "users" ||
+      value === "audit" ||
+      value === "health" ||
+      value === "security" ||
+      value === "settings";
 
     const onSetSection = (event: Event) => {
       const payload = (event as CustomEvent<{ section?: unknown }>).detail;
@@ -677,6 +739,18 @@ export const PlatformAdminPage = () => {
     }
   };
 
+  const updateDemoLeadStatus = async (lead: PlatformDemoLead, status: PlatformDemoLead["status"]) => {
+    try {
+      const result = await platformAdminUseCases.updateDemoLead(lead.id, status);
+      setDemoLeads((old) => old.map((item) => (item.id === lead.id ? result.data : item)));
+      snackbar.success(`Lead ${lead.companyName} aggiornato`);
+      void load({ silent: true });
+    } catch (err) {
+      if (handlePlatformAuthError(err)) return;
+      snackbar.error((err as Error).message);
+    }
+  };
+
   const onLicenseSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingTenant) return;
@@ -710,12 +784,17 @@ export const PlatformAdminPage = () => {
   };
 
   const sectionDescription: Record<PlatformSectionId, string> = {
-    overview: "Dashboard premium con live users, MRR e stato operativo",
-    clients: "Gestione clienti, piani, licenze e quick action",
+    overview: "Control room platform con KPI, alert e priorita operative",
+    tenants: "Gestione tenant, piani, licenze e quick action",
+    plans: "MRR, breakdown piani, trend e export finanziario",
     billing: "Fatture SaaS, PDF, invio email e stato delivery",
-    revenue: "MRR, breakdown piani, trend e export finanziario",
-    events: "Audit operativo, eventi recenti e watchlist",
-    tools: "Azioni globali e scorciatoie di controllo"
+    analytics: "Visite sito, CTA, funnel demo/signup e device",
+    leads: "Richieste demo, qualificazione e follow-up commerciale",
+    users: "Utenti SaaS aggregati e stato account",
+    audit: "Audit operativo, eventi recenti e watchlist",
+    health: "Stato API, database, email, Stripe, storage e code",
+    security: "Controlli platform, OTP, IP allowlist e sessioni",
+    settings: "Configurazioni globali platform e provider"
   };
   const sidebarItems: Array<{
     id: PlatformSectionId;
@@ -725,23 +804,23 @@ export const PlatformAdminPage = () => {
     badge?: string;
   }> = [
     {
-      id: "clients",
-      label: "Clienti",
+      id: "overview",
+      label: "Overview",
+      description: "Control room globale",
+      icon: LayoutDashboard,
+      badge: String(overview?.kpis.emailErrors ?? 0)
+    },
+    {
+      id: "tenants",
+      label: "Tenants",
       description: "Clienti, piani, licenze",
       icon: Building2,
       badge: String(tenants.length)
     },
     {
-      id: "overview",
-      label: "Dashboard",
-      description: "KPI e stato globale",
-      icon: Users,
-      badge: String(dashboardLive?.activeUsersLive ?? 0)
-    },
-    {
-      id: "revenue",
-      label: "Ricavi",
-      description: "MRR e trend economico",
+      id: "plans",
+      label: "Licenze & Piani",
+      description: "MRR e pricing",
       icon: BarChart3,
       badge: String(revenueActiveTenants)
     },
@@ -753,16 +832,51 @@ export const PlatformAdminPage = () => {
       badge: String(invoices.length)
     },
     {
-      id: "events",
-      label: "Eventi",
+      id: "analytics",
+      label: "Website Analytics",
+      description: "Visite e funnel",
+      icon: Globe2,
+      badge: String(websiteAnalytics?.totals.pageViews ?? 0)
+    },
+    {
+      id: "leads",
+      label: "Demo Leads",
+      description: "CRM leggero",
+      icon: UserRoundCheck,
+      badge: String(demoLeads.filter((lead) => lead.status === "NEW").length)
+    },
+    {
+      id: "users",
+      label: "Utenti",
+      description: "Utenti globali",
+      icon: Users,
+      badge: String(users.length)
+    },
+    {
+      id: "audit",
+      label: "Eventi & Audit",
       description: "Audit e watchlist operativa",
       icon: Activity,
       badge: String(events.length)
     },
     {
-      id: "tools",
-      label: "Strumenti",
-      description: "Azioni globali e reset",
+      id: "health",
+      label: "System Health",
+      description: "API, DB, email",
+      icon: Server,
+      badge: systemHealth?.db.status ?? "DB"
+    },
+    {
+      id: "security",
+      label: "Security",
+      description: "OTP e controlli",
+      icon: ShieldCheck,
+      badge: String(securityOverview?.auth.blockedLoginStates ?? 0)
+    },
+    {
+      id: "settings",
+      label: "Impostazioni",
+      description: "Provider e config",
       icon: SlidersHorizontal
     }
   ];
@@ -875,7 +989,7 @@ export const PlatformAdminPage = () => {
                     type="button"
                     onClick={() => {
                       setSearch(tenant.name);
-                      setActiveSection("clients");
+                      setActiveSection("tenants");
                     }}
                     className="flex w-full items-center gap-2 rounded-lg border border-border/70 bg-card/75 px-2 py-1.5 text-left transition hover:border-border hover:bg-card"
                   >
@@ -887,7 +1001,7 @@ export const PlatformAdminPage = () => {
                 );
               })}
             </div>
-                <Button variant="secondary" size="sm" className="w-full" onClick={() => setActiveSection("clients")}>
+                <Button variant="secondary" size="sm" className="w-full" onClick={() => setActiveSection("tenants")}>
                   Apri Matrice Clienti
                 </Button>
           </div>
@@ -1068,7 +1182,7 @@ export const PlatformAdminPage = () => {
         </div>
       ) : null}
 
-      {activeSection === "clients" ? (
+      {activeSection === "tenants" ? (
         <div className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-xl border border-border/70 bg-card/75 px-3 py-2">
@@ -1288,6 +1402,14 @@ export const PlatformAdminPage = () => {
                                   >
                                     <FileText className="h-3.5 w-3.5" />
                                     {invoiceLoading[tenant.id] ? "Genero..." : "Invia fattura"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-full min-w-0 text-[11px]"
+                                    onClick={() => setSelectedTenant(tenant)}
+                                  >
+                                    Apri drawer
                                   </Button>
                                 </div>
                                 {feedback ? (
@@ -1526,7 +1648,7 @@ export const PlatformAdminPage = () => {
         </div>
       ) : null}
 
-      {activeSection === "revenue" ? (
+      {activeSection === "plans" ? (
         <Card className="platform-main-card">
           <CardHeader className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1735,7 +1857,312 @@ export const PlatformAdminPage = () => {
         </Card>
       ) : null}
 
-      {activeSection === "events" ? (
+      {activeSection === "analytics" ? (
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Page view 30gg</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{websiteAnalytics?.totals.pageViews ?? 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Visitatori stimati</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{websiteAnalytics?.totals.uniqueVisitors ?? 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">CTA click</p>
+                <p className="mt-2 text-2xl font-semibold text-cyan-600 dark:text-cyan-300">{websiteAnalytics?.totals.ctaClicks ?? 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Visita → demo</p>
+                <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">{websiteAnalytics?.totals.visitToDemoRate ?? 0}%</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+            <Card className="platform-main-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base text-foreground">
+                  <Globe2 className="h-4 w-4 text-primary" />
+                  Website Analytics
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Tracking privacy-friendly: IP hashato, user-agent ridotto, nessun cookie invasivo di default.</p>
+              </CardHeader>
+              <CardContent>
+                {(websiteAnalytics?.trend.length ?? 0) === 0 ? (
+                  <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-card/50 py-12 text-center">
+                    <Globe2 className="h-7 w-7 text-muted-foreground" />
+                    <p className="font-semibold text-foreground">Nessun evento sito ancora raccolto</p>
+                    <p className="max-w-md text-sm text-muted-foreground">Da ora la platform può ricevere PAGE_VIEW, CTA_CLICK, DEMO_FORM_SUBMIT e signup events tramite endpoint pubblico.</p>
+                  </div>
+                ) : (
+                  <div className="h-72 rounded-2xl border border-border/70 bg-background/70 p-3">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={websiteAnalytics?.trend ?? []} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.45} />
+                        <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                        <YAxis width={42} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                        <Tooltip
+                          cursor={false}
+                          isAnimationActive={false}
+                          contentStyle={{
+                            background: "hsl(var(--card))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: 10
+                          }}
+                        />
+                        <Line type="monotone" dataKey="pageViews" stroke="#2563ff" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="demoSubmits" stroke="#00b8a9" strokeWidth={2.3} dot={false} />
+                        <Line type="monotone" dataKey="signups" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="platform-main-card">
+              <CardHeader>
+                <CardTitle className="text-base text-foreground">Top insights</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Top pagine</p>
+                  <div className="mt-2 space-y-1.5">
+                    {(websiteAnalytics?.topPages.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">Nessun dato disponibile.</p> : null}
+                    {websiteAnalytics?.topPages.slice(0, 6).map((row) => (
+                      <div key={`page-${row.label}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-sm">
+                        <span className="truncate text-foreground">{row.label}</span>
+                        <Badge variant="secondary">{row.value}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Device</p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+                    {websiteAnalytics?.deviceBreakdown.map((row) => (
+                      <div key={`device-${row.label}`} className="rounded-xl border border-border/70 bg-card/70 px-3 py-2">
+                        <p className="text-xs text-muted-foreground">{row.label}</p>
+                        <p className="font-semibold text-foreground">{row.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {activeSection === "leads" ? (
+        <Card className="platform-main-card platform-main-surface">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base text-foreground">
+              <UserRoundCheck className="h-4 w-4 text-primary" />
+              Demo Leads
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">CRM leggero per qualificare richieste demo, controllare delivery email e convertire i lead in tenant.</p>
+          </CardHeader>
+          <CardContent>
+            {demoLeads.length === 0 ? (
+              <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-card/50 py-12 text-center">
+                <UserRoundCheck className="h-7 w-7 text-muted-foreground" />
+                <p className="font-semibold text-foreground">Nessuna richiesta demo salvata</p>
+                <p className="text-sm text-muted-foreground">Il form /demo ora crea lead persistenti oltre all'invio email.</p>
+              </div>
+            ) : (
+              <div className="overflow-auto rounded-2xl border border-border/70">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Azienda</TableHead>
+                      <TableHead>Referente</TableHead>
+                      <TableHead>Flotta</TableHead>
+                      <TableHead>Origine</TableHead>
+                      <TableHead>Delivery</TableHead>
+                      <TableHead>Stato</TableHead>
+                      <TableHead>Azioni</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {demoLeads.map((lead) => (
+                      <TableRow key={lead.id}>
+                        <TableCell>
+                          <p className="font-semibold text-foreground">{lead.companyName}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(lead.createdAt)} · {lead.source}</p>
+                        </TableCell>
+                        <TableCell>
+                          <p className="font-medium text-foreground">{lead.fullName}</p>
+                          <p className="text-xs text-muted-foreground">{lead.emailMasked ?? lead.email}</p>
+                        </TableCell>
+                        <TableCell>{lead.fleetSize ?? "-"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{lead.utmSource ?? lead.referrer ?? "diretta"}</TableCell>
+                        <TableCell>
+                          <Badge variant={lead.emailDeliveryStatus === "SENT" ? "success" : lead.emailDeliveryStatus === "FAILED" ? "destructive" : "secondary"}>
+                            {lead.emailDeliveryStatus ?? "n/a"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={leadStatusVariant(lead.status)}>{leadStatusLabel(lead.status)}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={lead.status}
+                            className="h-8 min-w-[132px] text-xs"
+                            onChange={(event) => updateDemoLeadStatus(lead, event.target.value as PlatformDemoLead["status"])}
+                            aria-label={`Aggiorna stato lead ${lead.companyName}`}
+                          >
+                            <option value="NEW">Nuovo</option>
+                            <option value="CONTACTED">Contattato</option>
+                            <option value="QUALIFIED">Qualificato</option>
+                            <option value="WON">Convertito</option>
+                            <option value="LOST">Perso</option>
+                            <option value="SPAM">Spam</option>
+                          </Select>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {activeSection === "users" ? (
+        <Card className="platform-main-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base text-foreground">
+              <Users className="h-4 w-4 text-primary" />
+              Utenti SaaS globali
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Vista founder-only: stato utenti aggregato per supporto e audit, senza esporre la Platform ai tenant.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-auto rounded-2xl border border-border/70">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Utente</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Tenant</TableHead>
+                    <TableHead>Stato</TableHead>
+                    <TableHead>Supporto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium text-foreground">{user.firstName} {user.lastName}</TableCell>
+                      <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                      <TableCell>{user.tenant?.name ?? "N/A"}</TableCell>
+                      <TableCell><Badge variant={user.status === "ACTIVE" ? "success" : "warning"}>{user.status}</Badge></TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" onClick={() => {
+                          const tenant = tenants.find((item) => item.name === user.tenant?.name);
+                          if (tenant) setSelectedTenant(tenant);
+                        }}>
+                          Apri tenant
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {activeSection === "health" ? (
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          {[
+            { label: "API", status: systemHealth?.api.status, detail: `${systemHealth?.api.responseTimeMs ?? 0} ms`, icon: Server },
+            { label: "Database", status: systemHealth?.db.status, detail: "Query SELECT 1", icon: Database },
+            { label: "Email", status: systemHealth?.email.status, detail: `${systemHealth?.email.provider ?? "-"} · ${systemHealth?.email.failed ?? 0} failed`, icon: Mail },
+            { label: "Stripe", status: systemHealth?.stripe.status, detail: "Billing provider", icon: BarChart3 },
+            { label: "Storage", status: systemHealth?.storage.status, detail: systemHealth?.storage.uploadDir ?? "-", icon: FileText },
+            { label: "Fatture", status: (systemHealth?.invoices.errors ?? 0) > 0 ? "ERROR" : "UP", detail: `${systemHealth?.invoices.errors ?? 0} errori`, icon: FileText }
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <Card key={item.label} className="platform-stat-card">
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{item.label}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{item.detail}</p>
+                    </div>
+                    <Icon className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <Badge className="mt-4" variant={operationalStatusVariant(item.status)}>{item.status ?? "n/a"}</Badge>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {activeSection === "security" ? (
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <Card className="platform-main-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base text-foreground">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                Security controls
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-xl border border-border/70 bg-card/70 p-3">
+                <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">OTP admin</p>
+                <p className="mt-1 font-semibold text-foreground">{securityOverview?.auth.otpEmail ?? "n/a"}</p>
+                <p className="text-xs text-muted-foreground">TTL token: {securityOverview?.auth.tokenTtl ?? "-"}</p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-card/70 p-3">
+                <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">IP allowlist</p>
+                <Badge className="mt-1" variant={securityOverview?.controls.ipAllowlist === "CONFIGURED" ? "success" : "warning"}>
+                  {securityOverview?.controls.ipAllowlist ?? "n/a"}
+                </Badge>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-card/70 p-3">
+                <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Login bloccati</p>
+                <p className="mt-1 text-xl font-semibold text-foreground">{securityOverview?.auth.blockedLoginStates ?? 0}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="platform-main-card">
+            <CardHeader>
+              <CardTitle className="text-base text-foreground">Eventi sicurezza recenti</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(securityOverview?.recentEvents.length ?? 0) === 0 ? (
+                <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-card/50 py-10 text-center">
+                  <KeyRound className="h-6 w-6 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Nessun evento sicurezza recente.</p>
+                </div>
+              ) : null}
+              {securityOverview?.recentEvents.map((event) => (
+                <div key={`security-${event.id}`} className="rounded-xl border border-border/70 bg-card/70 px-3 py-2">
+                  <p className="text-sm font-semibold text-foreground">{event.action}</p>
+                  <p className="text-xs text-muted-foreground">{event.tenantName} · {timeAgo(event.createdAt)}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {activeSection === "audit" ? (
         <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           <Card className="platform-main-card">
             <CardHeader>
@@ -1809,7 +2236,7 @@ export const PlatformAdminPage = () => {
         </div>
       ) : null}
 
-      {activeSection === "tools" ? (
+      {activeSection === "settings" ? (
         <div className="grid gap-4 xl:grid-cols-2">
           <Card className="platform-main-card">
             <CardHeader>
@@ -1831,13 +2258,13 @@ export const PlatformAdminPage = () => {
               <div className="space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
                 <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Navigazione rapida</p>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => setActiveSection("clients")}>
+                  <Button variant="secondary" size="sm" onClick={() => setActiveSection("tenants")}>
                     Vai a Clienti
                   </Button>
-                  <Button variant="secondary" size="sm" onClick={() => setActiveSection("revenue")}>
+                  <Button variant="secondary" size="sm" onClick={() => setActiveSection("plans")}>
                     Vai a Ricavi
                   </Button>
-                  <Button variant="secondary" size="sm" onClick={() => setActiveSection("events")}>
+                  <Button variant="secondary" size="sm" onClick={() => setActiveSection("audit")}>
                     Vai a Eventi
                   </Button>
                 </div>
@@ -1914,6 +2341,108 @@ export const PlatformAdminPage = () => {
             })}
           </nav>
         </div>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-[112] bg-slate-950/45 backdrop-blur-sm transition-opacity ${
+          selectedTenant ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={() => setSelectedTenant(null)}
+      >
+        <aside
+          className={`ml-auto flex h-full w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl transition-transform duration-300 ${
+            selectedTenant ? "translate-x-0" : "translate-x-full"
+          }`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Dettaglio tenant platform"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {selectedTenant ? (
+            <>
+              <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Tenant drawer</p>
+                  <h2 className="mt-1 text-xl font-semibold text-foreground">{selectedTenant.company?.legalName || selectedTenant.name}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">{selectedTenant.owner?.email ?? "Owner non configurato"}</p>
+                </div>
+                <Button variant="outline" size="icon" onClick={() => setSelectedTenant(null)} aria-label="Chiudi drawer tenant">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Piano</p>
+                    <p className="mt-1 font-semibold text-foreground">{normalizePlanTier(selectedTenant.license?.plan)}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Licenza</p>
+                    <Badge className="mt-1" variant={statusBadgeVariant(selectedTenant.license?.status)}>{licenseStatusLabel(selectedTenant.license?.status)}</Badge>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Scadenza</p>
+                    <p className="mt-1 font-semibold text-foreground">{formatDate(selectedTenant.license?.expiresAt)}</p>
+                  </div>
+                </div>
+
+                <Card className="platform-main-card">
+                  <CardHeader>
+                    <CardTitle className="text-base">Profilo azienda</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid gap-2 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Ragione sociale</span>
+                      <span className="text-right font-medium text-foreground">{selectedTenant.company?.legalName ?? selectedTenant.name}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">P.IVA</span>
+                      <span className="text-right font-medium text-foreground">{selectedTenant.company?.vatNumber ?? "-"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Profilo</span>
+                      <Badge variant={selectedTenant.company?.profileCompleted ? "success" : "warning"}>
+                        {selectedTenant.company?.profileCompleted ? "Completo" : "Incompleto"}
+                      </Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="platform-main-card">
+                  <CardHeader>
+                    <CardTitle className="text-base">Azioni rapide sicure</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid gap-2 sm:grid-cols-2">
+                    <Button variant="outline" onClick={() => openConfirm(selectedTenant, "TRIAL_14_DAYS")}>Trial 14 giorni</Button>
+                    <Button variant="outline" onClick={() => openConfirm(selectedTenant, "RENEW_30_DAYS")}>Rinnova +30 giorni</Button>
+                    <Button variant="secondary" onClick={() => generateInvoice(selectedTenant)}>Genera fattura</Button>
+                    <Button variant="destructive" onClick={() => openConfirm(selectedTenant, "SUSPEND_LICENSE")}>Sospendi licenza</Button>
+                  </CardContent>
+                </Card>
+
+                <Card className="platform-main-card">
+                  <CardHeader>
+                    <CardTitle className="text-base">Fatture recenti</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {invoices.filter((invoice) => invoice.tenantId === selectedTenant.id).slice(0, 5).length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nessuna fattura generata per questo tenant.</p>
+                    ) : null}
+                    {invoices.filter((invoice) => invoice.tenantId === selectedTenant.id).slice(0, 5).map((invoice) => (
+                      <div key={`drawer-invoice-${invoice.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/70 px-3 py-2">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{invoice.invoiceNumber}</p>
+                          <p className="text-xs text-muted-foreground">{formatCurrency(invoice.total)}</p>
+                        </div>
+                        <Badge variant={invoiceStatusVariant(invoice.status)}>{invoiceStatusLabel(invoice.status)}</Badge>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          ) : null}
+        </aside>
       </div>
 
       {planConfirmState ? (

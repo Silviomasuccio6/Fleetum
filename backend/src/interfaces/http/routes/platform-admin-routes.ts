@@ -8,6 +8,12 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
   const router = Router();
 
   router.post("/auth/login", platformAuthRateLimit, asyncHandler(controller.login));
+  router.get("/overview", requirePlatformAuth, asyncHandler(controller.overview));
+  router.get("/analytics/website", requirePlatformAuth, asyncHandler(controller.websiteAnalytics));
+  router.get("/demo-leads", requirePlatformAuth, asyncHandler(controller.demoLeads));
+  router.patch("/demo-leads/:id", requirePlatformAuth, asyncHandler(controller.updateDemoLead));
+  router.get("/system-health", requirePlatformAuth, asyncHandler(controller.systemHealth));
+  router.get("/security", requirePlatformAuth, asyncHandler(controller.securityOverview));
   router.get("/tenants", requirePlatformAuth, asyncHandler(controller.tenants));
   router.get("/invoices", requirePlatformAuth, asyncHandler(controller.invoices));
   router.get("/tenants/:tenantId/invoices", requirePlatformAuth, asyncHandler(controller.tenantInvoices));
@@ -22,6 +28,7 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
   router.get("/events/recent", requirePlatformAuth, asyncHandler(controller.recentEvents));
   router.get("/metrics/revenue", requirePlatformAuth, asyncHandler(controller.revenueMetrics));
   router.get("/metrics/revenue/export.csv", requirePlatformAuth, asyncHandler(controller.revenueCsv));
+  router.get("/metrics/dashboard-live", requirePlatformAuth, asyncHandler(controller.dashboardLiveMetrics));
   router.patch("/tenants/:id/license", requirePlatformAuth, asyncHandler(controller.updateLicense));
   router.patch("/tenants/:id/status", requirePlatformAuth, asyncHandler(controller.updateTenantStatus));
   router.post("/tenants/:id/quick-action", requirePlatformAuth, asyncHandler(controller.quickAction));

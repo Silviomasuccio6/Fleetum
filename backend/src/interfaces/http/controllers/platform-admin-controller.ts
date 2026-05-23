@@ -1,14 +1,18 @@
 import { Request, Response } from "express";
 import { PlatformAdminService } from "../../../application/services/platform-admin-service.js";
 import { InvoiceService } from "../../../application/services/invoice-service.js";
+import { PlatformConsoleService } from "../../../application/services/platform-console-service.js";
 import { getClientIp } from "../../../shared/utils/ip.js";
 import {
+  demoLeadIdSchema,
   invoiceIdSchema,
   platformLoginSchema,
+  platformRangeQuerySchema,
   quickLicenseActionSchema,
   recentEventsQuerySchema,
   revenueReportQuerySchema,
   tenantIdSchema,
+  updateDemoLeadSchema,
   updateInvoiceStatusSchema,
   updateLicenseSchema,
   updateTenantStatusSchema
@@ -17,7 +21,8 @@ import {
 export class PlatformAdminController {
   constructor(
     private readonly service: PlatformAdminService,
-    private readonly invoiceService: InvoiceService
+    private readonly invoiceService: InvoiceService,
+    private readonly consoleService: PlatformConsoleService
   ) {}
 
   login = async (req: Request, res: Response) => {
@@ -33,6 +38,40 @@ export class PlatformAdminController {
 
   users = async (_req: Request, res: Response) => {
     const result = await this.service.listUsersGlobal();
+    res.json(result);
+  };
+
+  overview = async (req: Request, res: Response) => {
+    const query = platformRangeQuerySchema.parse(req.query);
+    const result = await this.consoleService.overview(query.days);
+    res.json(result);
+  };
+
+  websiteAnalytics = async (req: Request, res: Response) => {
+    const query = platformRangeQuerySchema.parse(req.query);
+    const result = await this.consoleService.websiteAnalytics(query.days);
+    res.json(result);
+  };
+
+  demoLeads = async (_req: Request, res: Response) => {
+    const result = await this.consoleService.listDemoLeads();
+    res.json(result);
+  };
+
+  updateDemoLead = async (req: Request, res: Response) => {
+    const id = demoLeadIdSchema.parse(req.params.id);
+    const payload = updateDemoLeadSchema.parse(req.body);
+    const result = await this.consoleService.updateDemoLead({ id, status: payload.status });
+    res.json(result);
+  };
+
+  systemHealth = async (_req: Request, res: Response) => {
+    const result = await this.consoleService.systemHealth();
+    res.json(result);
+  };
+
+  securityOverview = async (_req: Request, res: Response) => {
+    const result = await this.consoleService.securityOverview();
     res.json(result);
   };
 
@@ -67,6 +106,12 @@ export class PlatformAdminController {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename=\"${exported.fileName}\"`);
     res.send(exported.csv);
+  };
+
+  dashboardLiveMetrics = async (req: Request, res: Response) => {
+    const windowMinutes = Math.min(Math.max(Number(req.query.windowMinutes ?? 15), 1), 120);
+    const result = await this.consoleService.dashboardLiveMetrics(windowMinutes);
+    res.json(result);
   };
 
   updateLicense = async (req: Request, res: Response) => {
