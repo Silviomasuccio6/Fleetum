@@ -1,0 +1,54 @@
+{
+	email {$CADDY_EMAIL}
+}
+
+(security_headers) {
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+staging.fleetum.it {
+	import security_headers
+	encode zstd gzip
+
+	route /api/* {
+		reverse_proxy backend:4000
+	}
+
+	route {
+		root * /srv/fleetum
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+api-staging.fleetum.it {
+	import security_headers
+	encode zstd gzip
+
+	route /api/* {
+		reverse_proxy backend:4000
+	}
+
+	respond "Fleetum Staging API" 200
+}
+
+platform-staging.fleetum.it {
+	import security_headers
+	encode zstd gzip
+
+	route /platform-api/* {
+		reverse_proxy backend:4100
+	}
+
+	route {
+		root * /srv/fleetum
+		try_files {path} /platform.html
+		file_server
+	}
+}

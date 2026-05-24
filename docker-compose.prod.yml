@@ -18,9 +18,7 @@ services:
       - fleetum_private
 
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile.prod
+    image: ${FLEETUM_BACKEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-backend:latest}
     container_name: fleetum_backend
     restart: unless-stopped
     env_file:
@@ -38,15 +36,7 @@ services:
       - fleetum_private
 
   caddy:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile.prod
-      args:
-        VITE_API_BASE_URL: "https://api.fleetum.it/api"
-        VITE_PLATFORM_API_BASE_URL: "https://platform.fleetum.it/platform-api"
-        VITE_CLIENT_APP_URL: "https://fleetum.it/dashboard"
-        VITE_GOOGLE_AUTH_URL: "https://api.fleetum.it/api/auth/google"
-        VITE_APPLE_AUTH_URL: "https://api.fleetum.it/api/auth/apple"
+    image: ${FLEETUM_FRONTEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend:latest}
     container_name: fleetum_caddy
     restart: unless-stopped
     depends_on:

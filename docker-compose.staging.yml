@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fleetum_staging_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fleetum_staging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-fleetum_staging}
+    volumes:
+      - /opt/fleetum-staging/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fleetum_staging} -d ${POSTGRES_DB:-fleetum_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fleetum_staging_private
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    container_name: fleetum_staging_backend
+    restart: unless-stopped
+    env_file:
+      - /opt/fleetum-staging/env/backend.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /opt/fleetum-staging/uploads:/app/uploads
+      - /opt/fleetum-staging/logs:/app/logs
+    expose:
+      - "4000"
+      - "4100"
+    networks:
+      - fleetum_staging_private
+
+  caddy:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: "https://api-staging.fleetum.it/api"
+        VITE_PLATFORM_API_BASE_URL: "https://platform-staging.fleetum.it/platform-api"
+        VITE_CLIENT_APP_URL: "https://staging.fleetum.it/dashboard"
+        VITE_GOOGLE_AUTH_URL: "https://api-staging.fleetum.it/api/auth/google"
+        VITE_APPLE_AUTH_URL: "https://api-staging.fleetum.it/api/auth/apple"
+    container_name: fleetum_staging_caddy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL is required}
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - staging_caddy_data:/data
+      - staging_caddy_config:/config
+    networks:
+      - fleetum_staging_private
+
+networks:
+  fleetum_staging_private:
+    driver: bridge
+
+volumes:
+  staging_caddy_data:
+  staging_caddy_config:
