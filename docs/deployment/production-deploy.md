@@ -18,12 +18,24 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 1. CI green.
 2. Backup database.
 3. Backup uploads when document/storage changes are involved.
-4. Upload/pull application files or images.
-5. Build/pull containers.
-6. Run Prisma migration separately.
-7. Restart services.
-8. Health checks.
-9. Log review.
+4. GitHub Actions builds and pushes backend/frontend images to GHCR.
+5. Upload deployment manifests to the VPS.
+6. Pull the selected images on the VPS.
+7. Run Prisma migration separately.
+8. Restart services.
+9. Health checks.
+10. Log review.
+
+## Images
+
+Production uses immutable GHCR image tags generated from the deployed commit SHA:
+
+```txt
+ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha>
+ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha>
+```
+
+The workflow also updates `latest`, but the deploy step passes the explicit SHA-tagged images through `FLEETUM_BACKEND_IMAGE` and `FLEETUM_FRONTEND_IMAGE` to keep the release traceable.
 
 ## Migration command
 
@@ -60,5 +72,7 @@ curl -fsS https://fleetum.it/sitemap.xml
 ## Notes
 
 - Runtime backend starts only the app. Prisma migrations are a deploy step.
+- The VPS should not build production images. GitHub Actions builds and publishes images, then the VPS pulls them.
 - Secrets live outside the repository.
+- GHCR login happens inside GitHub Actions using a short-lived token before pulling private images.
 - Platform Console requires configured IP allowlist and OTP.

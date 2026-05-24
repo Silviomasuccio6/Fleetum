@@ -17,11 +17,78 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  build-images:
+    name: Build and publish production images
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend_image: ${{ steps.images.outputs.backend_image }}
+      frontend_image: ${{ steps.images.outputs.frontend_image }}
+
+    steps:
+      - name: Checkout requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Resolve image names
+        id: images
+        run: |
+          IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
+          BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:${IMAGE_TAG}"
+          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:${IMAGE_TAG}"
+          echo "backend_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ steps.images.outputs.backend_image }}
+            ghcr.io/silviomasuccio6/fleetum-backend:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile.prod
+          push: true
+          build-args: |
+            VITE_API_BASE_URL=https://api.fleetum.it/api
+            VITE_PLATFORM_API_BASE_URL=https://platform.fleetum.it/platform-api
+            VITE_CLIENT_APP_URL=https://fleetum.it/dashboard
+            VITE_GOOGLE_AUTH_URL=https://api.fleetum.it/api/auth/google
+            VITE_APPLE_AUTH_URL=https://api.fleetum.it/api/auth/apple
+          tags: |
+            ${{ steps.images.outputs.frontend_image }}
+            ghcr.io/silviomasuccio6/fleetum-frontend:latest
+
   deploy:
     name: Deploy Fleetum VPS
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: build-images
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout requested ref
@@ -65,31 +132,37 @@ jobs:
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "test \"\$(whoami)\" = '$FLEETUM_VPS_USER' && mkdir -p '$FLEETUM_APP_DIR' && test -w '$FLEETUM_APP_DIR'"
 
-      - name: Upload application files
+      - name: Upload deployment manifests
         env:
           FLEETUM_VPS_HOST: 57.131.47.124
           FLEETUM_VPS_USER: fleetum
           FLEETUM_APP_DIR: /opt/fleetum/app
         run: |
           rsync -az --delete \
-            --exclude '.git' \
-            --exclude 'node_modules' \
-            --exclude 'backend/dist' \
-            --exclude 'frontend/dist' \
-            --exclude 'uploads' \
-            --exclude 'backups' \
+            --include 'docker-compose.prod.yml' \
+            --include 'deploy/' \
+            --include 'deploy/caddy/' \
+            --include 'deploy/caddy/Caddyfile' \
+            --exclude '*' \
             -e "ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps" \
             ./ "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST:$FLEETUM_APP_DIR/"
 
-      - name: Rebuild and restart production containers
+      - name: Pull images, migrate and restart production containers
         env:
           FLEETUM_VPS_HOST: 57.131.47.124
           FLEETUM_VPS_USER: fleetum
           FLEETUM_APP_DIR: /opt/fleetum/app
           FLEETUM_ENV_FILE: /opt/fleetum/env/compose.env
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
+          FLEETUM_FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
         run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
+            "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "cd '$FLEETUM_APP_DIR' && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml build && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml up -d"
+            "cd '$FLEETUM_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml pull && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml up -d"
 
       - name: Production health checks
         run: |
