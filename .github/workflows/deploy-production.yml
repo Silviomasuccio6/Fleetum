@@ -89,7 +89,7 @@ jobs:
           FLEETUM_ENV_FILE: /opt/fleetum/env/compose.env
         run: |
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "cd '$FLEETUM_APP_DIR' && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml up -d --build"
+            "cd '$FLEETUM_APP_DIR' && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml build && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml up -d"
 
       - name: Production health checks
         run: |
