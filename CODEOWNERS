@@ -1,0 +1,15 @@
+# Fleetum code ownership for high-risk areas.
+# Replace @Silviomasuccio6 with a team once Fleetum has an organization/team setup.
+
+.github/workflows/* @Silviomasuccio6
+docker-compose* @Silviomasuccio6
+backend/prisma/* @Silviomasuccio6
+backend/prisma/migrations/* @Silviomasuccio6
+backend/src/shared/config/env.ts @Silviomasuccio6
+backend/src/interfaces/http/middlewares/* @Silviomasuccio6
+backend/src/application/services/billing-service.ts @Silviomasuccio6
+backend/src/application/services/license-policy-service.ts @Silviomasuccio6
+deploy/* @Silviomasuccio6
+deploy/** @Silviomasuccio6
+backend/Dockerfile.prod @Silviomasuccio6
+frontend/Dockerfile.prod @Silviomasuccio6

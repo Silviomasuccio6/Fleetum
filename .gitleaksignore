@@ -1,0 +1,5 @@
+# Historical CI placeholder values from commit 25a18949.
+# These were non-production test strings in .github/workflows/ci.yml and are kept
+# here so Gitleaks can still scan the repository without failing on old history.
+25a18949c4e4038c52b65b396aec09ee8580254a:.github/workflows/ci.yml:generic-api-key:45
+25a18949c4e4038c52b65b396aec09ee8580254a:.github/workflows/ci.yml:generic-api-key:46
