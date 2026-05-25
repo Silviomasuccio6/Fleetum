@@ -34,6 +34,10 @@ export const vehicleSchema = z.object({
   registrationDate: z.coerce.date().optional().nullable(),
   lastRevisionAt: z.coerce.date().optional().nullable(),
   revisionDueAt: z.coerce.date().optional().nullable(),
+  purchasePrice: z.number().min(0).optional().nullable(),
+  purchaseDate: z.coerce.date().optional().nullable(),
+  residualValue: z.number().min(0).optional().nullable(),
+  monthlyFixedCost: z.number().min(0).optional().nullable(),
   notes: z.string().optional(),
   isActive: z.boolean().optional()
 });

@@ -109,6 +109,17 @@ enum RentalCargosStatus {
   ERROR
 }
 
+enum VehicleCostType {
+  PURCHASE
+  INSURANCE
+  TAX
+  MAINTENANCE
+  REPAIR
+  REVISION
+  CLEANING
+  OTHER
+}
+
 enum BookingContractStatus {
   DRAFT
   READY
@@ -179,6 +190,7 @@ model Tenant {
   sites                         Site[]
   workshops                     Workshop[]
   vehicles                      Vehicle[]
+  vehicleCosts                  VehicleCost[]
   stoppages                     Stoppage[]
   reminders                     Reminder[]
   auditLogs                     AuditLog[]
@@ -460,6 +472,10 @@ model Vehicle {
   registrationDate      DateTime?
   lastRevisionAt        DateTime?
   revisionDueAt         DateTime?
+  purchasePrice         Float?
+  purchaseDate          DateTime?
+  residualValue         Float?
+  monthlyFixedCost      Float?
   notes                 String?
   isActive              Boolean              @default(true)
   createdAt             DateTime             @default(now())
@@ -471,11 +487,32 @@ model Vehicle {
   booklet               VehicleBooklet?
   stoppages             Stoppage[]
   maintenances          VehicleMaintenance[]
+  costs                 VehicleCost[]
   rentalBookings        RentalBooking[]
   rentalPriceLists      RentalPriceList[]
 
   @@index([tenantId, siteId])
   @@index([tenantId, revisionDueAt])
+}
+
+model VehicleCost {
+  id          String          @id @default(cuid())
+  tenantId    String
+  vehicleId   String
+  type        VehicleCostType @default(OTHER)
+  description String?
+  amount      Float
+  date        DateTime
+  recurring   Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  vehicle     Vehicle         @relation(fields: [vehicleId], references: [id])
+
+  @@index([tenantId, vehicleId, date])
+  @@index([tenantId, type])
+  @@index([tenantId, deletedAt])
 }
 
 model VehicleMaintenance {
