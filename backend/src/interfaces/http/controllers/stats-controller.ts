@@ -2,7 +2,9 @@ import { Request, Response } from "express";
 import ExcelJS from "exceljs";
 import { z } from "zod";
 import { GetDashboardStatsUseCase } from "../../../application/usecases/stats/get-dashboard-stats-usecase.js";
+import { VehicleProfitabilityReportService } from "../../../application/services/vehicle-profitability-report-service.js";
 import { stoppageStatusLabel } from "../../../shared/utils/stoppage-status-label.js";
+import { prisma } from "../../../infrastructure/database/prisma/client.js";
 
 type AnalyticsQuery = {
   dateFrom?: string;
@@ -25,6 +27,95 @@ export class StatsController {
 
   private readonly optionalString = z.preprocess((value) => (value === "" ? undefined : value), z.string().optional());
   private readonly csvDelimiter = ";";
+  private readonly vehicleProfitabilityService = new VehicleProfitabilityReportService();
+  private readonly vehicleProfitabilityQuerySchema = z.object({
+    vehicleId: this.optionalString,
+    siteId: this.optionalString,
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    dateFrom: z.string().datetime().optional(),
+    dateTo: z.string().datetime().optional(),
+    includeVat: z.preprocess((value) => String(value ?? "true") === "true", z.boolean()).optional().default(true),
+    includeCosts: z.preprocess((value) => String(value ?? "true") === "true", z.boolean()).optional().default(true),
+    statuses: z.preprocess((value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value === "string" && value.trim()) return value.split(",").map((item) => item.trim()).filter(Boolean);
+      return undefined;
+    }, z.array(z.enum(["DRAFT", "QUOTED", "HOLD", "CONFIRMED", "CONTRACT_SIGNED", "READY_FOR_HANDOVER", "IN_RENT", "CLOSED", "CANCELED", "NO_SHOW"])).optional())
+  });
+
+  private parseVehicleProfitabilityQuery(query: unknown) {
+    const parsed = this.vehicleProfitabilityQuerySchema.parse(query);
+    const now = new Date();
+    const fallbackFrom = new Date(now);
+    fallbackFrom.setFullYear(fallbackFrom.getFullYear() - 1);
+    const dateFrom = new Date(parsed.from ?? parsed.dateFrom ?? fallbackFrom.toISOString());
+    const dateTo = new Date(parsed.to ?? parsed.dateTo ?? now.toISOString());
+    return {
+      vehicleId: parsed.vehicleId,
+      siteId: parsed.siteId,
+      dateFrom,
+      dateTo,
+      includeVat: parsed.includeVat,
+      includeCosts: parsed.includeCosts,
+      statuses: parsed.statuses
+    };
+  }
+
+  vehicleProfitability = async (req: Request, res: Response) => {
+    const tenantId = req.auth!.tenantId;
+    const report = await this.vehicleProfitabilityService.build(tenantId, this.parseVehicleProfitabilityQuery(req.query));
+    res.json(report);
+  };
+
+  vehicleProfitabilityById = async (req: Request, res: Response) => {
+    const tenantId = req.auth!.tenantId;
+    const report = await this.vehicleProfitabilityService.build(tenantId, {
+      ...this.parseVehicleProfitabilityQuery(req.query),
+      vehicleId: req.params.vehicleId
+    });
+    res.json(report);
+  };
+
+  vehicleProfitabilityExport = async (req: Request, res: Response) => {
+    const tenantId = req.auth!.tenantId;
+    const exportType = String(req.params.format ?? req.query.export ?? "xlsx").toLowerCase();
+    const report = await this.vehicleProfitabilityService.build(tenantId, this.parseVehicleProfitabilityQuery(req.query));
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: req.auth!.userId,
+        action: "VEHICLE_PROFITABILITY_REPORT_EXPORTED",
+        resource: "vehicle/report",
+        resourceId: req.query.vehicleId ? String(req.query.vehicleId) : null,
+        details: {
+          period: report.period,
+          exportType,
+          filters: report.filters
+        }
+      }
+    });
+
+    if (exportType === "csv") {
+      const csv = await this.vehicleProfitabilityService.toCsv(report);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=\"fleetum-report-redditivita-veicolo.csv\"");
+      res.send(csv);
+      return;
+    }
+    if (exportType === "pdf") {
+      const pdf = await this.vehicleProfitabilityService.toPdf(report);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "attachment; filename=\"fleetum-report-redditivita-veicolo.pdf\"");
+      res.send(Buffer.from(pdf));
+      return;
+    }
+
+    const xlsx = await this.vehicleProfitabilityService.toXlsx(report);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", "attachment; filename=\"fleetum-report-redditivita-veicolo.xlsx\"");
+    res.send(Buffer.from(xlsx));
+  };
 
   private csvEscape(value: unknown) {
     const raw = String(value ?? "");
