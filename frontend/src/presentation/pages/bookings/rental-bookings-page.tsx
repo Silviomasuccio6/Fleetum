@@ -25,7 +25,7 @@ import { Select } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useRentalMonthAvailability } from "../../hooks/use-rental-month-availability";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, RotateCcw, Search, UserPlus } from "lucide-react";
+import { AlertTriangle, CalendarCheck2, CalendarDays, Car, ChevronLeft, ChevronRight, Clock3, Plus, RotateCcw, Search, UserPlus } from "lucide-react";
 
 type Site = {
   id: string;
@@ -245,6 +245,13 @@ const toMonthIso = (date: Date) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
 };
 
+const toDayKey = (value: Date | string) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
 const monthDays = (monthCursor: Date) => {
   const y = monthCursor.getFullYear();
   const m = monthCursor.getMonth();
@@ -296,6 +303,15 @@ const BOOKING_CONTRACT_STATUS_LABELS: Record<BookingContractStatus, string> = {
   SIGNED: "Firmato",
   ERROR: "Errore"
 };
+
+const BOOKING_STATUS_LEGEND: Array<{ status: RentalBookingStatus; tone: string }> = [
+  { status: "CONFIRMED", tone: "Confermata" },
+  { status: "READY_FOR_HANDOVER", tone: "Consegna" },
+  { status: "IN_RENT", tone: "In corso" },
+  { status: "QUOTED", tone: "Preventivo" },
+  { status: "HOLD", tone: "Opzione" },
+  { status: "CANCELED", tone: "Annullata" }
+];
 
 const defaultCustomerForm = (): CustomerFormState => ({
   mode: "create",
@@ -518,6 +534,74 @@ export const RentalBookingsPage = () => {
       monthAvailability.summary.occupancyRate,
       monthAvailability.summary.totalVehicles
     ]
+  );
+
+  const operationalStats = useMemo(() => {
+    const todayKey = toDayKey(new Date());
+    const bookings = monthAvailability.data.flatMap((row) =>
+      row.bookings.map((booking) => ({ ...booking, vehicleId: row.vehicle.id }))
+    );
+    const validBookings = bookings.filter((booking) => booking.status !== "CANCELED" && booking.status !== "NO_SHOW");
+    const activeVehicleIds = new Set(
+      validBookings
+        .filter((booking) => {
+          const pickup = new Date(booking.pickupAt);
+          const ret = new Date(booking.returnAt);
+          const now = new Date();
+          return pickup <= now && ret >= now;
+        })
+        .map((booking) => booking.vehicleId)
+    );
+
+    return {
+      activeRentals: activeVehicleIds.size,
+      pickupsToday: validBookings.filter((booking) => toDayKey(booking.pickupAt) === todayKey).length,
+      returnsToday: validBookings.filter((booking) => toDayKey(booking.returnAt) === todayKey).length,
+      pendingBookings: validBookings.filter((booking) => booking.status === "DRAFT" || booking.status === "QUOTED" || booking.status === "HOLD").length,
+      availableVehicles: monthAvailability.summary.availableVehicles,
+      occupancyRate: monthAvailability.summary.occupancyRate
+    };
+  }, [monthAvailability.data, monthAvailability.summary.availableVehicles, monthAvailability.summary.occupancyRate]);
+
+  const bookingMetricCards = useMemo(
+    () => [
+      {
+        label: "Noleggi in corso",
+        value: operationalStats.activeRentals,
+        hint: "Veicoli attualmente occupati",
+        icon: Car,
+        tone: "text-blue-700 bg-blue-50 border-blue-100 dark:text-blue-300 dark:bg-blue-950/30 dark:border-blue-900/50"
+      },
+      {
+        label: "Consegne oggi",
+        value: operationalStats.pickupsToday,
+        hint: "Uscite previste in giornata",
+        icon: CalendarCheck2,
+        tone: "text-emerald-700 bg-emerald-50 border-emerald-100 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-900/50"
+      },
+      {
+        label: "Riconsegne oggi",
+        value: operationalStats.returnsToday,
+        hint: "Rientri da presidiare",
+        icon: Clock3,
+        tone: "text-amber-700 bg-amber-50 border-amber-100 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-900/50"
+      },
+      {
+        label: "In attesa",
+        value: operationalStats.pendingBookings,
+        hint: "Bozze, preventivi e opzioni aperte",
+        icon: CalendarDays,
+        tone: "text-violet-700 bg-violet-50 border-violet-100 dark:text-violet-300 dark:bg-violet-950/30 dark:border-violet-900/50"
+      },
+      {
+        label: "Disponibili",
+        value: operationalStats.availableVehicles,
+        hint: `${operationalStats.occupancyRate}% occupazione mese`,
+        icon: AlertTriangle,
+        tone: "text-slate-700 bg-slate-50 border-slate-200 dark:text-slate-300 dark:bg-slate-900/40 dark:border-slate-800"
+      }
+    ],
+    [operationalStats]
   );
 
   useEffect(
@@ -1808,12 +1892,13 @@ export const RentalBookingsPage = () => {
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-5.5rem)] flex-col gap-3">
-      <div className="saas-hero-header grid gap-4 rounded-2xl px-4 py-3.5 backdrop-blur lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-center sm:px-6">
+    <section className="flex min-h-[calc(100vh-5.5rem)] flex-col gap-4 bg-slate-50/40 dark:bg-transparent">
+      <div className="saas-hero-header grid gap-5 rounded-[28px] border border-white/70 px-4 py-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.55)] backdrop-blur lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-center sm:px-6">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold sm:text-2xl">Booking Noleggi</h1>
-          <p className="mt-1 max-w-[420px] text-sm leading-relaxed text-muted-foreground">
-            Planner mensile per macchina, sede e stato operativo.
+          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary/70">Centro operativo noleggi</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-foreground sm:text-3xl">Booking Noleggi</h1>
+          <p className="mt-2 max-w-[660px] text-sm leading-relaxed text-muted-foreground">
+            Calendario operativo per leggere consegne, riconsegne, disponibilita veicoli e stato prenotazioni per sede.
           </p>
         </div>
 
@@ -1851,24 +1936,31 @@ export const RentalBookingsPage = () => {
         </div>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:hidden">
-        {bookingSummaryPills.map((pill) => (
-          <div key={pill.label} className="rounded-2xl border bg-card/85 px-4 py-3 shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{pill.label}</p>
-            <p className="mt-1 text-xl font-semibold text-foreground">{pill.value}</p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {bookingMetricCards.map((metric) => {
+          const Icon = metric.icon;
+          return (
+          <div key={metric.label} className="rounded-[24px] border border-slate-200/80 bg-white/90 px-4 py-3.5 shadow-[0_18px_55px_-44px_rgba(15,23,42,0.75)] dark:border-border dark:bg-card/85">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{metric.label}</p>
+                <p className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-foreground">{metric.value}</p>
+              </div>
+              <span className={`grid h-10 w-10 place-items-center rounded-2xl border ${metric.tone}`}>
+                <Icon className="h-4 w-4" aria-hidden="true" />
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">{metric.hint}</p>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {error ? <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       {success ? <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
-      {monthAvailability.error ? (
-        <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{monthAvailability.error}</p>
-      ) : null}
-
-      <Card className="saas-surface">
+      <Card className="saas-surface overflow-hidden border-slate-200/80 bg-white/95 shadow-[0_22px_70px_-54px_rgba(15,23,42,0.9)] dark:border-border dark:bg-card">
         <CardContent className="!py-4 sm:!py-4">
-          <div className="flex min-h-[52px] flex-col justify-center gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-h-[52px] flex-col justify-center gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="inline-flex h-11 items-center justify-between gap-2 rounded-2xl border bg-card/75 p-1 shadow-sm xl:min-w-[300px]">
               <Button variant="outline" size="sm" className="h-9 w-9 rounded-xl p-0" onClick={goPrevMonth} aria-label="Mese precedente">
                 <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -1933,41 +2025,71 @@ export const RentalBookingsPage = () => {
               </Button>
             </div>
           </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-border/60">
+            <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Legenda</span>
+            {BOOKING_STATUS_LEGEND.map((item) => (
+              <span key={item.status} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${toBadgeClass(item.status)}`}>
+                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+                {item.tone}
+              </span>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
       <div className="grid min-h-[calc(100vh-22rem)] flex-1 gap-3 2xl:grid-cols-[minmax(0,1fr)_390px]">
-        <Card className="saas-surface flex min-h-[620px] flex-col overflow-hidden">
+        <Card className="saas-surface flex min-h-[620px] flex-col overflow-hidden border-slate-200/80 bg-white shadow-[0_26px_90px_-60px_rgba(15,23,42,0.85)] dark:border-border dark:bg-card">
           <CardContent className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
-            {monthAvailability.loading ? <FleetumInlineLoader label="Caricamento calendario" className="px-2 pb-2" /> : null}
-            <RentalBookingMonthlyGrid
-              className="h-full min-h-[590px]"
-              monthKey={monthIso}
-              monthDays={days}
-              rows={monthAvailability.data}
-              statusFilter={statusFilter}
-              selectedBookingId={selectedBookingId}
-              onSelectBooking={(bookingId) => {
-                setSelectedBookingId(bookingId);
-                setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
-              }}
-              onEmptyCellClick={({ vehicleId, date }) => {
-                openCreateModalFromCell({ vehicleId, date });
-              }}
-              onBookingContextMenu={({ booking, x, y }) => {
-                const width = 320;
-                const height = 265;
-                const safeX = Math.max(8, Math.min(window.innerWidth - width - 8, x));
-                const safeY = Math.max(8, Math.min(window.innerHeight - height - 8, y));
-                setCtxMenu({
-                  open: true,
-                  x: safeX,
-                  y: safeY,
-                  booking
-                });
-              }}
-              getStatusClass={toBadgeClass}
-            />
+            {monthAvailability.loading ? (
+              <div className="space-y-2 p-2" aria-label="Caricamento calendario booking">
+                <FleetumInlineLoader label="Caricamento calendario" className="px-2 pb-1" />
+                <div className="grid gap-2">
+                  {Array.from({ length: 7 }).map((_, index) => (
+                    <div key={index} className="h-12 animate-pulse rounded-2xl bg-slate-100 dark:bg-muted/30" />
+                  ))}
+                </div>
+              </div>
+            ) : monthAvailability.error ? (
+              <div className="grid min-h-[520px] place-items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-6 text-center dark:border-border dark:bg-muted/10">
+                <div className="max-w-sm">
+                  <AlertTriangle className="mx-auto h-8 w-8 text-destructive" aria-hidden="true" />
+                  <p className="mt-3 text-sm font-semibold text-foreground">Calendario non disponibile</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{monthAvailability.error}</p>
+                  <Button className="mt-4" variant="outline" onClick={() => void monthAvailability.reload()}>
+                    Riprova
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <RentalBookingMonthlyGrid
+                className="h-full min-h-[590px]"
+                monthKey={monthIso}
+                monthDays={days}
+                rows={monthAvailability.data}
+                statusFilter={statusFilter}
+                selectedBookingId={selectedBookingId}
+                onSelectBooking={(bookingId) => {
+                  setSelectedBookingId(bookingId);
+                  setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
+                }}
+                onEmptyCellClick={({ vehicleId, date }) => {
+                  openCreateModalFromCell({ vehicleId, date });
+                }}
+                onBookingContextMenu={({ booking, x, y }) => {
+                  const width = 320;
+                  const height = 265;
+                  const safeX = Math.max(8, Math.min(window.innerWidth - width - 8, x));
+                  const safeY = Math.max(8, Math.min(window.innerHeight - height - 8, y));
+                  setCtxMenu({
+                    open: true,
+                    x: safeX,
+                    y: safeY,
+                    booking
+                  });
+                }}
+                getStatusClass={toBadgeClass}
+              />
+            )}
           </CardContent>
         </Card>
 
