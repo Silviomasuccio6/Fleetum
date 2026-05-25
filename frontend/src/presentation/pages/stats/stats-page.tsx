@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, Crown, Lock, SlidersHorizontal } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -108,6 +108,7 @@ const buildExportFilenameDate = () => new Date().toISOString().slice(0, 10);
 
 export const StatsPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { can, requiredPlan } = useEntitlements();
   const canReportsAdvanced = can("reports_advanced");
   const canAdvancedFilters = can("advanced_filters");
@@ -153,7 +154,11 @@ export const StatsPage = () => {
   );
 
   const masterData = useAsync(
-    () => Promise.all([masterDataUseCases.listSites({ page: 1, pageSize: 200 }), masterDataUseCases.listWorkshops({ page: 1, pageSize: 200 })]),
+    () => Promise.all([
+      masterDataUseCases.listSites({ page: 1, pageSize: 200 }),
+      masterDataUseCases.listWorkshops({ page: 1, pageSize: 200 }),
+      masterDataUseCases.listVehicles({ page: 1, pageSize: 200 })
+    ]),
     []
   );
 
@@ -210,8 +215,27 @@ export const StatsPage = () => {
 
   const sites = masterData.data?.[0]?.data ?? [];
   const workshops = masterData.data?.[1]?.data ?? [];
+  const vehicles = masterData.data?.[2]?.data ?? [];
   const data = stats.data ?? emptyAnalytics;
   const prev = previousStats.data ?? emptyAnalytics;
+  const [profitVehicleId, setProfitVehicleId] = useState(() => new URLSearchParams(location.search).get("vehicleId") ?? "");
+
+  const profitabilityParams = useMemo(
+    () => ({
+      from: toIsoStart(filters.dateFrom),
+      to: toIsoEnd(filters.dateTo),
+      vehicleId: profitVehicleId || undefined,
+      siteId: filters.siteId || undefined,
+      includeVat: true,
+      includeCosts: true
+    }),
+    [filters.dateFrom, filters.dateTo, filters.siteId, profitVehicleId]
+  );
+
+  const profitability = useAsync(
+    () => (canReportsAdvanced ? statsUseCases.vehicleProfitability(profitabilityParams) : Promise.resolve(null)),
+    [profitabilityParams, canReportsAdvanced, refreshKey]
+  );
 
   const trendData = useMemo(
     () =>
@@ -338,6 +362,16 @@ export const StatsPage = () => {
     const link = document.createElement("a");
     link.href = url;
     link.download = `gestione-fermi-report-analytics-${buildExportFilenameDate()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadVehicleProfitability = async (format: "pdf" | "xlsx" | "csv") => {
+    const blob = await statsUseCases.downloadVehicleProfitability(format, profitabilityParams);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fleetum-report-redditivita-veicolo-${buildExportFilenameDate()}.${format}`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -537,6 +571,143 @@ export const StatsPage = () => {
             ) : null}
           </div>
         </div>
+
+        <Card className="saas-surface border-blue-500/20 bg-gradient-to-br from-white to-blue-50/45 shadow-sm dark:from-slate-950 dark:to-blue-950/25">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Report redditivita veicolo</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Analizza fatturato generato, giorni noleggiati e recupero investimento per ogni auto della flotta.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => void downloadVehicleProfitability("pdf")} disabled={!canReportsAdvanced}>
+                  PDF
+                </Button>
+                <Button variant="outline" onClick={() => void downloadVehicleProfitability("xlsx")} disabled={!canReportsAdvanced}>
+                  Excel
+                </Button>
+                <Button variant="outline" onClick={() => void downloadVehicleProfitability("csv")} disabled={!canReportsAdvanced}>
+                  CSV
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="grid gap-1.5">
+                <Label>Veicolo</Label>
+                <Select value={profitVehicleId} onChange={(event) => setProfitVehicleId(event.target.value)}>
+                  <option value="">Tutti i veicoli</option>
+                  {vehicles.map((vehicle: any) => (
+                    <option key={vehicle.id} value={vehicle.id}>
+                      {vehicle.plate} · {vehicle.brand} {vehicle.model}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="rounded-2xl border bg-card px-4 py-3 text-xs text-muted-foreground">
+                Base dato: booking, contratti e pricing snapshot. ROI indicativo se il prezzo acquisto e i costi sono configurati.
+              </div>
+            </div>
+
+            {profitability.error ? (
+              <p className="text-sm text-destructive">{profitability.error}</p>
+            ) : null}
+
+            {profitability.data ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                  <CardStat title="Fatturato generato" value={formatCurrency(profitability.data.summary.totalRevenue)} />
+                  <CardStat title="Giorni noleggiati" value={formatNumber(profitability.data.summary.rentedDays)} />
+                  <CardStat title="Occupazione" value={`${profitability.data.summary.utilizationRate ?? 0}%`} />
+                  <CardStat title="Margine stimato" value={formatCurrency(profitability.data.summary.grossMargin)} />
+                  <CardStat
+                    title="Investimento recuperato"
+                    value={profitability.data.investment.recoveredPercentage == null ? "n/d" : `${profitability.data.investment.recoveredPercentage}%`}
+                  />
+                  <CardStat
+                    title="Residuo break-even"
+                    value={profitability.data.investment.remainingToBreakEven == null ? "n/d" : formatCurrency(profitability.data.investment.remainingToBreakEven)}
+                  />
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="h-[280px] rounded-2xl border bg-card p-3">
+                    {profitability.data.trend?.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={profitability.data.trend}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="month" />
+                          <YAxis />
+                          <Tooltip cursor={false} isAnimationActive={false} wrapperStyle={{ pointerEvents: "none" }} />
+                          <Bar dataKey="revenue" fill="#2563ff" radius={[6, 6, 0, 0]} name="Ricavi" />
+                          <Bar dataKey="costs" fill="#00b8a9" radius={[6, 6, 0, 0]} name="Costi" />
+                          <Line dataKey="margin" stroke="#07111f" strokeWidth={2.4} dot={false} name="Margine" />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="grid h-full place-items-center text-sm text-muted-foreground">Nessun trend economico nel periodo selezionato.</div>
+                    )}
+                  </div>
+
+                  <Card className="border-dashed">
+                    <CardContent className="space-y-3 pt-4 text-sm">
+                      <p className="font-semibold">Insight operativi</p>
+                      <p>
+                        {profitability.data.investment.purchasePrice
+                          ? `Investimento configurato: ${formatCurrency(profitability.data.investment.purchasePrice)}.`
+                          : "Prezzo acquisto non configurato: inseriscilo nella scheda veicolo per calcolare ROI e break-even."}
+                      </p>
+                      <p>
+                        {profitability.data.investment.breakEvenReached === true
+                          ? "Break-even raggiunto sul periodo/dati disponibili."
+                          : profitability.data.investment.remainingToBreakEven != null
+                            ? `Mancano ${formatCurrency(profitability.data.investment.remainingToBreakEven)} al break-even.`
+                            : "Break-even non stimabile con i dati attuali."}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{profitability.data.dataQuality?.notes?.[0]}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Veicolo</TableHead>
+                        <TableHead>Sede</TableHead>
+                        <TableHead>Ricavi</TableHead>
+                        <TableHead>Costi</TableHead>
+                        <TableHead>Margine</TableHead>
+                        <TableHead>Giorni</TableHead>
+                        <TableHead>ROI</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {profitability.data.vehicles?.slice(0, 8).map((vehicle: any) => (
+                        <TableRow key={vehicle.vehicleId}>
+                          <TableCell className="font-medium">{vehicle.plate} · {vehicle.brand} {vehicle.model}</TableCell>
+                          <TableCell>{vehicle.siteName ?? "-"}</TableCell>
+                          <TableCell>{formatCurrency(vehicle.revenue)}</TableCell>
+                          <TableCell>{formatCurrency(vehicle.costs)}</TableCell>
+                          <TableCell>{formatCurrency(vehicle.margin)}</TableCell>
+                          <TableCell>{formatNumber(vehicle.rentedDays)}</TableCell>
+                          <TableCell>{vehicle.recoveredPercentage == null ? "n/d" : `${vehicle.recoveredPercentage}%`}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
+                Caricamento report redditivita veicolo...
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {stats.error ? (
           <Card className="border-destructive/35">
