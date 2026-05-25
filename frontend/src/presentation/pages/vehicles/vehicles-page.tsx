@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { FileText, Trash2, Upload, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
@@ -58,6 +59,7 @@ const formatBytes = (value?: number | null) => {
 };
 
 export const VehiclesPage = () => {
+  const navigate = useNavigate();
   const [sites, setSites] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [totalVehicles, setTotalVehicles] = useState(0);
@@ -207,6 +209,7 @@ export const VehiclesPage = () => {
 
     const registrationDateValue = String(form.get("registrationDate") || "").trim();
     const lastRevisionAtValue = String(form.get("lastRevisionAt") || "").trim();
+    const purchaseDateValue = String(form.get("purchaseDate") || "").trim();
 
     const payload = {
       siteId: String(form.get("siteId") || "").trim(),
@@ -218,6 +221,10 @@ export const VehiclesPage = () => {
       maintenanceIntervalKm: String(form.get("maintenanceIntervalKm") || "").trim() ? Number(form.get("maintenanceIntervalKm")) : null,
       registrationDate: registrationDateValue ? toIsoAtNoon(registrationDateValue) : null,
       lastRevisionAt: lastRevisionAtValue ? toIsoAtNoon(lastRevisionAtValue) : null,
+      purchasePrice: String(form.get("purchasePrice") || "").trim() ? Number(form.get("purchasePrice")) : null,
+      purchaseDate: purchaseDateValue ? toIsoAtNoon(purchaseDateValue) : null,
+      residualValue: String(form.get("residualValue") || "").trim() ? Number(form.get("residualValue")) : null,
+      monthlyFixedCost: String(form.get("monthlyFixedCost") || "").trim() ? Number(form.get("monthlyFixedCost")) : null,
       notes: String(form.get("notes") || "").trim()
     };
 
@@ -364,6 +371,7 @@ export const VehiclesPage = () => {
                         Libretto
                       </Button>
                     ) : null}
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/statistiche?vehicleId=${vehicle.id}`)}>ROI</Button>
                     <Button size="sm" variant="outline" onClick={() => openEditPanel(vehicle)}>Modifica</Button>
                     <Button size="sm" variant="destructive" onClick={() => onDelete(vehicle.id)}>Elimina</Button>
                   </div>
@@ -413,6 +421,7 @@ export const VehiclesPage = () => {
                     <TableCell>
                       <div className="flex items-center justify-end gap-1.5">
                         <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openEditPanel(vehicle)}>Modifica</Button>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => navigate(`/statistiche?vehicleId=${vehicle.id}`)}>ROI</Button>
                         <Button size="sm" variant="destructive" className="h-7 px-2 text-[11px]" onClick={() => onDelete(vehicle.id)}>Elimina</Button>
                       </div>
                     </TableCell>
@@ -493,6 +502,22 @@ export const VehiclesPage = () => {
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Intervallo manutenzione (km)</Label>
                   <Input name="maintenanceIntervalKm" type="number" min={100} defaultValue={editingVehicle?.maintenanceIntervalKm ?? ""} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Prezzo acquisto</Label>
+                  <Input name="purchasePrice" type="number" min={0} step="0.01" defaultValue={editingVehicle?.purchasePrice ?? ""} placeholder="10000" />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Data acquisto</Label>
+                  <Input name="purchaseDate" type="date" defaultValue={toDateInputValue(editingVehicle?.purchaseDate)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Valore residuo stimato</Label>
+                  <Input name="residualValue" type="number" min={0} step="0.01" defaultValue={editingVehicle?.residualValue ?? ""} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Costi fissi mensili</Label>
+                  <Input name="monthlyFixedCost" type="number" min={0} step="0.01" defaultValue={editingVehicle?.monthlyFixedCost ?? ""} />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Data immatricolazione (libretto)</Label>
