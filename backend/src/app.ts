@@ -48,13 +48,35 @@ morgan.token("safe-url", (req) => {
 const localTenantOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
 const localPlatformOrigins = ["http://localhost:5174", "http://127.0.0.1:5174"];
 
+const expandOriginVariants = (origin: string) => {
+  try {
+    const url = new URL(origin);
+    const variants = [url.origin];
+
+    if (!url.hostname.startsWith("www.")) {
+      variants.push(`${url.protocol}//www.${url.host}`);
+    } else {
+      variants.push(`${url.protocol}//${url.host.replace(/^www\./, "")}`);
+    }
+
+    return variants;
+  } catch {
+    return [origin];
+  }
+};
+
 const getAllowedOrigins = (corsOrigin: string, localOrigins: string[]) => {
   const devOrigins = env.NODE_ENV === "production" ? [] : localOrigins;
+  const configuredOrigins = corsOrigin
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .flatMap(expandOriginVariants);
 
   return Array.from(
     new Set(
       [
-        corsOrigin,
+        ...configuredOrigins,
         ...devOrigins
       ].filter(Boolean)
     )
