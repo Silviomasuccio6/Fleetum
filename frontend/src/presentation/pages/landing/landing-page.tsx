@@ -756,9 +756,12 @@ const LandingFooter = () => {
     <footer className="fleetum-footer">
       <img src="/brand/fleetum-logo-for-dark-bg.svg" alt="Fleetum" />
       <nav aria-label="Footer Fleetum">
-        <a href="#prodotto">Prodotto</a>
-        <a href="#moduli">Moduli</a>
-        <a href="#prezzi">Prezzi</a>
+        <Link to="/software-autonoleggio">Software autonoleggio</Link>
+        <Link to="/booking-noleggi">Booking noleggi</Link>
+        <Link to="/contratti-noleggio-digitali">Contratti digitali</Link>
+        <Link to="/gestionale-flotta">Gestionale flotta</Link>
+        <Link to="/report-redditivita-veicolo">ROI veicolo</Link>
+        <Link to="/prezzi">Prezzi</Link>
         <Link to="/privacy">Privacy</Link>
         <Link to="/cookie">Cookie</Link>
         <Link to="/termini">Termini</Link>

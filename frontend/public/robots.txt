@@ -2,7 +2,11 @@ User-agent: *
 Allow: /
 Disallow: /dashboard
 Disallow: /booking
+Disallow: /fermi
+Disallow: /anagrafiche
+Disallow: /utenti
 Disallow: /profilo
 Disallow: /upgrade
 Disallow: /statistiche
+Disallow: /auth
 Sitemap: https://fleetum.it/sitemap.xml

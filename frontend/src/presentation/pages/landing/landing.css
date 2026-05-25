@@ -1974,3 +1974,398 @@
   from { opacity: 0; transform: translateY(28px) scale(.98); filter: blur(12px); }
   to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
+
+.fleetum-seo-page {
+  min-height: 100vh;
+  padding: 26px clamp(18px, 4vw, 56px) 72px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(37, 99, 255, .22), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(0, 184, 169, .16), transparent 32%),
+    linear-gradient(180deg, #050b16 0%, #07111f 44%, #0b1220 100%);
+  color: #f8fbff;
+  overflow: hidden;
+}
+
+.fleetum-seo-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(230, 236, 242, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230, 236, 242, .045) 1px, transparent 1px);
+  background-size: 82px 82px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, .9), transparent 78%);
+}
+
+.fleetum-seo-header {
+  position: sticky;
+  top: 18px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 28px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 13px 14px 13px 18px;
+  border: 1px solid rgba(230, 236, 242, .12);
+  border-radius: 24px;
+  background: rgba(7, 17, 31, .72);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .26);
+  backdrop-filter: blur(18px);
+}
+
+.fleetum-seo-header .fleetum-site-logo {
+  height: 42px;
+  min-width: 150px;
+  padding: 0;
+}
+
+.fleetum-seo-header .fleetum-site-logo img {
+  width: 150px;
+  height: auto;
+}
+
+.fleetum-seo-header nav {
+  display: flex;
+  justify-content: center;
+  gap: clamp(14px, 2vw, 28px);
+}
+
+.fleetum-seo-header nav a {
+  color: rgba(230, 236, 242, .72);
+  font-size: .9rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: color .2s ease;
+}
+
+.fleetum-seo-header nav a:hover {
+  color: #fff;
+}
+
+.fleetum-seo-hero,
+.fleetum-seo-section,
+.fleetum-seo-split,
+.fleetum-seo-cta {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, 100%);
+  margin-inline: auto;
+}
+
+.fleetum-seo-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.04fr) minmax(330px, .64fr);
+  gap: clamp(28px, 5vw, 70px);
+  align-items: center;
+  padding: clamp(82px, 12vw, 136px) 0 74px;
+}
+
+.fleetum-seo-hero h1 {
+  max-width: 880px;
+  margin: 18px 0 22px;
+  color: #fff;
+  font-size: clamp(3rem, 7.4vw, 6.8rem);
+  line-height: .9;
+  letter-spacing: -.075em;
+  text-wrap: balance;
+}
+
+.fleetum-seo-hero p {
+  max-width: 760px;
+  color: rgba(230, 236, 242, .74);
+  font-size: clamp(1.05rem, 1.6vw, 1.28rem);
+  line-height: 1.76;
+}
+
+.fleetum-seo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 30px;
+}
+
+.fleetum-seo-panel {
+  position: relative;
+  min-height: 430px;
+  padding: 30px;
+  border: 1px solid rgba(230, 236, 242, .12);
+  border-radius: 34px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .035)),
+    radial-gradient(circle at 20% 18%, rgba(37, 99, 255, .34), transparent 30%),
+    radial-gradient(circle at 84% 82%, rgba(0, 184, 169, .22), transparent 28%);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, .38);
+  overflow: hidden;
+}
+
+.fleetum-seo-panel::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 33px;
+  background:
+    linear-gradient(120deg, transparent 10%, rgba(255, 255, 255, .16), transparent 28%),
+    linear-gradient(180deg, rgba(7, 17, 31, .18), rgba(7, 17, 31, .68));
+  pointer-events: none;
+}
+
+.fleetum-seo-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.fleetum-seo-panel__label {
+  margin: 0 0 22px;
+  color: rgba(230, 236, 242, .62);
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.fleetum-seo-panel strong {
+  display: block;
+  max-width: 320px;
+  color: #fff;
+  font-size: clamp(1.85rem, 3vw, 3rem);
+  line-height: 1.02;
+  letter-spacing: -.045em;
+  text-transform: capitalize;
+}
+
+.fleetum-seo-panel ul {
+  display: grid;
+  gap: 14px;
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fleetum-seo-panel li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: rgba(230, 236, 242, .78);
+  line-height: 1.55;
+}
+
+.fleetum-seo-panel li svg {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  color: #32ddd1;
+}
+
+.fleetum-seo-section {
+  padding: 74px 0;
+}
+
+.fleetum-seo-section__head {
+  max-width: 760px;
+  margin-bottom: 30px;
+}
+
+.fleetum-seo-section__head h2,
+.fleetum-seo-split h2,
+.fleetum-seo-cta h2 {
+  margin: 10px 0 0;
+  color: #fff;
+  font-size: clamp(2rem, 4.8vw, 4rem);
+  line-height: 1;
+  letter-spacing: -.055em;
+  text-wrap: balance;
+}
+
+.fleetum-seo-section__head p,
+.fleetum-seo-split p,
+.fleetum-seo-cta p {
+  color: rgba(230, 236, 242, .68);
+  font-size: 1rem;
+  line-height: 1.78;
+}
+
+.fleetum-seo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fleetum-seo-card,
+.fleetum-seo-split article,
+.fleetum-seo-faq article {
+  border: 1px solid rgba(230, 236, 242, .11);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .035));
+  box-shadow: 0 22px 80px rgba(0, 0, 0, .18);
+  backdrop-filter: blur(18px);
+}
+
+.fleetum-seo-card {
+  min-height: 220px;
+  padding: 24px;
+  border-radius: 28px;
+  transition: transform .25s ease, border-color .25s ease, background .25s ease;
+}
+
+.fleetum-seo-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(50, 221, 209, .42);
+  background: linear-gradient(180deg, rgba(37, 99, 255, .13), rgba(255, 255, 255, .035));
+}
+
+.fleetum-seo-card svg {
+  color: #32ddd1;
+}
+
+.fleetum-seo-card h3 {
+  margin: 18px 0 10px;
+  color: #fff;
+  font-size: 1.05rem;
+  line-height: 1.25;
+  letter-spacing: -.02em;
+}
+
+.fleetum-seo-card p {
+  margin: 0;
+  color: rgba(230, 236, 242, .62);
+  font-size: .92rem;
+  line-height: 1.65;
+}
+
+.fleetum-seo-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 34px 0 74px;
+}
+
+.fleetum-seo-split article {
+  min-height: 300px;
+  padding: clamp(28px, 4vw, 46px);
+  border-radius: 34px;
+}
+
+.fleetum-seo-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.fleetum-seo-keywords span {
+  padding: 12px 16px;
+  border: 1px solid rgba(230, 236, 242, .14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .065);
+  color: rgba(230, 236, 242, .78);
+  font-size: .92rem;
+  font-weight: 800;
+}
+
+.fleetum-seo-faq {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fleetum-seo-faq article {
+  min-height: 170px;
+  padding: 24px;
+  border-radius: 26px;
+}
+
+.fleetum-seo-faq h3 {
+  margin: 0 0 10px;
+  color: #fff;
+  font-size: 1.08rem;
+}
+
+.fleetum-seo-faq p {
+  margin: 0;
+  color: rgba(230, 236, 242, .66);
+  line-height: 1.7;
+}
+
+.fleetum-seo-cta {
+  margin-top: 38px;
+  padding: clamp(34px, 6vw, 68px);
+  border: 1px solid rgba(230, 236, 242, .12);
+  border-radius: 38px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(37, 99, 255, .28), transparent 36%),
+    radial-gradient(circle at 86% 100%, rgba(0, 184, 169, .2), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .04));
+  box-shadow: 0 34px 120px rgba(0, 0, 0, .28);
+}
+
+.fleetum-seo-cta p {
+  max-width: 720px;
+  margin: 16px 0 28px;
+}
+
+@media (max-width: 980px) {
+  .fleetum-seo-header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .fleetum-seo-header nav {
+    display: none;
+  }
+
+  .fleetum-seo-hero,
+  .fleetum-seo-split {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-seo-panel {
+    min-height: 330px;
+  }
+
+  .fleetum-seo-grid,
+  .fleetum-seo-faq {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .fleetum-seo-page {
+    padding: 14px 14px 52px;
+  }
+
+  .fleetum-seo-header {
+    top: 10px;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .fleetum-seo-header .fleetum-site-logo {
+    min-width: 122px;
+  }
+
+  .fleetum-seo-header .fleetum-site-logo img {
+    width: 122px;
+  }
+
+  .fleetum-seo-header .fleetum-btn {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: .78rem;
+  }
+
+  .fleetum-seo-hero {
+    padding: 64px 0 44px;
+  }
+
+  .fleetum-seo-hero h1 {
+    font-size: clamp(2.75rem, 17vw, 4.2rem);
+  }
+
+  .fleetum-seo-grid,
+  .fleetum-seo-faq {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-seo-section {
+    padding: 48px 0;
+  }
+}

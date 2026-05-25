@@ -30,6 +30,7 @@ import { PrivacyPolicyPage } from "../pages/privacy/privacy-policy-page";
 import { CookieConsentBanner } from "../components/privacy/cookie-consent-banner";
 import { DemoRequestPage, LegalDocumentPage } from "../pages/legal/legal-pages";
 import { LandingPage } from "../pages/landing/landing-page";
+import { PublicSeoPage } from "../pages/landing/seo-pages";
 import { ProtectedRoute } from "./protected-route";
 import { GlobalTextTranslator } from "../components/i18n/global-text-translator";
 
@@ -49,6 +50,13 @@ export const AppRoutes = () => (
     <Route path="/termini" element={<LegalDocumentPage type="terms" />} />
     <Route path="/dpa" element={<LegalDocumentPage type="dpa" />} />
     <Route path="/demo" element={<DemoRequestPage />} />
+    <Route path="/software-autonoleggio" element={<PublicSeoPage slug="software-autonoleggio" />} />
+    <Route path="/software-rent-a-car" element={<PublicSeoPage slug="software-rent-a-car" />} />
+    <Route path="/gestionale-flotta" element={<PublicSeoPage slug="gestionale-flotta" />} />
+    <Route path="/booking-noleggi" element={<PublicSeoPage slug="booking-noleggi" />} />
+    <Route path="/contratti-noleggio-digitali" element={<PublicSeoPage slug="contratti-noleggio-digitali" />} />
+    <Route path="/report-redditivita-veicolo" element={<PublicSeoPage slug="report-redditivita-veicolo" />} />
+    <Route path="/prezzi" element={<PublicSeoPage slug="prezzi" />} />
     <Route path="/" element={<LandingPage />} />
     <Route
       element={
