@@ -19,14 +19,32 @@
 30 2 * * * /opt/fleetum/app/deploy/backup/backup-uploads.sh >> /opt/fleetum/logs/backup-uploads.log 2>&1
 ```
 
+## Configuration
+
+The scripts use safe defaults for production and can be configured with environment variables stored outside git.
+
+```bash
+BACKUP_DIR=/opt/fleetum/backups/postgres
+UPLOADS_DIR=/opt/fleetum/uploads
+RETENTION_DAYS=14
+COMPOSE_FILE=/opt/fleetum/app/docker-compose.prod.yml
+ENV_FILE=/opt/fleetum/env/compose.env
+POSTGRES_SERVICE_NAME=postgres
+POSTGRES_USER=fleetum
+POSTGRES_DB=fleetum
+OFFSITE_RCLONE_TARGET=remote:fleetum-backups
+RCLONE_TRANSFERS=4
+```
+
 ## Offsite
 
 Local backup is not enough. Configure offsite copy with Cloudflare R2, S3, Backblaze B2 or another provider. Use env/config outside the repo.
 
-Example placeholder:
+Recommended option with `rclone`:
 
 ```bash
-OFFSITE_SYNC_CMD="rclone copy /opt/fleetum/backups remote:fleetum-backups --transfers 4"
+OFFSITE_RCLONE_TARGET="remote:fleetum-backups/postgres" /opt/fleetum/app/deploy/backup/backup-postgres.sh
+OFFSITE_RCLONE_TARGET="remote:fleetum-backups/uploads" /opt/fleetum/app/deploy/backup/backup-uploads.sh
 ```
 
 ## Security
@@ -35,3 +53,11 @@ OFFSITE_SYNC_CMD="rclone copy /opt/fleetum/backups remote:fleetum-backups --tran
 - Restrict backup file permissions.
 - Encrypt offsite backups where possible.
 - Test restore regularly.
+
+## Deployment
+
+GitHub Actions deploys the backup runbooks and scripts to `/opt/fleetum/app/deploy/backup`. Cron should execute the scripts from that path so the VPS uses the reviewed version from git.
+
+## Restore test
+
+Run a restore test at least monthly in staging or on an isolated database. Do not wait for an incident to discover a backup cannot be restored.
