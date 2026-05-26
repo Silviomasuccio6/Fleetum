@@ -5,6 +5,7 @@ import { AppError } from "../../../shared/errors/app-error.js";
 import { SignupInput } from "../../dtos/auth-dto.js";
 import { getPlanMonthlyPrice } from "../../services/feature-entitlements-service.js";
 import { TenantProfileService } from "../../services/tenant-profile-service.js";
+import { upsertTenantSubscription } from "../../services/tenant-subscription-service.js";
 import { env } from "../../../shared/config/env.js";
 
 type SocialSignupInput = {
@@ -63,6 +64,17 @@ export class SignupUseCase {
     });
 
     const trialEndsAt = new Date(Date.now() + env.BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const subscription = await upsertTenantSubscription({
+      tenantId: tenant.id,
+      plan: "STARTER",
+      seats: 3,
+      status: "TRIAL",
+      expiresAt: trialEndsAt,
+      priceMonthly: getPlanMonthlyPrice("STARTER"),
+      billingCycle: "monthly",
+      provider: "local"
+    });
+
     await prisma.auditLog.create({
       data: {
         tenantId: tenant.id,
@@ -79,7 +91,8 @@ export class SignupUseCase {
             expiresAt: trialEndsAt,
             priceMonthly: getPlanMonthlyPrice("STARTER"),
             billingCycle: "monthly",
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
+            subscription
           }
         }
       }
@@ -128,6 +141,17 @@ export class SignupUseCase {
     });
 
     const trialEndsAt = new Date(Date.now() + env.BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const subscription = await upsertTenantSubscription({
+      tenantId: tenant.id,
+      plan: "STARTER",
+      seats: 3,
+      status: "TRIAL",
+      expiresAt: trialEndsAt,
+      priceMonthly: getPlanMonthlyPrice("STARTER"),
+      billingCycle: "monthly",
+      provider: "local"
+    });
+
     await prisma.auditLog.create({
       data: {
         tenantId: tenant.id,
@@ -144,7 +168,8 @@ export class SignupUseCase {
             expiresAt: trialEndsAt,
             priceMonthly: getPlanMonthlyPrice("STARTER"),
             billingCycle: "monthly",
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
+            subscription
           }
         }
       }
