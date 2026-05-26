@@ -16,8 +16,8 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 ## Deploy order
 
 1. CI green.
-2. Backup database.
-3. Backup uploads when document/storage changes are involved.
+2. Backup database with `deploy/backup/backup-postgres.sh`.
+3. Backup uploads with `deploy/backup/backup-uploads.sh` when document/storage changes are involved.
 4. GitHub Actions builds and pushes backend/frontend images to GHCR.
 5. Upload deployment manifests to the VPS.
 6. Pull the selected images on the VPS.
@@ -61,6 +61,18 @@ curl -fsS https://platform.fleetum.it/platform-api/health
 curl -fsS https://fleetum.it/robots.txt
 curl -fsS https://fleetum.it/sitemap.xml
 ```
+
+## Backup commands
+
+Backups should run before migrations and before any deploy that changes persistence, storage or document handling.
+
+```bash
+cd /opt/fleetum/app
+BACKUP_DIR=/opt/fleetum/backups/postgres ./deploy/backup/backup-postgres.sh
+BACKUP_DIR=/opt/fleetum/backups/uploads ./deploy/backup/backup-uploads.sh
+```
+
+For offsite copies, configure `OFFSITE_RCLONE_TARGET` outside the repository.
 
 ## Rollback
 
