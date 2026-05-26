@@ -1,4 +1,5 @@
 import { PlatformAdminRepository, PlatformAuditEvent, PlatformLicense, PlatformTenantRow } from "../../domain/repositories/platform-admin-repository.js";
+import { readTenantSubscription, upsertTenantSubscription } from "../../application/services/tenant-subscription-service.js";
 import { prisma } from "../database/prisma/client.js";
 
 const PLATFORM_ACTIONS = [
@@ -79,6 +80,18 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
   }
 
   async getLatestLicense(tenantId: string): Promise<PlatformLicense | null> {
+    const persisted = await readTenantSubscription(tenantId);
+    if (persisted) {
+      return {
+        plan: persisted.plan,
+        seats: persisted.seats,
+        status: persisted.status,
+        expiresAt: persisted.expiresAt,
+        updatedAt: persisted.updatedAt,
+        priceMonthly: persisted.priceMonthly,
+        billingCycle: persisted.billingCycle
+      };
+    }
     return this.getLatestLicenseAtOrBefore(tenantId, new Date());
   }
 
@@ -97,6 +110,17 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
   }
 
   async setLicense(tenantId: string, userId: string, details: PlatformLicense): Promise<void> {
+    const subscription = await upsertTenantSubscription({
+      tenantId,
+      plan: details.plan,
+      seats: details.seats,
+      status: details.status,
+      expiresAt: details.expiresAt,
+      priceMonthly: details.priceMonthly,
+      billingCycle: details.billingCycle,
+      provider: "local"
+    });
+
     await prisma.auditLog.create({
       data: {
         tenantId,
@@ -104,7 +128,11 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
         action: "PLATFORM_LICENSE_UPDATED",
         resource: "tenant",
         resourceId: tenantId,
-        details: details as any
+        details: {
+          ...details,
+          persisted: true,
+          subscription
+        } as any
       }
     });
   }
