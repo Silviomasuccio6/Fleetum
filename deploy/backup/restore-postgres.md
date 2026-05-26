@@ -35,6 +35,12 @@ curl -fsS https://api.fleetum.it/api/ready
 - Booking/contratti smoke tests pass.
 - Backend logs show no migration/query errors.
 
+## Restore test cadence
+
+- Monthly: restore the latest dump to an isolated staging/test database.
+- Before risky migrations: create a fresh dump and verify it is not empty.
+- After storage changes: test both PostgreSQL and uploads restore paths.
+
 ## Production warning
 
 Never restore over production without approval, fresh backup, maintenance window and rollback plan.

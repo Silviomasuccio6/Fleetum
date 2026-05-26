@@ -143,6 +143,9 @@ jobs:
             --include 'deploy/' \
             --include 'deploy/caddy/' \
             --include 'deploy/caddy/Caddyfile' \
+            --include 'deploy/backup/' \
+            --include 'deploy/backup/*.sh' \
+            --include 'deploy/backup/*.md' \
             --exclude '*' \
             -e "ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps" \
             ./ "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST:$FLEETUM_APP_DIR/"
