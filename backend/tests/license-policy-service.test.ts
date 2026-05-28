@@ -56,7 +56,7 @@ test("license policy reads plan from nested details.after payload", async () => 
     createdAt: new Date()
   };
 
-  const service = new LicensePolicyService(repo);
+  const service = new LicensePolicyService(repo, async () => null);
   const entitlements = await service.getTenantEntitlements("tenant-1");
 
   assert.equal(entitlements.plan, "PRO");
@@ -84,9 +84,51 @@ test("license policy reads plan from raw payload for backward compatibility", as
     createdAt: new Date()
   };
 
-  const service = new LicensePolicyService(repo);
+  const service = new LicensePolicyService(repo, async () => null);
   const license = await service.getTenantLicense("tenant-2");
 
   assert.equal(license.plan, "ENTERPRISE");
+  assert.equal(license.billingCycle, "yearly");
+});
+
+test("license policy prefers persisted tenant subscription over audit fallback", async () => {
+  const repo = new FakeAuditRepo();
+  repo.latest = {
+    id: "audit-3",
+    tenantId: "tenant-3",
+    userId: "platform-admin",
+    action: "PLATFORM_LICENSE_UPDATED",
+    resource: "tenant",
+    resourceId: "tenant-3",
+    details: {
+      plan: "STARTER",
+      seats: 3,
+      status: "ACTIVE",
+      expiresAt: null,
+      priceMonthly: 129,
+      billingCycle: "monthly"
+    },
+    createdAt: new Date()
+  };
+
+  const service = new LicensePolicyService(repo, async () => ({
+    plan: "PRO",
+    seats: 7,
+    status: "PAST_DUE",
+    expiresAt: null,
+    updatedAt: new Date().toISOString(),
+    priceMonthly: 199,
+    billingCycle: "yearly",
+    provider: "stripe",
+    stripeCustomerId: "cus_demo",
+    stripeSubscriptionId: "sub_demo"
+  }));
+
+  const license = await service.getTenantLicense("tenant-3");
+
+  assert.equal(license.plan, "PRO");
+  assert.equal(license.seats, 7);
+  assert.equal(license.status, "PAST_DUE");
+  assert.equal(license.priceMonthly, 199);
   assert.equal(license.billingCycle, "yearly");
 });

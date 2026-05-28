@@ -56,13 +56,40 @@ const compactEmail = (value?: string | null) => {
 
 export class PlatformConsoleService {
   private async latestLicenses() {
+    const subscriptions = await prisma.tenantSubscription.findMany({
+      select: {
+        tenantId: true,
+        plan: true,
+        seats: true,
+        status: true,
+        currentPeriodEnd: true,
+        trialEndsAt: true,
+        priceMonthly: true,
+        billingCycle: true
+      }
+    });
+
+    const map = new Map<string, LicenseSnapshot>();
+    subscriptions.forEach((subscription) => {
+      map.set(subscription.tenantId, {
+        plan: subscription.plan,
+        seats: subscription.seats,
+        status: String(subscription.status ?? "ACTIVE") as LicenseSnapshot["status"],
+        expiresAt: (subscription.currentPeriodEnd ?? subscription.trialEndsAt)?.toISOString() ?? null,
+        priceMonthly:
+          Number.isFinite(Number(subscription.priceMonthly)) && Number(subscription.priceMonthly) > 0
+            ? Number(subscription.priceMonthly)
+            : null,
+        billingCycle: subscription.billingCycle === "yearly" ? "yearly" : "monthly"
+      });
+    });
+
     const rows = await prisma.auditLog.findMany({
       where: { action: "PLATFORM_LICENSE_UPDATED", resource: "tenant", resourceId: { not: null } },
       orderBy: { createdAt: "desc" },
       select: { resourceId: true, details: true }
     });
 
-    const map = new Map<string, LicenseSnapshot>();
     rows.forEach((row) => {
       if (!row.resourceId || map.has(row.resourceId)) return;
       map.set(row.resourceId, parseLicense(row.details) ?? defaultLicense);
