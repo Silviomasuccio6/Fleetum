@@ -19,6 +19,14 @@
 30 2 * * * /opt/fleetum/app/deploy/backup/backup-uploads.sh >> /opt/fleetum/logs/backup-uploads.log 2>&1
 ```
 
+Production deploys install this schedule automatically through:
+
+```bash
+/opt/fleetum/app/deploy/backup/install-cron.sh
+```
+
+The installer is idempotent: it replaces the managed Fleetum block and removes the old legacy `ops/backup-db-prod.sh` cron entry if present.
+
 ## Configuration
 
 The scripts use safe defaults for production and can be configured with environment variables stored outside git.
@@ -57,6 +65,8 @@ OFFSITE_RCLONE_TARGET="remote:fleetum-backups/uploads" /opt/fleetum/app/deploy/b
 ## Deployment
 
 GitHub Actions deploys the backup runbooks and scripts to `/opt/fleetum/app/deploy/backup`. Cron should execute the scripts from that path so the VPS uses the reviewed version from git.
+
+The production workflow also runs `install-cron.sh` after containers are restarted, so the VPS cron stays aligned with the repository.
 
 ## Restore test
 

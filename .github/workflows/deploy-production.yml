@@ -167,6 +167,15 @@ jobs:
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "cd '$FLEETUM_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml pull && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml up -d"
 
+      - name: Install managed backup cron
+        env:
+          FLEETUM_VPS_HOST: 57.131.47.124
+          FLEETUM_VPS_USER: fleetum
+          FLEETUM_APP_DIR: /opt/fleetum/app
+        run: |
+          ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
+            "APP_DIR='$FLEETUM_APP_DIR' '$FLEETUM_APP_DIR/deploy/backup/install-cron.sh'"
+
       - name: Production health checks
         run: |
           for i in {1..12}; do
