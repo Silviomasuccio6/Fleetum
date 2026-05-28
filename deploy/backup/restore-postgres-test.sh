@@ -11,17 +11,29 @@ TEST_USER="${TEST_USER:-fleetum_restore_test}"
 TEST_PASSWORD="${TEST_PASSWORD:-fleetum_restore_test_password}"
 VERIFY_TABLE="${VERIFY_TABLE:-_prisma_migrations}"
 KEEP_CONTAINER="${KEEP_CONTAINER:-false}"
+BACKUP_CANDIDATES=""
+
+cleanup() {
+  if [ -n "$BACKUP_CANDIDATES" ]; then
+    rm -f "$BACKUP_CANDIDATES"
+  fi
+
+  if [ "$KEEP_CONTAINER" != "true" ]; then
+    docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 if [ -z "$BACKUP_FILE" ]; then
-  BACKUP_FILE="$(
-    find "$BACKUP_SEARCH_DIR" "$LEGACY_BACKUP_SEARCH_DIR" \
-      -maxdepth 1 \
-      -type f \
-      \( -name 'fleetum-postgres-*.sql.gz' -o -name 'fleetum_*.sql.gz' \) \
-      2>/dev/null \
-      | sort \
-      | tail -1
-  )"
+  BACKUP_CANDIDATES="$(mktemp)"
+
+  find "$BACKUP_SEARCH_DIR" "$LEGACY_BACKUP_SEARCH_DIR" \
+    -maxdepth 1 \
+    -type f \
+    \( -name 'fleetum-postgres-*.sql.gz' -o -name 'fleetum_*.sql.gz' \) \
+    > "$BACKUP_CANDIDATES" 2>/dev/null || true
+
+  BACKUP_FILE="$(sort "$BACKUP_CANDIDATES" | tail -1)"
 fi
 
 if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
@@ -33,13 +45,6 @@ if ! command -v docker >/dev/null 2>&1; then
   echo "[restore-test] docker command not found" >&2
   exit 2
 fi
-
-cleanup() {
-  if [ "$KEEP_CONTAINER" != "true" ]; then
-    docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
 
 echo "[restore-test] using backup: $BACKUP_FILE"
 gzip -t "$BACKUP_FILE"
