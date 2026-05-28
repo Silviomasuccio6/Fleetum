@@ -1,0 +1,184 @@
+name: Deploy Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA to deploy"
+        required: false
+        default: "develop"
+      confirm:
+        description: "Type DEPLOY_STAGING to confirm"
+        required: true
+
+concurrency:
+  group: fleetum-staging
+  cancel-in-progress: false
+
+jobs:
+  build-images:
+    name: Build and publish staging images
+    if: ${{ github.event.inputs.confirm == 'DEPLOY_STAGING' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend_image: ${{ steps.images.outputs.backend_image }}
+      frontend_image: ${{ steps.images.outputs.frontend_image }}
+
+    steps:
+      - name: Checkout requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'develop' }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Resolve image names
+        id: images
+        run: |
+          IMAGE_TAG="staging-$(git rev-parse --short=12 HEAD)"
+          BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:${IMAGE_TAG}"
+          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:${IMAGE_TAG}"
+          echo "backend_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ steps.images.outputs.backend_image }}
+            ghcr.io/silviomasuccio6/fleetum-backend:staging-latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile.prod
+          push: true
+          build-args: |
+            VITE_API_BASE_URL=https://api-staging.fleetum.it/api
+            VITE_PLATFORM_API_BASE_URL=https://platform-staging.fleetum.it/platform-api
+            VITE_CLIENT_APP_URL=https://staging.fleetum.it/dashboard
+            VITE_GOOGLE_AUTH_URL=https://api-staging.fleetum.it/api/auth/google
+            VITE_APPLE_AUTH_URL=https://api-staging.fleetum.it/api/auth/apple
+          tags: |
+            ${{ steps.images.outputs.frontend_image }}
+            ghcr.io/silviomasuccio6/fleetum-frontend:staging-latest
+
+  deploy:
+    name: Deploy Fleetum staging VPS
+    if: ${{ github.event.inputs.confirm == 'DEPLOY_STAGING' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build-images
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'develop' }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema backend/prisma/schema.prisma
+
+      - name: Verify build before deploy
+        run: npm run build
+
+      - name: Configure SSH key
+        env:
+          FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+        run: |
+          test -n "$FLEETUM_STAGING_SSH_KEY"
+          test -n "$FLEETUM_STAGING_HOST"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$FLEETUM_STAGING_SSH_KEY" > ~/.ssh/fleetum_staging
+          chmod 600 ~/.ssh/fleetum_staging
+          ssh-keyscan -H "$FLEETUM_STAGING_HOST" >> ~/.ssh/known_hosts
+
+      - name: Verify remote deploy target
+        env:
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
+        run: |
+          test -n "$FLEETUM_STAGING_USER"
+          ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+            "mkdir -p '$FLEETUM_STAGING_APP_DIR' && test -w '$FLEETUM_STAGING_APP_DIR'"
+
+      - name: Upload deployment manifests
+        env:
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
+        run: |
+          rsync -az --delete \
+            --include 'docker-compose.staging.yml' \
+            --include 'deploy/' \
+            --include 'deploy/caddy/' \
+            --include 'deploy/caddy/Caddyfile.staging' \
+            --include 'deploy/backup/' \
+            --include 'deploy/backup/*.sh' \
+            --include 'deploy/backup/*.md' \
+            --exclude '*' \
+            -e "ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" \
+            ./ "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/"
+
+      - name: Pull images, migrate and restart staging containers
+        env:
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
+          FLEETUM_STAGING_ENV_FILE: ${{ vars.FLEETUM_STAGING_ENV_FILE || '/opt/fleetum-staging/env/compose.env' }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
+          FLEETUM_FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+            "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+
+          ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+            "cd '$FLEETUM_STAGING_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d"
+
+      - name: Staging health checks
+        run: |
+          for i in {1..12}; do
+            if curl -fsS --max-time 20 https://api-staging.fleetum.it/api/ready; then
+              break
+            fi
+            if [ "$i" = "12" ]; then
+              echo "Staging API ready check failed after retries" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          curl -fsS --max-time 20 https://staging.fleetum.it/ | grep -q "Fleetum"
+          curl -fsS --max-time 20 https://platform-staging.fleetum.it/platform-api/health
