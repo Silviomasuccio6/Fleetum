@@ -9,6 +9,7 @@ import {
 } from "./feature-entitlements-service.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { upsertTenantSubscription } from "./tenant-subscription-service.js";
 
 type BillingLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
@@ -249,6 +250,19 @@ export class BillingService {
   }
 
   private async writeLicense(tenantId: string, userId: string | null, next: LicenseAuditPayload) {
+    const subscription = await upsertTenantSubscription({
+      tenantId,
+      plan: next.plan,
+      seats: next.seats,
+      status: next.status,
+      expiresAt: next.expiresAt,
+      priceMonthly: next.priceMonthly,
+      billingCycle: next.billingCycle,
+      provider: next.provider,
+      stripeCustomerId: next.stripeCustomerId,
+      stripeSubscriptionId: next.stripeSubscriptionId
+    });
+
     await this.auditRepository.create({
       tenantId,
       userId,
@@ -257,7 +271,11 @@ export class BillingService {
       resourceId: tenantId,
       details: {
         source: "billing",
-        after: next
+        persisted: true,
+        after: {
+          ...next,
+          subscription
+        }
       }
     });
   }

@@ -9,6 +9,7 @@ import {
   getPlanMonthlyPrice,
   normalizeBillingCycle
 } from "./feature-entitlements-service.js";
+import { readTenantSubscription, TenantSubscriptionSnapshot } from "./tenant-subscription-service.js";
 
 type LicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
@@ -65,9 +66,33 @@ const pickLicenseSource = (details: unknown): Record<string, unknown> => {
 };
 
 export class LicensePolicyService {
-  constructor(private readonly auditRepository: AuditLogRepository) {}
+  constructor(
+    private readonly auditRepository: AuditLogRepository,
+    private readonly subscriptionReader: (tenantId: string) => Promise<TenantSubscriptionSnapshot | null> = readTenantSubscription
+  ) {}
 
   async getTenantLicense(tenantId: string): Promise<LicenseInfo> {
+    const persisted = await this.subscriptionReader(tenantId);
+    if (persisted) {
+      const expiresAt = persisted.expiresAt;
+      const now = Date.now();
+      const expiresMs = expiresAt ? new Date(expiresAt).getTime() : null;
+      const daysRemaining = expiresMs ? Math.ceil((expiresMs - now) / 86400000) : null;
+      let status = persisted.status;
+      if (expiresMs && expiresMs < now) status = "EXPIRED";
+
+      return {
+        plan: persisted.plan,
+        seats: persisted.seats,
+        status,
+        expiresAt,
+        daysRemaining,
+        expiringSoon: daysRemaining !== null && daysRemaining >= 0 && daysRemaining <= 7,
+        priceMonthly: persisted.priceMonthly,
+        billingCycle: persisted.billingCycle
+      };
+    }
+
     const row = await this.auditRepository.getLatestByAction(tenantId, "tenant", "PLATFORM_LICENSE_UPDATED");
     const raw = pickLicenseSource(row?.details ?? {});
 

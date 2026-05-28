@@ -215,9 +215,34 @@ model Tenant {
   tenantProfile                 TenantProfile?
   tenantBranding                TenantBranding?
   tenantLegalSettings           TenantLegalSettings?
+  tenantSubscription            TenantSubscription?
   invoices                      Invoice[]
 
   @@index([isActive])
+}
+
+model TenantSubscription {
+  id                   String    @id @default(cuid())
+  tenantId             String    @unique
+  provider             String    @default("local")
+  plan                 String    @default("STARTER")
+  billingCycle         String    @default("monthly")
+  status               String    @default("ACTIVE")
+  seats                Int       @default(3)
+  priceMonthly         Float?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  currentPeriodEnd     DateTime?
+  trialEndsAt          DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([plan, status])
+  @@index([status, currentPeriodEnd])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
 }
 
 model TenantProfile {
