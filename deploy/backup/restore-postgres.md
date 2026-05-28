@@ -41,6 +41,22 @@ curl -fsS https://api.fleetum.it/api/ready
 - Before risky migrations: create a fresh dump and verify it is not empty.
 - After storage changes: test both PostgreSQL and uploads restore paths.
 
+## Non-destructive restore test
+
+Use `deploy/backup/restore-postgres-test.sh` to verify a dump without touching production.
+
+```bash
+/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+```
+
+The script starts a temporary PostgreSQL container, restores the latest dump, verifies the restored schema and removes the container at the end.
+
+To keep the temporary container for inspection:
+
+```bash
+KEEP_CONTAINER=true /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+```
+
 ## Production warning
 
 Never restore over production without approval, fresh backup, maintenance window and rollback plan.
