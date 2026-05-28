@@ -29,13 +29,13 @@ trap 'rm -f "$CURRENT_CRON" "$NEXT_CRON"' EXIT
 crontab -l > "$CURRENT_CRON" 2>/dev/null || true
 
 # Remove previously managed Fleetum block and the old one-line backup job.
+# Keep this in a single awk command so empty crontabs do not fail under pipefail.
 awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
   $0 == begin { skip = 1; next }
   $0 == end { skip = 0; next }
+  $0 ~ /\/opt\/fleetum\/app\/ops\/backup-db-prod\.sh/ { next }
   skip != 1 { print }
-' "$CURRENT_CRON" \
-  | grep -v '/opt/fleetum/app/ops/backup-db-prod.sh' \
-  | sed '/^[[:space:]]*$/N;/^\n$/D' > "$NEXT_CRON"
+' "$CURRENT_CRON" > "$NEXT_CRON"
 
 {
   echo "$BEGIN_MARKER"
