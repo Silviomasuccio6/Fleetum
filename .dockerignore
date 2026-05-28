@@ -8,9 +8,9 @@ frontend/dist
 dist
 build
 coverage
-.env
-.env.*
-!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 !deploy/env/*.example
 uploads
 backend/uploads
