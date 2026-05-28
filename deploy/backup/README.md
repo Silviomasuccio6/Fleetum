@@ -71,3 +71,24 @@ The production workflow also runs `install-cron.sh` after containers are restart
 ## Restore test
 
 Run a restore test at least monthly in staging or on an isolated database. Do not wait for an incident to discover a backup cannot be restored.
+
+Use the non-destructive restore test script:
+
+```bash
+/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+```
+
+The script:
+
+- picks the latest PostgreSQL dump by default;
+- supports both the new `/opt/fleetum/backups/postgres` path and the legacy `/opt/fleetum/backups` path;
+- restores into a temporary PostgreSQL container;
+- verifies Prisma migrations and public tables;
+- removes the temporary container unless `KEEP_CONTAINER=true` is set.
+
+To test a specific dump:
+
+```bash
+BACKUP_FILE=/opt/fleetum/backups/postgres/fleetum-postgres-YYYYMMDDTHHMMSSZ.sql.gz \
+  /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+```
