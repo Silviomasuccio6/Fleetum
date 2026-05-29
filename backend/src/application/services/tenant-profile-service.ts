@@ -1,11 +1,7 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
-import { env } from "../../shared/config/env.js";
+import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import type { SignupCompanyInput, TenantCompanyProfileInput } from "../../interfaces/http/validators/tenant-profile-validators.js";
-
-const uploadRootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 
 const normalizeText = (value?: string | null) => {
   const normalized = String(value ?? "").trim();
@@ -250,7 +246,7 @@ export class TenantProfileService {
   }
 
   async setLogo(tenantId: string, actorUserId: string, file: Express.Multer.File) {
-    const relativePath = `${env.UPLOAD_DIR}/${file.filename}`;
+    const relativePath = storageProvider.buildKey(file.filename);
     const current = await prisma.tenantBranding.findUnique({ where: { tenantId } });
     const branding = await prisma.tenantBranding.upsert({
       where: { tenantId },
@@ -271,7 +267,7 @@ export class TenantProfileService {
     });
 
     if (current?.logoFilePath && current.logoFilePath !== relativePath) {
-      await fs.unlink(path.resolve(process.cwd(), current.logoFilePath)).catch(() => undefined);
+      await storageProvider.delete(current.logoFilePath);
     }
 
     await prisma.auditLog.create({
@@ -301,8 +297,7 @@ export class TenantProfileService {
     const current = await prisma.tenantBranding.findUnique({ where: { tenantId } });
     if (!current) return this.getProfile(tenantId);
     if (current.logoFilePath) {
-      const fullPath = path.resolve(process.cwd(), current.logoFilePath);
-      if (fullPath.startsWith(`${uploadRootDir}${path.sep}`)) await fs.unlink(fullPath).catch(() => undefined);
+      await storageProvider.delete(current.logoFilePath);
     }
     const branding = await prisma.tenantBranding.update({
       where: { tenantId },

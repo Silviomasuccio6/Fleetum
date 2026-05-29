@@ -1,10 +1,9 @@
 import fs from "node:fs";
-import path from "node:path";
 import multer from "multer";
-import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { localStorageProvider } from "./storage-provider.js";
 
-const uploadDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
+const uploadDir = localStorageProvider.getRootDir();
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
