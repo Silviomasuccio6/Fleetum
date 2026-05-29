@@ -83,6 +83,7 @@ The script:
 - picks the latest PostgreSQL dump by default;
 - supports both the new `/opt/fleetum/backups/postgres` path and the legacy `/opt/fleetum/backups` path;
 - restores into a temporary PostgreSQL container;
+- creates compatibility roles such as `fleetum` for legacy dumps with ownership statements;
 - verifies Prisma migrations and public tables;
 - removes the temporary container unless `KEEP_CONTAINER=true` is set.
 
