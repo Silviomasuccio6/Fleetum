@@ -11,6 +11,7 @@ TEST_USER="${TEST_USER:-fleetum_restore_test}"
 TEST_PASSWORD="${TEST_PASSWORD:-fleetum_restore_test_password}"
 VERIFY_TABLE="${VERIFY_TABLE:-_prisma_migrations}"
 KEEP_CONTAINER="${KEEP_CONTAINER:-false}"
+COMPAT_ROLES="${COMPAT_ROLES:-fleetum}"
 BACKUP_CANDIDATES=""
 
 cleanup() {
@@ -59,14 +60,44 @@ docker run -d \
   "$POSTGRES_IMAGE" >/dev/null
 
 echo "[restore-test] waiting for temporary PostgreSQL"
-for _ in $(seq 1 30); do
-  if docker exec "$TEST_CONTAINER" pg_isready -U "$TEST_USER" -d "$TEST_DB" >/dev/null 2>&1; then
+for _ in $(seq 1 60); do
+  if docker exec "$TEST_CONTAINER" psql \
+    -v ON_ERROR_STOP=1 \
+    -U "$TEST_USER" \
+    -d "$TEST_DB" \
+    -tAc "select 1" >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
 
-docker exec "$TEST_CONTAINER" pg_isready -U "$TEST_USER" -d "$TEST_DB" >/dev/null
+docker exec "$TEST_CONTAINER" psql \
+  -v ON_ERROR_STOP=1 \
+  -U "$TEST_USER" \
+  -d "$TEST_DB" \
+  -tAc "select 1" >/dev/null
+
+if [ -n "$COMPAT_ROLES" ]; then
+  echo "[restore-test] preparing compatibility roles: $COMPAT_ROLES"
+  for role in $COMPAT_ROLES; do
+    if ! [[ "$role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      echo "[restore-test] invalid compatibility role name: $role" >&2
+      exit 2
+    fi
+
+    docker exec "$TEST_CONTAINER" psql \
+      -v ON_ERROR_STOP=1 \
+      -U "$TEST_USER" \
+      -d "$TEST_DB" \
+      -tAc "select 1 from pg_roles where rolname = '$role'" \
+      | grep -q '^1$' \
+      || docker exec "$TEST_CONTAINER" psql \
+        -v ON_ERROR_STOP=1 \
+        -U "$TEST_USER" \
+        -d "$TEST_DB" \
+        -c "create role \"$role\";"
+  done
+fi
 
 echo "[restore-test] restoring dump into isolated database"
 gunzip -c "$BACKUP_FILE" | docker exec -i "$TEST_CONTAINER" psql \
