@@ -1,6 +1,5 @@
 import { Response, Router } from "express";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { extractInvoiceTotalFromPdf } from "../../../application/services/invoice-pdf-parser-service.js";
 import { extractRegistrationDateFromBooklet } from "../../../application/services/vehicle-booklet-parser-service.js";
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
@@ -13,27 +12,18 @@ import {
   uploadRentalCustomerAttachments,
   uploadVehicleBooklet
 } from "../../../infrastructure/storage/multer.js";
+import { storageProvider } from "../../../infrastructure/storage/storage-provider.js";
 import { PrismaAuditLogRepository } from "../../../infrastructure/repositories/prisma-audit-log-repository.js";
-import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
 
-const uploadRootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 const auditRepository = new PrismaAuditLogRepository();
 const roundMoney = (value: number) => Math.round(value * 100) / 100;
 const isInvoiceAnalyzableFile = (file: Express.Multer.File) =>
   file.mimetype === "application/pdf" ||
   file.mimetype.startsWith("image/") ||
   [".pdf", ".jpg", ".jpeg", ".png", ".webp"].some((ext) => file.originalname.toLowerCase().endsWith(ext));
-
-const resolveStoredFile = (filePath: string) => {
-  const fullPath = path.resolve(process.cwd(), filePath);
-  if (fullPath !== uploadRootDir && !fullPath.startsWith(`${uploadRootDir}${path.sep}`)) {
-    throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
-  }
-  return fullPath;
-};
 
 const sendStoredFile = async (
   res: Response,
@@ -42,10 +32,8 @@ const sendStoredFile = async (
     mimeType: string;
   }
 ) => {
-  const fullPath = resolveStoredFile(input.filePath);
-  try {
-    await fs.access(fullPath);
-  } catch {
+  const fullPath = storageProvider.resolveLocalPath(input.filePath);
+  if (!(await storageProvider.exists(input.filePath))) {
     throw new AppError("File non trovato", 404, "NOT_FOUND");
   }
 
@@ -89,8 +77,7 @@ export const uploadsRoutes = () => {
   };
 
   const unlinkStoredFile = async (filePath: string) => {
-    const fullPath = resolveStoredFile(filePath);
-    await fs.unlink(fullPath).catch(() => undefined);
+    await storageProvider.delete(filePath);
   };
 
   router.post(
@@ -111,7 +98,7 @@ export const uploadsRoutes = () => {
       await prisma.stoppagePhoto.createMany({
         data: files.map((file) => ({
           stoppageId: req.params.id,
-          filePath: `${env.UPLOAD_DIR}/${file.filename}`,
+          filePath: storageProvider.buildKey(file.filename),
           fileName: file.filename,
           mimeType: file.mimetype,
           sizeBytes: file.size
@@ -196,7 +183,7 @@ export const uploadsRoutes = () => {
       await prisma.vehiclePhoto.createMany({
         data: files.map((file) => ({
           vehicleId: req.params.id,
-          filePath: `${env.UPLOAD_DIR}/${file.filename}`,
+          filePath: storageProvider.buildKey(file.filename),
           fileName: file.filename,
           mimeType: file.mimetype,
           sizeBytes: file.size
@@ -279,7 +266,7 @@ export const uploadsRoutes = () => {
       if (!file) throw new AppError("File libretto mancante", 400, "MISSING_FILE");
       await secureFiles([file]);
 
-      const storedFilePath = `${env.UPLOAD_DIR}/${file.filename}`;
+      const storedFilePath = storageProvider.buildKey(file.filename);
       const detectedRegistrationDate = await extractRegistrationDateFromBooklet(storedFilePath, file.mimetype);
       const nextRegistrationDate = detectedRegistrationDate ?? vehicle.registrationDate ?? null;
       const nextRevisionDueAt = computeVehicleRevisionDueAt({
@@ -442,7 +429,7 @@ export const uploadsRoutes = () => {
             data: {
               tenantId,
               maintenanceId: req.params.id,
-              filePath: `${env.UPLOAD_DIR}/${file.filename}`,
+              filePath: storageProvider.buildKey(file.filename),
               fileName: file.originalname || file.filename,
               mimeType: file.mimetype,
               sizeBytes: file.size,
@@ -596,7 +583,7 @@ export const uploadsRoutes = () => {
           customerId,
           bookingId,
           category,
-          filePath: `${env.UPLOAD_DIR}/${file.filename}`,
+          filePath: storageProvider.buildKey(file.filename),
           fileName: file.originalname || file.filename,
           mimeType: file.mimetype,
           sizeBytes: file.size

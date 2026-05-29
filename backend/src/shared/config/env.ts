@@ -15,6 +15,7 @@ const TEST_PLATFORM_JWT_SECRET =
 const TEST_PLATFORM_ADMIN_PASSWORD = "ci-platform-admin-password-0000";
 const TEST_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/fermi_ci?schema=public";
 const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "smtp").toLowerCase();
+const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
 
 const toInt = (value: string, name: string) => {
   const n = Number(value);
@@ -69,6 +70,10 @@ if (!["smtp", "resend"].includes(EMAIL_PROVIDER)) {
   throw new Error("EMAIL_PROVIDER must be smtp or resend");
 }
 
+if (!["local", "s3"].includes(STORAGE_PROVIDER)) {
+  throw new Error("STORAGE_PROVIDER must be local or s3");
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   PORT: toInt(process.env.PORT ?? "4000", "PORT"),
@@ -100,6 +105,13 @@ export const env = {
   APPLE_REDIRECT_URI: process.env.APPLE_REDIRECT_URI ?? `${BACKEND_PUBLIC_URL}/api/auth/apple/callback`,
 
   UPLOAD_DIR: process.env.UPLOAD_DIR ?? "uploads",
+  STORAGE_PROVIDER: STORAGE_PROVIDER as "local" | "s3",
+  S3_ENDPOINT: process.env.S3_ENDPOINT,
+  S3_BUCKET: process.env.S3_BUCKET,
+  S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
+  S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
+  S3_REGION: process.env.S3_REGION,
+  S3_PUBLIC_BASE_URL: process.env.S3_PUBLIC_BASE_URL,
   PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
 
