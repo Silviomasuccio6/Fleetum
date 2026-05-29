@@ -8,12 +8,28 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Strict-Transport-Security "max-age=15552000"
 		-Server
 	}
 }
 
+(frontend_cache_headers) {
+	@html path / /index.html /platform.html
+	header @html Cache-Control "no-cache"
+
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	@brand path /brand/*
+	header @brand Cache-Control "public, max-age=86400"
+
+	@seo path /robots.txt /sitemap.xml
+	header @seo Cache-Control "public, max-age=300"
+}
+
 fleetum.it, www.fleetum.it {
 	import security_headers
+	import frontend_cache_headers
 	encode zstd gzip
 
 	route /api/* {
@@ -40,6 +56,7 @@ api.fleetum.it {
 
 platform.fleetum.it {
 	import security_headers
+	import frontend_cache_headers
 	encode zstd gzip
 
 	route /platform-api/* {
