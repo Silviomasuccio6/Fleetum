@@ -36,6 +36,16 @@ fleetum.it, www.fleetum.it {
 		reverse_proxy backend:4000
 	}
 
+	route /assets/* {
+		root * /srv/fleetum
+		file_server
+	}
+
+	route /brand/* {
+		root * /srv/fleetum
+		file_server
+	}
+
 	route {
 		root * /srv/fleetum
 		try_files {path} /index.html
@@ -61,6 +71,16 @@ platform.fleetum.it {
 
 	route /platform-api/* {
 		reverse_proxy backend:4100
+	}
+
+	route /assets/* {
+		root * /srv/fleetum
+		file_server
+	}
+
+	route /brand/* {
+		root * /srv/fleetum
+		file_server
 	}
 
 	route {
