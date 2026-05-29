@@ -1,13 +1,9 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { PrismaAuditLogRepository } from "../../infrastructure/repositories/prisma-audit-log-repository.js";
-import { env } from "../../shared/config/env.js";
+import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../shared/errors/app-error.js";
-
-const uploadRootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 
 const retentionDefaults = {
   expiredTokenRetentionDays: 30,
@@ -17,17 +13,8 @@ const retentionDefaults = {
 
 const subDays = (date: Date, days: number) => new Date(date.getTime() - days * 86400000);
 
-const resolveStoredFile = (filePath: string) => {
-  const fullPath = path.resolve(process.cwd(), filePath);
-  if (fullPath !== uploadRootDir && !fullPath.startsWith(`${uploadRootDir}${path.sep}`)) {
-    throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
-  }
-  return fullPath;
-};
-
 const unlinkStoredFile = async (filePath: string) => {
-  const fullPath = resolveStoredFile(filePath);
-  await fs.unlink(fullPath).catch(() => undefined);
+  await storageProvider.delete(filePath);
 };
 
 const anonymizedLabel = (id: string) => `Cliente anonimizzato ${crypto.createHash("sha256").update(id).digest("hex").slice(0, 8)}`;

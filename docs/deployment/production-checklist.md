@@ -17,6 +17,7 @@
 
 - [ ] Backup PostgreSQL eseguito.
 - [ ] Backup uploads/documenti eseguito se impattati.
+- [ ] Storage provider verificato (`STORAGE_PROVIDER=local` salvo migrazione S3/R2 approvata).
 - [ ] Backup salvato fuori dal container.
 - [ ] Restore plan disponibile.
 - [ ] Punto di rollback identificato.

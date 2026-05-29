@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
 import { Prisma, RentalBookingStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { storageProvider } from "../../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { env } from "../../../shared/config/env.js";
 import {
@@ -281,14 +281,8 @@ export class RentalBookingsController {
     private readonly tenantProfileService: TenantProfileService = new TenantProfileService()
   ) {}
 
-  private readonly uploadRootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
-
   private resolveUploadPath(filePath: string) {
-    const fullPath = path.resolve(process.cwd(), filePath);
-    if (fullPath !== this.uploadRootDir && !fullPath.startsWith(`${this.uploadRootDir}${path.sep}`)) {
-      throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
-    }
-    return fullPath;
+    return storageProvider.resolveLocalPath(filePath);
   }
 
   private extractContractSignatureDetails(details: Prisma.JsonValue | null | undefined): {
@@ -333,11 +327,8 @@ export class RentalBookingsController {
     const decoded = this.decodeSignatureDataUrl(input.signatureDataUrl);
     const safeTenant = input.tenantId.replace(/[^a-zA-Z0-9_-]/g, "_");
     const fileName = `${input.contractId}-${Date.now()}.${decoded.extension}`;
-    const relativePath = path.posix.join(env.UPLOAD_DIR, "contract-signatures", safeTenant, fileName);
-    const absolutePath = this.resolveUploadPath(relativePath);
-
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-    await fs.writeFile(absolutePath, decoded.buffer);
+    const relativePath = storageProvider.buildKey("contract-signatures", safeTenant, fileName);
+    await storageProvider.write(relativePath, decoded.buffer);
 
     return {
       filePath: relativePath,
@@ -2426,7 +2417,7 @@ export class RentalBookingsController {
     if (!file) throw new AppError("Logo mancante", 400, "MISSING_FILE");
 
     const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
-    const nextLogoPath = `${env.UPLOAD_DIR}/${file.filename}`;
+    const nextLogoPath = storageProvider.buildKey(file.filename);
 
     await prisma.contractTemplate.update({
       where: { id: template.id },
@@ -2439,8 +2430,7 @@ export class RentalBookingsController {
     });
 
     if (template.logoFilePath && template.logoFilePath !== nextLogoPath) {
-      const oldPath = this.resolveUploadPath(template.logoFilePath);
-      await fs.unlink(oldPath).catch(() => undefined);
+      await storageProvider.delete(template.logoFilePath);
     }
 
     const refreshed = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
@@ -2453,8 +2443,7 @@ export class RentalBookingsController {
     const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
 
     if (template.logoFilePath) {
-      const fullPath = this.resolveUploadPath(template.logoFilePath);
-      await fs.unlink(fullPath).catch(() => undefined);
+      await storageProvider.delete(template.logoFilePath);
     }
 
     const updated = await prisma.contractTemplate.update({
@@ -2476,9 +2465,7 @@ export class RentalBookingsController {
     if (!template.logoFilePath) throw new AppError("Logo template non configurato", 404, "NOT_FOUND");
 
     const fullPath = this.resolveUploadPath(template.logoFilePath);
-    try {
-      await fs.access(fullPath);
-    } catch {
+    if (!(await storageProvider.exists(template.logoFilePath))) {
       throw new AppError("File logo non trovato", 404, "NOT_FOUND");
     }
 
