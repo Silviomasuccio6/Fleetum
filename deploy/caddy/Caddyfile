@@ -16,15 +16,6 @@
 (frontend_cache_headers) {
 	@html path / /index.html /platform.html
 	header @html Cache-Control "no-cache"
-
-	@assets path /assets/*
-	header @assets Cache-Control "public, max-age=31536000, immutable"
-
-	@brand path /brand/*
-	header @brand Cache-Control "public, max-age=86400"
-
-	@seo path /robots.txt /sitemap.xml
-	header @seo Cache-Control "public, max-age=300"
 }
 
 fleetum.it, www.fleetum.it {
