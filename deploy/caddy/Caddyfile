@@ -19,9 +19,17 @@
 	header @html Cache-Control "no-cache"
 }
 
+(secure_error_responses) {
+	handle_errors {
+		import security_headers
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}
+
 fleetum.it, www.fleetum.it {
 	import security_headers
 	import frontend_cache_headers
+	import secure_error_responses
 	encode zstd gzip
 
 	route /api/* {
@@ -59,6 +67,7 @@ api.fleetum.it {
 platform.fleetum.it {
 	import security_headers
 	import frontend_cache_headers
+	import secure_error_responses
 	encode zstd gzip
 
 	route /platform-api/* {
