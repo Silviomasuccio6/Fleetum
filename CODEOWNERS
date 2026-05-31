@@ -1,15 +1,63 @@
 # Fleetum code ownership for high-risk areas.
-# Replace @Silviomasuccio6 with a team once Fleetum has an organization/team setup.
+# Replace @Silviomasuccio6 with a GitHub team when Fleetum moves to an organization setup.
 
-.github/workflows/* @Silviomasuccio6
+# CI/CD, repository automation and release safety.
+.github/* @Silviomasuccio6
+.github/** @Silviomasuccio6
+
+# Production and staging deployment surfaces.
 docker-compose* @Silviomasuccio6
-backend/prisma/* @Silviomasuccio6
-backend/prisma/migrations/* @Silviomasuccio6
-backend/src/shared/config/env.ts @Silviomasuccio6
-backend/src/interfaces/http/middlewares/* @Silviomasuccio6
-backend/src/application/services/billing-service.ts @Silviomasuccio6
-backend/src/application/services/license-policy-service.ts @Silviomasuccio6
 deploy/* @Silviomasuccio6
 deploy/** @Silviomasuccio6
-backend/Dockerfile.prod @Silviomasuccio6
-frontend/Dockerfile.prod @Silviomasuccio6
+ops/* @Silviomasuccio6
+ops/** @Silviomasuccio6
+backend/Dockerfile* @Silviomasuccio6
+frontend/Dockerfile* @Silviomasuccio6
+
+# Database schema, migrations and generated-client sensitive changes.
+backend/prisma/* @Silviomasuccio6
+backend/prisma/** @Silviomasuccio6
+
+# Environment validation and runtime bootstrap.
+backend/src/shared/config/env.ts @Silviomasuccio6
+backend/src/app.ts @Silviomasuccio6
+backend/src/server.ts @Silviomasuccio6
+backend/src/interfaces/http/routes/index.ts @Silviomasuccio6
+
+# Authentication, authorization, platform access and request protection.
+backend/src/interfaces/http/middlewares/* @Silviomasuccio6
+backend/src/interfaces/http/middlewares/** @Silviomasuccio6
+backend/src/interfaces/http/routes/auth-routes.ts @Silviomasuccio6
+backend/src/interfaces/http/routes/platform-auth-routes.ts @Silviomasuccio6
+backend/src/interfaces/http/routes/platform-*.ts @Silviomasuccio6
+backend/src/interfaces/http/controllers/auth-controller.ts @Silviomasuccio6
+backend/src/interfaces/http/controllers/platform-*.ts @Silviomasuccio6
+backend/src/application/usecases/auth/* @Silviomasuccio6
+backend/src/application/usecases/auth/** @Silviomasuccio6
+backend/src/application/services/platform-*.ts @Silviomasuccio6
+
+# Billing, licenses, subscriptions, invoices and Stripe.
+backend/src/application/services/billing-service.ts @Silviomasuccio6
+backend/src/application/services/license-policy-service.ts @Silviomasuccio6
+backend/src/application/services/tenant-subscription-service.ts @Silviomasuccio6
+backend/src/application/services/invoice-service.ts @Silviomasuccio6
+backend/src/interfaces/http/controllers/billing-controller.ts @Silviomasuccio6
+backend/src/interfaces/http/routes/billing-routes.ts @Silviomasuccio6
+
+# Storage, uploads, file validation and privacy deletion/export flows.
+backend/src/infrastructure/storage/* @Silviomasuccio6
+backend/src/infrastructure/storage/** @Silviomasuccio6
+backend/src/interfaces/http/routes/uploads-routes.ts @Silviomasuccio6
+backend/src/application/services/privacy-compliance-service.ts @Silviomasuccio6
+
+# Package graph and dependency lockfiles.
+package.json @Silviomasuccio6
+package-lock.json @Silviomasuccio6
+backend/package.json @Silviomasuccio6
+frontend/package.json @Silviomasuccio6
+
+# Production, security and deployment documentation.
+docs/deployment/* @Silviomasuccio6
+docs/deployment/** @Silviomasuccio6
+docs/codex/* @Silviomasuccio6
+docs/codex/** @Silviomasuccio6
