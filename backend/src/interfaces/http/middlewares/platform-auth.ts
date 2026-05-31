@@ -20,6 +20,16 @@ export const requirePlatformAuth = (req: Request, _res: Response, next: NextFunc
     next();
   } catch (error) {
     if (error instanceof AppError) throw error;
+
+    try {
+      const tenantPayload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+      if (tenantPayload?.tenantId && tenantPayload.tokenType !== "platform") {
+        throw new AppError("Accesso platform negato", 403, "FORBIDDEN");
+      }
+    } catch (tenantError) {
+      if (tenantError instanceof AppError) throw tenantError;
+    }
+
     throw new AppError("Token platform non valido", 401, "UNAUTHORIZED");
   }
 };

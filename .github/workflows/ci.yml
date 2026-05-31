@@ -88,3 +88,34 @@ jobs:
 
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
+
+  tenant-isolation-security:
+    name: Tenant Isolation Security Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema backend/prisma/schema.prisma
+
+      - name: Run tenant isolation security tests
+        env:
+          NODE_ENV: test
+        run: npm run test:security -w backend
+
+      - name: Enforce security coverage threshold
+        env:
+          NODE_ENV: test
+        run: npm run test:security:coverage -w backend
