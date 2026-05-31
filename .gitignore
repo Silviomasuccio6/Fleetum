@@ -20,3 +20,11 @@ backend/.env
 frontend/.env
 *.tsbuildinfo
 tmp-contract-debug.pdf
+
+# Google Apps Script exports / customer-specific scripts
+*.gs
+*.gs.bak
+*.gs.txt
+
+# Customer-specific exports / private client logic
+GRETA_PRO_V4_MODIFICATO.gs
