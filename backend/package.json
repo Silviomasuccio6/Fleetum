@@ -15,7 +15,9 @@
     "privacy:retention:dry-run": "tsx src/scripts/privacy-retention.ts",
     "privacy:retention:run": "tsx src/scripts/privacy-retention.ts --run",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:security": "vitest run --config vitest.config.ts",
+    "test:security:coverage": "vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -48,8 +50,12 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.6.1",
     "@types/nodemailer": "^6.4.23",
+    "@types/supertest": "^7.2.0",
+    "@vitest/coverage-v8": "^4.1.7",
     "prisma": "^6.19.2",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^4.1.7"
   }
 }
