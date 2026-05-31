@@ -6,7 +6,7 @@ import morgan from "morgan";
 import { prisma } from "./infrastructure/database/prisma/client.js";
 import { apiRouter } from "./interfaces/http/routes/index.js";
 import { platformAlertService, platformRouter } from "./interfaces/http/routes/platform-index.js";
-import { env } from "./shared/config/env.js";
+import { env } from "./config/env.js";
 import { errorHandler } from "./interfaces/http/middlewares/error-handler.js";
 import { notFoundHandler } from "./interfaces/http/middlewares/not-found.js";
 import { createPlatformIpAllowlist } from "./interfaces/http/middlewares/platform-ip-allowlist.js";
