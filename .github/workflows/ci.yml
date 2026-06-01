@@ -80,6 +80,22 @@ jobs:
       - name: Frontend tests
         run: npx tsx --test frontend/tests/*.test.ts
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright E2E tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+
       - name: Public SEO artifacts smoke
         run: |
           test -f frontend/public/robots.txt
