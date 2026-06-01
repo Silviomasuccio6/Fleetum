@@ -77,6 +77,18 @@ jobs:
           NODE_ENV: test
         run: npm run test -w backend
 
+      - name: Backend unit coverage
+        env:
+          NODE_ENV: test
+        run: npm run test:coverage -w backend
+
+      - name: Upload backend coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-vitest-coverage
+          path: backend/coverage/vitest
+          if-no-files-found: error
+
       - name: Frontend tests
         run: npx tsx --test frontend/tests/*.test.ts
 
