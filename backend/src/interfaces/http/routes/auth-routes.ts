@@ -1,22 +1,22 @@
 import { Router } from "express";
 import { AuthController } from "../controllers/auth-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
-import { authRateLimit } from "../middlewares/auth-rate-limit.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
+import { authRateLimiter, forgotPasswordRateLimiter, registrationRateLimiter } from "../middlewares/rate-limiter.js";
 import { asyncHandler } from "./async-handler.js";
 
 export const authRoutes = (controller: AuthController) => {
   const router = Router();
-  router.post("/signup", authRateLimit, asyncHandler(controller.signup));
-  router.post("/login", authRateLimit, asyncHandler(controller.login));
+  router.post("/signup", authRateLimiter, registrationRateLimiter, asyncHandler(controller.signup));
+  router.post("/login", authRateLimiter, asyncHandler(controller.login));
   router.get("/google", asyncHandler(controller.googleAuthStart));
   router.get("/google/callback", asyncHandler(controller.googleAuthCallback));
   router.get("/apple", asyncHandler(controller.appleAuthStart));
   router.get("/apple/callback", asyncHandler(controller.appleAuthCallback));
   router.post("/apple/callback", asyncHandler(controller.appleAuthCallback));
-  router.post("/forgot-password", authRateLimit, asyncHandler(controller.forgotPassword));
-  router.post("/reset-password", authRateLimit, asyncHandler(controller.resetPassword));
-  router.post("/accept-invite", authRateLimit, asyncHandler(controller.acceptInvite));
+  router.post("/forgot-password", authRateLimiter, forgotPasswordRateLimiter, asyncHandler(controller.forgotPassword));
+  router.post("/reset-password", authRateLimiter, asyncHandler(controller.resetPassword));
+  router.post("/accept-invite", authRateLimiter, asyncHandler(controller.acceptInvite));
   router.post("/refresh", asyncHandler(controller.refresh));
   router.post("/logout", requireAuth, requireCsrfProtection, asyncHandler(controller.logout));
   router.get("/me", requireAuth, asyncHandler(controller.me));
