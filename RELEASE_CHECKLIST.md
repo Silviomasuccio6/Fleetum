@@ -1,5 +1,17 @@
 # Checklist Rilascio
 
+## Pre-deploy: migrazioni e rollback
+- [ ] Ho verificato se la release contiene migrazioni Prisma (`backend/prisma/migrations/*`)
+- [ ] `npx prisma migrate status --schema backend/prisma/schema.prisma` verificato in staging/ambiente target
+- [ ] La migrazione è solo additiva e reversibile (nuove tabelle/colonne nullable/indici) oppure è stata classificata come rischiosa/destructive
+- [ ] Per ogni migrazione rischiosa esiste una migration reverse documentata e testata
+- [ ] Per ogni migrazione destructive (`DROP COLUMN`, `DROP TABLE`, cancellazioni dati, data rewrite irreversibile) è stato eseguito backup manuale prima del deploy
+- [ ] Backup manuale verificato: dump PostgreSQL valido con `gzip -t` e, se applicabile, uploads validati con `tar -tzf`
+- [ ] Restore test o restore dry-run completato prima del deploy se la migrazione può impattare dati core
+- [ ] Tag Docker corrente e tag precedente annotati nel ticket/release notes
+- [ ] Piano rollback scelto prima del deploy: solo codice / codice + reverse migration / restore completo da backup
+- [ ] Finestra di manutenzione comunicata se la migrazione richiede lock, downtime o blocco scritture
+
 ## Gate obbligatori (bloccanti)
 - [ ] `npm run lint` verde
 - [ ] `npm run build` verde
