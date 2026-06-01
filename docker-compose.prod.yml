@@ -35,12 +35,25 @@ services:
     networks:
       - fleetum_private
 
+  frontend-assets:
+    image: ${FLEETUM_FRONTEND_ASSETS_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend-assets:latest}
+    container_name: fleetum_frontend_assets
+    restart: "no"
+    command: ["sh", "-c", "rm -rf /dist/* && cp -a /srv/fleetum/. /dist/"]
+    volumes:
+      - fleetum_frontend_dist:/dist
+    networks:
+      - fleetum_private
+
   caddy:
-    image: ${FLEETUM_FRONTEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend:latest}
+    image: caddy:2-alpine
     container_name: fleetum_caddy
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      frontend-assets:
+        condition: service_completed_successfully
     environment:
       CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL is required}
     ports:
@@ -48,6 +61,7 @@ services:
       - "443:443"
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - fleetum_frontend_dist:/srv/fleetum:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -58,5 +72,6 @@ networks:
     driver: bridge
 
 volumes:
+  fleetum_frontend_dist:
   caddy_data:
   caddy_config:

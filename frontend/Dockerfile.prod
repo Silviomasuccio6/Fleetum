@@ -23,8 +23,8 @@ COPY frontend frontend
 
 RUN npm run build -w frontend
 
-FROM caddy:2-alpine AS runtime
+FROM caddy:2-alpine AS assets
 
 COPY --from=build /app/frontend/dist /srv/fleetum
 
-EXPOSE 80 443
+CMD ["caddy", "version"]

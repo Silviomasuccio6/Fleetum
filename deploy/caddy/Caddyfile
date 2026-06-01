@@ -4,19 +4,22 @@
 
 (security_headers) {
 	header {
-		X-Content-Type-Options "nosniff"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		Strict-Transport-Security "max-age=15552000"
 		-Server
 		defer
 	}
 }
 
-(frontend_cache_headers) {
+(spa_cache_headers) {
 	@html path / /index.html /platform.html
-	header @html Cache-Control "no-cache"
+	header @html Cache-Control "no-cache, no-store, must-revalidate"
+
+	@static path /assets/* /brand/* /favicon.ico /apple-touch-icon.png
+	header @static Cache-Control "public, max-age=31536000, immutable"
 }
 
 (secure_error_responses) {
@@ -28,25 +31,25 @@
 
 fleetum.it, www.fleetum.it {
 	import security_headers
-	import frontend_cache_headers
+	import spa_cache_headers
 	import secure_error_responses
 	encode zstd gzip
 
-	route /api/* {
+	handle /api/* {
 		reverse_proxy backend:4000
 	}
 
-	route /assets/* {
+	handle /assets/* {
 		root * /srv/fleetum
 		file_server
 	}
 
-	route /brand/* {
+	handle /brand/* {
 		root * /srv/fleetum
 		file_server
 	}
 
-	route {
+	handle {
 		root * /srv/fleetum
 		try_files {path} /index.html
 		file_server
@@ -55,9 +58,10 @@ fleetum.it, www.fleetum.it {
 
 api.fleetum.it {
 	import security_headers
+	import secure_error_responses
 	encode zstd gzip
 
-	route /api/* {
+	handle /api/* {
 		reverse_proxy backend:4000
 	}
 
@@ -66,25 +70,25 @@ api.fleetum.it {
 
 platform.fleetum.it {
 	import security_headers
-	import frontend_cache_headers
+	import spa_cache_headers
 	import secure_error_responses
 	encode zstd gzip
 
-	route /platform-api/* {
+	handle /platform-api/* {
 		reverse_proxy backend:4100
 	}
 
-	route /assets/* {
+	handle /assets/* {
 		root * /srv/fleetum
 		file_server
 	}
 
-	route /brand/* {
+	handle /brand/* {
 		root * /srv/fleetum
 		file_server
 	}
 
-	route {
+	handle {
 		root * /srv/fleetum
 		try_files {path} /platform.html
 		file_server
