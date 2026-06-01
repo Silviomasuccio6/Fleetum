@@ -1,0 +1,34 @@
+name: Backup Test
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offsite-backup-dry-run:
+    name: Offsite backup dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install backup tool dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rclone
+
+      - name: Run offsite backup dry-run
+        env:
+          DRY_RUN: "true"
+          BACKUP_REMOTE_TOOL: "rclone"
+          RCLONE_TARGET: "dry-run:fleetum-backups"
+          LOCAL_BACKUP_ROOT: "${{ runner.temp }}/fleetum-backups"
+          LOG_FILE: "${{ runner.temp }}/fleetum-offsite-backup.log"
+          RETENTION_COUNT: "30"
+        run: deploy/backup/offsite-backup.sh
