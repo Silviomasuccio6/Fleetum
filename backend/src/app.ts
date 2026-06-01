@@ -1,6 +1,5 @@
 import cors from "cors";
 import express from "express";
-import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import morgan from "morgan";
 import { prisma } from "./infrastructure/database/prisma/client.js";
@@ -10,6 +9,7 @@ import { env } from "./shared/config/env.js";
 import { errorHandler } from "./interfaces/http/middlewares/error-handler.js";
 import { notFoundHandler } from "./interfaces/http/middlewares/not-found.js";
 import { createPlatformIpAllowlist } from "./interfaces/http/middlewares/platform-ip-allowlist.js";
+import { genericRateLimiter } from "./interfaces/http/middlewares/rate-limiter.js";
 import { requestContext } from "./interfaces/http/middlewares/request-context.js";
 
 const sensitiveQueryParams = new Set([
@@ -83,8 +83,6 @@ const getAllowedOrigins = (corsOrigin: string, localOrigins: string[]) => {
   );
 };
 
-const healthPaths = new Set(["/api/health", "/api/ready", "/platform-api/health", "/platform-api/ready"]);
-
 const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: string[]) => {
   const allowedOrigins = getAllowedOrigins(corsOrigin, localDevOrigins);
   const styleSrc = env.NODE_ENV === "production" ? ["'self'"] : ["'self'", "'unsafe-inline'"];
@@ -92,6 +90,7 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
   app.set("etag", false);
   app.disable("x-powered-by");
   app.set("trust proxy", env.TRUST_PROXY);
+  app.use(requestContext);
 
   app.use(
     helmet({
@@ -134,13 +133,7 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
   );
 
   app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 300,
-      standardHeaders: true,
-      legacyHeaders: false,
-      skip: (req) => healthPaths.has(req.path)
-    })
+    genericRateLimiter
   );
 
   app.use(express.json({
@@ -152,7 +145,6 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
     }
   }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-  app.use(requestContext);
   app.use(
     morgan(
       ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
