@@ -26,7 +26,7 @@ jobs:
       packages: write
     outputs:
       backend_image: ${{ steps.images.outputs.backend_image }}
-      frontend_image: ${{ steps.images.outputs.frontend_image }}
+      frontend_assets_image: ${{ steps.images.outputs.frontend_assets_image }}
 
     steps:
       - name: Checkout requested ref
@@ -49,9 +49,9 @@ jobs:
         run: |
           IMAGE_TAG="staging-$(git rev-parse --short=12 HEAD)"
           BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:${IMAGE_TAG}"
-          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:${IMAGE_TAG}"
+          FRONTEND_ASSETS_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend-assets:${IMAGE_TAG}"
           echo "backend_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "frontend_assets_image=${FRONTEND_ASSETS_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
         uses: docker/build-push-action@v6
@@ -63,7 +63,7 @@ jobs:
             ${{ steps.images.outputs.backend_image }}
             ghcr.io/silviomasuccio6/fleetum-backend:staging-latest
 
-      - name: Build and push frontend image
+      - name: Build and push frontend assets image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -76,8 +76,8 @@ jobs:
             VITE_GOOGLE_AUTH_URL=https://api-staging.fleetum.it/api/auth/google
             VITE_APPLE_AUTH_URL=https://api-staging.fleetum.it/api/auth/apple
           tags: |
-            ${{ steps.images.outputs.frontend_image }}
-            ghcr.io/silviomasuccio6/fleetum-frontend:staging-latest
+            ${{ steps.images.outputs.frontend_assets_image }}
+            ghcr.io/silviomasuccio6/fleetum-frontend-assets:staging-latest
 
   deploy:
     name: Deploy Fleetum staging VPS
@@ -159,13 +159,13 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
-          FLEETUM_FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+          FLEETUM_FRONTEND_ASSETS_IMAGE: ${{ needs.build-images.outputs.frontend_assets_image }}
         run: |
           printf '%s' "$GHCR_TOKEN" | ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
-            "cd '$FLEETUM_STAGING_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d"
+            "cd '$FLEETUM_STAGING_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_ASSETS_IMAGE='$FLEETUM_FRONTEND_ASSETS_IMAGE' && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d"
 
       - name: Staging health checks
         run: |

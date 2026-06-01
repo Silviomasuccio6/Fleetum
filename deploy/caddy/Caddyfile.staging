@@ -4,23 +4,44 @@
 
 (security_headers) {
 	header {
-		X-Content-Type-Options "nosniff"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		-Server
+		defer
 	}
+}
+
+(spa_cache_headers) {
+	@html path / /index.html /platform.html
+	header @html Cache-Control "no-cache, no-store, must-revalidate"
+
+	@static path /assets/* /brand/* /favicon.ico /apple-touch-icon.png
+	header @static Cache-Control "public, max-age=31536000, immutable"
 }
 
 staging.fleetum.it {
 	import security_headers
+	import spa_cache_headers
 	encode zstd gzip
 
-	route /api/* {
+	handle /api/* {
 		reverse_proxy backend:4000
 	}
 
-	route {
+	handle /assets/* {
+		root * /srv/fleetum
+		file_server
+	}
+
+	handle /brand/* {
+		root * /srv/fleetum
+		file_server
+	}
+
+	handle {
 		root * /srv/fleetum
 		try_files {path} /index.html
 		file_server
@@ -31,7 +52,7 @@ api-staging.fleetum.it {
 	import security_headers
 	encode zstd gzip
 
-	route /api/* {
+	handle /api/* {
 		reverse_proxy backend:4000
 	}
 
@@ -40,13 +61,24 @@ api-staging.fleetum.it {
 
 platform-staging.fleetum.it {
 	import security_headers
+	import spa_cache_headers
 	encode zstd gzip
 
-	route /platform-api/* {
+	handle /platform-api/* {
 		reverse_proxy backend:4100
 	}
 
-	route {
+	handle /assets/* {
+		root * /srv/fleetum
+		file_server
+	}
+
+	handle /brand/* {
+		root * /srv/fleetum
+		file_server
+	}
+
+	handle {
 		root * /srv/fleetum
 		try_files {path} /platform.html
 		file_server
