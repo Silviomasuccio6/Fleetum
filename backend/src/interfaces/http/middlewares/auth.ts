@@ -27,10 +27,14 @@ export const requireAuth = (req: Request, _res: Response, next: NextFunction) =>
     if (payload.tokenType && payload.tokenType !== "access") {
       throw new AppError("Token non valido", 401, "UNAUTHORIZED");
     }
+    if (req.params.tenantId && req.params.tenantId !== payload.tenantId) {
+      throw new AppError("Tenant non autorizzato", 403, "TENANT_FORBIDDEN");
+    }
     req.auth = payload;
     appendLogContext({ tenantId: payload.tenantId, userId: payload.userId });
     next();
-  } catch {
+  } catch (error) {
+    if (error instanceof AppError) throw error;
     throw new AppError("Token non valido", 401, "UNAUTHORIZED");
   }
 };
