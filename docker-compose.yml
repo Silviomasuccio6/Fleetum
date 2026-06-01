@@ -1,16 +1,27 @@
-version: "3.9"
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: fermi_postgres
+    container_name: ${POSTGRES_CONTAINER_NAME:-fleetum_postgres_local}
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: fermi_db
+      POSTGRES_USER: ${POSTGRES_USER:-fleetum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleetum_local_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fleetum}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - fleetum_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fleetum_local
+
+networks:
+  fleetum_local:
+    driver: bridge
+
 volumes:
-  postgres_data:
+  fleetum_postgres_data:
