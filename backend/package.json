@@ -15,7 +15,9 @@
     "privacy:retention:dry-run": "tsx src/scripts/privacy-retention.ts",
     "privacy:retention:run": "tsx src/scripts/privacy-retention.ts --run",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:watch": "tsx watch --test tests/*.test.ts",
+    "test:coverage": "tsx --test --experimental-test-coverage tests/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
