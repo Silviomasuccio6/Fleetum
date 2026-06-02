@@ -78,6 +78,10 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   PORT: toInt(process.env.PORT ?? "4000", "PORT"),
   PLATFORM_PORT: toInt(process.env.PLATFORM_PORT ?? "4100", "PLATFORM_PORT"),
+  PRISMA_SLOW_QUERY_MS: toInt(
+    process.env.PRISMA_SLOW_QUERY_MS ?? (process.env.NODE_ENV === "production" ? "500" : "100"),
+    "PRISMA_SLOW_QUERY_MS"
+  ),
   SHUTDOWN_GRACE_MS: toInt(process.env.SHUTDOWN_GRACE_MS ?? "15000", "SHUTDOWN_GRACE_MS"),
   PLATFORM_BIND_HOST: process.env.PLATFORM_BIND_HOST ?? "127.0.0.1",
   TRUST_PROXY: parseTrustProxy(process.env.TRUST_PROXY),
