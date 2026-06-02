@@ -32,19 +32,33 @@ Fleetum is a multi-tenant SaaS platform for car rental companies, fleet operatio
 
 ## Local Setup
 
-1. Start PostgreSQL:
+1. Create the local Docker environment file:
 
 ```bash
-docker compose up -d
+cp .env.local.example .env.local
 ```
 
-2. Install dependencies:
+The local Compose file uses Fleetum-aligned defaults:
+
+- container: `fleetum_postgres`
+- database: `fleetum`
+- user: `fleetum`
+- password: `fleetum_dev`
+- host port: `5433`
+
+2. Start PostgreSQL:
+
+```bash
+docker compose --env-file .env.local up -d
+```
+
+3. Install dependencies:
 
 ```bash
 npm ci
 ```
 
-3. Configure environment files:
+4. Configure application environment files:
 
 ```txt
 backend/.env
@@ -53,7 +67,13 @@ frontend/.env
 
 Use example files and placeholder values. Never commit real secrets.
 
-4. Initialize database:
+For backend local development, `DATABASE_URL` should point to the local Fleetum database:
+
+```bash
+DATABASE_URL="postgresql://fleetum:fleetum_dev@localhost:5433/fleetum?schema=public"
+```
+
+5. Initialize database:
 
 ```bash
 npm run prisma:generate -w backend
@@ -61,17 +81,48 @@ npm run prisma:deploy -w backend
 npm run prisma:seed -w backend
 ```
 
-5. Start the tenant app:
+6. Create the optional CI/test database locally:
+
+```bash
+createdb -h localhost -p 5433 -U fleetum fleetum_ci
+```
+
+If `createdb` is not available on your host, use Docker:
+
+```bash
+docker exec -it fleetum_postgres createdb -U fleetum fleetum_ci
+```
+
+The backend test fallback URL is:
+
+```txt
+postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public
+```
+
+7. Start the tenant app:
 
 ```bash
 npm run dev
 ```
 
-6. Start the platform console locally:
+8. Start the platform console locally:
 
 ```bash
 npm run dev:platform
 ```
+
+### Migrating Old Local Development Data
+
+If you previously used the legacy local database/container names (`fermi_postgres`, `fermi_db`), migrate data before removing the old volume:
+
+```bash
+docker exec -i fermi_postgres pg_dump -U postgres -d fermi_db > /tmp/fermi_db.sql
+docker compose --env-file .env.local up -d
+docker exec -i fleetum_postgres createdb -U fleetum fleetum || true
+cat /tmp/fermi_db.sql | docker exec -i fleetum_postgres psql -U fleetum -d fleetum
+```
+
+After verifying the Fleetum database, you can stop the old container/volume manually. Do not delete old volumes until the restore has been verified.
 
 ## Local URLs
 
