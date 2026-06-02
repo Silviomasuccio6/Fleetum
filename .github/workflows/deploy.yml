@@ -1,0 +1,291 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: ["main"]
+
+concurrency:
+  group: fleetum-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and push Docker images
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      deploy_sha: ${{ steps.meta.outputs.deploy_sha }}
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      frontend_image: ${{ steps.meta.outputs.frontend_image }}
+
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          DEPLOY_SHA="${{ github.event.workflow_run.head_sha }}"
+          BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:sha-${DEPLOY_SHA}"
+          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:sha-${DEPLOY_SHA}"
+          echo "deploy_sha=${DEPLOY_SHA}" >> "$GITHUB_OUTPUT"
+          echo "backend_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.prod
+          push: true
+          cache-from: type=gha,scope=fleetum-backend
+          cache-to: type=gha,mode=max,scope=fleetum-backend
+          tags: |
+            ${{ steps.meta.outputs.backend_image }}
+            ghcr.io/silviomasuccio6/fleetum-backend:latest
+
+      - name: Build and push frontend/caddy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile.prod
+          push: true
+          cache-from: type=gha,scope=fleetum-frontend
+          cache-to: type=gha,mode=max,scope=fleetum-frontend
+          build-args: |
+            VITE_API_BASE_URL=https://api.fleetum.it/api
+            VITE_PLATFORM_API_BASE_URL=https://platform.fleetum.it/platform-api
+            VITE_CLIENT_APP_URL=https://fleetum.it/dashboard
+            VITE_GOOGLE_AUTH_URL=https://api.fleetum.it/api/auth/google
+            VITE_APPLE_AUTH_URL=https://api.fleetum.it/api/auth/apple
+          tags: |
+            ${{ steps.meta.outputs.frontend_image }}
+            ghcr.io/silviomasuccio6/fleetum-frontend:latest
+
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: https://fleetum.it
+
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-and-push.outputs.deploy_sha }}
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-and-push.outputs.frontend_image }}
+          DEPLOY_SHA: ${{ needs.build-and-push.outputs.deploy_sha }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: BACKEND_IMAGE,FRONTEND_IMAGE,DEPLOY_SHA,GHCR_USERNAME,GHCR_TOKEN
+          script_stop: true
+          script: |
+            bash -se <<'DEPLOY_SCRIPT'
+            set -euo pipefail
+
+            APP_DIR="/opt/fleetum"
+            COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
+            COMPOSE_ENV_FILE="/opt/fleetum/env/compose.env"
+            BACKEND_ENV_FILE="/opt/fleetum/env/backend.env"
+            LAST_DEPLOY_FILE="/opt/fleetum/last-deploy.txt"
+            LOG_DIR="/opt/fleetum/logs"
+            SCRIPTS_DIR="/opt/fleetum/scripts"
+            HEALTH_URL="http://127.0.0.1:4000/api/health"
+
+            mkdir -p "$APP_DIR" "$LOG_DIR" "$SCRIPTS_DIR" "$(dirname "$COMPOSE_ENV_FILE")"
+            cd "$APP_DIR"
+
+            if [[ ! -f "$COMPOSE_FILE" ]]; then
+              echo "Missing $COMPOSE_FILE on VPS. Upload docker-compose.prod.yml before enabling deploy." >&2
+              exit 66
+            fi
+            if [[ ! -f "$BACKEND_ENV_FILE" ]]; then
+              echo "Missing $BACKEND_ENV_FILE on VPS." >&2
+              exit 66
+            fi
+            touch "$COMPOSE_ENV_FILE"
+
+            cat > "$SCRIPTS_DIR/rollback.sh" <<'ROLLBACK_SCRIPT'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            APP_DIR="${FLEETUM_APP_DIR:-/opt/fleetum}"
+            COMPOSE_FILE="${FLEETUM_COMPOSE_FILE:-$APP_DIR/docker-compose.prod.yml}"
+            COMPOSE_ENV_FILE="${FLEETUM_COMPOSE_ENV_FILE:-/opt/fleetum/env/compose.env}"
+            HEALTH_URL="${FLEETUM_HEALTH_URL:-http://127.0.0.1:4000/api/health}"
+            LOG_FILE="${FLEETUM_ROLLBACK_LOG:-/opt/fleetum/logs/rollback.log}"
+            BACKEND_IMAGE="${1:-}"
+            FRONTEND_IMAGE="${2:-}"
+            if [[ -z "$BACKEND_IMAGE" || -z "$FRONTEND_IMAGE" ]]; then
+              echo "Usage: $0 <backend-image> <frontend-image>" >&2
+              exit 64
+            fi
+            mkdir -p "$(dirname "$COMPOSE_ENV_FILE")" "$(dirname "$LOG_FILE")"
+            touch "$COMPOSE_ENV_FILE"
+            log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG_FILE"; }
+            upsert_env() {
+              local key="$1" value="$2" tmp
+              tmp="$(mktemp)"
+              if grep -q "^${key}=" "$COMPOSE_ENV_FILE"; then
+                sed "s|^${key}=.*|${key}=${value}|" "$COMPOSE_ENV_FILE" > "$tmp"
+              else
+                cat "$COMPOSE_ENV_FILE" > "$tmp"
+                printf '%s=%s\n' "$key" "$value" >> "$tmp"
+              fi
+              cat "$tmp" > "$COMPOSE_ENV_FILE"
+              rm -f "$tmp"
+            }
+            log "Starting rollback to backend=$BACKEND_IMAGE frontend=$FRONTEND_IMAGE"
+            upsert_env "FLEETUM_BACKEND_IMAGE" "$BACKEND_IMAGE"
+            upsert_env "FLEETUM_FRONTEND_IMAGE" "$FRONTEND_IMAGE"
+            cd "$APP_DIR"
+            docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" pull backend caddy
+            docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build backend caddy
+            sleep 15
+            curl -sf "$HEALTH_URL" >/dev/null
+            log "Rollback completed and health check passed"
+            ROLLBACK_SCRIPT
+            chmod +x "$SCRIPTS_DIR/rollback.sh"
+
+            log() {
+              printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG_DIR/deploy.log"
+            }
+
+            upsert_env() {
+              local key="$1" value="$2" tmp
+              tmp="$(mktemp)"
+              if grep -q "^${key}=" "$COMPOSE_ENV_FILE"; then
+                sed "s|^${key}=.*|${key}=${value}|" "$COMPOSE_ENV_FILE" > "$tmp"
+              else
+                cat "$COMPOSE_ENV_FILE" > "$tmp"
+                printf '%s=%s\n' "$key" "$value" >> "$tmp"
+              fi
+              cat "$tmp" > "$COMPOSE_ENV_FILE"
+              rm -f "$tmp"
+            }
+
+            current_image() {
+              local container="$1" fallback="$2"
+              docker inspect --format='{{.Config.Image}}' "$container" 2>/dev/null || printf '%s\n' "$fallback"
+            }
+
+            PREVIOUS_BACKEND_IMAGE="$(current_image fleetum_backend ghcr.io/silviomasuccio6/fleetum-backend:latest)"
+            PREVIOUS_FRONTEND_IMAGE="$(current_image fleetum_caddy ghcr.io/silviomasuccio6/fleetum-frontend:latest)"
+
+            cat > "$LAST_DEPLOY_FILE" <<EOF_LAST_DEPLOY
+            FLEETUM_BACKEND_IMAGE=$PREVIOUS_BACKEND_IMAGE
+            FLEETUM_FRONTEND_IMAGE=$PREVIOUS_FRONTEND_IMAGE
+            DEPLOY_SHA=$DEPLOY_SHA
+            SAVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            EOF_LAST_DEPLOY
+
+            log "Saved previous images in $LAST_DEPLOY_FILE"
+            log "Deploying backend=$BACKEND_IMAGE frontend=$FRONTEND_IMAGE sha=$DEPLOY_SHA"
+
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+            docker pull "$BACKEND_IMAGE"
+            docker pull "$FRONTEND_IMAGE"
+
+            NETWORK_NAME="$(docker network ls --filter name=fleetum_private --format '{{.Name}}' | head -n 1)"
+            NETWORK_ARGS=()
+            if [[ -n "$NETWORK_NAME" ]]; then
+              NETWORK_ARGS=(--network "$NETWORK_NAME")
+            fi
+
+            log "Running Prisma migration before restart"
+            docker run --rm \
+              "${NETWORK_ARGS[@]}" \
+              --env-file "$BACKEND_ENV_FILE" \
+              "$BACKEND_IMAGE" \
+              npx prisma migrate deploy --schema prisma/schema.prisma
+
+            upsert_env "FLEETUM_BACKEND_IMAGE" "$BACKEND_IMAGE"
+            upsert_env "FLEETUM_FRONTEND_IMAGE" "$FRONTEND_IMAGE"
+
+            log "Restarting production services"
+            docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build backend caddy
+
+            sleep 15
+            if ! curl -sf "$HEALTH_URL" >/dev/null; then
+              log "Health check failed after deploy. Starting automatic rollback."
+              "$SCRIPTS_DIR/rollback.sh" "$PREVIOUS_BACKEND_IMAGE" "$PREVIOUS_FRONTEND_IMAGE"
+              exit 1
+            fi
+
+            log "Deploy completed successfully"
+            DEPLOY_SCRIPT
+
+  notify-success:
+    name: Comment on deployed commit
+    needs: [build-and-push, deploy]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Add commit comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: '${{ needs.build-and-push.outputs.deploy_sha }}',
+              body: `Production deploy succeeded.\n\n- Backend: \`${{ needs.build-and-push.outputs.backend_image }}\`\n- Frontend: \`${{ needs.build-and-push.outputs.frontend_image }}\`\n- URL: https://fleetum.it\n- Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+
+  notify-failure:
+    name: Open deploy failure issue
+    needs: [build-and-push, deploy]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create GitHub issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = '${{ needs.build-and-push.outputs.deploy_sha || github.event.workflow_run.head_sha }}';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deploy failed: ${sha.slice(0, 12)}`,
+              body: `Production deploy failed.\n\n- SHA: \`${sha}\`\n- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Check the deploy job logs for the exact failing command.\n- If health failed after restart, the workflow attempted automatic rollback using /opt/fleetum/scripts/rollback.sh.`
+            });

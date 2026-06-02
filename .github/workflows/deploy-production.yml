@@ -7,10 +7,6 @@ on:
         description: "Branch, tag o SHA da deployare"
         required: false
         default: "main"
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: ["main"]
 
 concurrency:
   group: fleetum-production
