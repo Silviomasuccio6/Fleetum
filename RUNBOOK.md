@@ -13,14 +13,96 @@
 - Platform ready: `curl -s http://127.0.0.1:4100/platform-api/ready`
 
 ## Backup e restore DB
-- Backup:
-  ```bash
-  ./ops/backup-db.sh
-  ```
-- Restore su DB di test:
-  ```bash
-  ./ops/restore-db-test.sh backups/<nome-file>.sql
-  ```
+
+### Backup locale manuale
+
+Default produzione:
+
+- container: `fleetum_postgres`
+- database: `fleetum`
+- utente DB: `fleetum`
+- directory output: `backups/`
+
+Backup plain SQL:
+
+```bash
+./ops/backup-db.sh
+```
+
+Backup custom PostgreSQL compresso (`pg_dump -Fc`):
+
+```bash
+./ops/backup-db.sh --compress
+```
+
+Override esplicito:
+
+```bash
+./ops/backup-db.sh fleetum_postgres fleetum fleetum
+./ops/backup-db.sh --compress fleetum_postgres fleetum fleetum
+```
+
+Lo script verifica:
+
+- esistenza del container Docker;
+- creazione del file;
+- dimensione maggiore di 1 KB;
+- header PostgreSQL valido (`--`, `PostgreSQL` o `PGDMP`);
+- rimozione del file parziale in caso di errore.
+
+### Restore su database di test
+
+Non fare restore diretto su produzione salvo procedura di emergenza approvata.
+
+Restore di dump plain `.sql`:
+
+```bash
+./ops/restore-db-test.sh backups/<nome-file>.sql
+```
+
+Restore di dump custom `.dump` / `.pgdump`:
+
+```bash
+./ops/restore-db-test.sh backups/<nome-file>.dump
+```
+
+Default restore test:
+
+- container: `fleetum_postgres`
+- database target: `fleetum_restore_test`
+- utente DB: `fleetum`
+
+Lo script crea un database di test, ripristina il dump e conferma il numero di tabelle ripristinate.
+
+### Verifica periodica backup
+
+Eseguire almeno mensilmente:
+
+```bash
+./ops/backup-verify.sh backups/<nome-file>.dump
+```
+
+Oppure, per dump plain:
+
+```bash
+./ops/backup-verify.sh backups/<nome-file>.sql
+```
+
+La verifica:
+
+- controlla dimensione e header;
+- crea un database temporaneo;
+- prova un restore completo;
+- conta le tabelle ripristinate;
+- stampa il conteggio righe per tabelle critiche:
+  - `RentalBooking`
+  - `RentalCustomer`
+  - `Vehicle`
+- elimina il database temporaneo a fine esecuzione.
+
+### Nota produzione
+
+Il backup locale non basta per produzione. I backup critici devono essere copiati anche offsite e testati con restore periodico.
 
 ## Incident response minima
 1. Isolare il problema (API non raggiungibile, DB down, errori auth).
