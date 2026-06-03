@@ -45,6 +45,44 @@ const scrubJson = (value: unknown): unknown => {
 export class PrivacyComplianceService {
   private readonly auditRepository = new PrismaAuditLogRepository();
 
+  async createErasureRequest(input: {
+    tenantId: string;
+    userId?: string | null;
+    customerId: string;
+    legalBasis: string;
+    deleteAttachments?: boolean;
+  }) {
+    const requestedAt = new Date();
+
+    await this.auditRepository.create({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      action: "DATA_SUBJECT_ERASURE_REQUESTED",
+      resource: "RentalCustomer",
+      resourceId: input.customerId,
+      details: {
+        legalBasis: input.legalBasis.slice(0, 300),
+        deleteAttachments: input.deleteAttachments !== false,
+        requestedAt: requestedAt.toISOString()
+      }
+    });
+
+    const result = await this.anonymizeCustomer({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      customerId: input.customerId,
+      confirmation: "ANONYMIZE_CUSTOMER",
+      legalBasis: input.legalBasis,
+      deleteAttachments: input.deleteAttachments
+    });
+
+    return {
+      requestLogged: true,
+      requestedAt: requestedAt.toISOString(),
+      ...result
+    };
+  }
+
   async exportCustomerData(input: { tenantId: string; userId?: string | null; customerId: string }) {
     const customer = await prisma.rentalCustomer.findFirst({
       where: { tenantId: input.tenantId, id: input.customerId, deletedAt: null },

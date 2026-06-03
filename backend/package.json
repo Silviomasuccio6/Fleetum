@@ -12,6 +12,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
     "seed:demo-tenant": "tsx prisma/seed-demo-tenant.ts",
+    "privacy:pii-report": "tsx src/scripts/pii-report.ts",
     "privacy:retention:dry-run": "tsx src/scripts/privacy-retention.ts",
     "privacy:retention:run": "tsx src/scripts/privacy-retention.ts --run",
     "lint": "tsc --noEmit",
