@@ -4,6 +4,7 @@ import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../../presentation/components/brand/fleetum-logo-loader";
+import { prefetchDashboard } from "../../../presentation/routes/prefetch-routes";
 import { getSafeReturnTo } from "../../../presentation/routes/safe-return-to";
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -126,6 +127,7 @@ export const LoginCard = () => {
     try {
       const result = await authUseCases.login({ email, password });
       setSession(result.user, remember);
+      void prefetchDashboard();
       setSuccess(true);
       window.setTimeout(() => navigate(returnTo, { replace: true }), 450);
     } catch (error) {
