@@ -95,6 +95,50 @@ definitiva.
   ./ops/restore-db-test.sh backups/<nome-file>.sql
   ```
 
+## Deploy production sicuro
+Il deploy production GitHub Actions deve usare la sequenza sicura versionata in
+`deploy/scripts/safe-production-deploy.sh`.
+
+Prima di ogni `prisma migrate deploy` sono obbligatori:
+
+```bash
+/opt/fleetum/app/deploy/backup/backup-postgres.sh
+/opt/fleetum/app/deploy/backup/backup-uploads.sh
+```
+
+Se uno dei backup fallisce, la migration non deve partire e il workflow deve fallire.
+
+Prima del deploy, lo script salva le immagini correnti in:
+
+```txt
+/opt/fleetum/last-deploy.txt
+```
+
+Il file contiene almeno:
+
+```txt
+PREVIOUS_BACKEND_IMAGE=...
+PREVIOUS_FRONTEND_IMAGE=...
+NEW_BACKEND_IMAGE=...
+NEW_FRONTEND_IMAGE=...
+DEPLOY_STARTED_AT=...
+```
+
+La migration viene eseguita solo dopo backup riuscito. Se `prisma migrate deploy` fallisce,
+il deploy si ferma prima di `docker compose up -d`, quindi non viene avviata la nuova release.
+
+Il post-deploy health check obbligatorio e':
+
+```bash
+curl -fsS http://127.0.0.1:4000/api/ready
+```
+
+Se il health check fallisce dopo `up -d`, lo script esegue rollback applicativo automatico
+alle immagini salvate in `/opt/fleetum/last-deploy.txt`.
+
+Nota: il rollback automatico e' applicativo, non annulla migration Prisma gia' applicate.
+Migration destructive richiedono reverse migration testata o restore da backup.
+
 ## Incident response minima
 1. Isolare il problema (API non raggiungibile, DB down, errori auth).
 2. Raccogliere log backend e reverse proxy.
@@ -107,3 +151,15 @@ definitiva.
 - Conservare sempre l'artefatto della release precedente.
 - Rollback = redeploy build precedente + verifica health/readiness.
 - Se migrazione DB non backward-compatible, prevedere strategia di rollback DB testata prima del rilascio.
+
+Rollback manuale applicativo, se serve:
+
+```bash
+cd /opt/fleetum/app
+APP_DIR=/opt/fleetum/app \
+ENV_FILE=/opt/fleetum/env/compose.env \
+LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt \
+./deploy/scripts/rollback-production.sh
+```
+
+Ogni fallimento del workflow production crea una GitHub issue con link al run e risultati dei job.

@@ -186,16 +186,19 @@ jobs:
             --include 'deploy/backup/' \
             --include 'deploy/backup/*.sh' \
             --include 'deploy/backup/*.md' \
+            --include 'deploy/scripts/' \
+            --include 'deploy/scripts/*.sh' \
             --exclude '*' \
             -e "ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps" \
             ./ "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST:$FLEETUM_APP_DIR/"
 
-      - name: Pull images, migrate and restart production containers
+      - name: Pull images, backup, migrate and restart production containers
         env:
           FLEETUM_VPS_HOST: 57.131.47.124
           FLEETUM_VPS_USER: fleetum
           FLEETUM_APP_DIR: /opt/fleetum/app
           FLEETUM_ENV_FILE: /opt/fleetum/env/compose.env
+          FLEETUM_LAST_DEPLOY_FILE: /opt/fleetum/last-deploy.txt
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
@@ -205,7 +208,7 @@ jobs:
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "cd '$FLEETUM_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml pull && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_ENV_FILE' -f docker-compose.prod.yml up -d"
+            "cd '$FLEETUM_APP_DIR' && chmod +x deploy/scripts/*.sh deploy/backup/*.sh && FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' HEALTH_URL='http://127.0.0.1:4000/api/ready' ./deploy/scripts/safe-production-deploy.sh"
 
       - name: Install managed backup cron
         env:
@@ -219,11 +222,11 @@ jobs:
       - name: Production health checks
         run: |
           for i in {1..12}; do
-            if curl -fsS --max-time 20 https://api.fleetum.it/api/health; then
+            if curl -fsS --max-time 20 https://api.fleetum.it/api/ready; then
               break
             fi
             if [ "$i" = "12" ]; then
-              echo "Backend health check failed after retries" >&2
+              echo "Backend readiness check failed after retries" >&2
               exit 1
             fi
             sleep 5
@@ -242,3 +245,43 @@ jobs:
 
           curl -fsS --max-time 20 https://fleetum.it/robots.txt | grep -q "Sitemap"
           curl -fsS --max-time 20 https://fleetum.it/sitemap.xml | grep -q "fleetum.it/demo"
+
+  notify-failure:
+    name: Create deploy failure issue
+    if: ${{ always() && (needs.sast.result == 'failure' || needs.build-images.result == 'failure' || needs.deploy.result == 'failure') }}
+    runs-on: ubuntu-latest
+    needs: [sast, build-images, deploy]
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Create GitHub issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha.slice(0, 12);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Deploy failed: ${sha}`;
+            const body = [
+              `Production deploy failed for commit \`${context.sha}\`.`,
+              ``,
+              `Workflow run: ${runUrl}`,
+              ``,
+              `Job results:`,
+              `- SAST: ${{ needs.sast.result }}`,
+              `- Build images: ${{ needs.build-images.result }}`,
+              `- Deploy: ${{ needs.deploy.result }}`,
+              ``,
+              `Immediate checks:`,
+              `- Review the failed job logs in GitHub Actions.`,
+              `- If deployment reached the VPS and health failed, verify /opt/fleetum/last-deploy.txt and rollback logs.`,
+              `- Confirm database backup and uploads backup were completed before any migration.`,
+            ].join("\\n");
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+            });

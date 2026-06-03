@@ -16,15 +16,17 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 ## Deploy order
 
 1. CI green.
-2. Backup database with `deploy/backup/backup-postgres.sh`.
-3. Backup uploads with `deploy/backup/backup-uploads.sh` when document/storage changes are involved.
-4. GitHub Actions builds and pushes backend/frontend images to GHCR.
-5. Upload deployment manifests to the VPS.
-6. Pull the selected images on the VPS.
-7. Run Prisma migration separately.
-8. Restart services.
-9. Health checks.
-10. Log review.
+2. GitHub Actions builds and pushes backend/frontend images to GHCR.
+3. Upload deployment manifests to the VPS.
+4. Save currently running image tags in `/opt/fleetum/last-deploy.txt`.
+5. Pull the selected images on the VPS.
+6. Backup database with `deploy/backup/backup-postgres.sh`.
+7. Backup uploads with `deploy/backup/backup-uploads.sh`.
+8. Run Prisma migration separately only if both backups completed.
+9. Restart services.
+10. Health check `/api/ready`.
+11. Automatic application rollback if health fails.
+12. Public health checks and log review.
 
 ## Images
 
@@ -41,8 +43,10 @@ The workflow also updates `latest`, but the deploy step passes the explicit SHA-
 
 ```bash
 cd /opt/fleetum/app
-docker compose --env-file /opt/fleetum/env/compose.env -f docker-compose.prod.yml run --rm backend \
-  npx prisma migrate deploy --schema prisma/schema.prisma
+FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
+FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+ENV_FILE=/opt/fleetum/env/compose.env \
+./deploy/scripts/safe-production-deploy.sh
 ```
 
 ## Restart command
@@ -64,7 +68,8 @@ curl -fsS https://fleetum.it/sitemap.xml
 
 ## Backup commands
 
-Backups should run before migrations and before any deploy that changes persistence, storage or document handling.
+Backups must run before migrations. The production workflow enforces this through
+`deploy/scripts/safe-production-deploy.sh`.
 
 ```bash
 cd /opt/fleetum/app
@@ -76,8 +81,17 @@ For offsite copies, configure `OFFSITE_RCLONE_TARGET` outside the repository.
 
 ## Rollback
 
-- Revert to previous Git commit or image tag.
-- Restart containers.
+- Automatic rollback uses `/opt/fleetum/last-deploy.txt`.
+- Manual rollback command:
+
+```bash
+cd /opt/fleetum/app
+APP_DIR=/opt/fleetum/app \
+ENV_FILE=/opt/fleetum/env/compose.env \
+LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt \
+./deploy/scripts/rollback-production.sh
+```
+
 - Restore DB only if the migration changed data destructively and rollback was approved.
 - Verify `/api/ready` and core login/booking flows.
 
