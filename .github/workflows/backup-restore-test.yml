@@ -1,0 +1,56 @@
+name: Backup Restore Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "42 3 1 * *"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  restore-test:
+    name: Monthly restore test on VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run non-destructive restore test on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          FLEETUM_APP_DIR: /opt/fleetum/app
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: FLEETUM_APP_DIR
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "$FLEETUM_APP_DIR"
+            chmod +x deploy/backup/*.sh
+            ./deploy/backup/restore-postgres-test.sh
+
+      - name: Create failure issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Backup restore test failed: ${context.sha.slice(0, 7)}`;
+            const body = [
+              'Monthly Fleetum restore test failed.',
+              '',
+              `Workflow: ${context.workflow}`,
+              `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              'Immediate actions:',
+              '- Check latest PostgreSQL backup integrity.',
+              '- Check VPS Docker availability and disk space.',
+              '- Check offsite backup configuration and credentials.',
+              '- Do not run destructive migrations until restore is green.'
+            ].join('\n');
+            await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ['sre', 'backup', 'incident'] });

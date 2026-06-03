@@ -243,15 +243,85 @@ Stato noto: la stringa legacy `gestionalefermi` e' stata rimossa dal working tre
 risulta ancora in commit storici. Serve rewrite history dedicato prima della pubblicazione
 definitiva.
 
-## Backup e restore DB
-- Backup:
-  ```bash
-  ./ops/backup-db.sh
-  ```
-- Restore su DB di test:
-  ```bash
-  ./ops/restore-db-test.sh backups/<nome-file>.sql
-  ```
+## Backup e restore production-grade
+
+Fleetum production richiede backup offsite obbligatorio. I backup solo locali non sono
+considerati sufficienti per produzione: un guasto VPS o disco puo' rendere inutilizzabili
+applicazione, database e backup nello stesso momento.
+
+Target attuali:
+
+```txt
+RPO: 24 ore
+RTO: 4 ore
+Retention: 30 giorni
+```
+
+Configurazione production:
+
+```bash
+sudo cp /opt/fleetum/app/deploy/env/backup.env.production.example /opt/fleetum/env/backup.env
+sudo chmod 600 /opt/fleetum/env/backup.env
+sudo nano /opt/fleetum/env/backup.env
+```
+
+Opzioni offsite supportate:
+
+```txt
+Cloudflare R2
+AWS S3
+Backblaze B2
+Qualsiasi S3-compatible tramite rclone o aws-cli
+```
+
+Variabili minime con rclone:
+
+```env
+BACKUP_OFFSITE_REQUIRED=true
+RETENTION_DAYS=30
+OFFSITE_RCLONE_TARGET=fleetum-r2:fleetum-backups
+BACKUP_ALERT_EMAIL=ops@example.com
+RESEND_API_KEY=re_...
+RESEND_FROM=Fleetum Backups <no-reply@fleetum.it>
+```
+
+Backup manuale:
+
+```bash
+/opt/fleetum/app/deploy/backup/backup-postgres.sh
+/opt/fleetum/app/deploy/backup/backup-uploads.sh
+```
+
+Cron giornaliero installato dal deploy:
+
+```bash
+/opt/fleetum/app/deploy/backup/install-cron.sh
+```
+
+Schedulazione:
+
+```cron
+15 2 * * * /opt/fleetum/app/deploy/backup/backup-postgres.sh >> /opt/fleetum/logs/backup-postgres.log 2>&1
+30 2 * * * /opt/fleetum/app/deploy/backup/backup-uploads.sh >> /opt/fleetum/logs/backup-uploads.log 2>&1
+```
+
+Restore test mensile:
+
+```bash
+/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+```
+
+Il workflow GitHub Actions `Backup Restore Test` lo esegue automaticamente il primo giorno
+del mese e puo' essere lanciato manualmente. In caso di fallimento crea issue GitHub e gli
+script inviano alert via Resend/webhook se configurati.
+
+Regole operative:
+
+1. Non eseguire migration destructive se il restore test mensile non e' verde.
+2. Prima di migration rischiose, eseguire backup manuale e restore test.
+3. Verificare che i bucket offsite siano privati e con lifecycle retention 30 giorni.
+4. Non salvare mai credenziali backup nel repository.
+5. In caso di restore production, seguire `deploy/backup/restore-postgres.md`.
 
 ## Deploy production sicuro
 Il deploy production GitHub Actions deve usare la sequenza sicura versionata in

@@ -1,18 +1,60 @@
-# Fleetum Backup Strategy
+# Fleetum Production Backup Strategy
+
+Fleetum production backups must be offsite. Local-only backups are useful for fast restore, but are not enough if the VPS, disk or datacenter fails.
 
 ## Assets
 
-- PostgreSQL data: `/opt/fleetum/postgres` through logical `pg_dump`.
-- Uploads/documents: `/opt/fleetum/uploads` archive.
-- Env files: `/opt/fleetum/env` must be backed up securely outside the repo.
+- PostgreSQL logical dump via `pg_dump`.
+- Uploads/documents archive from `/opt/fleetum/uploads`.
+- Env files in `/opt/fleetum/env` must be backed up securely outside git and outside this automated archive process.
 
-## Recommended frequency
+## RPO / RTO targets
 
-- PostgreSQL: daily minimum, hourly once production usage grows.
-- Uploads: daily minimum, more often if contract/document volume grows.
-- Restore test: monthly.
+- RPO target: 24 hours with the current daily schedule.
+- RTO target: 4 hours for PostgreSQL restore plus uploads rehydrate on the current single-VPS architecture.
+- Monthly restore test is mandatory to keep these targets credible.
 
-## Cron example
+## Required production configuration
+
+Copy the example outside the repository:
+
+```bash
+sudo cp /opt/fleetum/app/deploy/env/backup.env.production.example /opt/fleetum/env/backup.env
+sudo chmod 600 /opt/fleetum/env/backup.env
+sudo nano /opt/fleetum/env/backup.env
+```
+
+Use either rclone or aws-cli compatible S3 config.
+
+### Option A: rclone, recommended
+
+Works well with Cloudflare R2, AWS S3 and Backblaze B2.
+
+```bash
+rclone config
+OFFSITE_RCLONE_TARGET=fleetum-r2:fleetum-backups
+```
+
+Backups are uploaded to:
+
+```txt
+$OFFSITE_RCLONE_TARGET/postgres/
+$OFFSITE_RCLONE_TARGET/uploads/
+```
+
+### Option B: aws-cli compatible S3
+
+```bash
+OFFSITE_S3_URI=s3://fleetum-backups/prod
+S3_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=auto
+```
+
+For aws-cli targets, configure bucket lifecycle to expire `postgres/` and `uploads/` objects after 30 days. The script enforces local retention and logs a reminder for remote lifecycle.
+
+## Daily cron
 
 ```cron
 15 2 * * * /opt/fleetum/app/deploy/backup/backup-postgres.sh >> /opt/fleetum/logs/backup-postgres.log 2>&1
@@ -25,71 +67,83 @@ Production deploys install this schedule automatically through:
 /opt/fleetum/app/deploy/backup/install-cron.sh
 ```
 
-The installer is idempotent: it replaces the managed Fleetum block and removes the old legacy `ops/backup-db-prod.sh` cron entry if present.
+The scripts auto-load `/opt/fleetum/env/backup.env`, so cron does not need to inline secrets.
 
-## Configuration
-
-The scripts use safe defaults for production and can be configured with environment variables stored outside git.
+## Manual backup
 
 ```bash
-BACKUP_DIR=/opt/fleetum/backups/postgres
-UPLOADS_DIR=/opt/fleetum/uploads
-RETENTION_DAYS=14
-COMPOSE_FILE=/opt/fleetum/app/docker-compose.prod.yml
-ENV_FILE=/opt/fleetum/env/compose.env
-POSTGRES_SERVICE_NAME=postgres
-POSTGRES_USER=fleetum
-POSTGRES_DB=fleetum
-OFFSITE_RCLONE_TARGET=remote:fleetum-backups
-RCLONE_TRANSFERS=4
+/opt/fleetum/app/deploy/backup/backup-postgres.sh
+/opt/fleetum/app/deploy/backup/backup-uploads.sh
 ```
 
-## Offsite
-
-Local backup is not enough. Configure offsite copy with Cloudflare R2, S3, Backblaze B2 or another provider. Use env/config outside the repo.
-
-Recommended option with `rclone`:
+Both scripts fail if offsite backup is not configured unless explicitly overridden with:
 
 ```bash
-OFFSITE_RCLONE_TARGET="remote:fleetum-backups/postgres" /opt/fleetum/app/deploy/backup/backup-postgres.sh
-OFFSITE_RCLONE_TARGET="remote:fleetum-backups/uploads" /opt/fleetum/app/deploy/backup/backup-uploads.sh
+BACKUP_OFFSITE_REQUIRED=false
 ```
 
-## Security
+Do not use that override in production except for break-glass diagnostics.
 
-- Do not store backup credentials in git.
-- Restrict backup file permissions.
-- Encrypt offsite backups where possible.
-- Test restore regularly.
+## Retention
 
-## Deployment
+Default retention is 30 days:
 
-GitHub Actions deploys the backup runbooks and scripts to `/opt/fleetum/app/deploy/backup`. Cron should execute the scripts from that path so the VPS uses the reviewed version from git.
+```bash
+RETENTION_DAYS=30
+```
 
-The production workflow also runs `install-cron.sh` after containers are restarted, so the VPS cron stays aligned with the repository.
+- Local files older than retention are deleted by the scripts.
+- rclone targets are pruned by `rclone delete --min-age`.
+- aws-cli/S3 targets require bucket lifecycle rules for remote retention.
 
-## Restore test
+## Alerts
 
-Run a restore test at least monthly in staging or on an isolated database. Do not wait for an incident to discover a backup cannot be restored.
+On backup or restore-test failure, scripts can notify through:
 
-Use the non-destructive restore test script:
+- Resend API using `RESEND_API_KEY`, `BACKUP_ALERT_EMAIL`, `RESEND_FROM`.
+- Generic webhook using `BACKUP_ALERT_WEBHOOK_URL`.
+
+Success notifications are disabled by default. Enable only if useful:
+
+```bash
+BACKUP_NOTIFY_SUCCESS=true
+```
+
+## Monthly restore test
+
+GitHub Actions workflow `.github/workflows/backup-restore-test.yml` runs monthly and manually. It SSHes into the VPS and runs:
 
 ```bash
 /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
 
-The script:
+The restore test:
 
-- picks the latest PostgreSQL dump by default;
-- supports both the new `/opt/fleetum/backups/postgres` path and the legacy `/opt/fleetum/backups` path;
-- restores into a temporary PostgreSQL container;
-- creates compatibility roles such as `fleetum` for legacy dumps with ownership statements;
+- finds the latest PostgreSQL dump by default;
+- validates gzip and minimum size;
+- starts an isolated PostgreSQL 16 container;
+- restores the dump;
 - verifies Prisma migrations and public tables;
-- removes the temporary container unless `KEEP_CONTAINER=true` is set.
+- removes the temporary container unless `KEEP_CONTAINER=true`.
 
-To test a specific dump:
+Run manually:
+
+```bash
+/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+```
+
+Use a specific dump:
 
 ```bash
 BACKUP_FILE=/opt/fleetum/backups/postgres/fleetum-postgres-YYYYMMDDTHHMMSSZ.sql.gz \
   /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
+
+## Security
+
+- Never store backup credentials in git.
+- Keep `/opt/fleetum/env/backup.env` mode `600`.
+- Keep buckets private.
+- Prefer server-side encryption or provider-managed encryption.
+- Restrict bucket credentials to the backup bucket/prefix only.
+- Test restore monthly and before destructive migrations.

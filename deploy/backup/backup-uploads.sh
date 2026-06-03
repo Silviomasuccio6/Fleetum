@@ -1,44 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=deploy/backup/lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
 UPLOADS_DIR="${UPLOADS_DIR:-/opt/fleetum/uploads}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/fleetum/backups/uploads}"
-RETENTION_DAYS="${RETENTION_DAYS:-14}"
+RETENTION_DAYS="${RETENTION_DAYS:-30}"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUTPUT_FILE="$BACKUP_DIR/fleetum-uploads-$TIMESTAMP.tar.gz"
 TMP_FILE="$OUTPUT_FILE.tmp"
+MIN_BACKUP_BYTES="${MIN_UPLOADS_BACKUP_BYTES:-128}"
 
 umask 077
 mkdir -p "$BACKUP_DIR"
+require_positive_int "RETENTION_DAYS" "$RETENTION_DAYS"
+require_positive_int "MIN_UPLOADS_BACKUP_BYTES" "$MIN_BACKUP_BYTES"
+require_offsite_config
 
-if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
-  echo "[backup-uploads] RETENTION_DAYS must be a positive integer" >&2
-  exit 2
-fi
-
-if [ ! -d "$UPLOADS_DIR" ]; then
-  echo "[backup-uploads] uploads directory not found: $UPLOADS_DIR" >&2
-  exit 2
-fi
+[ -d "$UPLOADS_DIR" ] || fail "uploads directory not found: $UPLOADS_DIR"
+command -v tar >/dev/null 2>&1 || fail "tar command not found"
 
 cleanup() {
   rm -f "$TMP_FILE"
 }
 trap cleanup EXIT
 
-echo "[backup-uploads] starting backup: $OUTPUT_FILE"
-tar -czf "$TMP_FILE" -C "$(dirname "$UPLOADS_DIR")" "$(basename "$UPLOADS_DIR")"
+log "starting uploads backup: $OUTPUT_FILE"
+tar -czf "$TMP_FILE" -C "$(dirname "$UPLOADS_DIR")" "$(basename "$UPLOADS_DIR")" || fail "uploads tar failed"
 mv "$TMP_FILE" "$OUTPUT_FILE"
 chmod 600 "$OUTPUT_FILE"
-find "$BACKUP_DIR" -type f -name 'fleetum-uploads-*.tar.gz' -mtime +"$RETENTION_DAYS" -delete
+verify_backup_file "$OUTPUT_FILE" "$MIN_BACKUP_BYTES"
+copy_to_offsite "$OUTPUT_FILE" "uploads"
+prune_local_backups "$BACKUP_DIR" 'fleetum-uploads-*.tar.gz' "$RETENTION_DAYS"
+prune_offsite_backups "uploads" "$RETENTION_DAYS"
 
-if [ -n "${OFFSITE_RCLONE_TARGET:-}" ]; then
-  if ! command -v rclone >/dev/null 2>&1; then
-    echo "[backup-uploads] OFFSITE_RCLONE_TARGET set but rclone is not installed" >&2
-    exit 2
-  fi
-  echo "[backup-uploads] syncing backup directory to configured offsite target"
-  rclone copy "$BACKUP_DIR" "$OFFSITE_RCLONE_TARGET" --transfers "${RCLONE_TRANSFERS:-4}"
-fi
-
-echo "[backup-uploads] completed: $OUTPUT_FILE"
+SIZE_BYTES="$(file_size_bytes "$OUTPUT_FILE")"
+log "Uploads backup completed: $OUTPUT_FILE (${SIZE_BYTES} bytes)"
+notify_backup_success "Uploads backup completed: $OUTPUT_FILE (${SIZE_BYTES} bytes)"
