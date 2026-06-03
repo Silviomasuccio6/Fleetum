@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import path from "node:path";
+import sharp from "sharp";
 import { AppError } from "../../shared/errors/app-error.js";
 
 const jpeg = [0xff, 0xd8, 0xff];
@@ -76,7 +78,25 @@ export const validateUploadedFile = async (filePath: string, mimeType: string) =
   return true;
 };
 
-export const sanitizeImageMetadata = async (_filePath: string) => {
-  // Hook per futura sanitizzazione EXIF/metadata (es. re-encode server-side con libreria imaging).
-  return;
+const toSharpFormat = (ext: string) => {
+  if (ext === ".jpg" || ext === ".jpeg") return "jpeg";
+  if (ext === ".png") return "png";
+  if (ext === ".webp") return "webp";
+  return undefined;
+};
+
+export const sanitizeImageMetadata = async (filePath: string): Promise<void> => {
+  const ext = path.extname(filePath).toLowerCase();
+  const tmpPath = `${filePath}.sanitized`;
+  const format = toSharpFormat(ext);
+
+  try {
+    const pipeline = sharp(filePath).rotate();
+    if (format) pipeline.toFormat(format);
+    await pipeline.toFile(tmpPath);
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    await fs.unlink(tmpPath).catch(() => undefined);
+    throw new AppError("Sanitizzazione immagine fallita", 500, "IMAGE_SANITIZE_ERROR");
+  }
 };
