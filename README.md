@@ -32,28 +32,42 @@ Fleetum is a multi-tenant SaaS platform for car rental companies, fleet operatio
 
 ## Local Setup
 
-1. Start PostgreSQL:
+1. Prepare local Docker environment:
 
 ```bash
-docker compose up -d
+cp .env.local.example .env.local
 ```
 
-2. Install dependencies:
+2. Start PostgreSQL:
+
+```bash
+docker compose --env-file .env.local up -d
+```
+
+This starts the local PostgreSQL container as `fleetum_postgres` and exposes it on port `5433`.
+
+3. Install dependencies:
 
 ```bash
 npm ci
 ```
 
-3. Configure environment files:
+4. Configure environment files:
 
 ```txt
 backend/.env
 frontend/.env
 ```
 
-Use example files and placeholder values. Never commit real secrets.
+Use example files and placeholder values. For local backend development, `DATABASE_URL` should point to:
 
-4. Initialize database:
+```txt
+postgresql://fleetum:fleetum_dev@localhost:5433/fleetum?schema=public
+```
+
+Never commit real secrets.
+
+5. Initialize database:
 
 ```bash
 npm run prisma:generate -w backend
@@ -61,17 +75,27 @@ npm run prisma:deploy -w backend
 npm run prisma:seed -w backend
 ```
 
-5. Start the tenant app:
+6. Start the tenant app:
 
 ```bash
 npm run dev
 ```
 
-6. Start the platform console locally:
+7. Start the platform console locally:
 
 ```bash
 npm run dev:platform
 ```
+
+## Local Test Database
+
+Backend tests that need a PostgreSQL database use the `fleetum_ci` database by default:
+
+```bash
+createdb -h localhost -p 5433 -U fleetum fleetum_ci
+```
+
+If you previously used the legacy local database from the old project, migrate data manually with a dump/restore into `fleetum` before deleting the old container or volume.
 
 ## Local URLs
 

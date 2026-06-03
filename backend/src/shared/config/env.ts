@@ -13,7 +13,7 @@ const TEST_JWT_SECRET = "test-jwt-secret-for-ci-only-0000000000000000";
 const TEST_PLATFORM_JWT_SECRET =
   "test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000";
 const TEST_PLATFORM_ADMIN_PASSWORD_HASH = "$2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde";
-const TEST_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/fermi_ci?schema=public";
+const TEST_DATABASE_URL = "postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public";
 const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "smtp").toLowerCase();
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
 

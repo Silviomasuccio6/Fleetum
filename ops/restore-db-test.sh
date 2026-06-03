@@ -2,14 +2,14 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Uso: $0 <path-backup.sql> [container=fermi_postgres] [target-db=fermi_db_restore_test] [db-user=postgres]"
+  echo "Uso: $0 <path-backup.sql> [container=fleetum_postgres] [target-db=fleetum_restore_test] [db-user=fleetum]"
   exit 1
 fi
 
 BACKUP_FILE="$1"
-CONTAINER_NAME="${2:-fermi_postgres}"
-TARGET_DB="${3:-fermi_db_restore_test}"
-DB_USER="${4:-postgres}"
+CONTAINER_NAME="${2:-fleetum_postgres}"
+TARGET_DB="${3:-fleetum_restore_test}"
+DB_USER="${4:-fleetum}"
 
 if [[ ! -f "${BACKUP_FILE}" ]]; then
   echo "Backup non trovato: ${BACKUP_FILE}"
