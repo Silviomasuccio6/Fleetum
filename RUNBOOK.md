@@ -42,6 +42,25 @@ Procedura produzione:
 Se `PLATFORM_ADMIN_PASSWORD_HASH` non inizia con `$2`, il backend fallisce il boot con
 un errore esplicito per evitare configurazioni insicure.
 
+## Pulizia history repository pubblico
+
+Prima di considerare il repository completamente pubblico, verificare che la history Git
+non contenga riferimenti legacy, email reali o dati cliente. Controllo consigliato:
+
+```bash
+git log --all -S "gestionalefermi" --oneline
+git log --all -S "gestionalefermi@gmail.com" --oneline
+```
+
+Se una stringa appare in commit precedenti, rimuoverla dalla history con `git filter-repo`
+o BFG Repo Cleaner su clone mirror, poi eseguire force-push coordinato di branch e tag.
+Questa operazione riscrive la history e rompe i clone esistenti: va pianificata prima di
+rendere il repository realmente pubblico e comunicata a chiunque abbia clonato la repo.
+
+Stato noto: la stringa legacy `gestionalefermi` e' stata rimossa dal working tree, ma
+risulta ancora in commit storici. Serve rewrite history dedicato prima della pubblicazione
+definitiva.
+
 ## Backup e restore DB
 - Backup:
   ```bash
