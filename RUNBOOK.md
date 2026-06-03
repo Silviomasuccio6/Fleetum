@@ -25,6 +25,17 @@ Verifica produzione:
 grep -q "TRUST_PROXY=1" /opt/fleetum/env/backend.env || echo "WARNING: TRUST_PROXY non impostato"
 ```
 
+## Sessioni tenant e refresh token
+
+`JWT_EXPIRES_IN` deve restare breve, consigliato `15m`, per ridurre la finestra utile di
+un access token compromesso. Il refresh token resta valido 30 giorni ed e' ruotato dal
+backend: il frontend intercetta i `401` con codice `UNAUTHORIZED`, chiama
+`POST /auth/refresh`, aggiorna cookie/CSRF e riprova automaticamente la richiesta
+originale.
+
+Se il refresh fallisce con `401`, il client cancella lo stato locale e reindirizza al
+login. Non modificare `PLATFORM_JWT_EXPIRES_IN`: la Platform Console usa un JWT separato.
+
 ## Password Platform Console
 
 La Platform Console usa email + password + OTP email. La password admin non deve mai

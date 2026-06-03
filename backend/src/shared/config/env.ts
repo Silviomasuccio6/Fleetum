@@ -84,7 +84,7 @@ export const env = {
 
   DATABASE_URL: required("DATABASE_URL", isCiOrTest ? TEST_DATABASE_URL : undefined),
   JWT_SECRET,
-  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "1d",
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "15m",
   PLATFORM_JWT_SECRET,
   PLATFORM_JWT_EXPIRES_IN: process.env.PLATFORM_JWT_EXPIRES_IN ?? "15m",
 
