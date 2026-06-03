@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
   PLAN_MONTHLY_PRICING_EUR,
@@ -142,7 +143,7 @@ export class PlatformAdminService {
     await this.loginGuard.assertAllowed(input.ip, normalizedEmail);
 
     const emailOk = constantTimeEqual(normalizedEmail, env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase());
-    const passwordOk = constantTimeEqual(input.password, env.PLATFORM_ADMIN_PASSWORD);
+    const passwordOk = await bcrypt.compare(input.password, env.PLATFORM_ADMIN_PASSWORD_HASH);
 
     if (!emailOk || !passwordOk) {
       const failure = await this.loginGuard.registerFailure(input.ip, normalizedEmail);

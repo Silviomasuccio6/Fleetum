@@ -98,10 +98,15 @@ PLATFORM_PORT=4100
 PLATFORM_BIND_HOST=127.0.0.1
 PLATFORM_CORS_ORIGIN=http://localhost:5174
 PLATFORM_ADMIN_EMAIL=info@fleetum.it
-PLATFORM_ADMIN_PASSWORD=replace_with_strong_password_min_20_chars
+# Genera con: node -e "require('bcryptjs').hash('TUA_PASSWORD',12).then(console.log)"
+PLATFORM_ADMIN_PASSWORD_HASH=$2b$12$replace_with_bcrypt_hash
 PLATFORM_JWT_SECRET=replace_with_platform_jwt_secret_min_64_chars
 PLATFORM_ALLOWED_IPS=127.0.0.1,::1
 ```
+
+La password della Platform Console non deve mai essere salvata in chiaro. In produzione
+salvare solo `PLATFORM_ADMIN_PASSWORD_HASH` nel file env del backend o nel secret
+manager usato dal deploy.
 
 Frontend tenant:
 
