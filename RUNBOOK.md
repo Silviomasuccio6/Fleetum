@@ -12,6 +12,19 @@
 - Platform health: `curl -s http://127.0.0.1:4100/platform-api/health`
 - Platform ready: `curl -s http://127.0.0.1:4100/platform-api/ready`
 
+## Configurazione VPS / reverse proxy
+
+`TRUST_PROXY` deve essere `1` nel `backend.env` di produzione perché il traffico passa
+attraverso Caddy. Senza questa impostazione Express legge l'IP del container Caddy invece
+del client reale: rate limiting auth e IP allowlist della Platform Console non funzionano
+correttamente.
+
+Verifica produzione:
+
+```bash
+grep -q "TRUST_PROXY=1" /opt/fleetum/env/backend.env || echo "WARNING: TRUST_PROXY non impostato"
+```
+
 ## Password Platform Console
 
 La Platform Console usa email + password + OTP email. La password admin non deve mai
