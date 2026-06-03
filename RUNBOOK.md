@@ -11,6 +11,164 @@
 - API ready: `curl -s http://127.0.0.1:4000/api/ready`
 - Platform health: `curl -s http://127.0.0.1:4100/platform-api/health`
 - Platform ready: `curl -s http://127.0.0.1:4100/platform-api/ready`
+- API metrics: `curl -H "Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:4000/api/metrics`
+- Platform metrics: `curl -H "Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:4100/platform-api/metrics`
+
+## Observability e metriche
+
+Fleetum espone metriche in formato Prometheus text su:
+
+```txt
+GET /api/metrics
+GET /platform-api/metrics
+```
+
+In produzione `METRICS_TOKEN` deve essere configurato nel backend env e le richieste
+devono usare:
+
+```bash
+Authorization: Bearer <METRICS_TOKEN>
+```
+
+Se `METRICS_TOKEN` manca in produzione, l'endpoint metriche risponde `403` per evitare
+esposizione pubblica di informazioni operative.
+
+Metriche principali:
+
+```txt
+fleetum_http_requests_total
+fleetum_http_request_duration_seconds
+fleetum_http_errors_total
+fleetum_prisma_operation_duration_seconds
+fleetum_prisma_slow_operations_total
+fleetum_prisma_errors_total
+fleetum_db_available
+```
+
+I path HTTP sono normalizzati per ridurre cardinalita' e leakage: ID, CUID e numeri sono
+sostituiti con `:id`.
+
+### Slow query logging Prisma
+
+Soglie default:
+
+```txt
+development: 100ms
+production: 500ms
+critical: >= 2000ms
+```
+
+Override opzionale:
+
+```env
+PRISMA_SLOW_QUERY_MS=750
+```
+
+I log Prisma includono `model`, `action`, `durationMs`, `requestId`, `tenantId` e `userId`
+quando disponibili dal contesto request. Non vengono loggati parametri SQL: possono
+contenere PII come nomi, email, documenti, targhe, numeri patente o dati contratto.
+
+Esempio warning:
+
+```json
+{
+  "level": "warn",
+  "requestId": "req_01",
+  "tenantId": "tenant_01",
+  "model": "RentalBooking",
+  "action": "findMany",
+  "durationMs": 684.21,
+  "thresholdMs": 500,
+  "msg": "Slow Prisma operation"
+}
+```
+
+Esempio errore critico:
+
+```json
+{
+  "level": "error",
+  "requestId": "req_02",
+  "tenantId": "tenant_01",
+  "model": "AuditLog",
+  "action": "findMany",
+  "durationMs": 2405.77,
+  "thresholdMs": 500,
+  "msg": "Critical slow Prisma operation"
+}
+```
+
+In sviluppo viene loggata anche la struttura SQL delle query oltre soglia, ma mai i
+parametri. In produzione vengono loggati errori Prisma e operazioni lente model/action.
+
+### Alert consigliati
+
+Configurare alert nel sistema di monitoraggio scelto, ad esempio Prometheus + Alertmanager,
+Grafana Cloud, Better Stack, Datadog o equivalente.
+
+```yaml
+groups:
+  - name: fleetum-api
+    rules:
+      - alert: FleetumHighErrorRate
+        expr: sum(rate(fleetum_http_errors_total[5m])) / clamp_min(sum(rate(fleetum_http_requests_total[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fleetum error rate sopra 5%"
+
+      - alert: FleetumHighResponseTime
+        expr: histogram_quantile(0.95, sum(rate(fleetum_http_request_duration_seconds_bucket[5m])) by (le)) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fleetum p95 response time sopra 1.5s"
+
+      - alert: FleetumDatabaseUnavailable
+        expr: fleetum_db_available == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database Fleetum non disponibile"
+
+      - alert: FleetumPrismaSlowOperations
+        expr: sum(rate(fleetum_prisma_slow_operations_total[10m])) > 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Aumento operazioni Prisma lente"
+```
+
+### Incident procedure: error rate alto
+
+1. Verificare `/api/ready` e `/platform-api/ready`.
+2. Controllare log backend filtrando per `level=error` e `requestId`.
+3. Verificare se gli errori sono concentrati su un path normalizzato o su un tenant.
+4. Se correlati a nuova release, eseguire rollback applicativo.
+5. Se correlati a DB, seguire procedura `Database unavailable`.
+6. Aprire issue/post-mortem con timeline, requestId campione e azione correttiva.
+
+### Incident procedure: response time alto
+
+1. Controllare `fleetum_http_request_duration_seconds` p95/p99.
+2. Controllare `fleetum_prisma_slow_operations_total` e log `Slow Prisma operation`.
+3. Identificare `model/action` e requestId correlati.
+4. Verificare indici DB, paginazione, include Prisma pesanti e query N+1.
+5. Se impatta produzione, applicare mitigazione: ridurre paginazione, disabilitare job pesante,
+   rollback, oppure aumentare risorse DB temporaneamente.
+
+### Incident procedure: database unavailable
+
+1. Verificare `fleetum_db_available` e `curl -fsS http://127.0.0.1:4000/api/ready`.
+2. Controllare stato container/managed DB e connessione `DATABASE_URL`.
+3. Controllare saturazione disco, CPU, memoria e connessioni DB.
+4. Non eseguire migration durante incidente DB.
+5. Se DB locale e dati corrotti, usare restore da backup secondo procedura backup/restore.
+6. Dopo ripristino, verificare `/api/ready`, login tenant e una query booking/veicoli.
 
 ## Configurazione VPS / reverse proxy
 

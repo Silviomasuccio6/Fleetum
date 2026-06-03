@@ -31,6 +31,7 @@ import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
+import { metrics } from "../../../infrastructure/observability/metrics.js";
 import { PrismaAuditLogRepository } from "../../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { PrismaNotificationsRepository } from "../../../infrastructure/repositories/prisma-notifications-repository.js";
 import { PrismaReminderRepository } from "../../../infrastructure/repositories/prisma-reminder-repository.js";
@@ -321,8 +322,10 @@ apiRouter.use("/billing", billingWebhookRoutes(billingController));
 apiRouter.get("/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
+    metrics.setDbAvailable(true);
     res.json({ ok: true, db: "up" });
   } catch {
+    metrics.setDbAvailable(false);
     res.status(503).json({
       ok: false,
       db: "down",
