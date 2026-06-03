@@ -74,6 +74,12 @@ if (!["local", "s3"].includes(STORAGE_PROVIDER)) {
   throw new Error("STORAGE_PROVIDER must be local or s3");
 }
 
+if (STORAGE_PROVIDER === "s3") {
+  for (const name of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]) {
+    if (!process.env[name]) throw new Error(`Missing required env var for S3 storage: ${name}`);
+  }
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   PORT: toInt(process.env.PORT ?? "4000", "PORT"),
@@ -112,6 +118,7 @@ export const env = {
   S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
   S3_REGION: process.env.S3_REGION,
   S3_PUBLIC_BASE_URL: process.env.S3_PUBLIC_BASE_URL,
+  S3_SIGNED_URL_EXPIRES_SECONDS: toInt(process.env.S3_SIGNED_URL_EXPIRES_SECONDS ?? "300", "S3_SIGNED_URL_EXPIRES_SECONDS"),
   PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
 

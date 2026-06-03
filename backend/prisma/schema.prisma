@@ -214,6 +214,7 @@ model Tenant {
   rentalExtraKmTiers            RentalExtraKmTier[]
   rentalBookingPricingSnapshots RentalBookingPricingSnapshot[]
   privacyAcceptances            PrivacyAcceptance[]
+  storedFileObjects             StoredFileObject[]
   tenantProfile                 TenantProfile?
   tenantBranding                TenantBranding?
   tenantLegalSettings           TenantLegalSettings?
@@ -1333,6 +1334,30 @@ model PlatformOtpChallenge {
   createdAt DateTime @default(now())
 
   @@index([key, expiresAt])
+}
+
+model StoredFileObject {
+  id           String    @id @default(cuid())
+  tenantId     String
+  provider     String
+  bucket       String?
+  storageKey   String
+  originalName String?
+  mimeType     String?
+  sizeBytes    Int
+  checksumSha256 String?
+  resourceType String?
+  resourceId   String?
+  visibility   String    @default("private")
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, bucket, storageKey])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, resourceType, resourceId])
+  @@index([tenantId, storageKey])
+  @@index([deletedAt])
 }
 
 model EmailQueue {

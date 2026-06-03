@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../shared/errors/app-error.js";
@@ -247,6 +248,8 @@ export class TenantProfileService {
 
   async setLogo(tenantId: string, actorUserId: string, file: Express.Multer.File) {
     const relativePath = storageProvider.buildKey(file.filename);
+    await storageProvider.writeFromFile(relativePath, file.path, { tenantId, resourceType: "TenantBranding", resourceId: tenantId, originalName: file.originalname, mimeType: file.mimetype });
+    if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
     const current = await prisma.tenantBranding.findUnique({ where: { tenantId } });
     const branding = await prisma.tenantBranding.upsert({
       where: { tenantId },
