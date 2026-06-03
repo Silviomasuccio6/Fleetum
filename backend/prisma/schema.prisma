@@ -1148,6 +1148,17 @@ model LoginRateLimitState {
   @@index([scope, blockedUntil])
 }
 
+model PlatformOtpChallenge {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([key, expiresAt])
+}
+
 model EmailQueue {
   id            String           @id @default(cuid())
   tenantId      String?

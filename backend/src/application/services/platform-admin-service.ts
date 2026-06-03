@@ -15,6 +15,7 @@ import {
   PlatformLicenseStatus
 } from "../../domain/repositories/platform-admin-repository.js";
 import { emailSender } from "../../infrastructure/email/email-sender.js";
+import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { PlatformAlertService } from "./platform-alert-service.js";
@@ -98,7 +99,6 @@ const constantTimeEqual = (left: string, right: string) => {
 };
 
 const PLATFORM_OTP_TTL_MS = 8 * 60 * 1000;
-const platformOtpChallenges = new Map<string, { codeHash: string; expiresAt: number; attempts: number }>();
 
 const maskEmail = (email: string) => email.replace(/^(.{2}).*(@.*)$/, "$1***$2");
 
@@ -168,14 +168,29 @@ export class PlatformAdminService {
     }
 
     const challengeKey = createOtpKey(normalizedEmail);
-    const challenge = platformOtpChallenges.get(challengeKey);
+    const now = new Date();
+    const challenge = await prisma.platformOtpChallenge.findFirst({
+      where: { key: challengeKey, expiresAt: { gt: now } }
+    });
 
     if (!input.otp) {
       const code = createOtpCode();
-      platformOtpChallenges.set(challengeKey, {
-        codeHash: crypto.createHash("sha256").update(code).digest("hex"),
-        expiresAt: Date.now() + PLATFORM_OTP_TTL_MS,
-        attempts: 0
+      const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+      const expiresAt = new Date(Date.now() + PLATFORM_OTP_TTL_MS);
+      await prisma.platformOtpChallenge.deleteMany({ where: { expiresAt: { lt: now } } });
+      await prisma.platformOtpChallenge.upsert({
+        where: { key: challengeKey },
+        create: {
+          key: challengeKey,
+          codeHash,
+          expiresAt,
+          attempts: 0
+        },
+        update: {
+          codeHash,
+          expiresAt,
+          attempts: 0
+        }
       });
 
       await emailSender.send({
@@ -197,13 +212,13 @@ export class PlatformAdminService {
       };
     }
 
-    if (!challenge || challenge.expiresAt < Date.now()) {
-      platformOtpChallenges.delete(challengeKey);
+    if (!challenge) {
+      await prisma.platformOtpChallenge.deleteMany({ where: { key: challengeKey } });
       throw new AppError("Codice OTP scaduto. Richiedi un nuovo codice.", 401, "PLATFORM_OTP_EXPIRED");
     }
 
     if (challenge.attempts >= 5) {
-      platformOtpChallenges.delete(challengeKey);
+      await prisma.platformOtpChallenge.deleteMany({ where: { key: challengeKey } });
       await this.loginGuard.registerFailure(input.ip, normalizedEmail);
       throw new AppError("Troppi tentativi OTP. Richiedi un nuovo codice.", 401, "PLATFORM_OTP_LOCKED");
     }
@@ -212,12 +227,14 @@ export class PlatformAdminService {
     const otpOk = constantTimeEqual(otpHash, challenge.codeHash);
 
     if (!otpOk) {
-      challenge.attempts += 1;
-      platformOtpChallenges.set(challengeKey, challenge);
+      await prisma.platformOtpChallenge.update({
+        where: { key: challengeKey },
+        data: { attempts: { increment: 1 } }
+      });
       throw new AppError("Codice OTP non valido", 401, "PLATFORM_OTP_INVALID");
     }
 
-    platformOtpChallenges.delete(challengeKey);
+    await prisma.platformOtpChallenge.deleteMany({ where: { key: challengeKey } });
 
     await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
 
