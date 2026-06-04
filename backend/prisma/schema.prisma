@@ -219,6 +219,7 @@ model Tenant {
   tenantBranding                TenantBranding?
   tenantLegalSettings           TenantLegalSettings?
   tenantSubscription            TenantSubscription?
+  billingEvents                 BillingEvent[]
   invoices                      Invoice[]
   consentLogs                   ConsentLog[]
 
@@ -247,6 +248,25 @@ model TenantSubscription {
   @@index([status, currentPeriodEnd])
   @@index([stripeCustomerId])
   @@index([stripeSubscriptionId])
+}
+
+model BillingEvent {
+  id           String    @id @default(cuid())
+  eventId      String    @unique
+  provider     String    @default("stripe")
+  type         String
+  tenantId     String?
+  processedAt  DateTime?
+  status       String    @default("RECEIVED")
+  errorMessage String?
+  payload      Json
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  tenant       Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([provider, type])
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
 }
 
 model TenantProfile {

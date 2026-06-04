@@ -1,4 +1,5 @@
-import crypto from "node:crypto";
+import Stripe from "stripe";
+import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
 import {
   BillingCycle,
@@ -9,9 +10,20 @@ import {
 } from "./feature-entitlements-service.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
-import { upsertTenantSubscription } from "./tenant-subscription-service.js";
+import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput, readTenantSubscription, upsertTenantSubscription } from "./tenant-subscription-service.js";
 
 type BillingLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+type StripeClient = Stripe;
+
+type BillingEventStatus = "RECEIVED" | "PROCESSED" | "IGNORED" | "FAILED";
+
+type BillingEventRecord = {
+  eventId: string;
+  tenantId: string | null;
+  status: string;
+  processedAt: Date | null;
+};
 
 type LicenseAuditPayload = {
   plan: SaasPlan;
@@ -24,6 +36,15 @@ type LicenseAuditPayload = {
   stripeSubscriptionId?: string | null;
   provider?: "stripe" | "local";
   updatedAt: string;
+};
+
+type BillingServiceDeps = {
+  createBillingEvent(event: Stripe.Event, tenantId: string | null): Promise<BillingEventRecord>;
+  updateBillingEvent(eventId: string, data: { tenantId?: string | null; status: BillingEventStatus; processedAt?: Date | null; errorMessage?: string | null }): Promise<void>;
+  findSubscriptionByTenantId(tenantId: string): Promise<TenantSubscriptionSnapshot | null>;
+  findSubscriptionByStripeSubscriptionId(subscriptionId: string): Promise<{ tenantId: string } | null>;
+  findSubscriptionByStripeCustomerId(customerId: string): Promise<{ tenantId: string } | null>;
+  upsertSubscription(input: TenantSubscriptionUpsertInput): Promise<TenantSubscriptionSnapshot>;
 };
 
 const PLAN_PRICE_ENV_KEYS: Record<SaasPlan, Record<BillingCycle, keyof typeof env>> = {
@@ -41,8 +62,6 @@ const PLAN_PRICE_ENV_KEYS: Record<SaasPlan, Record<BillingCycle, keyof typeof en
   }
 };
 
-const STRIPE_API_BASE = "https://api.stripe.com/v1";
-
 const getNested = (source: unknown, path: string): unknown => {
   let current = source;
   for (const key of path.split(".")) {
@@ -52,8 +71,100 @@ const getNested = (source: unknown, path: string): unknown => {
   return current;
 };
 
+const stripeId = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") return (value as { id: string }).id;
+  return null;
+};
+
+const unixToIso = (value: unknown) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Date(n < 100000000000 ? n * 1000 : n).toISOString();
+};
+
+const jsonPayload = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value ?? {}));
+
+const stripeStatusToLicense = (stripeStatus: string): BillingLicenseStatus => {
+  if (stripeStatus === "active") return "ACTIVE";
+  if (stripeStatus === "trialing") return "TRIAL";
+  if (stripeStatus === "past_due" || stripeStatus === "unpaid") return "PAST_DUE";
+  if (stripeStatus === "canceled") return "CANCELED";
+  if (stripeStatus === "incomplete_expired") return "EXPIRED";
+  return "SUSPENDED";
+};
+
+const createStripeClient = () => {
+  if (!env.STRIPE_SECRET_KEY) return null;
+  return new Stripe(env.STRIPE_SECRET_KEY);
+};
+
+const defaultDeps: BillingServiceDeps = {
+  async createBillingEvent(event, tenantId) {
+    try {
+      return await prisma.billingEvent.create({
+        data: {
+          eventId: event.id,
+          provider: "stripe",
+          type: event.type,
+          tenantId,
+          status: "RECEIVED",
+          payload: jsonPayload(event)
+        },
+        select: { eventId: true, tenantId: true, status: true, processedAt: true }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const existing = await prisma.billingEvent.findUnique({
+          where: { eventId: event.id },
+          select: { eventId: true, tenantId: true, status: true, processedAt: true }
+        });
+        if (existing) return existing;
+      }
+      throw error;
+    }
+  },
+  async updateBillingEvent(eventId, data) {
+    await prisma.billingEvent.update({
+      where: { eventId },
+      data: {
+        tenantId: data.tenantId,
+        processedAt: data.processedAt,
+        status: data.status,
+        errorMessage: data.errorMessage
+      }
+    });
+  },
+  async findSubscriptionByTenantId(tenantId) {
+    return readTenantSubscription(tenantId);
+  },
+  async findSubscriptionByStripeSubscriptionId(subscriptionId) {
+    return prisma.tenantSubscription.findFirst({
+      where: { provider: "stripe", stripeSubscriptionId: subscriptionId },
+      select: { tenantId: true }
+    });
+  },
+  async findSubscriptionByStripeCustomerId(customerId) {
+    return prisma.tenantSubscription.findFirst({
+      where: { provider: "stripe", stripeCustomerId: customerId },
+      select: { tenantId: true }
+    });
+  },
+  async upsertSubscription(input) {
+    return upsertTenantSubscription(input);
+  }
+};
+
 export class BillingService {
-  constructor(private readonly auditRepository: AuditLogRepository) {}
+  private readonly deps: BillingServiceDeps;
+
+  constructor(
+    private readonly auditRepository: AuditLogRepository,
+    private readonly stripeClient: StripeClient | null = createStripeClient(),
+    deps: Partial<BillingServiceDeps> = {}
+  ) {
+    this.deps = { ...defaultDeps, ...deps };
+  }
 
   async createCheckoutSession(input: {
     tenantId: string;
@@ -68,7 +179,7 @@ export class BillingService {
     const successUrl = `${env.APP_URL}/upgrade?checkout=success&plan=${plan}`;
     const cancelUrl = `${env.APP_URL}/upgrade?checkout=cancelled&plan=${plan}`;
 
-    if (!env.STRIPE_SECRET_KEY) {
+    if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
       const localCompleteUrl = new URL("/api/billing/local-complete", "http://local-checkout");
       localCompleteUrl.searchParams.set("plan", plan);
       localCompleteUrl.searchParams.set("billingCycle", billingCycle);
@@ -92,35 +203,31 @@ export class BillingService {
       throw new AppError(`Price Stripe non configurato per ${plan} ${billingCycle}`, 500, "STRIPE_PRICE_MISSING");
     }
 
-    const body = new URLSearchParams();
-    body.set("mode", "subscription");
-    body.set("success_url", successUrl);
-    body.set("cancel_url", cancelUrl);
-    body.set("client_reference_id", input.tenantId);
-    body.set("line_items[0][price]", String(priceId));
-    body.set("line_items[0][quantity]", "1");
-    body.set("metadata[tenantId]", input.tenantId);
-    body.set("metadata[userId]", input.userId);
-    body.set("metadata[plan]", plan);
-    body.set("metadata[billingCycle]", billingCycle);
-    body.set("subscription_data[metadata][tenantId]", input.tenantId);
-    body.set("subscription_data[metadata][plan]", plan);
-    body.set("subscription_data[metadata][billingCycle]", billingCycle);
-    if (input.customerEmail) body.set("customer_email", input.customerEmail);
-    if (env.BILLING_TRIAL_DAYS > 0) body.set("subscription_data[trial_period_days]", String(env.BILLING_TRIAL_DAYS));
-
-    const response = await fetch(`${STRIPE_API_BASE}/checkout/sessions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
-        "Content-Type": "application/x-www-form-urlencoded"
+    const session = await this.stripeClient.checkout.sessions.create({
+      mode: "subscription",
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      client_reference_id: input.tenantId,
+      customer_email: input.customerEmail ?? undefined,
+      line_items: [{ price: String(priceId), quantity: 1 }],
+      metadata: {
+        tenantId: input.tenantId,
+        userId: input.userId,
+        plan,
+        billingCycle
       },
-      body
+      subscription_data: {
+        trial_period_days: env.BILLING_TRIAL_DAYS > 0 ? env.BILLING_TRIAL_DAYS : undefined,
+        metadata: {
+          tenantId: input.tenantId,
+          plan,
+          billingCycle
+        }
+      }
     });
 
-    const payload = await response.json() as { id?: string; url?: string; error?: { message?: string } };
-    if (!response.ok || !payload.url) {
-      throw new AppError(payload.error?.message ?? "Creazione checkout Stripe fallita", 502, "STRIPE_CHECKOUT_FAILED");
+    if (!session.url) {
+      throw new AppError("Creazione checkout Stripe fallita", 502, "STRIPE_CHECKOUT_FAILED");
     }
 
     await this.auditRepository.create({
@@ -128,13 +235,13 @@ export class BillingService {
       userId: input.userId,
       action: "BILLING_CHECKOUT_CREATED",
       resource: "billing",
-      resourceId: payload.id ?? null,
-      details: { plan, billingCycle, priceMonthly, stripeSessionId: payload.id ?? null }
+      resourceId: session.id,
+      details: { plan, billingCycle, priceMonthly, stripeSessionId: session.id }
     });
 
     return {
       mode: "stripe",
-      checkoutUrl: payload.url
+      checkoutUrl: session.url
     };
   }
 
@@ -157,100 +264,150 @@ export class BillingService {
 
   async handleWebhook(input: { signature?: string; rawBody?: Buffer; body: unknown }) {
     const event = this.verifyWebhook(input);
-    const type = String((event as Record<string, unknown>).type ?? "");
-    const dataObject = getNested(event, "data.object") as Record<string, unknown> | undefined;
-    if (!dataObject) return { received: true, ignored: true };
+    const dataObject = event.data.object as unknown as Record<string, unknown> | undefined;
+    const tenantId = dataObject ? await this.resolveTenantId(dataObject) : null;
+    const billingEvent = await this.deps.createBillingEvent(event, tenantId);
 
-    if (type === "checkout.session.completed") {
-      await this.applyStripeObject(dataObject, "ACTIVE");
-      return { received: true };
+    if (billingEvent.processedAt && billingEvent.status === "PROCESSED") {
+      return { received: true, duplicate: true };
     }
 
-    if (type === "customer.subscription.updated" || type === "customer.subscription.created") {
-      const stripeStatus = String(dataObject.status ?? "");
-      const nextStatus: BillingLicenseStatus =
-        stripeStatus === "active" || stripeStatus === "trialing"
-          ? "ACTIVE"
-          : stripeStatus === "past_due" || stripeStatus === "unpaid"
-            ? "PAST_DUE"
-            : stripeStatus === "canceled"
-              ? "CANCELED"
-              : "SUSPENDED";
-      await this.applyStripeObject(dataObject, nextStatus);
-      return { received: true };
+    try {
+      const result = await this.processStripeEvent(event, dataObject);
+      await this.deps.updateBillingEvent(event.id, {
+        tenantId: result.tenantId ?? tenantId,
+        processedAt: new Date(),
+        status: result.ignored ? "IGNORED" : "PROCESSED",
+        errorMessage: null
+      });
+      return { received: true, ignored: result.ignored ?? false };
+    } catch (error) {
+      await this.deps.updateBillingEvent(event.id, {
+        tenantId,
+        status: "FAILED",
+        errorMessage: error instanceof Error ? error.message.slice(0, 1000) : "Webhook processing failed"
+      });
+      throw error;
     }
-
-    if (type === "customer.subscription.deleted") {
-      await this.applyStripeObject(dataObject, "CANCELED");
-      return { received: true };
-    }
-
-    if (type === "invoice.payment_failed") {
-      await this.applyStripeObject(dataObject, "PAST_DUE");
-      return { received: true };
-    }
-
-    return { received: true, ignored: true };
   }
 
-  private verifyWebhook(input: { signature?: string; rawBody?: Buffer; body: unknown }) {
-    if (!env.STRIPE_WEBHOOK_SECRET) return input.body;
+  private verifyWebhook(input: { signature?: string; rawBody?: Buffer; body: unknown }): Stripe.Event {
+    if (!env.STRIPE_WEBHOOK_SECRET) {
+      throw new AppError("STRIPE_WEBHOOK_SECRET non configurato", 500, "STRIPE_WEBHOOK_SECRET_MISSING");
+    }
+    if (!this.stripeClient) {
+      throw new AppError("STRIPE_SECRET_KEY non configurata", 500, "STRIPE_CLIENT_MISSING");
+    }
     if (!input.signature || !input.rawBody) throw new AppError("Firma webhook Stripe mancante", 400, "STRIPE_SIGNATURE_MISSING");
 
-    const parts = Object.fromEntries(
-      input.signature.split(",").map((item) => {
-        const [key, value] = item.split("=");
-        return [key, value];
-      })
-    );
-    const timestamp = parts.t;
-    const signature = parts.v1;
-    if (!timestamp || !signature) throw new AppError("Firma webhook Stripe non valida", 400, "STRIPE_SIGNATURE_INVALID");
-
-    const tolerance = 5 * 60;
-    if (Math.abs(Date.now() / 1000 - Number(timestamp)) > tolerance) {
-      throw new AppError("Webhook Stripe scaduto", 400, "STRIPE_SIGNATURE_EXPIRED");
-    }
-
-    const signedPayload = `${timestamp}.${input.rawBody.toString("utf8")}`;
-    const expected = crypto.createHmac("sha256", env.STRIPE_WEBHOOK_SECRET).update(signedPayload).digest("hex");
-    const expectedBuffer = Buffer.from(expected, "hex");
-    const signatureBuffer = Buffer.from(signature, "hex");
-    if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) {
+    try {
+      return this.stripeClient.webhooks.constructEvent(input.rawBody, input.signature, env.STRIPE_WEBHOOK_SECRET);
+    } catch {
       throw new AppError("Firma webhook Stripe non valida", 400, "STRIPE_SIGNATURE_INVALID");
     }
-
-    return JSON.parse(input.rawBody.toString("utf8"));
   }
 
-  private async applyStripeObject(source: Record<string, unknown>, status: BillingLicenseStatus) {
-    const metadata = typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {};
-    const tenantId = String(metadata.tenantId ?? source.client_reference_id ?? "");
-    if (!tenantId) return;
+  private async processStripeEvent(event: Stripe.Event, dataObject?: Record<string, unknown>) {
+    if (!dataObject) return { ignored: true, tenantId: null };
 
-    const plan = ensureKnownPlan(String(metadata.plan ?? "STARTER"));
-    const billingCycle = normalizeBillingCycle(String(metadata.billingCycle ?? "monthly"));
-    const currentPeriodEnd = Number(source.current_period_end ?? getNested(source, "lines.data.0.period.end"));
-    const expiresAt = Number.isFinite(currentPeriodEnd) && currentPeriodEnd > 0
-      ? new Date(currentPeriodEnd < 100000000000 ? currentPeriodEnd * 1000 : currentPeriodEnd).toISOString()
-      : null;
+    if (event.type === "checkout.session.completed") {
+      const session = dataObject as unknown as Stripe.Checkout.Session & Record<string, unknown>;
+      const subscriptionId = stripeId(session.subscription);
+      const tenantId = await this.resolveTenantId(session);
+      if (!tenantId) return { ignored: true, tenantId: null };
+
+      if (subscriptionId && this.stripeClient) {
+        const subscription = await this.stripeClient.subscriptions.retrieve(subscriptionId);
+        await this.applyStripeObject(subscription as unknown as Record<string, unknown>, stripeStatusToLicense(subscription.status), {
+          fallbackTenantId: tenantId,
+          fallbackCustomerId: stripeId(session.customer),
+          fallbackSubscriptionId: subscriptionId,
+          fallbackMetadata: typeof session.metadata === "object" && session.metadata ? session.metadata as Record<string, unknown> : {}
+        });
+      } else {
+        await this.applyStripeObject(session, "ACTIVE", { fallbackTenantId: tenantId });
+      }
+      return { tenantId };
+    }
+
+    if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
+      const status = stripeStatusToLicense(String(dataObject.status ?? ""));
+      const tenantId = await this.applyStripeObject(dataObject, status);
+      return { tenantId };
+    }
+
+    if (event.type === "customer.subscription.deleted") {
+      const tenantId = await this.applyStripeObject(dataObject, "CANCELED");
+      return { tenantId };
+    }
+
+    if (event.type === "invoice.payment_failed") {
+      const tenantId = await this.applyStripeObject(dataObject, "PAST_DUE");
+      return { tenantId };
+    }
+
+    return { ignored: true, tenantId: await this.resolveTenantId(dataObject) };
+  }
+
+  private async resolveTenantId(source: Record<string, unknown>) {
+    const metadata = typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {};
+    const direct = metadata.tenantId ?? source.client_reference_id;
+    if (typeof direct === "string" && direct.trim()) return direct;
+
+    const subscriptionId = stripeId(source.subscription) ?? stripeId(source.id);
+    if (subscriptionId) {
+      const row = await this.deps.findSubscriptionByStripeSubscriptionId(subscriptionId);
+      if (row) return row.tenantId;
+    }
+
+    const customerId = stripeId(source.customer);
+    if (customerId) {
+      const row = await this.deps.findSubscriptionByStripeCustomerId(customerId);
+      if (row) return row.tenantId;
+    }
+
+    return null;
+  }
+
+  private async applyStripeObject(source: Record<string, unknown>, status: BillingLicenseStatus, fallback?: {
+    fallbackTenantId?: string | null;
+    fallbackCustomerId?: string | null;
+    fallbackSubscriptionId?: string | null;
+    fallbackMetadata?: Record<string, unknown>;
+  }) {
+    const metadata = {
+      ...(fallback?.fallbackMetadata ?? {}),
+      ...(typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {})
+    };
+    const tenantId = String(metadata.tenantId ?? fallback?.fallbackTenantId ?? await this.resolveTenantId(source) ?? "");
+    if (!tenantId) return null;
+
+    const current = await this.deps.findSubscriptionByTenantId(tenantId);
+    const plan = ensureKnownPlan(String(metadata.plan ?? current?.plan ?? "STARTER"));
+    const billingCycle = normalizeBillingCycle(String(metadata.billingCycle ?? current?.billingCycle ?? "monthly"));
+    const currentPeriodEnd = source.current_period_end ?? getNested(source, "lines.data.0.period.end");
+    const expiresAt = unixToIso(currentPeriodEnd) ?? current?.expiresAt ?? null;
+    const customerId = stripeId(source.customer) ?? fallback?.fallbackCustomerId ?? current?.stripeCustomerId ?? null;
+    const subscriptionId = stripeId(source.subscription) ?? stripeId(source.id) ?? fallback?.fallbackSubscriptionId ?? current?.stripeSubscriptionId ?? null;
 
     await this.writeLicense(tenantId, null, {
       plan,
-      seats: 3,
+      seats: current?.seats ?? 3,
       status,
       expiresAt,
-      priceMonthly: getPlanMonthlyPrice(plan),
+      priceMonthly: current?.priceMonthly ?? getPlanMonthlyPrice(plan),
       billingCycle,
-      stripeCustomerId: typeof source.customer === "string" ? source.customer : null,
-      stripeSubscriptionId: typeof source.subscription === "string" ? source.subscription : typeof source.id === "string" ? source.id : null,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
       provider: "stripe",
       updatedAt: new Date().toISOString()
     });
+
+    return tenantId;
   }
 
   private async writeLicense(tenantId: string, userId: string | null, next: LicenseAuditPayload) {
-    const subscription = await upsertTenantSubscription({
+    const subscription = await this.deps.upsertSubscription({
       tenantId,
       plan: next.plan,
       seats: next.seats,
