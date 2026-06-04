@@ -352,7 +352,7 @@ describe("black-box HTTP tenant isolation", () => {
     assertPayloadDoesNotContain(dashboard.body, tenantB.marker);
 
     const profitability = await jsonRequest(`/stats/vehicles/profitability?vehicleId=${tenantB.vehicleId}`, tenantA.token);
-    assert.equal(profitability.response.status, 200);
+    assertForbiddenOrNotFound(profitability.response.status);
     assertPayloadDoesNotContain(profitability.body, tenantB.marker);
 
     const settings = await jsonRequest("/settings/integrations", tenantA.token);
