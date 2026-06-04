@@ -29,8 +29,10 @@ jobs:
 
     steps:
       - name: Validate confirmation
+        env:
+          CONFIRM_TEXT: ${{ github.event.inputs.confirmText }}
         run: |
-          if [ "${{ github.event.inputs.confirmText }}" != "SEED_DEMO_DATA" ]; then
+          if [ "$CONFIRM_TEXT" != "SEED_DEMO_DATA" ]; then
             echo "Conferma non valida. Inserire esattamente SEED_DEMO_DATA." >&2
             exit 1
           fi
