@@ -154,7 +154,7 @@ jobs:
       - name: Configure SSH key
         env:
           FLEETUM_VPS_SSH_KEY: ${{ secrets.FLEETUM_VPS_SSH_KEY }}
-          FLEETUM_VPS_HOST: 57.131.47.124
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
         run: |
           test -n "$FLEETUM_VPS_SSH_KEY"
           test -n "$FLEETUM_VPS_HOST"
@@ -165,19 +165,25 @@ jobs:
 
       - name: Verify remote deploy target
         env:
-          FLEETUM_VPS_HOST: 57.131.47.124
-          FLEETUM_VPS_USER: fleetum
-          FLEETUM_APP_DIR: /opt/fleetum/app
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER }}
+          FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR }}
         run: |
+          test -n "$FLEETUM_VPS_HOST"
+          test -n "$FLEETUM_VPS_USER"
+          test -n "$FLEETUM_APP_DIR"
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "test \"\$(whoami)\" = '$FLEETUM_VPS_USER' && mkdir -p '$FLEETUM_APP_DIR' && test -w '$FLEETUM_APP_DIR'"
 
       - name: Upload deployment manifests
         env:
-          FLEETUM_VPS_HOST: 57.131.47.124
-          FLEETUM_VPS_USER: fleetum
-          FLEETUM_APP_DIR: /opt/fleetum/app
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER }}
+          FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR }}
         run: |
+          test -n "$FLEETUM_VPS_HOST"
+          test -n "$FLEETUM_VPS_USER"
+          test -n "$FLEETUM_APP_DIR"
           rsync -az --delete \
             --include 'docker-compose.prod.yml' \
             --include 'deploy/' \
@@ -194,16 +200,21 @@ jobs:
 
       - name: Pull images, backup, migrate and restart production containers
         env:
-          FLEETUM_VPS_HOST: 57.131.47.124
-          FLEETUM_VPS_USER: fleetum
-          FLEETUM_APP_DIR: /opt/fleetum/app
-          FLEETUM_ENV_FILE: /opt/fleetum/env/compose.env
-          FLEETUM_LAST_DEPLOY_FILE: /opt/fleetum/last-deploy.txt
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER }}
+          FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR }}
+          FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE }}
+          FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
           FLEETUM_FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
         run: |
+          test -n "$FLEETUM_VPS_HOST"
+          test -n "$FLEETUM_VPS_USER"
+          test -n "$FLEETUM_APP_DIR"
+          test -n "$FLEETUM_ENV_FILE"
+          test -n "$FLEETUM_LAST_DEPLOY_FILE"
           printf '%s' "$GHCR_TOKEN" | ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
@@ -212,10 +223,13 @@ jobs:
 
       - name: Install managed backup cron
         env:
-          FLEETUM_VPS_HOST: 57.131.47.124
-          FLEETUM_VPS_USER: fleetum
-          FLEETUM_APP_DIR: /opt/fleetum/app
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER }}
+          FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR }}
         run: |
+          test -n "$FLEETUM_VPS_HOST"
+          test -n "$FLEETUM_VPS_USER"
+          test -n "$FLEETUM_APP_DIR"
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "APP_DIR='$FLEETUM_APP_DIR' '$FLEETUM_APP_DIR/deploy/backup/install-cron.sh'"
 
@@ -275,7 +289,7 @@ jobs:
               ``,
               `Immediate checks:`,
               `- Review the failed job logs in GitHub Actions.`,
-              `- If deployment reached the VPS and health failed, verify /opt/fleetum/last-deploy.txt and rollback logs.`,
+              `- If deployment reached the VPS and health failed, verify the configured FLEETUM_LAST_DEPLOY_FILE and rollback logs.`,
               `- Confirm database backup and uploads backup were completed before any migration.`,
             ].join("\\n");
 

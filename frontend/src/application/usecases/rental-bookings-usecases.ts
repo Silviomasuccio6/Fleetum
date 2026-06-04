@@ -1,5 +1,6 @@
 import { httpClient } from "../../infrastructure/api/http-client";
 import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
+import type { RentalBookingDto, RentalBookingListResponseDto } from "../dtos/rental-bookings-dto";
 
 export type RentalBookingStatus =
   | "DRAFT"
@@ -378,21 +379,9 @@ const API_BASE_URL = getApiBaseUrl();
 
 export const rentalBookingsUseCases = {
   list: (params: Record<string, string | number | undefined>) =>
-    httpClient.get<{
-      data: any[];
-      total: number;
-      page: number;
-      pageSize: number;
-      kpis: {
-        active: number;
-        readyForHandover: number;
-        inRent: number;
-        cargosPending: number;
-        cargosErrors: number;
-      };
-    }>("/rental-bookings", params),
-  getById: (id: string) => httpClient.get<any>(`/rental-bookings/${id}`),
-  quickDetail: (id: string) => httpClient.get<any>(`/rental-bookings/${id}/quick`),
+    httpClient.get<RentalBookingListResponseDto>("/rental-bookings", params),
+  getById: (id: string) => httpClient.get<RentalBookingDto>(`/rental-bookings/${id}`),
+  quickDetail: (id: string) => httpClient.get<RentalBookingDto>(`/rental-bookings/${id}/quick`),
   suggestVehicles: (params: { q: string; siteId?: string }) =>
     httpClient.get<{
       data: Array<{
@@ -405,13 +394,13 @@ export const rentalBookingsUseCases = {
     }>("/rental-bookings/suggest/vehicles", params),
   suggestCustomers: (params: { q: string }) =>
     httpClient.get<{ data: RentalCustomer[] }>("/rental-bookings/suggest/customers", params),
-  create: (input: unknown) => httpClient.post<any>("/rental-bookings", input),
-  update: (id: string, input: unknown) => httpClient.patch<any>(`/rental-bookings/${id}`, input),
+  create: (input: unknown) => httpClient.post<RentalBookingDto>("/rental-bookings", input),
+  update: (id: string, input: unknown) => httpClient.patch<RentalBookingDto>(`/rental-bookings/${id}`, input),
   remove: (id: string) => httpClient.delete(`/rental-bookings/${id}`),
   transition: (id: string, toStatus: RentalBookingStatus, reason?: string) =>
-    httpClient.post<any>(`/rental-bookings/${id}/transition`, { toStatus, reason }),
+    httpClient.post<RentalBookingDto>(`/rental-bookings/${id}/transition`, { toStatus, reason }),
   setContractStatus: (id: string, input: { status: RentalContractStatus; signedAt?: string; note?: string }) =>
-    httpClient.post<any>(`/rental-bookings/${id}/contract`, input),
+    httpClient.post<RentalBookingDto>(`/rental-bookings/${id}/contract`, input),
   generateContract: (bookingId: string) => httpClient.post<BookingContract>(`/rental-bookings/${bookingId}/contract/generate`),
   getContract: (bookingId: string) => httpClient.get<BookingContract>(`/rental-bookings/${bookingId}/contract`),
   updateContract: (
@@ -465,9 +454,9 @@ export const rentalBookingsUseCases = {
       };
     }>("/rental-bookings/contracts", params),
   setCargosStatus: (id: string, input: { status: RentalCargosStatus; transmissionId?: string; message?: string }) =>
-    httpClient.post<any>(`/rental-bookings/${id}/cargos`, input),
+    httpClient.post<RentalBookingDto>(`/rental-bookings/${id}/cargos`, input),
   addNote: (id: string, message: string, type: "NOTE" | "SYSTEM" | "CARGOS" = "NOTE") =>
-    httpClient.post<any>(`/rental-bookings/${id}/notes`, { message, type }),
+    httpClient.post<RentalBookingDto>(`/rental-bookings/${id}/notes`, { message, type }),
   dayAvailability: (params: { date: string; siteId?: string }) =>
     httpClient.get<{
       day: string;

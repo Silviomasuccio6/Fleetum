@@ -1,12 +1,19 @@
 import { httpClient } from "../../infrastructure/api/http-client";
+import type {
+  IntegrationsSettingsDto,
+  PlaybooksSettingsDto,
+  ReportsSettingsDto,
+  SettingsUpdateResponseDto,
+  SlaSettingsDto
+} from "../dtos/settings-dto";
 
 export const settingsUseCases = {
-  getSla: () => httpClient.get<any>("/settings/sla"),
-  updateSla: (input: any) => httpClient.put("/settings/sla", input),
-  getPlaybooks: () => httpClient.get<any>("/settings/playbooks"),
-  updatePlaybooks: (input: any) => httpClient.put("/settings/playbooks", input),
-  getReports: () => httpClient.get<any>("/settings/reports"),
-  updateReports: (input: any) => httpClient.put("/settings/reports", input),
-  getIntegrations: () => httpClient.get<any>("/settings/integrations"),
-  updateIntegrations: (input: any) => httpClient.put("/settings/integrations", input)
+  getSla: () => httpClient.get<SlaSettingsDto>("/settings/sla"),
+  updateSla: (input: Partial<SlaSettingsDto>) => httpClient.put<SettingsUpdateResponseDto>("/settings/sla", input),
+  getPlaybooks: () => httpClient.get<PlaybooksSettingsDto>("/settings/playbooks"),
+  updatePlaybooks: (input: PlaybooksSettingsDto) => httpClient.put<SettingsUpdateResponseDto>("/settings/playbooks", input),
+  getReports: () => httpClient.get<ReportsSettingsDto>("/settings/reports"),
+  updateReports: (input: Partial<ReportsSettingsDto>) => httpClient.put<SettingsUpdateResponseDto>("/settings/reports", input),
+  getIntegrations: () => httpClient.get<IntegrationsSettingsDto>("/settings/integrations"),
+  updateIntegrations: (input: Partial<IntegrationsSettingsDto>) => httpClient.put<SettingsUpdateResponseDto>("/settings/integrations", input)
 };

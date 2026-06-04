@@ -170,6 +170,24 @@ groups:
 5. Se DB locale e dati corrotti, usare restore da backup secondo procedura backup/restore.
 6. Dopo ripristino, verificare `/api/ready`, login tenant e una query booking/veicoli.
 
+## Managed PostgreSQL
+
+La migrazione da PostgreSQL Docker locale a managed PostgreSQL e' documentata in:
+
+```txt
+docs/deployment/postgres-managed-migration.md
+```
+
+Principi operativi:
+
+- `DATABASE_URL` e' la connection string runtime del backend, con SSL e pooler/session URL.
+- `DIRECT_URL` e' la connection string diretta per `prisma migrate deploy`, `pg_dump`,
+  `pg_restore` e admin tooling.
+- `PG_DUMP_DATABASE_URL` deve essere configurata in `/opt/fleetum/env/backup.env` dopo
+  la rimozione del servizio locale `postgres`.
+- Il vecchio volume `/opt/fleetum/postgres` non va cancellato subito dopo il cutover:
+  conservarlo almeno 7-14 giorni come rollback/fallback controllato.
+
 ## Configurazione VPS / reverse proxy
 
 `TRUST_PROXY` deve essere `1` nel `backend.env` di produzione perché il traffico passa
@@ -230,8 +248,8 @@ Prima di considerare il repository completamente pubblico, verificare che la his
 non contenga riferimenti legacy, email reali o dati cliente. Controllo consigliato:
 
 ```bash
-git log --all -S "gestionalefermi" --oneline
-git log --all -S "gestionalefermi@gmail.com" --oneline
+git log --all -S "<legacy-brand-or-system-marker>" --oneline
+git log --all -S "<legacy-real-email>" --oneline
 ```
 
 Se una stringa appare in commit precedenti, rimuoverla dalla history con `git filter-repo`
@@ -239,9 +257,29 @@ o BFG Repo Cleaner su clone mirror, poi eseguire force-push coordinato di branch
 Questa operazione riscrive la history e rompe i clone esistenti: va pianificata prima di
 rendere il repository realmente pubblico e comunicata a chiunque abbia clonato la repo.
 
-Stato noto: la stringa legacy `gestionalefermi` e' stata rimossa dal working tree, ma
-risulta ancora in commit storici. Serve rewrite history dedicato prima della pubblicazione
+Stato noto: alcune stringhe legacy sono state rimosse dal working tree, ma possono
+risultare ancora in commit storici. Serve rewrite history dedicato prima della pubblicazione
 definitiva.
+
+### Secret scanning CI
+
+Fleetum usa due controlli Gitleaks separati:
+
+1. `.github/workflows/ci.yml`: working tree scan con `--no-git --redact`, bloccante su PR/push.
+2. `.github/workflows/secret-history-scan.yml`: full history scan manuale/schedulato con checkout completo.
+
+Il full history scan non fallisce di default per evitare che vecchi falsi positivi blocchino
+il lavoro quotidiano, ma produce un artifact SARIF redatto. Per usarlo come gate manuale,
+lanciare il workflow con `fail_on_findings=true`.
+
+Policy e comandi locali:
+
+```txt
+docs/security/secret-scanning-policy.md
+```
+
+Se il full history scan trova un segreto reale, ruotare subito il segreto prima di qualsiasi
+rewrite della history. Non incollare mai valori di secret in issue, PR, log o chat.
 
 ## Backup e restore production-grade
 
@@ -255,6 +293,15 @@ Target attuali:
 RPO: 24 ore
 RTO: 4 ore
 Retention: 30 giorni
+```
+
+Ultimo restore drill documentato:
+
+```txt
+Data: 2026-06-04
+Ambiente: locale isolato, nessun impatto produzione
+Esito: PASS con gap StoredFileObject/uploads reali non disponibili nel DB locale
+Report: docs/deployment/restore-drills/2026-06-04-restore-drill.md
 ```
 
 Configurazione production:

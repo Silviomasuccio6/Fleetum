@@ -1,16 +1,28 @@
 import { httpClient } from "../../infrastructure/api/http-client";
 import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
+import type {
+  AiSuggestionDto,
+  AnalyticsReportDto,
+  ApiQueryParams,
+  DashboardStatsDto,
+  TeamPerformanceDto,
+  VehicleProfitabilityReportDto,
+  WorkshopCapacityDto,
+  WorkshopHealthDto
+} from "../dtos/stats-dto";
+
+type ExportQueryParams = Record<string, string | number | undefined>;
 
 export const statsUseCases = {
-  dashboard: () => httpClient.get<any>("/stats/dashboard"),
-  analytics: (params?: Record<string, string | number | undefined>) => httpClient.get<any>("/stats/analytics", params),
-  vehicleProfitability: (params?: Record<string, string | number | boolean | undefined>) =>
-    httpClient.get<any>("/stats/vehicles/profitability", params as Record<string, string | number | undefined>),
-  workshopsHealth: (params?: Record<string, string | number | undefined>) => httpClient.get<{ data: any[] }>("/stats/workshops/health", params),
-  workshopsCapacity: (params?: Record<string, string | number | undefined>) => httpClient.get<{ data: any[] }>("/stats/workshops/capacity", params),
-  teamPerformance: (params?: Record<string, string | number | undefined>) => httpClient.get<{ data: any[] }>("/stats/team/performance", params),
-  aiSuggestions: () => httpClient.get<{ data: any[] }>("/stats/ai/suggestions"),
-  downloadAnalyticsXlsx: async (params?: Record<string, string | number | undefined>) => {
+  dashboard: () => httpClient.get<DashboardStatsDto>("/stats/dashboard"),
+  analytics: (params?: ExportQueryParams) => httpClient.get<AnalyticsReportDto>("/stats/analytics", params),
+  vehicleProfitability: (params?: ApiQueryParams) =>
+    httpClient.get<VehicleProfitabilityReportDto>("/stats/vehicles/profitability", params as ExportQueryParams),
+  workshopsHealth: (params?: ExportQueryParams) => httpClient.get<{ data: WorkshopHealthDto[] }>("/stats/workshops/health", params),
+  workshopsCapacity: (params?: ExportQueryParams) => httpClient.get<{ data: WorkshopCapacityDto[] }>("/stats/workshops/capacity", params),
+  teamPerformance: (params?: ExportQueryParams) => httpClient.get<{ data: TeamPerformanceDto[] }>("/stats/team/performance", params),
+  aiSuggestions: () => httpClient.get<{ data: AiSuggestionDto[] }>("/stats/ai/suggestions"),
+  downloadAnalyticsXlsx: async (params?: ExportQueryParams) => {
     const query = new URLSearchParams();
     Object.entries(params ?? {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
@@ -36,7 +48,7 @@ export const statsUseCases = {
     }
     return response.blob();
   },
-  downloadAnalyticsCsv: async (params?: Record<string, string | number | undefined>) => {
+  downloadAnalyticsCsv: async (params?: ExportQueryParams) => {
     const query = new URLSearchParams();
     Object.entries(params ?? {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));

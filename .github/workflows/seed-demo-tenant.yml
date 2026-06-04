@@ -38,7 +38,7 @@ jobs:
       - name: Configure SSH key
         env:
           FLEETUM_VPS_SSH_KEY: ${{ secrets.FLEETUM_VPS_SSH_KEY }}
-          FLEETUM_VPS_HOST: 57.131.47.124
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
         run: |
           test -n "$FLEETUM_VPS_SSH_KEY"
           test -n "$FLEETUM_VPS_HOST"
@@ -49,13 +49,17 @@ jobs:
 
       - name: Run idempotent demo tenant seed
         env:
-          FLEETUM_VPS_HOST: 57.131.47.124
-          FLEETUM_VPS_USER: fleetum
-          FLEETUM_APP_DIR: /opt/fleetum/app
-          FLEETUM_ENV_FILE: /opt/fleetum/env/compose.env
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER }}
+          FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR }}
+          FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE }}
           DEMO_TENANT_ADMIN_EMAIL: ${{ github.event.inputs.tenantAdminEmail }}
           DEMO_TENANT_ID: ${{ github.event.inputs.tenantId }}
         run: |
+          test -n "$FLEETUM_VPS_HOST"
+          test -n "$FLEETUM_VPS_USER"
+          test -n "$FLEETUM_APP_DIR"
+          test -n "$FLEETUM_ENV_FILE"
           TENANT_ADMIN_EMAIL_B64="$(printf '%s' "$DEMO_TENANT_ADMIN_EMAIL" | base64 -w0)"
           TENANT_ID_B64="$(printf '%s' "$DEMO_TENANT_ID" | base64 -w0)"
           ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \

@@ -12,6 +12,8 @@ ENV_FILE="${ENV_FILE:-/opt/fleetum/env/compose.env}"
 SERVICE_NAME="${POSTGRES_SERVICE_NAME:-postgres}"
 DB_USER="${POSTGRES_USER:-fleetum}"
 DB_NAME="${POSTGRES_DB:-fleetum}"
+PG_DUMP_DATABASE_URL="${PG_DUMP_DATABASE_URL:-${DIRECT_URL:-}}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUTPUT_FILE="$BACKUP_DIR/fleetum-postgres-$TIMESTAMP.sql.gz"
 TMP_FILE="$OUTPUT_FILE.tmp"
@@ -23,7 +25,6 @@ require_positive_int "RETENTION_DAYS" "$RETENTION_DAYS"
 require_positive_int "MIN_POSTGRES_BACKUP_BYTES" "$MIN_BACKUP_BYTES"
 require_offsite_config
 
-[ -f "$COMPOSE_FILE" ] || fail "compose file not found: $COMPOSE_FILE"
 command -v docker >/dev/null 2>&1 || fail "docker command not found"
 
 cleanup() {
@@ -32,17 +33,26 @@ cleanup() {
 trap cleanup EXIT
 
 log "starting PostgreSQL backup: $OUTPUT_FILE"
-cd "$(dirname "$COMPOSE_FILE")"
 
-if [ -f "$ENV_FILE" ]; then
-  COMPOSE_ENV_ARGS=(--env-file "$ENV_FILE")
+if [ -n "$PG_DUMP_DATABASE_URL" ]; then
+  log "using managed PostgreSQL connection for pg_dump"
+  docker run --rm "$POSTGRES_IMAGE" \
+    pg_dump "$PG_DUMP_DATABASE_URL" --no-owner --no-privileges \
+    | gzip -9 > "$TMP_FILE" || fail "managed pg_dump failed"
 else
-  COMPOSE_ENV_ARGS=()
-fi
+  [ -f "$COMPOSE_FILE" ] || fail "compose file not found: $COMPOSE_FILE"
+  cd "$(dirname "$COMPOSE_FILE")"
 
-docker compose "${COMPOSE_ENV_ARGS[@]}" -f "$COMPOSE_FILE" exec -T "$SERVICE_NAME" \
-  pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges \
-  | gzip -9 > "$TMP_FILE" || fail "pg_dump failed"
+  if [ -f "$ENV_FILE" ]; then
+    COMPOSE_ENV_ARGS=(--env-file "$ENV_FILE")
+  else
+    COMPOSE_ENV_ARGS=()
+  fi
+
+  docker compose "${COMPOSE_ENV_ARGS[@]}" -f "$COMPOSE_FILE" exec -T "$SERVICE_NAME" \
+    pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges \
+    | gzip -9 > "$TMP_FILE" || fail "compose pg_dump failed"
+fi
 
 mv "$TMP_FILE" "$OUTPUT_FILE"
 chmod 600 "$OUTPUT_FILE"

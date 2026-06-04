@@ -17,6 +17,104 @@ type AnalyticsQuery = {
   model?: string;
 };
 
+type AnalyticsStatus = NonNullable<AnalyticsQuery["status"]>;
+type AnalyticsRowValue = string | number | null | undefined;
+
+type AnalyticsKpis = {
+  totalStoppages?: number | null;
+  openStoppages?: number | null;
+  closedStoppages?: number | null;
+  canceledStoppages?: number | null;
+  criticalOpen?: number | null;
+  highOpen?: number | null;
+  averageClosureDays?: number | null;
+  medianClosureDays?: number | null;
+  p90ClosureDays?: number | null;
+  averageOpenAgeDays?: number | null;
+  closureRateWithin7Days?: number | null;
+  closureRateWithin30Days?: number | null;
+  closureRateWithin60Days?: number | null;
+  remindersTotal?: number | null;
+  reminderSuccessRate?: number | null;
+  estimatedOpenCost?: number | null;
+  estimatedTotalCost?: number | null;
+};
+
+type NamedCountRow = {
+  name?: string | null;
+  count?: number | null;
+};
+
+type StatusCountRow = {
+  status: AnalyticsStatus;
+  count?: number | null;
+};
+
+type PriorityCountRow = {
+  priority?: string | null;
+  count?: number | null;
+};
+
+type TrendStoppageRow = {
+  day: string | Date;
+  opened?: number | null;
+  closed?: number | null;
+  reminders?: number | null;
+};
+
+type AgingBucketRow = {
+  bucket?: string | null;
+  count?: number | null;
+};
+
+type LongestOpenRow = {
+  plate?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  site?: string | null;
+  workshop?: string | null;
+  status: AnalyticsStatus;
+  priority?: string | null;
+  openDays?: number | null;
+};
+
+type VehicleDowntimeRow = {
+  plate?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  count?: number | null;
+  openDays?: number | null;
+};
+
+type ReminderFailureRow = {
+  sentAt: string | Date;
+  recipient?: string | null;
+  type?: string | null;
+  errorMessage?: string | null;
+};
+
+type AnalyticsReportResult = {
+  filtersApplied?: {
+    dateFrom?: string | Date;
+    dateTo?: string | Date;
+  };
+  kpis?: AnalyticsKpis;
+  charts?: {
+    byWorkshop?: NamedCountRow[];
+    bySite?: NamedCountRow[];
+    byBrand?: NamedCountRow[];
+    byStatus?: StatusCountRow[];
+    byPriority?: PriorityCountRow[];
+    trendStoppages?: TrendStoppageRow[];
+    agingBuckets?: AgingBucketRow[];
+  };
+  tables?: {
+    longestOpen?: LongestOpenRow[];
+    topVehiclesDowntime?: VehicleDowntimeRow[];
+    reminderFailures?: ReminderFailureRow[];
+  };
+};
+
 export class StatsController {
   constructor(private readonly useCase: GetDashboardStatsUseCase) {}
 
@@ -185,7 +283,7 @@ export class StatsController {
     plate?: string;
     brand?: string;
     model?: string;
-  }, result: any) {
+  }, result: AnalyticsReportResult) {
     const lines: string[] = [];
     const now = new Date();
 
@@ -244,7 +342,7 @@ export class StatsController {
       lines,
       "Top fermi aperti (anzianita)",
       ["Targa", "Veicolo", "Sede", "Officina", "Stato", "Priorita", "Giorni aperto"],
-      (result.tables?.longestOpen ?? []).map((x: any) => [
+      (result.tables?.longestOpen ?? []).map((x) => [
         x.plate,
         `${x.brand} ${x.model}`.trim(),
         x.site,
@@ -259,7 +357,7 @@ export class StatsController {
       lines,
       "Top veicoli per fermo cumulato",
       ["Targa", "Veicolo", "Numero fermi", "Giorni fermo cumulati"],
-      (result.tables?.topVehiclesDowntime ?? []).map((x: any) => [
+      (result.tables?.topVehiclesDowntime ?? []).map((x) => [
         x.plate,
         `${x.brand} ${x.model}`.trim(),
         this.formatNumber(x.count, 0),
@@ -271,28 +369,28 @@ export class StatsController {
       lines,
       "Distribuzione per officina",
       ["Officina", "Numero fermi"],
-      (result.charts?.byWorkshop ?? []).map((x: any) => [x.name, this.formatNumber(x.count, 0)])
+      (result.charts?.byWorkshop ?? []).map((x) => [x.name, this.formatNumber(x.count, 0)])
     );
 
     this.addSection(
       lines,
       "Distribuzione per sede",
       ["Sede", "Numero fermi"],
-      (result.charts?.bySite ?? []).map((x: any) => [x.name, this.formatNumber(x.count, 0)])
+      (result.charts?.bySite ?? []).map((x) => [x.name, this.formatNumber(x.count, 0)])
     );
 
     this.addSection(
       lines,
       "Distribuzione per marca",
       ["Marca", "Numero fermi"],
-      (result.charts?.byBrand ?? []).map((x: any) => [x.name, this.formatNumber(x.count, 0)])
+      (result.charts?.byBrand ?? []).map((x) => [x.name, this.formatNumber(x.count, 0)])
     );
 
     this.addSection(
       lines,
       "Trend giornaliero",
       ["Data", "Aperti", "Chiusi", "Reminders"],
-      (result.charts?.trendStoppages ?? []).map((x: any) => [
+      (result.charts?.trendStoppages ?? []).map((x) => [
         this.formatDate(x.day),
         this.formatNumber(x.opened, 0),
         this.formatNumber(x.closed, 0),
@@ -304,14 +402,14 @@ export class StatsController {
       lines,
       "Aging bucket fermi aperti",
       ["Bucket giorni", "Numero fermi"],
-      (result.charts?.agingBuckets ?? []).map((x: any) => [x.bucket, this.formatNumber(x.count, 0)])
+      (result.charts?.agingBuckets ?? []).map((x) => [x.bucket, this.formatNumber(x.count, 0)])
     );
 
     this.addSection(
       lines,
       "Errori reminder (ultimi)",
       ["Data invio", "Destinatario", "Tipo", "Errore"],
-      (result.tables?.reminderFailures ?? []).map((x: any) => [
+      (result.tables?.reminderFailures ?? []).map((x) => [
         this.formatDateTime(new Date(x.sentAt)),
         x.recipient,
         x.type,
@@ -333,10 +431,10 @@ export class StatsController {
     return `${"#".repeat(filled)}${"-".repeat(width - filled)}`;
   }
 
-  private setupWorksheet(sheet: ExcelJS.Worksheet, columns: Array<{ width: number }>) {
+  private setupWorksheet(sheet: ExcelJS.Worksheet, columns: Array<Partial<ExcelJS.Column>>) {
     sheet.properties.defaultRowHeight = 20;
     sheet.views = [{ state: "frozen", ySplit: 4 }];
-    sheet.columns = columns as any;
+    sheet.columns = columns;
   }
 
   private writeSheetTitle(sheet: ExcelJS.Worksheet, title: string, subtitle: string) {
@@ -461,7 +559,7 @@ export class StatsController {
     }
   }
 
-  private async buildAnalyticsWorkbook(tenantId: string, parsed: AnalyticsQuery, result: any) {
+  private async buildAnalyticsWorkbook(tenantId: string, parsed: AnalyticsQuery, result: AnalyticsReportResult) {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Fleetum";
     workbook.lastModifiedBy = "Fleetum";
@@ -518,7 +616,7 @@ export class StatsController {
       rowCursor,
       "Top Fermi Aperti (Priorita operativa)",
       ["Targa", "Veicolo", "Sede", "Officina", "Stato", "Priorita", "Giorni aperto"],
-      (result.tables?.longestOpen ?? []).map((x: any) => [
+      (result.tables?.longestOpen ?? []).map((x) => [
         x.plate ?? "-",
         `${x.brand ?? ""} ${x.model ?? ""}`.trim(),
         x.site ?? "-",
@@ -534,7 +632,7 @@ export class StatsController {
       rowCursor,
       "Volume per officina",
       ["Officina", "Fermi", "Grafico"],
-      (result.charts?.byWorkshop ?? []).map((x: any, _idx: number, all: any[]) => {
+      (result.charts?.byWorkshop ?? []).map((x, _idx, all) => {
         const max = Math.max(1, ...all.map((y) => Number(y.count) || 0));
         return [x.name ?? "-", this.formatNumber(x.count, 0), this.textBar(x.count, max, 26)];
       })
@@ -553,15 +651,15 @@ export class StatsController {
     ]);
     this.writeSheetTitle(trendSheet, "Trend Giornaliero e Sintesi", "Vista evoluzione aperture, chiusure e reminders");
     const trendRows = result.charts?.trendStoppages ?? [];
-    const maxOpened = Math.max(1, ...trendRows.map((x: any) => Number(x.opened) || 0));
-    const maxClosed = Math.max(1, ...trendRows.map((x: any) => Number(x.closed) || 0));
+    const maxOpened = Math.max(1, ...trendRows.map((x) => Number(x.opened) || 0));
+    const maxClosed = Math.max(1, ...trendRows.map((x) => Number(x.closed) || 0));
 
     let trendCursor = this.writeTable(
       trendSheet,
       4,
       "Trend Aperture / Chiusure",
       ["Data", "Aperti", "Chiusi", "Reminders", "Grafico aperti", "Grafico chiusi"],
-      trendRows.map((x: any) => [
+      trendRows.map((x) => [
         this.formatDate(x.day),
         this.formatNumber(x.opened, 0),
         this.formatNumber(x.closed, 0),
@@ -576,7 +674,7 @@ export class StatsController {
       trendCursor,
       "Distribuzione per stato",
       ["Stato", "Numero", "Grafico"],
-      (result.charts?.byStatus ?? []).map((x: any, _idx: number, all: any[]) => {
+      (result.charts?.byStatus ?? []).map((x, _idx, all) => {
         const max = Math.max(1, ...all.map((y) => Number(y.count) || 0));
         return [stoppageStatusLabel(x.status), this.formatNumber(x.count, 0), this.textBar(x.count, max, 30)];
       })
@@ -587,7 +685,7 @@ export class StatsController {
       trendCursor,
       "Distribuzione per priorita",
       ["Priorita", "Numero", "Grafico"],
-      (result.charts?.byPriority ?? []).map((x: any, _idx: number, all: any[]) => {
+      (result.charts?.byPriority ?? []).map((x, _idx, all) => {
         const max = Math.max(1, ...all.map((y) => Number(y.count) || 0));
         return [x.priority ?? "-", this.formatNumber(x.count, 0), this.textBar(x.count, max, 30)];
       })
@@ -610,7 +708,7 @@ export class StatsController {
       4,
       "Distribuzione per sede",
       ["Sede", "Fermi", "Grafico"],
-      (result.charts?.bySite ?? []).map((x: any, _idx: number, all: any[]) => {
+      (result.charts?.bySite ?? []).map((x, _idx, all) => {
         const max = Math.max(1, ...all.map((y) => Number(y.count) || 0));
         return [x.name ?? "-", this.formatNumber(x.count, 0), this.textBar(x.count, max, 28)];
       })
@@ -621,7 +719,7 @@ export class StatsController {
       opsCursor,
       "Distribuzione per marca",
       ["Marca", "Fermi", "Grafico"],
-      (result.charts?.byBrand ?? []).map((x: any, _idx: number, all: any[]) => {
+      (result.charts?.byBrand ?? []).map((x, _idx, all) => {
         const max = Math.max(1, ...all.map((y) => Number(y.count) || 0));
         return [x.name ?? "-", this.formatNumber(x.count, 0), this.textBar(x.count, max, 28)];
       })
@@ -632,7 +730,7 @@ export class StatsController {
       opsCursor,
       "Aging bucket fermi aperti",
       ["Bucket", "Numero", "Grafico"],
-      (result.charts?.agingBuckets ?? []).map((x: any, _idx: number, all: any[]) => {
+      (result.charts?.agingBuckets ?? []).map((x, _idx, all) => {
         const max = Math.max(1, ...all.map((y) => Number(y.count) || 0));
         return [x.bucket ?? "-", this.formatNumber(x.count, 0), this.textBar(x.count, max, 28)];
       })
@@ -656,7 +754,7 @@ export class StatsController {
       4,
       "Top veicoli per downtime cumulato",
       ["Targa", "Veicolo", "Numero fermi", "Giorni cumulati"],
-      (result.tables?.topVehiclesDowntime ?? []).map((x: any) => [
+      (result.tables?.topVehiclesDowntime ?? []).map((x) => [
         x.plate ?? "-",
         `${x.brand ?? ""} ${x.model ?? ""}`.trim(),
         this.formatNumber(x.count, 0),
@@ -669,7 +767,7 @@ export class StatsController {
       detailCursor,
       "Reminder falliti (ultimi)",
       ["Data invio", "Destinatario", "Tipo", "Errore"],
-      (result.tables?.reminderFailures ?? []).map((x: any) => [
+      (result.tables?.reminderFailures ?? []).map((x) => [
         this.formatDateTime(new Date(x.sentAt)),
         x.recipient ?? "-",
         x.type ?? "-",

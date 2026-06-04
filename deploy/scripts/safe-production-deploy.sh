@@ -131,7 +131,7 @@ main() {
 
   log "running Prisma migrations"
   run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm backend \
-    npx prisma migrate deploy --schema prisma/schema.prisma
+    sh -lc 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; fi; npx prisma migrate deploy --schema prisma/schema.prisma'
 
   log "restarting production containers"
   run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build
