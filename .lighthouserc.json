@@ -12,7 +12,8 @@
       "numberOfRuns": 1,
       "settings": {
         "chromeFlags": "--headless=new --no-sandbox",
-        "preset": "desktop"
+        "preset": "desktop",
+        "throttlingMethod": "provided"
       }
     },
     "assert": {
