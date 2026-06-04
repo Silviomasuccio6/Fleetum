@@ -299,8 +299,8 @@ Ultimo restore drill documentato:
 
 ```txt
 Data: 2026-06-04
-Ambiente: locale isolato, nessun impatto produzione
-Esito: PASS con gap StoredFileObject/uploads reali non disponibili nel DB locale
+Ambiente: locale isolato con schema Fleetum corrente, nessun impatto produzione
+Esito: PASS su DB, StoredFileObject e uploads canary; resta da provare backup offsite reale
 Report: docs/deployment/restore-drills/2026-06-04-restore-drill.md
 ```
 

@@ -4,33 +4,51 @@
 
 Restore drill eseguito su ambiente locale isolato, senza impatto produzione.
 
-Il database sorgente disponibile localmente era il container legacy `<legacy_local_postgres_container>`
-con database `<legacy_local_database>`. Il restore e' stato eseguito su un database temporaneo separato:
-`fleetum_restore_drill_20260604`.
+Questa prova usa un container PostgreSQL temporaneo con schema Fleetum aggiornato tramite tutte le migration disponibili al 2026-06-04, inclusa la migration `StoredFileObject`.
 
-Gli uploads non erano disponibili in locale o in `/opt/fleetum/uploads`; per verificare
-il flusso file e' stata usata una directory canary temporanea in `/tmp/fleetum-uploads-drill`.
+Container sorgente temporaneo:
+
+```txt
+fleetum-restore-drill-current
+```
+
+Database sorgente temporaneo:
+
+```txt
+fleetum_drill
+```
+
+Database restore temporaneo:
+
+```txt
+fleetum_restore_drill_current_20260604
+```
+
+Gli uploads reali di produzione non sono stati usati. Per verificare il flusso file e' stata usata una directory canary temporanea in `/tmp/fleetum-uploads-drill-current`.
 
 ## Esito
 
 | Area | Esito | Note |
 | --- | --- | --- |
+| Migration schema corrente | PASS | 32 migration Prisma applicate correttamente in container Node 20 |
+| Fixture dati critici | PASS | Tenant, User, Vehicle, RentalBooking, RentalCustomer, BookingContract, StoredFileObject, AuditLog |
 | Backup DB | PASS | Dump SQL creato correttamente |
+| Verifica dump | PASS | File non vuoto, header PostgreSQL valido |
 | Restore DB isolato | PASS | Restore su database temporaneo completato |
-| Row count pre/post | PASS | Conteggi invariati per le tabelle presenti |
+| Row count pre/post | PASS | Conteggi invariati per tutte le tabelle critiche |
 | Upload backup/restore | PASS | File canary recuperato correttamente |
-| StoredFileObject | GAP | Tabella non presente nel DB locale sorgente |
+| StoredFileObject | PASS | Tabella presente e record verificato pre/post restore |
 | Produzione | NON TOCCATA | Nessun comando eseguito su VPS production |
 
 ## Tempi misurati
 
 | Metrica | Valore |
 | --- | ---: |
-| Inizio drill | 2026-06-04 14:26:14 Europe/Rome |
-| Fine drill | 2026-06-04 14:27:44 Europe/Rome |
-| Durata totale drill | ~90 secondi |
-| Backup DB | ~2 secondi |
-| Restore DB | ~3 secondi |
+| Inizio drill | 2026-06-04 20:12 Europe/Rome circa |
+| Fine drill | 2026-06-04 20:15 Europe/Rome circa |
+| Durata totale drill | ~3 minuti, escluso download/install dipendenze container Node 20 |
+| Backup DB | <1 secondo |
+| Restore DB | ~2 secondi |
 | Backup uploads canary | <1 secondo |
 
 Target runbook:
@@ -39,32 +57,69 @@ Target runbook:
 | --- | ---: |
 | RPO target | 24 ore |
 | RTO target | 4 ore |
+| Retention target | 30 giorni |
 
 Risultato drill locale:
 
 | Metrica | Valore |
 | --- | ---: |
 | RPO osservato | ~0 minuti sul dump appena creato |
-| RTO osservato | ~90 secondi end-to-end locale |
+| RTO osservato | ~3 minuti end-to-end locale |
+
+## Migration schema corrente
+
+Il primo tentativo con Prisma locale ha fallito con `Schema engine error`, problema gia' noto dell'ambiente locale.
+Per evitare falsi negativi, le migration sono state applicate da container Node 20:
+
+```bash
+docker run --rm \
+  -v /tmp/Fleetum-verify:/repo \
+  -w /repo \
+  -e DATABASE_URL='postgresql://fleetum:fleetum_dev@host.docker.internal:55434/fleetum_drill?schema=public' \
+  node:20-bookworm \
+  bash -lc 'npm ci >/dev/null && npx prisma migrate deploy --schema backend/prisma/schema.prisma'
+```
+
+Risultato:
+
+```txt
+32 migrations found in prisma/migrations
+All migrations have been successfully applied.
+```
+
+## Fixture dati critici
+
+Sono stati creati record demo isolati nelle tabelle critiche:
+
+| Tabella | Pre-backup |
+| --- | ---: |
+| Tenant | 1 |
+| User | 1 |
+| Vehicle | 1 |
+| RentalBooking | 1 |
+| RentalCustomer | 1 |
+| BookingContract | 1 |
+| StoredFileObject | 1 |
+| AuditLog | 1 |
 
 ## Backup DB
 
 Comando:
 
 ```bash
-./ops/backup-db.sh <legacy_local_postgres_container> <legacy_local_database> postgres
+./ops/backup-db.sh fleetum-restore-drill-current fleetum_drill fleetum
 ```
 
 Output:
 
 ```txt
-Backup creato: /private/tmp/Fleetum-verify/backups/<legacy_local_database>_20260604_142622.sql
+Backup creato: /private/tmp/Fleetum-verify/backups/fleetum_drill_20260604_201406.sql
 ```
 
 Verifica file:
 
 ```txt
-Dimensione: 22347489 bytes
+Dimensione: 133833 bytes
 Header: PostgreSQL database dump
 ```
 
@@ -73,57 +128,58 @@ Header: PostgreSQL database dump
 Comando:
 
 ```bash
-./ops/restore-db-test.sh backups/<legacy_local_database>_20260604_142622.sql <legacy_local_postgres_container> fleetum_restore_drill_20260604 postgres
+./ops/restore-db-test.sh backups/fleetum_drill_20260604_201406.sql fleetum-restore-drill-current fleetum_restore_drill_current_20260604 fleetum
 ```
 
 Output:
 
 ```txt
-NOTICE:  database "fleetum_restore_drill_20260604" does not exist, skipping
 DROP DATABASE
+NOTICE:  database "fleetum_restore_drill_current_20260604" does not exist, skipping
 CREATE DATABASE
-Restore completato su database: fleetum_restore_drill_20260604
+Restore completato su database: fleetum_restore_drill_current_20260604
 ```
 
 ## Conteggi tabelle critiche
 
 | Tabella | Pre-backup | Post-restore | Esito |
 | --- | ---: | ---: | --- |
-| Tenant | 19 | 19 | PASS |
-| User | 19 | 19 | PASS |
-| Vehicle | 19 | 19 | PASS |
-| RentalBooking | 12 | 12 | PASS |
-| RentalCustomer | 13 | 13 | PASS |
-| BookingContract | 9 | 9 | PASS |
-| StoredFileObject | N/A | N/A | GAP: tabella assente nel DB locale |
+| Tenant | 1 | 1 | PASS |
+| User | 1 | 1 | PASS |
+| Vehicle | 1 | 1 | PASS |
+| RentalBooking | 1 | 1 | PASS |
+| RentalCustomer | 1 | 1 | PASS |
+| BookingContract | 1 | 1 | PASS |
+| StoredFileObject | 1 | 1 | PASS |
+| AuditLog | 1 | 1 | PASS |
 
-Conteggio tabelle pubbliche post-restore: `43`.
+Conteggio tabelle pubbliche post-restore: `54`.
 
 ## Upload restore
 
 Directory canary:
 
 ```txt
-/tmp/fleetum-uploads-drill/source/uploads/contracts/canary-contract.txt
+/tmp/fleetum-uploads-drill-current/source/uploads/contracts/canary-contract.txt
 ```
 
 Comando backup:
 
 ```bash
 BACKUP_OFFSITE_REQUIRED=false \
-UPLOADS_DIR=/tmp/fleetum-uploads-drill/source/uploads \
-BACKUP_DIR=/tmp/fleetum-uploads-drill/backups \
+UPLOADS_DIR=/tmp/fleetum-uploads-drill-current/source/uploads \
+BACKUP_DIR=/tmp/fleetum-uploads-drill-current/backups \
 ./deploy/backup/backup-uploads.sh
 ```
 
 Output:
 
 ```txt
-[2026-06-04T12:27:33Z] starting uploads backup: /tmp/fleetum-uploads-drill/backups/fleetum-uploads-20260604T122733Z.tar.gz
-[2026-06-04T12:27:33Z] Uploads backup completed: /tmp/fleetum-uploads-drill/backups/fleetum-uploads-20260604T122733Z.tar.gz (560 bytes)
+[2026-06-04T18:14:43Z] starting uploads backup: /tmp/fleetum-uploads-drill-current/backups/fleetum-uploads-20260604T181443Z.tar.gz
+[2026-06-04T18:14:43Z] Uploads backup completed: /tmp/fleetum-uploads-drill-current/backups/fleetum-uploads-20260604T181443Z.tar.gz (554 bytes)
 ```
 
-Verifica contenuto:
+Verifica contenuto archivio:
 
 ```txt
 uploads/
@@ -134,21 +190,20 @@ uploads/contracts/canary-contract.txt
 Verifica file ripristinato:
 
 ```txt
-Fleetum restore drill upload canary 2026-06-04
+Fleetum restore drill upload canary current schema 2026-06-04
 ```
 
 ## Cleanup
 
-Il database temporaneo `fleetum_restore_drill_20260604` e' stato rimosso dopo la verifica.
+Il database temporaneo `fleetum_restore_drill_current_20260604` e' stato rimosso dopo la verifica.
+Il container temporaneo `fleetum-restore-drill-current` e' stato fermato e rimosso automaticamente perche' avviato con `--rm`.
 
 ## Rischi residui
 
-- Il drill non prova un backup reale di produzione o offsite.
-- Il DB locale sorgente non contiene la tabella `StoredFileObject`; serve ripetere il drill
-  su un database aggiornato con tutte le migration Fleetum.
+- Il drill non prova ancora un backup reale di produzione o offsite S3/R2/B2.
 - Gli uploads reali non erano disponibili; la verifica file e' stata eseguita con canary locale.
-- Lo script `ops/backup-db.sh` crea un dump valido, ma non esegue ancora tutte le verifiche robuste
-  documentate nei task SRE precedenti: dimensione minima, header e cleanup file parziali.
+- `ops/backup-db.sh` crea un dump valido, ma resta meno robusto degli script in `deploy/backup`: non controlla dimensione minima, header e cleanup file parziali in modo nativo.
+- La prova e' locale: non misura latenza, banda, permessi bucket e credenziali offsite reali.
 
 ## Prossima prova consigliata
 
