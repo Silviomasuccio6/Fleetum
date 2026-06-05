@@ -124,6 +124,7 @@ jobs:
     name: Deploy Fleetum VPS
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 30
     needs: [build-images, sast]
     permissions:
