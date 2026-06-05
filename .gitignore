@@ -31,3 +31,6 @@ tmp-contract-debug.pdf
 
 # Customer-specific exports / private client logic
 GRETA_PRO_V4_MODIFICATO.gs
+
+# Lighthouse CI local artifacts
+.lighthouseci/

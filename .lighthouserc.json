@@ -9,7 +9,7 @@
         "http://127.0.0.1:4173/booking-noleggi",
         "http://127.0.0.1:4173/report-redditivita-veicolo"
       ],
-      "numberOfRuns": 1,
+      "numberOfRuns": 3,
       "settings": {
         "chromeFlags": "--headless=new --no-sandbox",
         "preset": "desktop",
