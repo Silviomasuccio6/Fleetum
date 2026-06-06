@@ -374,6 +374,49 @@ Regole operative:
 Il deploy production GitHub Actions deve usare la sequenza sicura versionata in
 `deploy/scripts/safe-production-deploy.sh`.
 
+### Configurazione GitHub Actions production
+
+Configurare questi valori nel repository GitHub, preferibilmente nell'environment
+`production` per applicare approval e audit trail.
+
+Secrets obbligatori:
+
+```txt
+FLEETUM_VPS_SSH_KEY
+```
+
+`FLEETUM_VPS_SSH_KEY` deve contenere la chiave privata SSH completa usata dal workflow
+per collegarsi al VPS. Non inserire la chiave pubblica e non stamparla nei log. Il
+workflow accetta anche il nome legacy `VPS_SSH_KEY`, ma il nome canonico e'
+`FLEETUM_VPS_SSH_KEY`.
+
+Variables consigliate:
+
+```txt
+FLEETUM_VPS_HOST
+FLEETUM_VPS_USER
+FLEETUM_APP_DIR
+FLEETUM_ENV_FILE
+FLEETUM_LAST_DEPLOY_FILE
+```
+
+Valori production attesi:
+
+```txt
+FLEETUM_APP_DIR=/opt/fleetum/app
+FLEETUM_ENV_FILE=/opt/fleetum/env/compose.env
+FLEETUM_LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt
+```
+
+`FLEETUM_VPS_HOST` e `FLEETUM_VPS_USER` possono essere GitHub Variables o Secrets. Per
+compatibilita' temporanea il workflow supporta anche `VPS_HOST`, `VPS_USER`, `APP_DIR`,
+`ENV_FILE` e `LAST_DEPLOY_FILE`, ma i nomi `FLEETUM_*` restano lo standard operativo.
+
+Se il deploy fallisce nella fase iniziale, controllare lo step `Validate production
+deploy configuration`: deve indicare esattamente quale secret o variable manca. Se fallisce
+lo step `Configure SSH key`, la chiave privata e' assente, non valida, salvata come chiave
+pubblica oppure il VPS non e' raggiungibile via SSH sulla porta configurata.
+
 Prima di ogni `prisma migrate deploy` sono obbligatori:
 
 ```bash
