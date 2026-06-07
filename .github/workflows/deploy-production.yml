@@ -155,8 +155,8 @@ jobs:
       - name: Validate production deploy configuration
         env:
           FLEETUM_VPS_SSH_KEY: ${{ secrets.FLEETUM_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
-          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST || secrets.FLEETUM_VPS_HOST || secrets.VPS_HOST }}
-          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER || secrets.FLEETUM_VPS_USER || secrets.VPS_USER }}
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
           FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE || vars.ENV_FILE }}
           FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE || vars.LAST_DEPLOY_FILE }}
@@ -196,7 +196,7 @@ jobs:
       - name: Configure SSH key
         env:
           FLEETUM_VPS_SSH_KEY: ${{ secrets.FLEETUM_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
-          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST || secrets.FLEETUM_VPS_HOST || secrets.VPS_HOST }}
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
         run: |
           set -euo pipefail
 
@@ -208,6 +208,18 @@ jobs:
             echo "::error::Missing repository/environment variable FLEETUM_VPS_HOST (or legacy VPS_HOST)."
             exit 1
           fi
+
+          FLEETUM_VPS_HOST="$(printf '%s' "$FLEETUM_VPS_HOST" | tr -d '\r\n[:space:]')"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#ssh://}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
+
+          if ! [[ "$FLEETUM_VPS_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[A-Za-z0-9.-]+$ ]]; then
+            echo "::error::FLEETUM_VPS_HOST must be only an IPv4 address or hostname, without protocol, user, port, spaces or quotes."
+            exit 1
+          fi
+
+          echo "VPS host value normalized and validated."
 
           install -m 700 -d ~/.ssh
           if [[ "$FLEETUM_VPS_SSH_KEY" == *\\n* ]]; then
@@ -229,8 +241,8 @@ jobs:
 
       - name: Verify remote deploy target
         env:
-          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST || secrets.FLEETUM_VPS_HOST || secrets.VPS_HOST }}
-          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER || secrets.FLEETUM_VPS_USER || secrets.VPS_USER }}
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
         run: |
           set -euo pipefail
@@ -239,13 +251,18 @@ jobs:
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
           fi
+          FLEETUM_VPS_HOST="$(printf '%s' "$FLEETUM_VPS_HOST" | tr -d '\r\n[:space:]')"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#ssh://}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
+          FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "test \"\$(whoami)\" = '$FLEETUM_VPS_USER' && mkdir -p '$FLEETUM_APP_DIR' && test -w '$FLEETUM_APP_DIR'"
 
       - name: Upload deployment manifests
         env:
-          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST || secrets.FLEETUM_VPS_HOST || secrets.VPS_HOST }}
-          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER || secrets.FLEETUM_VPS_USER || secrets.VPS_USER }}
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
         run: |
           set -euo pipefail
@@ -254,6 +271,11 @@ jobs:
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
           fi
+          FLEETUM_VPS_HOST="$(printf '%s' "$FLEETUM_VPS_HOST" | tr -d '\r\n[:space:]')"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#ssh://}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
+          FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
           rsync -az --delete \
             --include 'docker-compose.prod.yml' \
             --include 'deploy/' \
@@ -270,8 +292,8 @@ jobs:
 
       - name: Pull images, backup, migrate and restart production containers
         env:
-          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST || secrets.FLEETUM_VPS_HOST || secrets.VPS_HOST }}
-          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER || secrets.FLEETUM_VPS_USER || secrets.VPS_USER }}
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
           FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE || vars.ENV_FILE }}
           FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE || vars.LAST_DEPLOY_FILE }}
@@ -288,6 +310,11 @@ jobs:
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
           fi
+          FLEETUM_VPS_HOST="$(printf '%s' "$FLEETUM_VPS_HOST" | tr -d '\r\n[:space:]')"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#ssh://}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
+          FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
           printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
@@ -296,8 +323,8 @@ jobs:
 
       - name: Install managed backup cron
         env:
-          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST || secrets.FLEETUM_VPS_HOST || secrets.VPS_HOST }}
-          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER || secrets.FLEETUM_VPS_USER || secrets.VPS_USER }}
+          FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
+          FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
         run: |
           set -euo pipefail
@@ -306,6 +333,11 @@ jobs:
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
           fi
+          FLEETUM_VPS_HOST="$(printf '%s' "$FLEETUM_VPS_HOST" | tr -d '\r\n[:space:]')"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#ssh://}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
+          FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "APP_DIR='$FLEETUM_APP_DIR' '$FLEETUM_APP_DIR/deploy/backup/install-cron.sh'"
 
@@ -367,7 +399,7 @@ jobs:
               `- Review the failed job logs in GitHub Actions.`,
               `- If deployment reached the VPS and health failed, verify the configured FLEETUM_LAST_DEPLOY_FILE and rollback logs.`,
               `- Confirm database backup and uploads backup were completed before any migration.`,
-            ].join("\\n");
+            ].join("\n");
 
             await github.rest.issues.create({
               owner: context.repo.owner,
