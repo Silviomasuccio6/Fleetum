@@ -327,7 +327,7 @@ jobs:
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "cd '$FLEETUM_APP_DIR' && chmod +x deploy/scripts/*.sh deploy/backup/*.sh && FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' HEALTH_URL='http://127.0.0.1:4000/api/ready' ./deploy/scripts/safe-production-deploy.sh"
+            "cd '$FLEETUM_APP_DIR' && chmod +x deploy/scripts/*.sh deploy/backup/*.sh && FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
 
       - name: Install managed backup cron
         env:

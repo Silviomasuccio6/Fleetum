@@ -7,10 +7,12 @@
 4. `npm run dev` (sviluppo) oppure `npm run build && npm run start -w backend` + deploy frontend statico
 
 ## Verifiche post-avvio
-- API health: `curl -s http://127.0.0.1:4000/api/health`
-- API ready: `curl -s http://127.0.0.1:4000/api/ready`
-- Platform health: `curl -s http://127.0.0.1:4100/platform-api/health`
-- Platform ready: `curl -s http://127.0.0.1:4100/platform-api/ready`
+- API health production: `curl -fsS https://api.fleetum.it/api/health`
+- API ready production: `curl -fsS https://api.fleetum.it/api/ready`
+- Platform health production: `curl -fsS https://platform.fleetum.it/platform-api/health`
+- Platform ready production: `curl -fsS https://platform.fleetum.it/platform-api/ready`
+- API health locale/dev: `curl -s http://127.0.0.1:4000/api/health`
+- API ready locale/dev: `curl -s http://127.0.0.1:4000/api/ready`
 - API metrics: `curl -H "Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:4000/api/metrics`
 - Platform metrics: `curl -H "Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:4100/platform-api/metrics`
 
@@ -163,7 +165,7 @@ groups:
 
 ### Incident procedure: database unavailable
 
-1. Verificare `fleetum_db_available` e `curl -fsS http://127.0.0.1:4000/api/ready`.
+1. Verificare `fleetum_db_available` e `curl -fsS https://api.fleetum.it/api/ready`.
 2. Controllare stato container/managed DB e connessione `DATABASE_URL`.
 3. Controllare saturazione disco, CPU, memoria e connessioni DB.
 4. Non eseguire migration durante incidente DB.
@@ -453,8 +455,12 @@ il deploy si ferma prima di `docker compose up -d`, quindi non viene avviata la 
 Il post-deploy health check obbligatorio e':
 
 ```bash
-curl -fsS http://127.0.0.1:4000/api/ready
+curl -fsS https://api.fleetum.it/api/ready
 ```
+
+Il backend production non deve necessariamente pubblicare la porta `4000` sull'host:
+Caddy raggiunge il container tramite rete Docker. Per questo il safe deploy usa l'URL
+pubblico `https://api.fleetum.it/api/ready` invece di `http://127.0.0.1:4000/api/ready`.
 
 Se il health check fallisce dopo `up -d`, lo script esegue rollback applicativo automatico
 alle immagini salvate in `/opt/fleetum/last-deploy.txt`.
