@@ -368,13 +368,14 @@ export class PlatformAdminService {
     if (!tenant) throw new AppError("Tenant non trovato", 404, "NOT_FOUND");
 
     const before = (await this.repository.getLatestLicense(input.tenantId)) ?? defaultLicense;
+    const plan = ensureKnownPlan(input.plan);
     const after: PlatformLicense = {
-      plan: ensureKnownPlan(input.plan),
+      plan,
       seats: input.seats,
       status: input.status,
       expiresAt: input.expiresAt ?? null,
       updatedAt: new Date().toISOString(),
-      priceMonthly: input.priceMonthly === undefined ? (before.priceMonthly ?? null) : input.priceMonthly,
+      priceMonthly: input.priceMonthly === undefined || input.priceMonthly === null ? getPlanMonthlyPrice(plan) : input.priceMonthly,
       billingCycle: input.billingCycle ?? before.billingCycle ?? "monthly"
     };
 

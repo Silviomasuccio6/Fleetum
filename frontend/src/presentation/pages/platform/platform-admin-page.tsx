@@ -54,6 +54,7 @@ import { Select } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { useNavigate } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { PLAN_MONTHLY_PRICING_EUR } from "../../../domain/constants/entitlements";
 import {
   buildPlanUpdatePayload,
   clearPlanDraft,
@@ -314,6 +315,7 @@ export const PlatformAdminPage = () => {
   const [selectedTenant, setSelectedTenant] = useState<TenantRow | null>(null);
   const [search, setSearch] = useState("");
   const [licenseFilter, setLicenseFilter] = useState<"ALL" | LicenseStatus>("ALL");
+  const [planFilter, setPlanFilter] = useState<"ALL" | PlanTier>("ALL");
   const [tenantStatusFilter, setTenantStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -487,20 +489,28 @@ export const PlatformAdminPage = () => {
         ? `${tenant.company.legalName ?? ""} ${tenant.company.tradeName ?? ""} ${tenant.company.vatNumber ?? ""} ${tenant.company.email ?? ""}`
         : "";
       const matchesSearch = q.length === 0 || `${tenant.name} ${owner} ${company}`.toLowerCase().includes(q);
-      const licenseStatus = tenant.license?.status ?? "ACTIVE";
+      const licenseStatus = tenant.license?.status ?? "PENDING";
       const matchesLicense = licenseFilter === "ALL" || licenseStatus === licenseFilter;
+      const matchesPlan = planFilter === "ALL" || normalizePlanTier(tenant.license?.plan) === planFilter;
       const tenantState = tenant.isActive ? "ACTIVE" : "INACTIVE";
       const matchesTenantStatus = tenantStatusFilter === "ALL" || tenantStatusFilter === tenantState;
-      return matchesSearch && matchesLicense && matchesTenantStatus;
+      return matchesSearch && matchesLicense && matchesPlan && matchesTenantStatus;
     });
-  }, [licenseFilter, search, tenantStatusFilter, tenants]);
+  }, [licenseFilter, planFilter, search, tenantStatusFilter, tenants]);
 
   const kpis = useMemo(() => {
     const activeTenants = tenants.filter((tenant) => tenant.isActive).length;
-    const activeLicenses = tenants.filter((tenant) => (tenant.license?.status ?? "ACTIVE") === "ACTIVE").length;
+    const activeLicenses = tenants.filter((tenant) => (tenant.license?.status ?? "PENDING") === "ACTIVE").length;
     const expiringSoon = tenants.filter((tenant) => isExpiringSoon(tenant.license?.expiresAt)).length;
-    const suspended = tenants.filter((tenant) => (tenant.license?.status ?? "ACTIVE") === "SUSPENDED").length;
-    return { activeTenants, activeLicenses, expiringSoon, suspended };
+    const suspended = tenants.filter((tenant) => {
+      const status = tenant.license?.status ?? "PENDING";
+      return status === "PENDING" || status === "SUSPENDED" || status === "EXPIRED" || status === "PAST_DUE" || status === "CANCELED";
+    }).length;
+    const tenantsByPlan = PLAN_TIERS.reduce(
+      (acc, plan) => ({ ...acc, [plan]: tenants.filter((tenant) => normalizePlanTier(tenant.license?.plan) === plan).length }),
+      {} as Record<PlanTier, number>
+    );
+    return { activeTenants, activeLicenses, expiringSoon, suspended, tenantsByPlan };
   }, [tenants]);
 
   const activeTenantsCounter = useCountUp(kpis.activeTenants);
@@ -570,7 +580,7 @@ export const PlatformAdminPage = () => {
   const criticalTenantsCount = useMemo(
     () =>
       tenants.filter((tenant) => {
-        const licenseStatus = tenant.license?.status ?? "ACTIVE";
+        const licenseStatus = tenant.license?.status ?? "PENDING";
         return !tenant.isActive || licenseStatus === "SUSPENDED" || licenseStatus === "EXPIRED" || licenseStatus === "PAST_DUE" || licenseStatus === "CANCELED" || isExpiringSoon(tenant.license?.expiresAt);
       }).length,
     [tenants]
@@ -616,7 +626,7 @@ export const PlatformAdminPage = () => {
 
   const updateTenantPlan = async (tenant: TenantRow, nextPlan: PlanTier, forceActivate: boolean) => {
     const currentPlan = normalizePlanTier(tenant.license?.plan);
-    const licenseStatus = tenant.license?.status ?? "ACTIVE";
+    const licenseStatus = tenant.license?.status ?? "PENDING";
     const planChanged = hasPlanChange(currentPlan, nextPlan);
     const hasStatusChange = forceActivate && licenseStatus !== "ACTIVE";
     if (!planChanged && !hasStatusChange) return;
@@ -632,6 +642,17 @@ export const PlatformAdminPage = () => {
       });
       const result = await platformAdminUseCases.updateLicense(tenant.id, payload);
       const savedPlan = normalizePlanTier(typeof result?.after?.plan === "string" ? result.after.plan : nextPlan);
+      setSelectedTenant((current) =>
+        current?.id === tenant.id
+          ? {
+              ...current,
+              license: {
+                ...current.license,
+                ...(typeof result?.after === "object" && result.after ? result.after : {})
+              }
+            }
+          : current
+      );
       setPlanDrafts((old) => clearPlanDraft(old, tenant.id));
       setRowFeedback((old) => ({
         ...old,
@@ -655,6 +676,10 @@ export const PlatformAdminPage = () => {
 
   const requestPlanUpdate = (tenant: TenantRow, forceActivate: boolean) => {
     const nextPlan = planDrafts[tenant.id] ?? normalizePlanTier(tenant.license?.plan);
+    requestDirectPlanUpdate(tenant, nextPlan, forceActivate);
+  };
+
+  const requestDirectPlanUpdate = (tenant: TenantRow, nextPlan: PlanTier, forceActivate: boolean) => {
     if (!isPlanTier(nextPlan)) {
       setRowFeedback((old) => ({ ...old, [tenant.id]: { type: "error", message: "Piano non valido" } }));
       snackbar.error("Piano non valido");
@@ -781,6 +806,7 @@ export const PlatformAdminPage = () => {
 
   const resetFilters = () => {
     setSearch("");
+    setPlanFilter("ALL");
     setLicenseFilter("ALL");
     setTenantStatusFilter("ALL");
   };
@@ -886,7 +912,7 @@ export const PlatformAdminPage = () => {
     const riskScore = (tenant: TenantRow) => {
       let score = 0;
       if (!tenant.isActive) score += 2;
-      const licenseStatus = tenant.license?.status ?? "ACTIVE";
+      const licenseStatus = tenant.license?.status ?? "PENDING";
       if (licenseStatus === "SUSPENDED") score += 5;
       if (licenseStatus === "PAST_DUE") score += 5;
       if (licenseStatus === "CANCELED") score += 5;
@@ -984,7 +1010,7 @@ export const PlatformAdminPage = () => {
             </div>
             <div className="space-y-1.5">
               {tenantPriorityList.slice(0, 5).map((tenant) => {
-                const licenseStatus = tenant.license?.status ?? "ACTIVE";
+                const licenseStatus = tenant.license?.status ?? "PENDING";
                 return (
                   <button
                     key={`priority-${tenant.id}`}
@@ -1226,11 +1252,19 @@ export const PlatformAdminPage = () => {
                 </div>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-[1.6fr_1fr_1fr_auto]">
+              <div className="grid gap-2 md:grid-cols-[1.5fr_0.8fr_1fr_1fr_auto]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" placeholder="Cerca cliente o owner..." />
                 </div>
+                <Select value={planFilter} onChange={(e) => setPlanFilter(e.target.value as PlanTier | "ALL")}>
+                  <option value="ALL">Piano: tutti</option>
+                  {PLAN_TIERS.map((plan) => (
+                    <option key={`filter-${plan}`} value={plan}>
+                      {plan}
+                    </option>
+                  ))}
+                </Select>
                 <Select value={licenseFilter} onChange={(e) => setLicenseFilter(e.target.value as LicenseStatus | "ALL")}>
                   <option value="ALL">Licenza: tutte</option>
                   <option value="PENDING">PENDING</option>
@@ -1249,6 +1283,27 @@ export const PlatformAdminPage = () => {
                 <Button variant="ghost" size="sm" onClick={resetFilters}>
                   Reset
                 </Button>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3">
+                {PLAN_TIERS.map((plan) => (
+                  <button
+                    key={`quick-filter-${plan}`}
+                    type="button"
+                    onClick={() => setPlanFilter(planFilter === plan ? "ALL" : plan)}
+                    className={`rounded-2xl border px-3 py-2 text-left transition ${
+                      planFilter === plan
+                        ? "border-indigo-400 bg-indigo-50 text-indigo-900 shadow-sm dark:border-indigo-400/60 dark:bg-indigo-500/15 dark:text-indigo-100"
+                        : "border-border/70 bg-background/70 text-foreground hover:border-indigo-300 hover:bg-indigo-50/60 dark:hover:bg-indigo-500/10"
+                    }`}
+                  >
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{plan}</span>
+                    <span className="mt-1 flex items-end justify-between gap-2">
+                      <strong className="text-lg">{kpis.tenantsByPlan[plan]}</strong>
+                      <span className="text-xs text-muted-foreground">{formatCurrency(PLAN_MONTHLY_PRICING_EUR[plan])}/mese</span>
+                    </span>
+                  </button>
+                ))}
               </div>
             </CardHeader>
 
@@ -1305,10 +1360,12 @@ export const PlatformAdminPage = () => {
                         const busy = !!rowLoading[tenant.id];
                         const currentPlan = normalizePlanTier(tenant.license?.plan);
                         const selectedPlan = planDrafts[tenant.id] ?? currentPlan;
-                        const licenseStatus = tenant.license?.status ?? "ACTIVE";
+                        const licenseStatus = tenant.license?.status ?? "PENDING";
                         const hasPlanChanges = hasPlanChange(currentPlan, selectedPlan);
+                        const canActivateWithPlan = licenseStatus !== "ACTIVE";
                         const profileComplete = tenant.company?.profileCompleted;
                         const companyName = tenant.company?.legalName || tenant.company?.tradeName || tenant.name;
+                        const displayedPrice = tenant.license?.priceMonthly ?? PLAN_MONTHLY_PRICING_EUR[currentPlan];
 
                         return (
                           <TableRow key={tenant.id} className="platform-tenant-row">
@@ -1336,6 +1393,17 @@ export const PlatformAdminPage = () => {
                             </TableCell>
                             <TableCell className="platform-tenant-cell">
                               <div className="platform-plan-cell">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <Badge
+                                    variant={currentPlan === "ENTERPRISE" ? "success" : currentPlan === "PRO" ? "secondary" : "outline"}
+                                    className="text-[10px] font-bold tracking-[0.08em]"
+                                  >
+                                    {currentPlan}
+                                  </Badge>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {formatCurrency(displayedPrice)}/mese
+                                  </span>
+                                </div>
                                 <Select
                                   value={selectedPlan}
                                   onChange={(event) => {
@@ -1353,6 +1421,26 @@ export const PlatformAdminPage = () => {
                                   ))}
                                 </Select>
                                 {hasPlanChanges ? <p className="text-[11px] text-amber-600 dark:text-amber-300">Modifica non salvata</p> : null}
+                                <div className="grid grid-cols-2 gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={busy || !hasPlanChanges}
+                                    className="h-7 min-w-0 text-[11px]"
+                                    onClick={() => requestPlanUpdate(tenant, false)}
+                                  >
+                                    Salva
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant={canActivateWithPlan ? "secondary" : "ghost"}
+                                    disabled={busy || (!hasPlanChanges && !canActivateWithPlan)}
+                                    className="h-7 min-w-0 text-[11px]"
+                                    onClick={() => requestPlanUpdate(tenant, true)}
+                                  >
+                                    {canActivateWithPlan ? "Salva + attiva" : "Già attiva"}
+                                  </Button>
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell className="platform-tenant-cell text-center">
@@ -1460,7 +1548,7 @@ export const PlatformAdminPage = () => {
                   </div>
                   <div className="grid gap-1.5">
                     <Label>Stato licenza</Label>
-                    <Select name="status" defaultValue={editingTenant.license?.status ?? "ACTIVE"}>
+                    <Select name="status" defaultValue={editingTenant.license?.status ?? "PENDING"}>
                       <option value="PENDING">PENDING</option>
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="TRIAL">TRIAL</option>
@@ -2379,6 +2467,9 @@ export const PlatformAdminPage = () => {
                   <div className="rounded-xl border border-border/70 bg-background/70 p-3">
                     <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Piano</p>
                     <p className="mt-1 font-semibold text-foreground">{normalizePlanTier(selectedTenant.license?.plan)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {formatCurrency(selectedTenant.license?.priceMonthly ?? PLAN_MONTHLY_PRICING_EUR[normalizePlanTier(selectedTenant.license?.plan)])}/mese
+                    </p>
                   </div>
                   <div className="rounded-xl border border-border/70 bg-background/70 p-3">
                     <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Licenza</p>
@@ -2389,6 +2480,42 @@ export const PlatformAdminPage = () => {
                     <p className="mt-1 font-semibold text-foreground">{formatDate(selectedTenant.license?.expiresAt)}</p>
                   </div>
                 </div>
+
+                <Card className="platform-main-card">
+                  <CardHeader>
+                    <CardTitle className="text-base">Piano SaaS</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Cambia piano manualmente dalla Platform Console. Se il cliente è `PENDING`, `PAST_DUE` o scaduto puoi usare
+                      <span className="font-semibold text-foreground"> Salva + attiva</span> per abilitare subito la licenza.
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {PLAN_TIERS.map((plan) => {
+                        const isCurrent = normalizePlanTier(selectedTenant.license?.plan) === plan;
+                        return (
+                          <button
+                            key={`drawer-plan-${selectedTenant.id}-${plan}`}
+                            type="button"
+                            disabled={!!rowLoading[selectedTenant.id]}
+                            onClick={() => requestDirectPlanUpdate(selectedTenant, plan, selectedTenant.license?.status !== "ACTIVE")}
+                            className={`rounded-2xl border p-3 text-left transition ${
+                              isCurrent
+                                ? "border-indigo-400 bg-indigo-50 text-indigo-950 dark:border-indigo-400/60 dark:bg-indigo-500/15 dark:text-indigo-100"
+                                : "border-border/70 bg-background/70 hover:border-indigo-300 hover:bg-indigo-50/60 dark:hover:bg-indigo-500/10"
+                            }`}
+                          >
+                            <span className="flex items-center justify-between gap-2">
+                              <strong className="text-sm">{plan}</strong>
+                              {isCurrent ? <Badge variant="secondary">attuale</Badge> : null}
+                            </span>
+                            <span className="mt-2 block text-xs text-muted-foreground">{formatCurrency(PLAN_MONTHLY_PRICING_EUR[plan])}/mese standard</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
 
                 <Card className="platform-main-card">
                   <CardHeader>
