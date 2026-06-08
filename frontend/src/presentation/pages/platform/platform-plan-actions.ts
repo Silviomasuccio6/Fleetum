@@ -1,4 +1,5 @@
 import { LicenseStatus } from "../../../application/usecases/platform/platform-admin-usecases";
+import { PLAN_MONTHLY_PRICING_EUR } from "../../../domain/constants/entitlements";
 
 export type PlanTier = "STARTER" | "PRO" | "ENTERPRISE";
 
@@ -50,13 +51,13 @@ type LicenseSnapshot = {
 
 export const buildPlanUpdatePayload = (input: { nextPlan: PlanTier; license?: LicenseSnapshot; forceActive?: boolean }) => {
   const license = input.license ?? null;
-  const status = input.forceActive ? "ACTIVE" : (license?.status ?? "ACTIVE");
+  const status = input.forceActive ? "ACTIVE" : (license?.status ?? "PENDING");
   return {
     plan: input.nextPlan,
     seats: license?.seats ?? 3,
     status,
     expiresAt: license?.expiresAt ?? null,
-    priceMonthly: license?.priceMonthly ?? null,
+    priceMonthly: license?.priceMonthly ?? PLAN_MONTHLY_PRICING_EUR[input.nextPlan],
     billingCycle: license?.billingCycle ?? "monthly"
   };
 };

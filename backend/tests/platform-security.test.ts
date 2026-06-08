@@ -198,7 +198,7 @@ test("quick action trial sets TRIAL status with 14-day expiry", async () => {
   assert.ok(repo.audits.some((row) => row.action === "PLATFORM_LICENSE_QUICK_ACTION"));
 });
 
-test("updateLicense updates tenant plan without losing billing fields", async () => {
+test("updateLicense updates tenant plan and realigns standard monthly price", async () => {
   const repo = new FakePlatformRepository();
   repo.license = {
     plan: "ENTERPRISE",
@@ -233,7 +233,7 @@ test("updateLicense updates tenant plan without losing billing fields", async ()
 
   assert.equal(result.updated, true);
   assert.equal(repo.license.plan, "STARTER");
-  assert.equal(repo.license.priceMonthly, 399);
+  assert.equal(repo.license.priceMonthly, 129);
   assert.equal(repo.license.billingCycle, "yearly");
   assert.equal(repo.audits.at(-1)?.action, "PLATFORM_LICENSE_UPDATED");
   assert.equal(sentAlerts.length, 1);

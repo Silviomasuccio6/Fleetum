@@ -186,13 +186,13 @@ export const LoginCard = () => {
 
           {welcome === "trial" ? (
             <p className="premium-login-error premium-login-error--block" style={{ color: "#065f46", background: "rgba(209,250,229,0.8)", borderColor: "rgba(16,185,129,0.45)" }}>
-              Prova gratuita di 14 giorni pronta. Accedi per entrare nel gestionale.
+              Accedi per completare la prova di 14 giorni tramite checkout Stripe con carta obbligatoria.
             </p>
           ) : null}
 
           {welcome === "billing" ? (
             <p className="premium-login-error premium-login-error--block" style={{ color: "#3730a3", background: "rgba(224,231,255,0.82)", borderColor: "rgba(99,102,241,0.35)" }}>
-              Accedi e ti porto alla scelta piano con checkout Stripe.
+              Dopo l'accesso ti porto alla scelta piano: il gestionale si abilita solo dopo conferma Stripe.
             </p>
           ) : null}
 
@@ -286,7 +286,7 @@ export const LoginCard = () => {
               className="premium-login-link"
               onClick={() => navigate("/signup")}
             >
-              Inizia gratis →
+              Attiva prova con carta →
             </button>
           </p>
           <p className="premium-login-signup-text !mt-2 text-[11px] leading-5">

@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode, FormEvent, useEffect, useState } from "react";
 import { AtSign, Briefcase, Building2, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, Star, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
@@ -87,10 +88,10 @@ const initialForm = {
 
 export const SignupPage = () => {
   const navigate = useNavigate();
+  const setSession = useAuthStore((state) => state.setSession);
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -207,8 +208,8 @@ export const SignupPage = () => {
           accentColor: form.accentColor
         }
       });
+      setSession(result.user, true);
       setTenantId(result.tenantId);
-      setRegisteredEmail(form.email);
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
@@ -221,19 +222,14 @@ export const SignupPage = () => {
 
   const startAnotherSignup = () => {
     setTenantId(null);
-    setRegisteredEmail(null);
     setError(null);
     setForm(initialForm);
     setPrivacyAccepted(false);
     setCurrentStep(0);
   };
 
-  const goToLoginAfterSignup = (next: "/dashboard" | "/upgrade") => {
-    const params = new URLSearchParams();
-    if (registeredEmail) params.set("email", registeredEmail);
-    params.set("next", next);
-    params.set("welcome", next === "/upgrade" ? "billing" : "trial");
-    navigate(`/login?${params.toString()}`);
+  const goToBillingAfterSignup = () => {
+    navigate("/upgrade?welcome=billing", { replace: true });
   };
 
   return (
@@ -278,15 +274,12 @@ export const SignupPage = () => {
                 <p className="premium-signup-success__eyebrow">Tenant creato correttamente</p>
                 <h3>Workspace pronto</h3>
                 <p>
-                  Il tenant <strong>{tenantId}</strong> è stato creato con una prova gratuita di 14 giorni. Puoi entrare subito
-                  oppure scegliere un piano Stripe dopo il login.
+                  Il tenant <strong>{tenantId}</strong> è stato creato. Per usare il gestionale devi scegliere un piano
+                  e completare Stripe Checkout con carta valida. La prova dura 14 giorni e il primo addebito parte alla fine del trial.
                 </p>
                 <div className="premium-signup-success__actions">
-                  <button type="button" className="premium-login-submit" onClick={() => goToLoginAfterSignup("/dashboard")}>
+                  <button type="button" className="premium-login-submit" onClick={goToBillingAfterSignup}>
                     <span className="premium-login-submit-shimmer" aria-hidden />
-                    Avvia prova gratuita
-                  </button>
-                  <button type="button" className="premium-login-social-btn justify-center" onClick={() => goToLoginAfterSignup("/upgrade")}>
                     Scegli piano con Stripe
                   </button>
                   <button type="button" className="premium-login-social-btn justify-center" onClick={startAnotherSignup}>
@@ -294,8 +287,8 @@ export const SignupPage = () => {
                   </button>
                 </div>
                 <p className="mt-3 text-xs leading-5 text-slate-500">
-                  Il login resta sempre disponibile con email e password. Per abbonarti ti accompagniamo prima
-                  nell'area autenticata, poi apriamo il checkout Stripe in modo sicuro.
+                  Il gestionale resta bloccato finché Stripe non conferma una subscription attiva o in trial con metodo di pagamento raccolto.
+                  Non abilitiamo licenze dal redirect di successo: aspettiamo sempre il webhook verificato.
                 </p>
               </div>
             ) : (

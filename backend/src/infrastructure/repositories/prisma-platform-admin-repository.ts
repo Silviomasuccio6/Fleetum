@@ -16,7 +16,7 @@ const parseLicenseFromDetails = (details: unknown): PlatformLicense | null => {
   return {
     plan: String(source.plan ?? "STARTER"),
     seats: Number(source.seats ?? 3),
-    status: String(source.status ?? "ACTIVE") as PlatformLicense["status"],
+    status: String(source.status ?? "PENDING") as PlatformLicense["status"],
     expiresAt: source.expiresAt ? String(source.expiresAt) : null,
     updatedAt: source.updatedAt ? String(source.updatedAt) : undefined,
     priceMonthly:

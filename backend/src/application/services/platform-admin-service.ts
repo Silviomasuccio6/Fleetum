@@ -53,7 +53,7 @@ type Snapshot = {
 const defaultLicense: PlatformLicense = {
   plan: "STARTER",
   seats: 3,
-  status: "ACTIVE",
+  status: "PENDING",
   expiresAt: null,
   updatedAt: undefined,
   priceMonthly: null,
@@ -368,13 +368,14 @@ export class PlatformAdminService {
     if (!tenant) throw new AppError("Tenant non trovato", 404, "NOT_FOUND");
 
     const before = (await this.repository.getLatestLicense(input.tenantId)) ?? defaultLicense;
+    const plan = ensureKnownPlan(input.plan);
     const after: PlatformLicense = {
-      plan: ensureKnownPlan(input.plan),
+      plan,
       seats: input.seats,
       status: input.status,
       expiresAt: input.expiresAt ?? null,
       updatedAt: new Date().toISOString(),
-      priceMonthly: input.priceMonthly === undefined ? (before.priceMonthly ?? null) : input.priceMonthly,
+      priceMonthly: input.priceMonthly === undefined || input.priceMonthly === null ? getPlanMonthlyPrice(plan) : input.priceMonthly,
       billingCycle: input.billingCycle ?? before.billingCycle ?? "monthly"
     };
 
@@ -622,7 +623,7 @@ export class PlatformAdminService {
         mrrByPlan[plan] += revenue.estimatedMrr;
       }
 
-      if (snapshot.status === "SUSPENDED" || snapshot.status === "EXPIRED" || snapshot.status === "PAST_DUE" || snapshot.status === "CANCELED") {
+      if (snapshot.status === "PENDING" || snapshot.status === "SUSPENDED" || snapshot.status === "EXPIRED" || snapshot.status === "PAST_DUE" || snapshot.status === "CANCELED") {
         mrrLost += revenue.estimatedMrr;
       }
     }

@@ -59,7 +59,26 @@ export class AuthController {
         userAgent: req.headers["user-agent"]
       });
     }
-    res.status(201).json(result);
+    const session = await this.authSessionService.createSession({
+      userId: result.user.id,
+      tenantId: result.tenantId,
+      roles: result.user.roles,
+      permissions: result.user.permissions,
+      userAgent: req.headers["user-agent"],
+      ipAddress: req.ip
+    });
+    const csrfToken = issueCsrfToken();
+    setAccessCookie(res, session.accessToken);
+    setRefreshCookie(res, session.refreshToken, session.refreshExpiresAt);
+    setCsrfCookie(res, csrfToken);
+    res.status(201).json({
+      tenantId: result.tenantId,
+      refreshExpiresAt: session.refreshExpiresAt,
+      user: result.user,
+      csrfToken,
+      requiresBilling: true,
+      next: "/upgrade"
+    });
   };
 
   login = async (req: Request, res: Response) => {
@@ -195,7 +214,12 @@ export class AuthController {
 
     const refreshed = await this.authSessionService.refresh(refreshToken, req.headers["user-agent"], req.ip);
     const access = await this.licensePolicyService.evaluateAccess(refreshed.user.tenantId);
-    if (access.blocked) {
+    const canAuthenticateForBilling =
+      access.reason === "LICENSE_PENDING" ||
+      access.reason === "LICENSE_EXPIRED" ||
+      access.reason === "LICENSE_PAST_DUE" ||
+      access.reason === "LICENSE_CANCELED";
+    if (access.blocked && !canAuthenticateForBilling) {
       if (access.reason === "TENANT_INACTIVE") throw new AppError("Tenant disattivato. Contatta l'amministratore.", 403, "TENANT_INACTIVE");
       if (access.reason === "LICENSE_SUSPENDED") throw new AppError("Licenza sospesa. Contatta il supporto.", 403, "LICENSE_SUSPENDED");
       throw new AppError("Licenza scaduta. Rinnova per continuare.", 402, "LICENSE_EXPIRED");

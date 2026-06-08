@@ -16,7 +16,7 @@ const authHeaders = () => {
   return headers;
 };
 
-export type LicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+export type LicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 export type QuickAction =
   | "ACTIVATE_LICENSE"
   | "SUSPEND_LICENSE"

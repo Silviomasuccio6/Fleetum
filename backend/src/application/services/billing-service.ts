@@ -13,7 +13,7 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput, readTenantSubscription, upsertTenantSubscription } from "./tenant-subscription-service.js";
 
-type BillingLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+type BillingLicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 type StripeClient = Stripe;
 
 type BillingEventStatus = "RECEIVED" | "PROCESSED" | "IGNORED" | "FAILED";
@@ -88,6 +88,7 @@ const jsonPayload = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.s
 const stripeStatusToLicense = (stripeStatus: string): BillingLicenseStatus => {
   if (stripeStatus === "active") return "ACTIVE";
   if (stripeStatus === "trialing") return "TRIAL";
+  if (stripeStatus === "incomplete") return "PENDING";
   if (stripeStatus === "past_due" || stripeStatus === "unpaid") return "PAST_DUE";
   if (stripeStatus === "canceled") return "CANCELED";
   if (stripeStatus === "incomplete_expired") return "EXPIRED";
@@ -180,6 +181,10 @@ export class BillingService {
     const cancelUrl = `${env.APP_URL}/upgrade?checkout=cancelled&plan=${plan}`;
 
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
+      if (env.NODE_ENV === "production") {
+        throw new AppError("Stripe non configurato in produzione", 500, "STRIPE_NOT_CONFIGURED");
+      }
+
       const localCompleteUrl = new URL("/api/billing/local-complete", "http://local-checkout");
       localCompleteUrl.searchParams.set("plan", plan);
       localCompleteUrl.searchParams.set("billingCycle", billingCycle);
@@ -209,6 +214,7 @@ export class BillingService {
       cancel_url: cancelUrl,
       client_reference_id: input.tenantId,
       customer_email: input.customerEmail ?? undefined,
+      payment_method_collection: "always",
       line_items: [{ price: String(priceId), quantity: 1 }],
       metadata: {
         tenantId: input.tenantId,
@@ -218,6 +224,9 @@ export class BillingService {
       },
       subscription_data: {
         trial_period_days: env.BILLING_TRIAL_DAYS > 0 ? env.BILLING_TRIAL_DAYS : undefined,
+        trial_settings: env.BILLING_TRIAL_DAYS > 0
+          ? { end_behavior: { missing_payment_method: "cancel" } }
+          : undefined,
         metadata: {
           tenantId: input.tenantId,
           plan,
@@ -243,6 +252,57 @@ export class BillingService {
       mode: "stripe",
       checkoutUrl: session.url
     };
+  }
+
+  async createPaymentMethodUpdateSession(input: { tenantId: string; userId: string }) {
+    if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
+      throw new AppError("Stripe non configurato", 500, "STRIPE_NOT_CONFIGURED");
+    }
+
+    const subscription = await this.deps.findSubscriptionByTenantId(input.tenantId);
+    if (!subscription?.stripeCustomerId) {
+      throw new AppError(
+        "Completa prima il checkout Stripe per associare un cliente di fatturazione.",
+        409,
+        "STRIPE_CUSTOMER_MISSING"
+      );
+    }
+
+    const session = await this.stripeClient.checkout.sessions.create({
+      mode: "setup",
+      customer: subscription.stripeCustomerId,
+      client_reference_id: input.tenantId,
+      payment_method_types: ["card"],
+      success_url: `${env.APP_URL}/upgrade?payment_method=updated`,
+      cancel_url: `${env.APP_URL}/upgrade?payment_method=cancelled`,
+      metadata: {
+        tenantId: input.tenantId,
+        userId: input.userId,
+        action: "update_payment_method"
+      },
+      setup_intent_data: {
+        metadata: {
+          tenantId: input.tenantId,
+          userId: input.userId,
+          action: "update_payment_method"
+        }
+      }
+    });
+
+    if (!session.url) {
+      throw new AppError("Creazione sessione aggiornamento carta fallita", 502, "STRIPE_PAYMENT_METHOD_SESSION_FAILED");
+    }
+
+    await this.auditRepository.create({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      action: "BILLING_PAYMENT_METHOD_SESSION_CREATED",
+      resource: "billing",
+      resourceId: session.id,
+      details: { stripeSessionId: session.id, stripeCustomerId: subscription.stripeCustomerId }
+    });
+
+    return { mode: "stripe", checkoutUrl: session.url };
   }
 
   async completeLocalCheckout(input: { tenantId: string; userId: string; plan: string; billingCycle?: string }) {
@@ -312,6 +372,12 @@ export class BillingService {
 
     if (event.type === "checkout.session.completed") {
       const session = dataObject as unknown as Stripe.Checkout.Session & Record<string, unknown>;
+      const metadata = typeof session.metadata === "object" && session.metadata ? session.metadata as Record<string, unknown> : {};
+      if (session.mode === "setup" || metadata.action === "update_payment_method") {
+        const tenantId = await this.applyPaymentMethodUpdate(session);
+        return { tenantId };
+      }
+
       const subscriptionId = stripeId(session.subscription);
       const tenantId = await this.resolveTenantId(session);
       if (!tenantId) return { ignored: true, tenantId: null };
@@ -346,7 +412,57 @@ export class BillingService {
       return { tenantId };
     }
 
+    if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+      const tenantId = await this.applyStripeObject(dataObject, "ACTIVE");
+      return { tenantId };
+    }
+
     return { ignored: true, tenantId: await this.resolveTenantId(dataObject) };
+  }
+
+  private async applyPaymentMethodUpdate(session: Stripe.Checkout.Session & Record<string, unknown>) {
+    if (!this.stripeClient) throw new AppError("STRIPE_SECRET_KEY non configurata", 500, "STRIPE_CLIENT_MISSING");
+
+    const tenantId = await this.resolveTenantId(session);
+    if (!tenantId) return null;
+
+    const setupIntentId = stripeId(session.setup_intent);
+    const customerId = stripeId(session.customer);
+    if (!setupIntentId || !customerId) {
+      throw new AppError("Sessione Stripe setup incompleta", 400, "STRIPE_SETUP_SESSION_INCOMPLETE");
+    }
+
+    const setupIntent = await this.stripeClient.setupIntents.retrieve(setupIntentId);
+    const paymentMethodId = stripeId(setupIntent.payment_method);
+    if (!paymentMethodId) {
+      throw new AppError("Metodo di pagamento Stripe mancante", 400, "STRIPE_PAYMENT_METHOD_MISSING");
+    }
+
+    await this.stripeClient.customers.update(customerId, {
+      invoice_settings: { default_payment_method: paymentMethodId }
+    });
+
+    const subscription = await this.deps.findSubscriptionByTenantId(tenantId);
+    if (subscription?.stripeSubscriptionId) {
+      await this.stripeClient.subscriptions.update(subscription.stripeSubscriptionId, {
+        default_payment_method: paymentMethodId
+      });
+    }
+
+    await this.auditRepository.create({
+      tenantId,
+      userId: typeof session.metadata?.userId === "string" ? session.metadata.userId : null,
+      action: "BILLING_PAYMENT_METHOD_UPDATED",
+      resource: "billing",
+      resourceId: customerId,
+      details: {
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscription?.stripeSubscriptionId ?? null,
+        paymentMethodSource: "stripe_checkout_setup"
+      }
+    });
+
+    return tenantId;
   }
 
   private async resolveTenantId(source: Record<string, unknown>) {
