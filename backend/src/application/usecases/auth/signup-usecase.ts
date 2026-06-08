@@ -6,7 +6,6 @@ import { SignupInput } from "../../dtos/auth-dto.js";
 import { getPlanMonthlyPrice } from "../../services/feature-entitlements-service.js";
 import { TenantProfileService } from "../../services/tenant-profile-service.js";
 import { upsertTenantSubscription } from "../../services/tenant-subscription-service.js";
-import { env } from "../../../shared/config/env.js";
 
 type SocialSignupInput = {
   email: string;
@@ -63,16 +62,15 @@ export class SignupUseCase {
       }
     });
 
-    const trialEndsAt = new Date(Date.now() + env.BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const subscription = await upsertTenantSubscription({
       tenantId: tenant.id,
       plan: "STARTER",
       seats: 3,
-      status: "TRIAL",
-      expiresAt: trialEndsAt,
+      status: "PENDING",
+      expiresAt: null,
       priceMonthly: getPlanMonthlyPrice("STARTER"),
       billingCycle: "monthly",
-      provider: "local"
+      provider: "stripe"
     });
 
     await prisma.auditLog.create({
@@ -83,12 +81,12 @@ export class SignupUseCase {
         resource: "tenant",
         resourceId: tenant.id,
         details: {
-          source: "signup_trial",
+          source: "signup_pending_billing",
           after: {
             plan: "STARTER",
             seats: 3,
-            status: "TRIAL",
-            expiresAt: trialEndsAt,
+            status: "PENDING",
+            expiresAt: null,
             priceMonthly: getPlanMonthlyPrice("STARTER"),
             billingCycle: "monthly",
             updatedAt: new Date().toISOString(),
@@ -140,16 +138,15 @@ export class SignupUseCase {
       company: { legalName: tenantName, tradeName: tenantName, adminFirstName: firstName, adminLastName: lastName, adminEmail: normalizedEmail }
     });
 
-    const trialEndsAt = new Date(Date.now() + env.BILLING_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const subscription = await upsertTenantSubscription({
       tenantId: tenant.id,
       plan: "STARTER",
       seats: 3,
-      status: "TRIAL",
-      expiresAt: trialEndsAt,
+      status: "PENDING",
+      expiresAt: null,
       priceMonthly: getPlanMonthlyPrice("STARTER"),
       billingCycle: "monthly",
-      provider: "local"
+      provider: "stripe"
     });
 
     await prisma.auditLog.create({
@@ -160,12 +157,12 @@ export class SignupUseCase {
         resource: "tenant",
         resourceId: tenant.id,
         details: {
-          source: "signup_trial",
+          source: "signup_pending_billing",
           after: {
             plan: "STARTER",
             seats: 3,
-            status: "TRIAL",
-            expiresAt: trialEndsAt,
+            status: "PENDING",
+            expiresAt: null,
             priceMonthly: getPlanMonthlyPrice("STARTER"),
             billingCycle: "monthly",
             updatedAt: new Date().toISOString(),

@@ -53,7 +53,7 @@ type Snapshot = {
 const defaultLicense: PlatformLicense = {
   plan: "STARTER",
   seats: 3,
-  status: "ACTIVE",
+  status: "PENDING",
   expiresAt: null,
   updatedAt: undefined,
   priceMonthly: null,
@@ -622,7 +622,7 @@ export class PlatformAdminService {
         mrrByPlan[plan] += revenue.estimatedMrr;
       }
 
-      if (snapshot.status === "SUSPENDED" || snapshot.status === "EXPIRED" || snapshot.status === "PAST_DUE" || snapshot.status === "CANCELED") {
+      if (snapshot.status === "PENDING" || snapshot.status === "SUSPENDED" || snapshot.status === "EXPIRED" || snapshot.status === "PAST_DUE" || snapshot.status === "CANCELED") {
         mrrLost += revenue.estimatedMrr;
       }
     }

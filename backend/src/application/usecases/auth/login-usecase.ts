@@ -70,7 +70,12 @@ export class LoginUseCase {
     if (!user) throw new AppError("Utente non trovato", 404, "NOT_FOUND");
     if (user.status !== "ACTIVE") throw new AppError("Utente non attivo", 403, "FORBIDDEN");
     const access = await this.licensePolicyService.evaluateAccess(user.tenantId);
-    if (access.blocked) {
+    const canAuthenticateForBilling =
+      access.reason === "LICENSE_PENDING" ||
+      access.reason === "LICENSE_EXPIRED" ||
+      access.reason === "LICENSE_PAST_DUE" ||
+      access.reason === "LICENSE_CANCELED";
+    if (access.blocked && !canAuthenticateForBilling) {
       if (access.reason === "TENANT_INACTIVE") throw new AppError("Tenant disattivato. Contatta l'amministratore.", 403, "TENANT_INACTIVE");
       if (access.reason === "LICENSE_SUSPENDED") throw new AppError("Licenza sospesa. Contatta il supporto.", 403, "LICENSE_SUSPENDED");
       throw new AppError("Licenza scaduta. Rinnova per continuare.", 402, "LICENSE_EXPIRED");

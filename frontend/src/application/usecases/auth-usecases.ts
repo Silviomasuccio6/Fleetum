@@ -13,7 +13,14 @@ export const authUseCases = {
     privacyAccepted?: boolean;
     company?: Partial<TenantCompanyProfilePayload>;
   }) =>
-    httpClient.post<{ tenantId: string }>("/auth/signup", input),
+    httpClient.post<{
+      tenantId: string;
+      refreshExpiresAt: string;
+      user: any;
+      csrfToken: string;
+      requiresBilling: boolean;
+      next: "/upgrade";
+    }>("/auth/signup", input),
   login: (input: { email: string; password: string }) =>
     httpClient.post<{ refreshExpiresAt: string; user: any; csrfToken: string }>("/auth/login", input),
   forgotPassword: (email: string) => httpClient.post("/auth/forgot-password", { email }),
@@ -29,7 +36,7 @@ export const authUseCases = {
       license: {
         plan: string;
         seats: number;
-        status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+        status: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
         expiresAt: string | null;
         daysRemaining: number | null;
         expiringSoon: boolean;
@@ -39,7 +46,7 @@ export const authUseCases = {
     httpClient.get<{
       plan: string;
       seats: number;
-      status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+      status: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
       expiresAt: string | null;
       daysRemaining: number | null;
       expiringSoon: boolean;

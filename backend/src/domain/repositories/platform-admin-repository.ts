@@ -17,7 +17,7 @@ export type PlatformTenantRow = {
   _count: { users: number; vehicles: number; stoppages: number };
 };
 
-export type PlatformLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+export type PlatformLicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
 export type PlatformLicense = {
   plan: string;

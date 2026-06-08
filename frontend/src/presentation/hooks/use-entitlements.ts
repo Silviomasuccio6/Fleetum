@@ -13,7 +13,7 @@ import {
 
 export const useEntitlements = () => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const { plan, priceMonthly, features, loading, loaded, error, setLoading, setEntitlements, setError, reset } = useEntitlementsStore();
+  const { plan, licenseStatus, priceMonthly, features, loading, loaded, error, setLoading, setEntitlements, setError, reset } = useEntitlementsStore();
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -34,7 +34,8 @@ export const useEntitlements = () => {
         setEntitlements({
           plan: normalizedPlan,
           priceMonthly: data.priceMonthly,
-          features: (data.features?.length ? data.features : getFeatureListForPlan(normalizedPlan)) ?? []
+          features: (data.features?.length ? data.features : getFeatureListForPlan(normalizedPlan)) ?? [],
+          licenseStatus: data.license?.status ?? null
         });
       })
       .catch(async (err) => {
@@ -46,7 +47,8 @@ export const useEntitlements = () => {
           setEntitlements({
             plan: normalizedPlan,
             priceMonthly: PLAN_MONTHLY_PRICING_EUR[normalizedPlan],
-            features: getFeatureListForPlan(normalizedPlan)
+            features: getFeatureListForPlan(normalizedPlan),
+            licenseStatus: license.status
           });
           return;
         } catch {
@@ -65,6 +67,7 @@ export const useEntitlements = () => {
 
   return {
     plan,
+    licenseStatus,
     priceMonthly,
     features,
     can,

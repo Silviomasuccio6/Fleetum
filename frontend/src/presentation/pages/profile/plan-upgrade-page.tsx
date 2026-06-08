@@ -70,7 +70,7 @@ const getPlanHighlights = (plan: SaasPlan) => {
 };
 
 export const PlanUpgradePage = () => {
-  const { plan, loading } = useEntitlements();
+  const { plan, licenseStatus, loading } = useEntitlements();
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export const PlanUpgradePage = () => {
     total: number;
     currency: string;
   }>>([]);
-  const currentPlan = loading ? null : plan;
+  const currentPlan = loading || (licenseStatus !== "ACTIVE" && licenseStatus !== "TRIAL") ? null : plan;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
 
@@ -155,8 +155,8 @@ export const PlanUpgradePage = () => {
       {welcomeStatus === "billing" ? (
         <Card className="border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
           <CardContent className="py-4 text-sm">
-            <strong>Account creato.</strong> Hai gia una prova gratuita di 14 giorni attiva: se vuoi abbonarti subito,
-            scegli un piano e apriremo il checkout Stripe in sicurezza.
+            <strong>Account creato.</strong> Scegli un piano per attivare l'abbonamento o la prova di 14 giorni
+            tramite checkout Stripe. Il gestionale si abilita dopo la conferma del webhook.
           </CardContent>
         </Card>
       ) : null}

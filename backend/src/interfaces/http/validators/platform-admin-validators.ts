@@ -12,7 +12,7 @@ export const platformLoginSchema = z.object({
 export const updateLicenseSchema = z.object({
   plan: z.enum(["STARTER", "PRO", "ENTERPRISE"]),
   seats: z.number().int().min(1).max(10000),
-  status: z.enum(["ACTIVE", "SUSPENDED", "EXPIRED", "TRIAL", "PAST_DUE", "CANCELED"]),
+  status: z.enum(["PENDING", "ACTIVE", "SUSPENDED", "EXPIRED", "TRIAL", "PAST_DUE", "CANCELED"]),
   expiresAt: z.string().datetime().nullable().optional(),
   priceMonthly: z.number().positive().max(1_000_000).nullable().optional(),
   billingCycle: z.enum(["monthly", "yearly"]).optional()

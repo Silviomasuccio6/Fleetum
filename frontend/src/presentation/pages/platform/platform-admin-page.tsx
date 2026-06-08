@@ -141,6 +141,7 @@ const actionLabels: Record<QuickAction, string> = {
 
 const statusBadgeVariant = (status?: LicenseStatus) => {
   if (status === "ACTIVE") return "success" as const;
+  if (status === "PENDING") return "warning" as const;
   if (status === "TRIAL") return "secondary" as const;
   if (status === "PAST_DUE") return "warning" as const;
   if (status === "EXPIRED") return "destructive" as const;
@@ -150,6 +151,7 @@ const statusBadgeVariant = (status?: LicenseStatus) => {
 
 const licenseStatusLabel = (status?: LicenseStatus) => {
   if (status === "ACTIVE") return "Attiva";
+  if (status === "PENDING") return "In attesa checkout";
   if (status === "SUSPENDED") return "Sospesa";
   if (status === "EXPIRED") return "Scaduta";
   if (status === "TRIAL") return "Trial";
@@ -1231,6 +1233,7 @@ export const PlatformAdminPage = () => {
                 </div>
                 <Select value={licenseFilter} onChange={(e) => setLicenseFilter(e.target.value as LicenseStatus | "ALL")}>
                   <option value="ALL">Licenza: tutte</option>
+                  <option value="PENDING">PENDING</option>
                   <option value="ACTIVE">ACTIVE</option>
                   <option value="SUSPENDED">SUSPENDED</option>
                   <option value="EXPIRED">EXPIRED</option>
@@ -1458,6 +1461,7 @@ export const PlatformAdminPage = () => {
                   <div className="grid gap-1.5">
                     <Label>Stato licenza</Label>
                     <Select name="status" defaultValue={editingTenant.license?.status ?? "ACTIVE"}>
+                      <option value="PENDING">PENDING</option>
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="TRIAL">TRIAL</option>
                       <option value="SUSPENDED">SUSPENDED</option>

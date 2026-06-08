@@ -5,19 +5,19 @@
 Configurare login/registrazione Google in modo sicuro e mantenere il flusso commerciale corretto:
 
 - il login email/password continua ad accedere normalmente;
-- la registrazione crea un tenant con prova gratuita di 14 giorni;
-- dopo la registrazione l'utente puo entrare in prova oppure scegliere un piano tramite Stripe Checkout;
+- la registrazione crea un tenant in stato `PENDING`;
+- dopo la registrazione l'utente deve scegliere un piano tramite Stripe Checkout;
+- la prova gratuita di 14 giorni viene attivata solo da Stripe, tramite subscription `trialing` confermata dal webhook;
 - Google OAuth non espone segreti nel frontend o nel repository.
 
 ## Flusso applicativo
 
 1. Registrazione email/password su `/signup`.
-2. Backend crea tenant, admin e licenza `TRIAL` con durata `BILLING_TRIAL_DAYS`.
-3. La schermata finale propone:
-   - `Avvia prova gratuita`: login e redirect a `/dashboard`;
-   - `Scegli piano con Stripe`: login e redirect a `/upgrade`.
-4. `/upgrade` crea una Stripe Checkout Session autenticata.
-5. Il webhook Stripe aggiorna la licenza tenant.
+2. Backend crea tenant, admin e subscription interna `PENDING`.
+3. La schermata finale propone solo `Scegli piano con Stripe`.
+4. `/upgrade` crea una Stripe Checkout Session autenticata in `mode=subscription`.
+5. Il webhook Stripe aggiorna la licenza tenant a `TRIAL` o `ACTIVE`.
+6. Dashboard, booking, veicoli, contratti e report restano bloccati finché la licenza non è `TRIAL` o `ACTIVE`.
 
 ## Variabili backend richieste
 
@@ -44,6 +44,14 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://api.fleetum.it/api/auth/google/callback
 BILLING_TRIAL_DAYS=14
 ```
+
+Se il backend restituisce:
+
+```json
+{"error":"GOOGLE_OAUTH_NOT_CONFIGURED","message":"OAuth Google non configurato sul backend"}
+```
+
+significa che almeno una tra `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` o `GOOGLE_REDIRECT_URI` non è configurata nel file env del backend o non è stata caricata dopo il deploy. Dopo aver aggiornato l'env, riavviare il backend e verificare `/api/ready`.
 
 ## Redirect URI da autorizzare in Google Cloud
 
@@ -83,4 +91,3 @@ Ogni modifica deve passare da:
 3. CI GitHub Actions;
 4. Deploy Production GitHub Actions;
 5. health check `https://api.fleetum.it/api/health`.
-

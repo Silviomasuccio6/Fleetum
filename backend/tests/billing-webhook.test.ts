@@ -190,6 +190,47 @@ test("invoice.payment_failed resolves tenant from existing subscription and mark
   assert.equal(subscriptions.get("tenant-past-due")?.status, "PAST_DUE");
 });
 
+test("customer.subscription.created with trialing status activates Stripe trial", async () => {
+  const { service, sign, subscriptions } = makeHarness();
+
+  await service.handleWebhook(sign(baseEvent("evt_subscription_trialing", "customer.subscription.created", {
+    id: "sub_trial",
+    object: "subscription",
+    status: "trialing",
+    customer: "cus_trial",
+    current_period_end: 1_800_000_000,
+    metadata: { tenantId: "tenant-trial", plan: "STARTER", billingCycle: "monthly" }
+  })));
+
+  assert.equal(subscriptions.get("tenant-trial")?.status, "TRIAL");
+  assert.equal(subscriptions.get("tenant-trial")?.provider, "stripe");
+});
+
+test("invoice.paid reactivates tenant after successful payment", async () => {
+  const { service, sign, subscriptions } = makeHarness();
+  subscriptions.set("tenant-recovered", {
+    plan: "PRO",
+    seats: 5,
+    status: "PAST_DUE",
+    expiresAt: null,
+    priceMonthly: 149,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_recovered",
+    stripeSubscriptionId: "sub_recovered"
+  });
+
+  await service.handleWebhook(sign(baseEvent("evt_invoice_paid", "invoice.paid", {
+    id: "in_paid",
+    object: "invoice",
+    customer: "cus_recovered",
+    subscription: "sub_recovered",
+    lines: { data: [{ period: { end: 1_800_000_000 } }] }
+  })));
+
+  assert.equal(subscriptions.get("tenant-recovered")?.status, "ACTIVE");
+});
+
 test("customer.subscription.deleted marks license canceled", async () => {
   const { service, sign, subscriptions } = makeHarness();
   subscriptions.set("tenant-canceled", {

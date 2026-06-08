@@ -13,7 +13,7 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput, readTenantSubscription, upsertTenantSubscription } from "./tenant-subscription-service.js";
 
-type BillingLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+type BillingLicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 type StripeClient = Stripe;
 
 type BillingEventStatus = "RECEIVED" | "PROCESSED" | "IGNORED" | "FAILED";
@@ -88,6 +88,7 @@ const jsonPayload = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.s
 const stripeStatusToLicense = (stripeStatus: string): BillingLicenseStatus => {
   if (stripeStatus === "active") return "ACTIVE";
   if (stripeStatus === "trialing") return "TRIAL";
+  if (stripeStatus === "incomplete") return "PENDING";
   if (stripeStatus === "past_due" || stripeStatus === "unpaid") return "PAST_DUE";
   if (stripeStatus === "canceled") return "CANCELED";
   if (stripeStatus === "incomplete_expired") return "EXPIRED";
@@ -180,6 +181,10 @@ export class BillingService {
     const cancelUrl = `${env.APP_URL}/upgrade?checkout=cancelled&plan=${plan}`;
 
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
+      if (env.NODE_ENV === "production") {
+        throw new AppError("Stripe non configurato in produzione", 500, "STRIPE_NOT_CONFIGURED");
+      }
+
       const localCompleteUrl = new URL("/api/billing/local-complete", "http://local-checkout");
       localCompleteUrl.searchParams.set("plan", plan);
       localCompleteUrl.searchParams.set("billingCycle", billingCycle);
@@ -343,6 +348,11 @@ export class BillingService {
 
     if (event.type === "invoice.payment_failed") {
       const tenantId = await this.applyStripeObject(dataObject, "PAST_DUE");
+      return { tenantId };
+    }
+
+    if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+      const tenantId = await this.applyStripeObject(dataObject, "ACTIVE");
       return { tenantId };
     }
 

@@ -94,15 +94,19 @@ api.interceptors.response.use(
     const isSilentSessionCheck = requestUrl.startsWith("/auth/me");
 
     const licenseMessage =
-      apiErrorCode === "LICENSE_EXPIRED"
+      apiErrorCode === "LICENSE_PENDING"
+        ? "Completa l'abbonamento o attiva la prova di 14 giorni per usare il gestionale."
+        : apiErrorCode === "LICENSE_EXPIRED"
         ? "Licenza scaduta. Rinnova per continuare."
         : apiErrorCode === "LICENSE_SUSPENDED"
           ? "Licenza sospesa. Contatta il supporto."
-          : apiErrorCode === "LICENSE_CANCELED"
-            ? "Abbonamento cancellato. Riattiva il piano per continuare."
-            : apiErrorCode === "TENANT_INACTIVE"
-              ? "Tenant disattivato. Contatta l'amministratore."
-              : null;
+          : apiErrorCode === "LICENSE_PAST_DUE"
+            ? "Pagamento non riuscito. Aggiorna l'abbonamento per continuare."
+            : apiErrorCode === "LICENSE_CANCELED"
+              ? "Abbonamento cancellato. Riattiva il piano per continuare."
+              : apiErrorCode === "TENANT_INACTIVE"
+                ? "Tenant disattivato. Contatta l'amministratore."
+                : null;
 
     const planLimitMessage =
       apiErrorCode === "PLAN_LIMIT"
