@@ -180,6 +180,9 @@ jobs:
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
           : "${FLEETUM_ENV_FILE:=/opt/fleetum/env/compose.env}"
           : "${FLEETUM_LAST_DEPLOY_FILE:=/opt/fleetum/last-deploy.txt}"
+          FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_ENV_FILE="$(printf '%s' "$FLEETUM_ENV_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_LAST_DEPLOY_FILE="$(printf '%s' "$FLEETUM_LAST_DEPLOY_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
           if [ "$missing" -ne 0 ]; then
             echo "::error::Production deploy configuration is incomplete. Add the missing GitHub Secrets/Variables in the production environment or repository settings."
@@ -247,6 +250,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
+          FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           if [ -z "$FLEETUM_VPS_HOST" ] || [ -z "$FLEETUM_VPS_USER" ]; then
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
@@ -267,6 +271,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
+          FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           if [ -z "$FLEETUM_VPS_HOST" ] || [ -z "$FLEETUM_VPS_USER" ]; then
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
@@ -306,6 +311,9 @@ jobs:
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
           : "${FLEETUM_ENV_FILE:=/opt/fleetum/env/compose.env}"
           : "${FLEETUM_LAST_DEPLOY_FILE:=/opt/fleetum/last-deploy.txt}"
+          FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_ENV_FILE="$(printf '%s' "$FLEETUM_ENV_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_LAST_DEPLOY_FILE="$(printf '%s' "$FLEETUM_LAST_DEPLOY_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           if [ -z "$FLEETUM_VPS_HOST" ] || [ -z "$FLEETUM_VPS_USER" ]; then
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
@@ -329,6 +337,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
+          FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           if [ -z "$FLEETUM_VPS_HOST" ] || [ -z "$FLEETUM_VPS_USER" ]; then
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1

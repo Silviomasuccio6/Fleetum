@@ -408,6 +408,11 @@ FLEETUM_ENV_FILE=/opt/fleetum/env/compose.env
 FLEETUM_LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt
 ```
 
+Quando si inseriscono le Variables nell'interfaccia GitHub, verificare che il valore non
+contenga spazi, virgolette o ritorni a capo finali. Il workflow normalizza questi valori
+prima di usarli, ma valori sporchi possono causare errori difficili da leggere negli step
+SSH/rsync, ad esempio `bash: line 2: /: Is a directory` o `rsync error code 126`.
+
 `FLEETUM_VPS_HOST` e `FLEETUM_VPS_USER` possono essere GitHub Variables o Secrets. Per
 compatibilita' temporanea il workflow supporta anche `VPS_HOST`, `VPS_USER`, `APP_DIR`,
 `ENV_FILE` e `LAST_DEPLOY_FILE`, ma i nomi `FLEETUM_*` restano lo standard operativo.
