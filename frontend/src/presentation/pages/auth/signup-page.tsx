@@ -275,7 +275,7 @@ export const SignupPage = () => {
                 <h3>Workspace pronto</h3>
                 <p>
                   Il tenant <strong>{tenantId}</strong> è stato creato. Per usare il gestionale devi scegliere un piano
-                  e attivare l'abbonamento o la prova di 14 giorni tramite Stripe.
+                  e completare Stripe Checkout con carta valida. La prova dura 14 giorni e il primo addebito parte alla fine del trial.
                 </p>
                 <div className="premium-signup-success__actions">
                   <button type="button" className="premium-login-submit" onClick={goToBillingAfterSignup}>
@@ -287,7 +287,7 @@ export const SignupPage = () => {
                   </button>
                 </div>
                 <p className="mt-3 text-xs leading-5 text-slate-500">
-                  Il gestionale resta bloccato finché Stripe non conferma una subscription attiva o in trial.
+                  Il gestionale resta bloccato finché Stripe non conferma una subscription attiva o in trial con metodo di pagamento raccolto.
                   Non abilitiamo licenze dal redirect di successo: aspettiamo sempre il webhook verificato.
                 </p>
               </div>

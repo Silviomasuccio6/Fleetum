@@ -10,6 +10,12 @@ export const billingUseCases = {
       input,
       { suppressSuccessToast: true }
     ),
+  createPaymentMethodSession: () =>
+    httpClient.post<{ mode: "stripe"; checkoutUrl: string }>(
+      "/billing/payment-method-session",
+      {},
+      { suppressSuccessToast: true }
+    ),
   listInvoices: () =>
     httpClient.get<{
       data: Array<{

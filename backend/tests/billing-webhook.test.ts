@@ -55,7 +55,7 @@ const snapshotFromInput = (input: TenantSubscriptionUpsertInput): TenantSubscrip
   stripeSubscriptionId: input.stripeSubscriptionId ?? null
 });
 
-const makeHarness = () => {
+const makeHarness = (stripeClient?: Stripe) => {
   (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
   (env as Record<string, unknown>).STRIPE_WEBHOOK_SECRET = webhookSecret;
 
@@ -65,7 +65,7 @@ const makeHarness = () => {
   const subscriptions = new Map<string, TenantSubscriptionSnapshot>();
   const upserts: TenantSubscriptionUpsertInput[] = [];
 
-  const service = new BillingService(audit, stripe, {
+  const service = new BillingService(audit, stripeClient ?? stripe, {
     async createBillingEvent(event, tenantId) {
       const existing = events.get(event.id);
       if (existing) return existing;
@@ -124,6 +124,91 @@ const baseEvent = (id: string, type: string, object: Record<string, unknown>) =>
   data: { object }
 });
 
+test("checkout sessions always collect a card before starting the Stripe trial", async () => {
+  (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
+  (env as Record<string, unknown>).STRIPE_PRICE_STARTER_MONTHLY = "price_starter_monthly_test";
+  (env as Record<string, unknown>).BILLING_TRIAL_DAYS = 14;
+
+  const audit = new FakeAuditRepo();
+  const createdSessions: Array<Record<string, unknown>> = [];
+  const stripeClient = {
+    checkout: {
+      sessions: {
+        create: async (params: Record<string, unknown>) => {
+          createdSessions.push(params);
+          return { id: "cs_trial_card_required", url: "https://checkout.stripe.test/session" };
+        }
+      }
+    }
+  } as unknown as Stripe;
+
+  const service = new BillingService(audit, stripeClient);
+  const result = await service.createCheckoutSession({
+    tenantId: "tenant-card-required",
+    userId: "user-card-required",
+    plan: "STARTER",
+    billingCycle: "monthly"
+  });
+
+  assert.equal(result.mode, "stripe");
+  assert.equal(createdSessions.length, 1);
+  assert.equal(createdSessions[0].mode, "subscription");
+  assert.equal(createdSessions[0].payment_method_collection, "always");
+  assert.deepEqual(createdSessions[0].line_items, [{ price: "price_starter_monthly_test", quantity: 1 }]);
+  assert.deepEqual(createdSessions[0].subscription_data, {
+    trial_period_days: 14,
+    trial_settings: { end_behavior: { missing_payment_method: "cancel" } },
+    metadata: { tenantId: "tenant-card-required", plan: "STARTER", billingCycle: "monthly" }
+  });
+  assert.equal(audit.rows.at(-1)?.action, "BILLING_CHECKOUT_CREATED");
+});
+
+test("payment method update creates a setup Checkout session for the Stripe customer", async () => {
+  (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
+  const audit = new FakeAuditRepo();
+  const createdSessions: Array<Record<string, unknown>> = [];
+  const stripeClient = {
+    checkout: {
+      sessions: {
+        create: async (params: Record<string, unknown>) => {
+          createdSessions.push(params);
+          return { id: "cs_update_card", url: "https://checkout.stripe.test/update-card" };
+        }
+      }
+    }
+  } as unknown as Stripe;
+
+  const service = new BillingService(audit, stripeClient, {
+    async findSubscriptionByTenantId() {
+      return {
+        plan: "STARTER",
+        seats: 3,
+        status: "TRIAL",
+        expiresAt: null,
+        priceMonthly: 149,
+        billingCycle: "monthly",
+        provider: "stripe",
+        stripeCustomerId: "cus_update_card",
+        stripeSubscriptionId: "sub_update_card"
+      };
+    }
+  });
+
+  const result = await service.createPaymentMethodUpdateSession({ tenantId: "tenant-card", userId: "user-card" });
+
+  assert.equal(result.mode, "stripe");
+  assert.equal(createdSessions.length, 1);
+  assert.equal(createdSessions[0].mode, "setup");
+  assert.equal(createdSessions[0].customer, "cus_update_card");
+  assert.deepEqual(createdSessions[0].payment_method_types, ["card"]);
+  assert.deepEqual(createdSessions[0].metadata, {
+    tenantId: "tenant-card",
+    userId: "user-card",
+    action: "update_payment_method"
+  });
+  assert.equal(audit.rows.at(-1)?.action, "BILLING_PAYMENT_METHOD_SESSION_CREATED");
+});
+
 test("billing webhook verifies Stripe signature and persists checkout.session.completed as license update", async () => {
   const { audit, events, service, sign, subscriptions } = makeHarness();
   const event = baseEvent("evt_checkout_completed", "checkout.session.completed", {
@@ -142,6 +227,60 @@ test("billing webhook verifies Stripe signature and persists checkout.session.co
   assert.equal(subscriptions.get("tenant-1")?.plan, "PRO");
   assert.equal(subscriptions.get("tenant-1")?.billingCycle, "yearly");
   assert.equal(audit.rows.at(-1)?.action, "PLATFORM_LICENSE_UPDATED");
+});
+
+test("setup checkout completion stores the new card as default payment method", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  const customerUpdates: Array<{ customerId: string; params: Record<string, unknown> }> = [];
+  const subscriptionUpdates: Array<{ subscriptionId: string; params: Record<string, unknown> }> = [];
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    setupIntents: {
+      retrieve: async (setupIntentId: string) => ({ id: setupIntentId, payment_method: "pm_new_default" })
+    },
+    customers: {
+      update: async (customerId: string, params: Record<string, unknown>) => {
+        customerUpdates.push({ customerId, params });
+        return { id: customerId };
+      }
+    },
+    subscriptions: {
+      update: async (subscriptionId: string, params: Record<string, unknown>) => {
+        subscriptionUpdates.push({ subscriptionId, params });
+        return { id: subscriptionId };
+      }
+    }
+  } as unknown as Stripe;
+  const { audit, service, sign, subscriptions } = makeHarness(stripeClient);
+  subscriptions.set("tenant-card", {
+    plan: "STARTER",
+    seats: 3,
+    status: "TRIAL",
+    expiresAt: null,
+    priceMonthly: 149,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_card",
+    stripeSubscriptionId: "sub_card"
+  });
+
+  const result = await service.handleWebhook(sign(baseEvent("evt_setup_checkout_completed", "checkout.session.completed", {
+    id: "cs_setup_card",
+    object: "checkout.session",
+    mode: "setup",
+    client_reference_id: "tenant-card",
+    customer: "cus_card",
+    setup_intent: "seti_card",
+    metadata: { tenantId: "tenant-card", userId: "user-card", action: "update_payment_method" }
+  })));
+
+  assert.deepEqual(result, { received: true, ignored: false });
+  assert.deepEqual(customerUpdates, [{
+    customerId: "cus_card",
+    params: { invoice_settings: { default_payment_method: "pm_new_default" } }
+  }]);
+  assert.deepEqual(subscriptionUpdates, [{ subscriptionId: "sub_card", params: { default_payment_method: "pm_new_default" } }]);
+  assert.equal(audit.rows.at(-1)?.action, "BILLING_PAYMENT_METHOD_UPDATED");
 });
 
 test("billing webhook is idempotent by Stripe event id", async () => {

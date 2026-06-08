@@ -21,6 +21,14 @@ export class BillingController {
     res.json(result);
   };
 
+  createPaymentMethodSession = async (req: Request, res: Response) => {
+    const result = await this.billingService.createPaymentMethodUpdateSession({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId
+    });
+    res.json(result);
+  };
+
   localComplete = async (req: Request, res: Response) => {
     const input = localCompleteSchema.parse(req.query);
     await this.billingService.completeLocalCheckout({

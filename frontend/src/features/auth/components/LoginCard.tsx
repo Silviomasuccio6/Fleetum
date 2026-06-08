@@ -186,7 +186,7 @@ export const LoginCard = () => {
 
           {welcome === "trial" ? (
             <p className="premium-login-error premium-login-error--block" style={{ color: "#065f46", background: "rgba(209,250,229,0.8)", borderColor: "rgba(16,185,129,0.45)" }}>
-              Accedi per completare la prova di 14 giorni tramite checkout Stripe.
+              Accedi per completare la prova di 14 giorni tramite checkout Stripe con carta obbligatoria.
             </p>
           ) : null}
 
@@ -286,7 +286,7 @@ export const LoginCard = () => {
               className="premium-login-link"
               onClick={() => navigate("/signup")}
             >
-              Attiva prova con Stripe →
+              Attiva prova con carta →
             </button>
           </p>
           <p className="premium-login-signup-text !mt-2 text-[11px] leading-5">

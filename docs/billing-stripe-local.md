@@ -13,6 +13,9 @@ Il gestionale usa un modello SaaS con piani:
 Ogni nuovo tenant parte in `PENDING`. L'accesso operativo al gestionale si abilita solo quando Stripe conferma una subscription `trialing` o `active` tramite webhook verificato.
 
 `BILLING_TRIAL_DAYS` configura il trial dentro Stripe Checkout: il trial di 14 giorni non viene più assegnato localmente allo signup.
+Fleetum richiede sempre una carta valida prima di iniziare il trial: la Checkout Session usa `payment_method_collection=always` e l'eventuale assenza del metodo di pagamento a fine trial cancella la subscription Stripe invece di lasciare accessi gratuiti non fatturabili.
+
+Gli utenti possono sostituire la carta dal gestionale tramite una sessione Stripe Checkout `mode=setup`. Fleetum non espone un'azione per rimuovere il metodo di pagamento: per trial, rinnovi e recupero pagamenti falliti deve rimanere sempre disponibile una carta predefinita su customer/subscription Stripe.
 
 ## Stati licenza
 

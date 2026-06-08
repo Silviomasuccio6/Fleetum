@@ -7,7 +7,8 @@ Configurare login/registrazione Google in modo sicuro e mantenere il flusso comm
 - il login email/password continua ad accedere normalmente;
 - la registrazione crea un tenant in stato `PENDING`;
 - dopo la registrazione l'utente deve scegliere un piano tramite Stripe Checkout;
-- la prova gratuita di 14 giorni viene attivata solo da Stripe, tramite subscription `trialing` confermata dal webhook;
+- la prova di 14 giorni viene attivata solo da Stripe, tramite subscription `trialing` confermata dal webhook;
+- anche durante il trial Stripe Checkout deve raccogliere una carta valida (`payment_method_collection=always`);
 - Google OAuth non espone segreti nel frontend o nel repository.
 
 ## Flusso applicativo
@@ -15,7 +16,7 @@ Configurare login/registrazione Google in modo sicuro e mantenere il flusso comm
 1. Registrazione email/password su `/signup`.
 2. Backend crea tenant, admin e subscription interna `PENDING`.
 3. La schermata finale propone solo `Scegli piano con Stripe`.
-4. `/upgrade` crea una Stripe Checkout Session autenticata in `mode=subscription`.
+4. `/upgrade` crea una Stripe Checkout Session autenticata in `mode=subscription`, con carta obbligatoria anche se il piano parte in trial.
 5. Il webhook Stripe aggiorna la licenza tenant a `TRIAL` o `ACTIVE`.
 6. Dashboard, booking, veicoli, contratti e report restano bloccati finché la licenza non è `TRIAL` o `ACTIVE`.
 

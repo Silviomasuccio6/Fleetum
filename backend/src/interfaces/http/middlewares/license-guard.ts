@@ -34,7 +34,7 @@ export const requireValidLicense = (licensePolicyService: LicensePolicyService) 
           throw new AppError("Licenza sospesa. Contatta il supporto.", 403, "LICENSE_SUSPENDED");
         }
         if (access.reason === "LICENSE_PENDING") {
-          throw new AppError("Completa l'abbonamento o attiva la prova di 14 giorni per usare il gestionale.", 402, "LICENSE_PENDING");
+          throw new AppError("Completa Stripe Checkout con una carta valida per attivare la prova di 14 giorni e usare il gestionale.", 402, "LICENSE_PENDING");
         }
         if (access.reason === "LICENSE_PAST_DUE") {
           throw new AppError("Pagamento non riuscito. Aggiorna l'abbonamento per continuare.", 402, "LICENSE_PAST_DUE");
