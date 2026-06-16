@@ -11,7 +11,7 @@ import {
 } from "./feature-entitlements-service.js";
 import { readTenantSubscription, TenantSubscriptionSnapshot } from "./tenant-subscription-service.js";
 
-type LicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+type LicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
 export type LicenseInfo = {
   plan: SaasPlan;
@@ -27,7 +27,7 @@ export type LicenseInfo = {
 const defaultLicense: LicenseInfo = {
   plan: "STARTER",
   seats: 3,
-  status: "ACTIVE",
+  status: "PENDING",
   expiresAt: null,
   daysRemaining: null,
   expiringSoon: false,
@@ -36,8 +36,8 @@ const defaultLicense: LicenseInfo = {
 };
 
 const toValidStatus = (value: unknown): LicenseStatus => {
-  if (value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") return value;
-  return "ACTIVE";
+  if (value === "PENDING" || value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") return value;
+  return "PENDING";
 };
 
 const toPositiveNumberOrNull = (value: unknown): number | null => {
@@ -122,18 +122,28 @@ export class LicensePolicyService {
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { isActive: true } });
     const license = await this.getTenantLicense(tenantId);
 
-    const blocked = !tenant?.isActive || license.status === "SUSPENDED" || license.status === "EXPIRED" || license.status === "CANCELED";
+    const blocked =
+      !tenant?.isActive ||
+      license.status === "PENDING" ||
+      license.status === "SUSPENDED" ||
+      license.status === "EXPIRED" ||
+      license.status === "PAST_DUE" ||
+      license.status === "CANCELED";
     return {
       blocked,
       reason: !tenant?.isActive
         ? "TENANT_INACTIVE"
-        : license.status === "SUSPENDED"
+        : license.status === "PENDING"
+          ? "LICENSE_PENDING"
+          : license.status === "SUSPENDED"
           ? "LICENSE_SUSPENDED"
           : license.status === "EXPIRED"
             ? "LICENSE_EXPIRED"
-            : license.status === "CANCELED"
-              ? "LICENSE_CANCELED"
-              : null,
+            : license.status === "PAST_DUE"
+              ? "LICENSE_PAST_DUE"
+              : license.status === "CANCELED"
+                ? "LICENSE_CANCELED"
+                : null,
       license
     };
   }

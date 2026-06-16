@@ -8,7 +8,7 @@ declare global {
       license?: {
         plan: "STARTER" | "PRO" | "ENTERPRISE";
         seats: number;
-        status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+        status: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
         expiresAt: string | null;
         daysRemaining: number | null;
         expiringSoon: boolean;
@@ -32,6 +32,12 @@ export const requireValidLicense = (licensePolicyService: LicensePolicyService) 
         }
         if (access.reason === "LICENSE_SUSPENDED") {
           throw new AppError("Licenza sospesa. Contatta il supporto.", 403, "LICENSE_SUSPENDED");
+        }
+        if (access.reason === "LICENSE_PENDING") {
+          throw new AppError("Completa Stripe Checkout con una carta valida per attivare la prova di 14 giorni e usare il gestionale.", 402, "LICENSE_PENDING");
+        }
+        if (access.reason === "LICENSE_PAST_DUE") {
+          throw new AppError("Pagamento non riuscito. Aggiorna il metodo di pagamento per continuare.", 402, "LICENSE_PAST_DUE");
         }
         if (access.reason === "LICENSE_CANCELED") {
           throw new AppError("Abbonamento cancellato. Riattiva il piano per continuare.", 402, "LICENSE_CANCELED");

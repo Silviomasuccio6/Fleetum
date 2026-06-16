@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Check, Crown, Download, FileText, Lock, Sparkles } from "lucide-react";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
+import { authUseCases } from "../../../application/usecases/auth-usecases";
 import {
   FeatureKey,
   getFeatureListForPlan,
@@ -16,9 +17,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
 type BillingCycle = "monthly" | "yearly";
+type LicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+type PlanUpgradeMode = "activation" | "upgrade";
 
 const orderedFeatures = getFeatureListForPlan("ENTERPRISE");
-const annualDiscountRate = 0.18;
+const annualDiscountRate = 0.15;
 
 const planRank: Record<SaasPlan, number> = {
   STARTER: 0,
@@ -69,11 +72,12 @@ const getPlanHighlights = (plan: SaasPlan) => {
   return ["Automazioni avanzate", "Controlli multi-workspace", "Security insights e supporto prioritario"];
 };
 
-export const PlanUpgradePage = () => {
+export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
   const { plan, loading } = useEntitlements();
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [invoices, setInvoices] = useState<Array<{
     id: string;
     invoiceNumber: string;
@@ -85,9 +89,11 @@ export const PlanUpgradePage = () => {
     total: number;
     currency: string;
   }>>([]);
-  const currentPlan = loading ? null : plan;
+  const billingIsActive = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
+  const currentPlan = loading || !billingIsActive ? null : plan;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
+  const billingRequired = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("billing") === "required" : false;
 
   const planCards = useMemo(
     () =>
@@ -112,10 +118,18 @@ export const PlanUpgradePage = () => {
   );
 
   useEffect(() => {
+    authUseCases.licenseStatus()
+      .then((license) => setLicenseStatus(license.status as LicenseStatus))
+      .catch(() => setLicenseStatus("PENDING"));
+  }, []);
+
+  useEffect(() => {
+    if (mode === "activation" || !billingIsActive) return;
+
     billingUseCases.listInvoices()
       .then((result) => setInvoices(result.data))
       .catch(() => setInvoices([]));
-  }, []);
+  }, [billingIsActive, mode]);
 
   return (
     <section className="space-y-5">
@@ -131,14 +145,19 @@ export const PlanUpgradePage = () => {
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              Sblocca analytics, automazioni e controllo enterprise
+              {mode === "activation" ? "Scegli il piano e attiva Fleetum" : "Sblocca analytics, automazioni e controllo enterprise"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
-              Upgrade immediato, nessun downtime e operativita continua. Scegli il ciclo di fatturazione e confronta i piani qui sotto.
+              {mode === "activation"
+                ? "Prima di entrare nel gestionale devi completare Stripe Checkout. La prova di 14 giorni richiede una carta valida e il gestionale si abilita solo dopo il webhook Stripe."
+                : "Upgrade immediato, nessun downtime e operativita continua. Scegli il ciclo di fatturazione e confronta i piani qui sotto."}
             </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
+                Prova 14 giorni con carta obbligatoria
+              </span>
               <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
                 Sconto annuale {Math.round(annualDiscountRate * 100)}%
               </span>
@@ -155,8 +174,16 @@ export const PlanUpgradePage = () => {
       {welcomeStatus === "billing" ? (
         <Card className="border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
           <CardContent className="py-4 text-sm">
-            <strong>Account creato.</strong> Hai gia una prova gratuita di 14 giorni attiva: se vuoi abbonarti subito,
-            scegli un piano e apriremo il checkout Stripe in sicurezza.
+            <strong>Account creato.</strong> Ora scegli un piano. Non mostriamo il gestionale finché Stripe non conferma una subscription
+            in prova o attiva con carta raccolta.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {billingRequired ? (
+        <Card className="border-amber-300/70 bg-amber-50/85 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <CardContent className="py-4 text-sm">
+            Completa prima l'attivazione: scegli un piano e inserisci una carta valida su Stripe. Subito dopo il webhook potrai entrare nel gestionale.
           </CardContent>
         </Card>
       ) : null}
@@ -199,9 +226,11 @@ export const PlanUpgradePage = () => {
           const priceSuffix = billingCycle === "monthly" ? "/mese" : "/anno";
           const buttonLabel = isCurrent
             ? "Piano attivo"
-            : entry === "ENTERPRISE"
-              ? "Passa a Piano Enterprise"
-              : `Passa a ${entry}`;
+            : currentPlan
+              ? entry === "ENTERPRISE"
+                ? "Passa a Piano Enterprise"
+                : `Passa a ${entry}`
+              : "Inizia prova con carta";
 
           return (
             <Card
@@ -229,6 +258,11 @@ export const PlanUpgradePage = () => {
                 <div>
                   <p className="text-3xl font-semibold tracking-tight text-foreground">{formatPrice(priceValue)}</p>
                   <p className="text-xs text-muted-foreground">{priceSuffix}</p>
+                  {!currentPlan ? (
+                    <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
+                      14 giorni di prova, carta richiesta ora, primo addebito dopo il trial.
+                    </p>
+                  ) : null}
                 </div>
               </CardHeader>
 
@@ -270,7 +304,7 @@ export const PlanUpgradePage = () => {
                     }}
                     className={cn(
                       "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition",
-                      isUpgrade
+                      !currentPlan || isUpgrade
                         ? "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-14px_rgba(79,70,229,0.65)] hover:brightness-110"
                         : "border border-input bg-background text-foreground hover:bg-muted"
                     )}
@@ -288,7 +322,10 @@ export const PlanUpgradePage = () => {
       {checkoutStatus === "success" ? (
         <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
           <CardContent className="py-4 text-sm font-semibold">
-            Pagamento confermato. Il piano e la licenza del tenant sono stati aggiornati.
+            Checkout completato. Attendi pochi secondi: il webhook Stripe deve confermare trial o abbonamento prima dell'accesso al gestionale.
+            {billingIsActive ? (
+              <a className="ml-2 underline" href="/dashboard">Entra nel gestionale</a>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -307,7 +344,7 @@ export const PlanUpgradePage = () => {
         </Card>
       ) : null}
 
-      <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .34s both" }}>
+      {mode === "upgrade" && billingIsActive ? <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .34s both" }}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <FileText className="h-4 w-4 text-primary" />
@@ -358,7 +395,7 @@ export const PlanUpgradePage = () => {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card> : null}
 
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .4s both" }}>
         <CardHeader>

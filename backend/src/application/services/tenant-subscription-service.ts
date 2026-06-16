@@ -1,7 +1,7 @@
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { BillingCycle, SaasPlan, ensureKnownPlan, normalizeBillingCycle } from "./feature-entitlements-service.js";
 
-export type TenantSubscriptionStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+export type TenantSubscriptionStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
 export type TenantSubscriptionSnapshot = {
   plan: SaasPlan;
@@ -30,10 +30,10 @@ export type TenantSubscriptionUpsertInput = {
 };
 
 const toValidStatus = (value: unknown): TenantSubscriptionStatus => {
-  if (value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") {
+  if (value === "PENDING" || value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") {
     return value;
   }
-  return "ACTIVE";
+  return "PENDING";
 };
 
 const toPositiveSeats = (value: unknown) => {

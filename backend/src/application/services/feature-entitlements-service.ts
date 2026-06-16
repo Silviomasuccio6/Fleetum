@@ -9,7 +9,7 @@ export const PLAN_LEVELS: Record<SaasPlan, number> = {
 };
 
 export const PLAN_MONTHLY_PRICING_EUR: Record<SaasPlan, number> = {
-  STARTER: 129,
+  STARTER: 149,
   PRO: 199,
   ENTERPRISE: 249
 };

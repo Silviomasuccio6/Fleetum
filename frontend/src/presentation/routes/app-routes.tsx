@@ -26,12 +26,14 @@ import { StatsPage } from "../pages/stats/stats-page";
 import { ProfileSettingsPage } from "../pages/profile/profile-settings-page";
 import { CompanyProfilePage } from "../pages/profile/company-profile-page";
 import { PlanUpgradePage } from "../pages/profile/plan-upgrade-page";
+import { BillingActivationPage } from "../pages/billing/billing-activation-page";
 import { PrivacyPolicyPage } from "../pages/privacy/privacy-policy-page";
 import { CookieConsentBanner } from "../components/privacy/cookie-consent-banner";
 import { DemoRequestPage, LegalDocumentPage } from "../pages/legal/legal-pages";
 import { LandingPage } from "../pages/landing/landing-page";
 import { PublicSeoPage } from "../pages/landing/seo-pages";
 import { ProtectedRoute } from "./protected-route";
+import { BillingActivatedRoute } from "./billing-activated-route";
 import { GlobalTextTranslator } from "../components/i18n/global-text-translator";
 
 export const AppRoutes = () => (
@@ -50,6 +52,14 @@ export const AppRoutes = () => (
     <Route path="/termini" element={<LegalDocumentPage type="terms" />} />
     <Route path="/dpa" element={<LegalDocumentPage type="dpa" />} />
     <Route path="/demo" element={<DemoRequestPage />} />
+    <Route
+      path="/activate"
+      element={
+        <ProtectedRoute>
+          <BillingActivationPage />
+        </ProtectedRoute>
+      }
+    />
     <Route path="/software-autonoleggio" element={<PublicSeoPage slug="software-autonoleggio" />} />
     <Route path="/software-rent-a-car" element={<PublicSeoPage slug="software-rent-a-car" />} />
     <Route path="/gestionale-flotta" element={<PublicSeoPage slug="gestionale-flotta" />} />
@@ -61,7 +71,9 @@ export const AppRoutes = () => (
     <Route
       element={
         <ProtectedRoute>
-          <AppLayout />
+          <BillingActivatedRoute>
+            <AppLayout />
+          </BillingActivatedRoute>
         </ProtectedRoute>
       }
     >

@@ -88,7 +88,9 @@ api.interceptors.response.use(
     const isSilentSessionCheck = requestUrl.startsWith("/auth/me");
 
     const licenseMessage =
-      apiErrorCode === "LICENSE_EXPIRED"
+      apiErrorCode === "LICENSE_PENDING"
+        ? "Completa Stripe Checkout con una carta valida per attivare la prova di 14 giorni e usare il gestionale."
+        : apiErrorCode === "LICENSE_EXPIRED"
         ? "Licenza scaduta. Rinnova per continuare."
         : apiErrorCode === "LICENSE_SUSPENDED"
           ? "Licenza sospesa. Contatta il supporto."

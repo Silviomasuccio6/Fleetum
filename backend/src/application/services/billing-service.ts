@@ -10,8 +10,9 @@ import {
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { upsertTenantSubscription } from "./tenant-subscription-service.js";
+import { prisma } from "../../infrastructure/database/prisma/client.js";
 
-type BillingLicenseStatus = "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+type BillingLicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 
 type LicenseAuditPayload = {
   plan: SaasPlan;
@@ -65,10 +66,14 @@ export class BillingService {
     const plan = ensureKnownPlan(input.plan);
     const billingCycle = normalizeBillingCycle(input.billingCycle);
     const priceMonthly = getPlanMonthlyPrice(plan);
-    const successUrl = `${env.APP_URL}/upgrade?checkout=success&plan=${plan}`;
-    const cancelUrl = `${env.APP_URL}/upgrade?checkout=cancelled&plan=${plan}`;
+    const successUrl = `${env.APP_URL}/activate?checkout=success&plan=${plan}`;
+    const cancelUrl = `${env.APP_URL}/activate?checkout=cancelled&plan=${plan}`;
 
     if (!env.STRIPE_SECRET_KEY) {
+      if (env.NODE_ENV === "production") {
+        throw new AppError("Stripe non configurato in produzione", 500, "STRIPE_NOT_CONFIGURED");
+      }
+
       const localCompleteUrl = new URL("/api/billing/local-complete", "http://local-checkout");
       localCompleteUrl.searchParams.set("plan", plan);
       localCompleteUrl.searchParams.set("billingCycle", billingCycle);
@@ -96,6 +101,7 @@ export class BillingService {
     body.set("mode", "subscription");
     body.set("success_url", successUrl);
     body.set("cancel_url", cancelUrl);
+    body.set("payment_method_collection", "always");
     body.set("client_reference_id", input.tenantId);
     body.set("line_items[0][price]", String(priceId));
     body.set("line_items[0][quantity]", "1");
@@ -107,7 +113,10 @@ export class BillingService {
     body.set("subscription_data[metadata][plan]", plan);
     body.set("subscription_data[metadata][billingCycle]", billingCycle);
     if (input.customerEmail) body.set("customer_email", input.customerEmail);
-    if (env.BILLING_TRIAL_DAYS > 0) body.set("subscription_data[trial_period_days]", String(env.BILLING_TRIAL_DAYS));
+    if (env.BILLING_TRIAL_DAYS > 0) {
+      body.set("subscription_data[trial_period_days]", String(env.BILLING_TRIAL_DAYS));
+      body.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
+    }
 
     const response = await fetch(`${STRIPE_API_BASE}/checkout/sessions`, {
       method: "POST",
@@ -162,15 +171,17 @@ export class BillingService {
     if (!dataObject) return { received: true, ignored: true };
 
     if (type === "checkout.session.completed") {
-      await this.applyStripeObject(dataObject, "ACTIVE");
+      await this.applyStripeObject(dataObject, env.BILLING_TRIAL_DAYS > 0 ? "TRIAL" : "ACTIVE");
       return { received: true };
     }
 
     if (type === "customer.subscription.updated" || type === "customer.subscription.created") {
       const stripeStatus = String(dataObject.status ?? "");
       const nextStatus: BillingLicenseStatus =
-        stripeStatus === "active" || stripeStatus === "trialing"
+        stripeStatus === "active"
           ? "ACTIVE"
+          : stripeStatus === "trialing"
+            ? "TRIAL"
           : stripeStatus === "past_due" || stripeStatus === "unpaid"
             ? "PAST_DUE"
             : stripeStatus === "canceled"
@@ -225,15 +236,36 @@ export class BillingService {
 
   private async applyStripeObject(source: Record<string, unknown>, status: BillingLicenseStatus) {
     const metadata = typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {};
-    const tenantId = String(metadata.tenantId ?? source.client_reference_id ?? "");
+    const stripeCustomerId = typeof source.customer === "string" ? source.customer : null;
+    const stripeSubscriptionId =
+      typeof source.subscription === "string" ? source.subscription : typeof source.id === "string" ? source.id : null;
+    let tenantId = String(metadata.tenantId ?? source.client_reference_id ?? "");
+
+    if (!tenantId && (stripeSubscriptionId || stripeCustomerId)) {
+      const existingSubscription = await prisma.tenantSubscription.findFirst({
+        where: stripeSubscriptionId && stripeCustomerId
+          ? { OR: [{ stripeSubscriptionId }, { stripeCustomerId }] }
+          : stripeSubscriptionId
+            ? { stripeSubscriptionId }
+            : { stripeCustomerId: stripeCustomerId ?? "" },
+        select: { tenantId: true, plan: true, billingCycle: true }
+      });
+
+      tenantId = existingSubscription?.tenantId ?? "";
+      if (!metadata.plan && existingSubscription?.plan) metadata.plan = existingSubscription.plan;
+      if (!metadata.billingCycle && existingSubscription?.billingCycle) metadata.billingCycle = existingSubscription.billingCycle;
+    }
+
     if (!tenantId) return;
 
     const plan = ensureKnownPlan(String(metadata.plan ?? "STARTER"));
     const billingCycle = normalizeBillingCycle(String(metadata.billingCycle ?? "monthly"));
-    const currentPeriodEnd = Number(source.current_period_end ?? getNested(source, "lines.data.0.period.end"));
-    const expiresAt = Number.isFinite(currentPeriodEnd) && currentPeriodEnd > 0
-      ? new Date(currentPeriodEnd < 100000000000 ? currentPeriodEnd * 1000 : currentPeriodEnd).toISOString()
-      : null;
+    const periodEnd = Number(source.current_period_end ?? source.trial_end ?? getNested(source, "lines.data.0.period.end"));
+    const expiresAt = Number.isFinite(periodEnd) && periodEnd > 0
+      ? new Date(periodEnd < 100000000000 ? periodEnd * 1000 : periodEnd).toISOString()
+      : status === "TRIAL" && env.BILLING_TRIAL_DAYS > 0
+        ? new Date(Date.now() + env.BILLING_TRIAL_DAYS * 86400000).toISOString()
+        : null;
 
     await this.writeLicense(tenantId, null, {
       plan,
@@ -242,8 +274,8 @@ export class BillingService {
       expiresAt,
       priceMonthly: getPlanMonthlyPrice(plan),
       billingCycle,
-      stripeCustomerId: typeof source.customer === "string" ? source.customer : null,
-      stripeSubscriptionId: typeof source.subscription === "string" ? source.subscription : typeof source.id === "string" ? source.id : null,
+      stripeCustomerId,
+      stripeSubscriptionId,
       provider: "stripe",
       updatedAt: new Date().toISOString()
     });

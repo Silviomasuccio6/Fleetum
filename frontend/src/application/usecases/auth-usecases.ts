@@ -29,7 +29,7 @@ export const authUseCases = {
       license: {
         plan: string;
         seats: number;
-        status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+        status: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
         expiresAt: string | null;
         daysRemaining: number | null;
         expiringSoon: boolean;
@@ -39,7 +39,7 @@ export const authUseCases = {
     httpClient.get<{
       plan: string;
       seats: number;
-      status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+      status: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
       expiresAt: string | null;
       daysRemaining: number | null;
       expiringSoon: boolean;

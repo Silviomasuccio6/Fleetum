@@ -118,7 +118,7 @@ export const SignupPage = () => {
     const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
     const target = new URL(providerUrl, window.location.origin);
     target.searchParams.set("intent", "signup");
-    target.searchParams.set("returnTo", "/upgrade?welcome=billing");
+    target.searchParams.set("returnTo", "/activate?welcome=billing");
     window.location.href = target.toString();
   };
 
@@ -228,11 +228,11 @@ export const SignupPage = () => {
     setCurrentStep(0);
   };
 
-  const goToLoginAfterSignup = (next: "/dashboard" | "/upgrade") => {
+  const goToBillingAfterSignup = () => {
     const params = new URLSearchParams();
     if (registeredEmail) params.set("email", registeredEmail);
-    params.set("next", next);
-    params.set("welcome", next === "/upgrade" ? "billing" : "trial");
+    params.set("next", "/activate?welcome=billing");
+    params.set("welcome", "billing");
     navigate(`/login?${params.toString()}`);
   };
 
@@ -278,24 +278,21 @@ export const SignupPage = () => {
                 <p className="premium-signup-success__eyebrow">Tenant creato correttamente</p>
                 <h3>Workspace pronto</h3>
                 <p>
-                  Il tenant <strong>{tenantId}</strong> è stato creato con una prova gratuita di 14 giorni. Puoi entrare subito
-                  oppure scegliere un piano Stripe dopo il login.
+                  Il tenant <strong>{tenantId}</strong> è stato creato. Prima di entrare nel gestionale devi scegliere un piano
+                  e completare Stripe Checkout con carta valida. La prova dura 14 giorni e il primo addebito parte alla fine del trial.
                 </p>
                 <div className="premium-signup-success__actions">
-                  <button type="button" className="premium-login-submit" onClick={() => goToLoginAfterSignup("/dashboard")}>
+                  <button type="button" className="premium-login-submit" onClick={goToBillingAfterSignup}>
                     <span className="premium-login-submit-shimmer" aria-hidden />
-                    Avvia prova gratuita
-                  </button>
-                  <button type="button" className="premium-login-social-btn justify-center" onClick={() => goToLoginAfterSignup("/upgrade")}>
-                    Scegli piano con Stripe
+                    Scegli piano e attiva con Stripe
                   </button>
                   <button type="button" className="premium-login-social-btn justify-center" onClick={startAnotherSignup}>
                     Crea un altro tenant
                   </button>
                 </div>
                 <p className="mt-3 text-xs leading-5 text-slate-500">
-                  Il login resta sempre disponibile con email e password. Per abbonarti ti accompagniamo prima
-                  nell'area autenticata, poi apriamo il checkout Stripe in modo sicuro.
+                  Il gestionale resta bloccato finché Stripe non conferma una subscription attiva o in trial con metodo di pagamento raccolto.
+                  Non abilitiamo licenze dal redirect di successo: aspettiamo sempre il webhook verificato.
                 </p>
               </div>
             ) : (

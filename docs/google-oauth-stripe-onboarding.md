@@ -5,19 +5,19 @@
 Configurare login/registrazione Google in modo sicuro e mantenere il flusso commerciale corretto:
 
 - il login email/password continua ad accedere normalmente;
-- la registrazione crea un tenant con prova gratuita di 14 giorni;
-- dopo la registrazione l'utente puo entrare in prova oppure scegliere un piano tramite Stripe Checkout;
+- la registrazione crea un tenant in stato `PENDING`;
+- dopo la registrazione l'utente deve passare dalla pagina `/activate`, scegliere un piano e completare Stripe Checkout;
+- la prova di 14 giorni viene attivata solo da Stripe e richiede carta valida prima dell'accesso al gestionale;
 - Google OAuth non espone segreti nel frontend o nel repository.
 
 ## Flusso applicativo
 
 1. Registrazione email/password su `/signup`.
-2. Backend crea tenant, admin e licenza `TRIAL` con durata `BILLING_TRIAL_DAYS`.
-3. La schermata finale propone:
-   - `Avvia prova gratuita`: login e redirect a `/dashboard`;
-   - `Scegli piano con Stripe`: login e redirect a `/upgrade`.
-4. `/upgrade` crea una Stripe Checkout Session autenticata.
-5. Il webhook Stripe aggiorna la licenza tenant.
+2. Backend crea tenant, admin e subscription interna `PENDING`.
+3. La schermata finale propone solo il percorso di attivazione: login e redirect a `/activate`.
+4. `/activate` crea una Stripe Checkout Session autenticata in `mode=subscription` con carta obbligatoria anche durante il trial.
+5. Il webhook Stripe aggiorna la licenza tenant a `TRIAL` o `ACTIVE`.
+6. Dashboard, booking, veicoli, contratti e report restano non renderizzati finché la licenza non è `TRIAL` o `ACTIVE`.
 
 ## Variabili backend richieste
 
@@ -61,7 +61,7 @@ Se viene usata anche la sincronizzazione Google Calendar:
 
 - `GOOGLE_CLIENT_SECRET` deve stare solo in `.env` locale o GitHub/VPS secrets.
 - Il frontend apre `/api/auth/google`, non conosce il client secret.
-- Il parametro `returnTo` viene accettato solo se e un path interno, ad esempio `/dashboard` o `/upgrade`.
+- Il parametro `returnTo` viene accettato solo se e un path interno, ad esempio `/dashboard` o `/activate`.
 - Lo stato OAuth e firmato con `JWT_SECRET` e scade dopo 10 minuti.
 - Non usare redirect assoluti esterni nel parametro `next`/`returnTo`.
 
@@ -83,4 +83,3 @@ Ogni modifica deve passare da:
 3. CI GitHub Actions;
 4. Deploy Production GitHub Actions;
 5. health check `https://api.fleetum.it/api/health`.
-
