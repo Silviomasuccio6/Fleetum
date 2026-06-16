@@ -92,6 +92,7 @@ export const SignupPage = () => {
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -210,6 +211,7 @@ export const SignupPage = () => {
       });
       setSession(result.user, true);
       setTenantId(result.tenantId);
+      setRegisteredEmail(form.email);
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
@@ -222,6 +224,7 @@ export const SignupPage = () => {
 
   const startAnotherSignup = () => {
     setTenantId(null);
+    setRegisteredEmail(null);
     setError(null);
     setForm(initialForm);
     setPrivacyAccepted(false);
