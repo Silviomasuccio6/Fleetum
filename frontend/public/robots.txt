@@ -1,7 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /dashboard
-Disallow: /booking
+Disallow: /booking/
 Disallow: /fermi
 Disallow: /anagrafiche
 Disallow: /utenti

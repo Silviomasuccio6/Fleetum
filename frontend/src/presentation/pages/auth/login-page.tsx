@@ -7,6 +7,7 @@ import { Alert } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import { prefetchPrimaryTenantRoutes } from "../../routes/prefetch-routes";
 
 export const LoginPage = () => {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ export const LoginPage = () => {
       });
       const remember = formData.get("remember") === "on";
       setSession(result.user, remember);
+      prefetchPrimaryTenantRoutes();
       navigate("/dashboard");
     } catch (err) {
       setError((err as Error).message);

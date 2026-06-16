@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode, FormEvent, useEffect, useState } from "react";
 import { AtSign, Briefcase, Building2, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, Star, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
@@ -87,10 +88,10 @@ const initialForm = {
 
 export const SignupPage = () => {
   const navigate = useNavigate();
+  const setSession = useAuthStore((state) => state.setSession);
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -207,8 +208,8 @@ export const SignupPage = () => {
           accentColor: form.accentColor
         }
       });
+      setSession(result.user, true);
       setTenantId(result.tenantId);
-      setRegisteredEmail(form.email);
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
@@ -221,7 +222,6 @@ export const SignupPage = () => {
 
   const startAnotherSignup = () => {
     setTenantId(null);
-    setRegisteredEmail(null);
     setError(null);
     setForm(initialForm);
     setPrivacyAccepted(false);

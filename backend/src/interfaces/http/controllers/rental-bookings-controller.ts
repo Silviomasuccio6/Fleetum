@@ -2418,6 +2418,8 @@ export class RentalBookingsController {
 
     const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
     const nextLogoPath = storageProvider.buildKey(file.filename);
+    await storageProvider.writeFromFile(nextLogoPath, file.path, { tenantId, resourceType: "ContractTemplateLogo", resourceId: template.id, originalName: file.originalname || file.filename, mimeType: file.mimetype });
+    if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
 
     await prisma.contractTemplate.update({
       where: { id: template.id },
@@ -2464,14 +2466,14 @@ export class RentalBookingsController {
     const template = await this.getOrCreateDefaultTemplate(tenantId, req.auth?.userId);
     if (!template.logoFilePath) throw new AppError("Logo template non configurato", 404, "NOT_FOUND");
 
-    const fullPath = this.resolveUploadPath(template.logoFilePath);
     if (!(await storageProvider.exists(template.logoFilePath))) {
       throw new AppError("File logo non trovato", 404, "NOT_FOUND");
     }
 
+    const payload = await storageProvider.read(template.logoFilePath);
     res.setHeader("Cache-Control", "private, max-age=60");
     res.type(template.logoMimeType || "application/octet-stream");
-    res.sendFile(fullPath);
+    res.send(payload);
   };
 
   previewContractTemplate = async (req: Request, res: Response) => {

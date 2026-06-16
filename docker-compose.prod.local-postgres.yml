@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fleetum_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fleetum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-fleetum}
+    volumes:
+      - /opt/fleetum/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fleetum} -d ${POSTGRES_DB:-fleetum}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fleetum_private
+
+  backend:
+    image: ${FLEETUM_BACKEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-backend:latest}
+    container_name: fleetum_backend
+    restart: unless-stopped
+    env_file:
+      - /opt/fleetum/env/backend.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /opt/fleetum/uploads:/app/uploads
+      - /opt/fleetum/logs:/app/logs
+    expose:
+      - "4000"
+      - "4100"
+    networks:
+      - fleetum_private
+
+  caddy:
+    image: ${FLEETUM_FRONTEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend:latest}
+    container_name: fleetum_caddy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - fleetum_private
+
+networks:
+  fleetum_private:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

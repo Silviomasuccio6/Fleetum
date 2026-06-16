@@ -6,7 +6,7 @@ import { estimateLicenseMonthlyRevenue, getPlanMonthlyPrice, SAAS_PLANS } from "
 type LicenseSnapshot = {
   plan: string;
   seats: number;
-  status: "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
+  status: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
   expiresAt: string | null;
   priceMonthly?: number | null;
   billingCycle?: "monthly" | "yearly";
@@ -15,7 +15,7 @@ type LicenseSnapshot = {
 const defaultLicense: LicenseSnapshot = {
   plan: "STARTER",
   seats: 3,
-  status: "ACTIVE",
+  status: "PENDING",
   expiresAt: null,
   priceMonthly: null,
   billingCycle: "monthly"
@@ -33,7 +33,7 @@ const parseLicense = (details: unknown): LicenseSnapshot | null => {
   if (!details || typeof details !== "object") return null;
   const payload = details as Record<string, unknown>;
   const source = payload.after && typeof payload.after === "object" ? (payload.after as Record<string, unknown>) : payload;
-  const status = String(source.status ?? "ACTIVE") as LicenseSnapshot["status"];
+  const status = String(source.status ?? "PENDING") as LicenseSnapshot["status"];
   return {
     plan: String(source.plan ?? "STARTER"),
     seats: Number(source.seats ?? 3),
@@ -117,7 +117,7 @@ export class PlatformConsoleService {
     tenants.forEach((tenant) => {
       const license = licenses.get(tenant.id) ?? defaultLicense;
       const plan = SAAS_PLANS.includes(license.plan as any) ? (license.plan as (typeof SAAS_PLANS)[number]) : "STARTER";
-      if (license.status === "SUSPENDED" || license.status === "EXPIRED" || license.status === "PAST_DUE" || license.status === "CANCELED") {
+      if (license.status === "PENDING" || license.status === "SUSPENDED" || license.status === "EXPIRED" || license.status === "PAST_DUE" || license.status === "CANCELED") {
         suspended += 1;
       }
       if (license.status === "TRIAL") trial += 1;

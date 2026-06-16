@@ -1,9 +1,21 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { AuthController } from "../controllers/auth-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
 import { authRateLimit } from "../middlewares/auth-rate-limit.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
 import { asyncHandler } from "./async-handler.js";
+
+const refreshRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    message: "Troppe richieste di refresh. Riprova tra qualche minuto.",
+    error: "REFRESH_RATE_LIMITED"
+  }
+});
 
 export const authRoutes = (controller: AuthController) => {
   const router = Router();
@@ -17,7 +29,7 @@ export const authRoutes = (controller: AuthController) => {
   router.post("/forgot-password", authRateLimit, asyncHandler(controller.forgotPassword));
   router.post("/reset-password", authRateLimit, asyncHandler(controller.resetPassword));
   router.post("/accept-invite", authRateLimit, asyncHandler(controller.acceptInvite));
-  router.post("/refresh", asyncHandler(controller.refresh));
+  router.post("/refresh", refreshRateLimit, asyncHandler(controller.refresh));
   router.post("/logout", requireAuth, requireCsrfProtection, asyncHandler(controller.logout));
   router.get("/me", requireAuth, asyncHandler(controller.me));
   router.get("/me/entitlements", requireAuth, asyncHandler(controller.entitlements));

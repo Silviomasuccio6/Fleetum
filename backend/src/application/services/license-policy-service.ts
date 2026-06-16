@@ -36,7 +36,15 @@ const defaultLicense: LicenseInfo = {
 };
 
 const toValidStatus = (value: unknown): LicenseStatus => {
-  if (value === "PENDING" || value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") return value;
+  if (
+    value === "PENDING" ||
+    value === "ACTIVE" ||
+    value === "SUSPENDED" ||
+    value === "EXPIRED" ||
+    value === "TRIAL" ||
+    value === "PAST_DUE" ||
+    value === "CANCELED"
+  ) return value;
   return "PENDING";
 };
 
@@ -135,7 +143,7 @@ export class LicensePolicyService {
         ? "TENANT_INACTIVE"
         : license.status === "PENDING"
           ? "LICENSE_PENDING"
-          : license.status === "SUSPENDED"
+        : license.status === "SUSPENDED"
           ? "LICENSE_SUSPENDED"
           : license.status === "EXPIRED"
             ? "LICENSE_EXPIRED"

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, Crown, Download, FileText, Lock, Sparkles } from "lucide-react";
+import { ArrowRight, Check, CreditCard, Crown, Download, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
-import { authUseCases } from "../../../application/usecases/auth-usecases";
 import {
   FeatureKey,
   getFeatureListForPlan,
@@ -17,7 +16,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
 type BillingCycle = "monthly" | "yearly";
-type LicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 type PlanUpgradeMode = "activation" | "upgrade";
 
 const orderedFeatures = getFeatureListForPlan("ENTERPRISE");
@@ -73,11 +71,12 @@ const getPlanHighlights = (plan: SaasPlan) => {
 };
 
 export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
-  const { plan, loading } = useEntitlements();
+  const { plan, licenseStatus, loading } = useEntitlements();
+  const isActivationMode = mode === "activation";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
+  const [busyPaymentMethod, setBusyPaymentMethod] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [invoices, setInvoices] = useState<Array<{
     id: string;
     invoiceNumber: string;
@@ -89,11 +88,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
     total: number;
     currency: string;
   }>>([]);
-  const billingIsActive = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
-  const currentPlan = loading || !billingIsActive ? null : plan;
+  const currentPlan = loading || (licenseStatus !== "ACTIVE" && licenseStatus !== "TRIAL") ? null : plan;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
+  const paymentMethodStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("payment_method") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
-  const billingRequired = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("billing") === "required" : false;
+  const canUpdatePaymentMethod = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE";
 
   const planCards = useMemo(
     () =>
@@ -118,18 +117,10 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   );
 
   useEffect(() => {
-    authUseCases.licenseStatus()
-      .then((license) => setLicenseStatus(license.status as LicenseStatus))
-      .catch(() => setLicenseStatus("PENDING"));
-  }, []);
-
-  useEffect(() => {
-    if (mode === "activation" || !billingIsActive) return;
-
     billingUseCases.listInvoices()
       .then((result) => setInvoices(result.data))
       .catch(() => setInvoices([]));
-  }, [billingIsActive, mode]);
+  }, []);
 
   return (
     <section className="space-y-5">
@@ -145,18 +136,17 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              {mode === "activation" ? "Scegli il piano e attiva Fleetum" : "Sblocca analytics, automazioni e controllo enterprise"}
+              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Attiva Fleetum con prova Stripe e carta obbligatoria"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
-              {mode === "activation"
-                ? "Prima di entrare nel gestionale devi completare Stripe Checkout. La prova di 14 giorni richiede una carta valida e il gestionale si abilita solo dopo il webhook Stripe."
-                : "Upgrade immediato, nessun downtime e operativita continua. Scegli il ciclo di fatturazione e confronta i piani qui sotto."}
+              Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial,
+              ma il metodo di pagamento resta necessario per mantenere attivo il gestionale.
             </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
-                Prova 14 giorni con carta obbligatoria
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
+                <ShieldCheck className="h-3.5 w-3.5" /> Carta richiesta prima del trial
               </span>
               <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
                 Sconto annuale {Math.round(annualDiscountRate * 100)}%
@@ -174,16 +164,42 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       {welcomeStatus === "billing" ? (
         <Card className="border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
           <CardContent className="py-4 text-sm">
-            <strong>Account creato.</strong> Ora scegli un piano. Non mostriamo il gestionale finché Stripe non conferma una subscription
-            in prova o attiva con carta raccolta.
+            <strong>Account creato.</strong> Scegli un piano e completa Stripe Checkout. La prova dura 14 giorni,
+            ma richiede subito una carta valida; Fleetum si abilita solo dopo la conferma del webhook Stripe.
           </CardContent>
         </Card>
       ) : null}
 
-      {billingRequired ? (
-        <Card className="border-amber-300/70 bg-amber-50/85 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          <CardContent className="py-4 text-sm">
-            Completa prima l'attivazione: scegli un piano e inserisci una carta valida su Stripe. Subito dopo il webhook potrai entrare nel gestionale.
+      {canUpdatePaymentMethod ? (
+        <Card className="border-sky-200/80 bg-sky-50/80 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
+          <CardContent className="flex flex-col gap-3 py-4 text-sm md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-semibold">Metodo di pagamento</p>
+              <p className="text-sky-800/80 dark:text-sky-100/75">
+                Puoi sostituire la carta tramite Stripe. Fleetum non mostra un'azione per rimuoverla: serve sempre un metodo valido
+                per trial, rinnovi e recupero pagamenti falliti.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0 border-sky-300 bg-white/80 text-sky-900 hover:bg-white dark:border-sky-500/40 dark:bg-slate-950/40 dark:text-sky-100"
+              disabled={busyPaymentMethod}
+              onClick={async () => {
+                setCheckoutError(null);
+                setBusyPaymentMethod(true);
+                try {
+                  const session = await billingUseCases.createPaymentMethodSession();
+                  window.location.href = session.checkoutUrl;
+                } catch (error) {
+                  setCheckoutError((error as Error).message);
+                  setBusyPaymentMethod(false);
+                }
+              }}
+            >
+              <CreditCard className="h-4 w-4" />
+              {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
+            </Button>
           </CardContent>
         </Card>
       ) : null}
@@ -230,7 +246,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
               ? entry === "ENTERPRISE"
                 ? "Passa a Piano Enterprise"
                 : `Passa a ${entry}`
-              : "Inizia prova con carta";
+              : `Prova 14 giorni con carta`;
 
           return (
             <Card
@@ -322,10 +338,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       {checkoutStatus === "success" ? (
         <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
           <CardContent className="py-4 text-sm font-semibold">
-            Checkout completato. Attendi pochi secondi: il webhook Stripe deve confermare trial o abbonamento prima dell'accesso al gestionale.
-            {billingIsActive ? (
-              <a className="ml-2 underline" href="/dashboard">Entra nel gestionale</a>
-            ) : null}
+            Checkout completato. Il piano, il trial e la carta vengono confermati dal webhook Stripe.
           </CardContent>
         </Card>
       ) : null}
@@ -338,13 +351,29 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </Card>
       ) : null}
 
+      {paymentMethodStatus === "updated" ? (
+        <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Carta aggiornata. Stripe la usera come metodo predefinito per i prossimi addebiti.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {paymentMethodStatus === "cancelled" ? (
+        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Aggiornamento carta annullato. Il metodo di pagamento precedente resta invariato.
+          </CardContent>
+        </Card>
+      ) : null}
+
       {checkoutError ? (
         <Card className="border-red-300/70 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
           <CardContent className="py-4 text-sm font-semibold">{checkoutError}</CardContent>
         </Card>
       ) : null}
 
-      {mode === "upgrade" && billingIsActive ? <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .34s both" }}>
+      <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .34s both" }}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <FileText className="h-4 w-4 text-primary" />
@@ -395,7 +424,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
           )}
         </CardContent>
-      </Card> : null}
+      </Card>
 
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .4s both" }}>
         <CardHeader>

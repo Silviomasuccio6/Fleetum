@@ -110,6 +110,66 @@ const APPLE_SYNC_MARKER_PREFIX = "[GF_ACAL_UID:";
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const PHONE_RE = /\+?\d[\d\s().-]{6,}\d/g;
 
+type StoppageListItem = {
+  id: string;
+  openedAt: string | Date;
+  status: string;
+  priority?: string | null;
+  vehicle?: {
+    plate?: string | null;
+    brand?: string | null;
+    model?: string | null;
+  } | null;
+  site?: { name?: string | null } | null;
+  workshop?: { name?: string | null } | null;
+};
+
+type StoppageListResponse = {
+  data: StoppageListItem[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+};
+
+type ClosureChecklistPayload = {
+  photosUploaded?: boolean;
+  finalCauseSet?: boolean;
+  finalCostSet?: boolean;
+  operatorSigned?: boolean;
+};
+
+type FinalCostPayload = {
+  actualTotalCost?: number;
+};
+
+type CostApprovalDecisionPayload = {
+  approved?: boolean;
+};
+
+type PartsOrderPayload = {
+  etaDate?: string;
+  [key: string]: unknown;
+};
+
+type EscalationLevel = "LEVEL_1" | "LEVEL_2" | "LEVEL_3";
+
+type SlaEscalationRow = {
+  id: string;
+  plate?: string | null;
+  site?: string | null;
+  workshop?: string | null;
+  priority?: string | null;
+  status: string;
+  daysOpen: number;
+  thresholdDays: number;
+  escalation: EscalationLevel | null;
+};
+
+const asObject = <T extends Record<string, unknown>>(value: unknown): Partial<T> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<T>) : {};
+
+const isActiveStoppage = (item: StoppageListItem) => item.status !== "CLOSED" && item.status !== "CANCELED";
+
 const ipv4ToInt = (ip: string) => {
   const parts = ip.split(".").map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
@@ -323,7 +383,7 @@ export class StoppagesController {
     userId?: string
   ) {
     const checklist = await this.opsRepository.findLatestEventByType(tenantId, stoppageId, "CLOSURE_CHECKLIST");
-    const c = (checklist?.payload as any) ?? null;
+    const c = asObject<ClosureChecklistPayload>(checklist?.payload);
     const complete = Boolean(c?.photosUploaded && c?.finalCauseSet && c?.finalCostSet && c?.operatorSigned);
     if (complete) return;
 
@@ -1478,11 +1538,11 @@ export class StoppagesController {
   slaOverview = async (req: Request, res: Response) => {
     type SlaRow = {
       id: string;
-      plate: string | undefined;
-      site: string | undefined;
-      workshop: string | undefined;
+      plate: string | null | undefined;
+      site: string | null | undefined;
+      workshop: string | null | undefined;
       status: string;
-      priority: string | undefined;
+      priority: string | null | undefined;
       daysOpen: number;
       thresholdDays: number;
       remainingDays: number;
@@ -1490,9 +1550,9 @@ export class StoppagesController {
     };
 
     const now = new Date();
-    const rows = (await this.useCases.list(req.auth!.tenantId, { skip: 0, take: 500, sortDir: "desc" })) as any;
-    const active = rows.data.filter((item: any) => item.status !== "CLOSED" && item.status !== "CANCELED");
-    const data: SlaRow[] = active.map((item: any) => {
+    const rows = (await this.useCases.list(req.auth!.tenantId, { skip: 0, take: 500, sortDir: "desc" })) as StoppageListResponse;
+    const active = rows.data.filter(isActiveStoppage);
+    const data: SlaRow[] = active.map((item) => {
       const daysOpen = Math.floor((now.getTime() - new Date(item.openedAt).getTime()) / 86400000);
       const thresholdDays = getSlaThresholdForPriority(item.priority);
       const remainingDays = thresholdDays - daysOpen;
@@ -1924,7 +1984,7 @@ export class StoppagesController {
       .map((row) => {
         const days = Math.max(0, (Number((row.closedAt ?? now)) - Number(row.openedAt)) / 86400000);
         const estimated = Number(((row.estimatedCostPerDay ?? 0) * days).toFixed(2));
-        const actual = Number((((row.events[0]?.payload as any)?.actualTotalCost as number | undefined) ?? 0).toFixed(2));
+        const actual = Number((asObject<FinalCostPayload>(row.events[0]?.payload).actualTotalCost ?? 0).toFixed(2));
         const variance = Number((actual - estimated).toFixed(2));
         const varianceRate = estimated > 0 ? Number(((variance / estimated) * 100).toFixed(2)) : 0;
         return {
@@ -1957,7 +2017,7 @@ export class StoppagesController {
   listPartsOrders = async (req: Request, res: Response) => {
     const data = await this.opsRepository.listEventsByType(req.auth!.tenantId, req.params.id, "PARTS_ORDER");
     const parsed = data.map((x) => {
-      const payload = (x.payload as any) ?? {};
+      const payload = asObject<PartsOrderPayload>(x.payload);
       const etaDate = payload.etaDate ? new Date(payload.etaDate) : null;
       const etaRisk = etaDate ? Math.floor((Date.now() - etaDate.getTime()) / 86400000) : null;
       return {
@@ -2021,7 +2081,7 @@ export class StoppagesController {
     const threshold = 1500;
     if (payload.actualTotalCost >= threshold) {
       const latestDecision = await this.opsRepository.findLatestEventByType(req.auth!.tenantId, req.params.id, "COST_APPROVAL_DECISION");
-      const decisionPayload = (latestDecision?.payload as any) ?? null;
+      const decisionPayload = asObject<CostApprovalDecisionPayload>(latestDecision?.payload);
       const approved = Boolean(decisionPayload?.approved);
       if (!approved) {
         throw new AppError(
@@ -2048,8 +2108,8 @@ export class StoppagesController {
       this.opsRepository.listEventsByType(req.auth!.tenantId, req.params.id, "COST_APPROVAL_DECISION")
     ]);
     res.json({
-      requests: requests.map((x) => ({ id: x.id, createdAt: x.createdAt, ...((x.payload as any) ?? {}) })),
-      decisions: decisions.map((x) => ({ id: x.id, createdAt: x.createdAt, ...((x.payload as any) ?? {}) }))
+      requests: requests.map((x) => ({ id: x.id, createdAt: x.createdAt, ...asObject(x.payload) })),
+      decisions: decisions.map((x) => ({ id: x.id, createdAt: x.createdAt, ...asObject(x.payload) }))
     });
   };
 
@@ -2133,12 +2193,12 @@ export class StoppagesController {
   };
 
   alerts = async (req: Request, res: Response) => {
-    const rows = (await this.useCases.list(req.auth!.tenantId, { skip: 0, take: 500, sortDir: "desc" })) as any;
+    const rows = (await this.useCases.list(req.auth!.tenantId, { skip: 0, take: 500, sortDir: "desc" })) as StoppageListResponse;
     const now = new Date();
 
     const alerts = rows.data
-      .filter((item: any) => item.status !== "CLOSED" && item.status !== "CANCELED")
-      .map((item: any) => {
+      .filter(isActiveStoppage)
+      .map((item) => {
         const days = Math.floor((now.getTime() - new Date(item.openedAt).getTime()) / 86400000);
         const severity = days > 10 ? "CRITICAL" : days > 5 ? "WARNING" : "INFO";
         return {
@@ -2152,17 +2212,17 @@ export class StoppagesController {
           message: days > 10 ? "Fermo critico oltre 10 giorni" : days > 5 ? "Fermo oltre soglia attenzione" : "Fermo monitorato"
         };
       })
-      .filter((a: any) => a.severity !== "INFO");
+      .filter((alert) => alert.severity !== "INFO");
 
-    res.json({ data: alerts.sort((a: any, b: any) => b.daysOpen - a.daysOpen) });
+    res.json({ data: alerts.sort((a, b) => b.daysOpen - a.daysOpen) });
   };
 
   slaEscalations = async (req: Request, res: Response) => {
     const now = new Date();
-    const rows = (await this.useCases.list(req.auth!.tenantId, { skip: 0, take: 1000, sortDir: "desc" })) as any;
-    const active = rows.data.filter((item: any) => item.status !== "CLOSED" && item.status !== "CANCELED");
+    const rows = (await this.useCases.list(req.auth!.tenantId, { skip: 0, take: 1000, sortDir: "desc" })) as StoppageListResponse;
+    const active = rows.data.filter(isActiveStoppage);
     const data = active
-      .map((item: any) => {
+      .map<SlaEscalationRow>((item) => {
         const daysOpen = Math.floor((now.getTime() - new Date(item.openedAt).getTime()) / 86400000);
         const thresholdDays = getSlaThresholdForPriority(item.priority);
         const escalation = this.escalationLevel(daysOpen, thresholdDays);
@@ -2178,13 +2238,13 @@ export class StoppagesController {
           escalation
         };
       })
-      .filter((x: any) => x.escalation !== null)
-      .sort((a: any, b: any) => b.daysOpen - a.daysOpen);
+      .filter((row): row is SlaEscalationRow & { escalation: EscalationLevel } => row.escalation !== null)
+      .sort((a, b) => b.daysOpen - a.daysOpen);
     res.json({
       kpis: {
-        level1: data.filter((x: any) => x.escalation === "LEVEL_1").length,
-        level2: data.filter((x: any) => x.escalation === "LEVEL_2").length,
-        level3: data.filter((x: any) => x.escalation === "LEVEL_3").length
+        level1: data.filter((x) => x.escalation === "LEVEL_1").length,
+        level2: data.filter((x) => x.escalation === "LEVEL_2").length,
+        level3: data.filter((x) => x.escalation === "LEVEL_3").length
       },
       data
     });

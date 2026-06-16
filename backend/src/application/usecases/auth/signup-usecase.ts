@@ -70,7 +70,7 @@ export class SignupUseCase {
       expiresAt: null,
       priceMonthly: getPlanMonthlyPrice("STARTER"),
       billingCycle: "monthly",
-      provider: "local"
+      provider: "stripe"
     });
 
     await prisma.auditLog.create({
@@ -146,7 +146,7 @@ export class SignupUseCase {
       expiresAt: null,
       priceMonthly: getPlanMonthlyPrice("STARTER"),
       billingCycle: "monthly",
-      provider: "local"
+      provider: "stripe"
     });
 
     await prisma.auditLog.create({

@@ -4,6 +4,7 @@ import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../../presentation/components/brand/fleetum-logo-loader";
+import { prefetchPrimaryTenantRoutes } from "../../../presentation/routes/prefetch-routes";
 import { getSafeReturnTo } from "../../../presentation/routes/safe-return-to";
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -126,6 +127,7 @@ export const LoginCard = () => {
     try {
       const result = await authUseCases.login({ email, password });
       setSession(result.user, remember);
+      prefetchPrimaryTenantRoutes();
       setSuccess(true);
       window.setTimeout(() => navigate(returnTo, { replace: true }), 450);
     } catch (error) {
@@ -190,7 +192,7 @@ export const LoginCard = () => {
 
           {welcome === "billing" ? (
             <p className="premium-login-error premium-login-error--block" style={{ color: "#3730a3", background: "rgba(224,231,255,0.82)", borderColor: "rgba(99,102,241,0.35)" }}>
-              Accedi e ti porto alla scelta piano con checkout Stripe.
+              Dopo l'accesso ti porto alla scelta piano: il gestionale si abilita solo dopo conferma Stripe.
             </p>
           ) : null}
 

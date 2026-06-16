@@ -3,11 +3,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { validateUploadedFile } from "../src/infrastructure/storage/file-security.js";
+import sharp from "sharp";
+import { sanitizeImageMetadata, validateUploadedFile } from "../src/infrastructure/storage/file-security.js";
 
-const withTempFile = async (content: Buffer | string, fn: (filePath: string) => Promise<void>) => {
+const withTempFile = async (content: Buffer | string, fn: (filePath: string) => Promise<void>, filename = "sample.bin") => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fleetum-file-security-"));
-  const filePath = path.join(dir, "sample.bin");
+  const filePath = path.join(dir, filename);
   await fs.writeFile(filePath, content);
   try {
     await fn(filePath);
@@ -46,4 +47,41 @@ test("file security blocks EICAR test signature", async () => {
       return true;
     });
   });
+});
+
+test("image metadata sanitizer strips EXIF metadata from JPEG files", async () => {
+  const marker = "FleetumSensitiveGpsMetadata";
+  const image = await sharp({
+    create: {
+      width: 8,
+      height: 8,
+      channels: 3,
+      background: { r: 30, g: 120, b: 220 }
+    }
+  })
+    .jpeg()
+    .withMetadata({
+      exif: {
+        IFD0: {
+          ImageDescription: marker
+        }
+      }
+    })
+    .toBuffer();
+
+  await withTempFile(
+    image,
+    async (filePath) => {
+      const beforeBuffer = await fs.readFile(filePath);
+      assert.equal(beforeBuffer.includes(Buffer.from(marker)), true);
+      assert.ok((await sharp(filePath).metadata()).exif);
+
+      await sanitizeImageMetadata(filePath);
+
+      const afterBuffer = await fs.readFile(filePath);
+      assert.equal(afterBuffer.includes(Buffer.from(marker)), false);
+      assert.equal((await sharp(filePath).metadata()).exif, undefined);
+    },
+    "sample.jpg"
+  );
 });

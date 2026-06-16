@@ -33,6 +33,12 @@ const isStateChangingMethod = (method?: string) => {
 
 const readCsrfToken = () => getCookieValue("fermi_csrf") ?? tokenStorage.getCsrf();
 
+const logoutAndRedirectToLogin = () => {
+  tokenStorage.clear();
+  useAuthStore.getState().logout();
+  if (window.location.pathname !== "/login") window.location.href = "/login";
+};
+
 const tryRefreshSession = async () => {
   if (refreshPromise) return refreshPromise;
 
@@ -94,11 +100,13 @@ api.interceptors.response.use(
         ? "Licenza scaduta. Rinnova per continuare."
         : apiErrorCode === "LICENSE_SUSPENDED"
           ? "Licenza sospesa. Contatta il supporto."
-          : apiErrorCode === "LICENSE_CANCELED"
-            ? "Abbonamento cancellato. Riattiva il piano per continuare."
-            : apiErrorCode === "TENANT_INACTIVE"
-              ? "Tenant disattivato. Contatta l'amministratore."
-              : null;
+          : apiErrorCode === "LICENSE_PAST_DUE"
+            ? "Pagamento non riuscito. Aggiorna l'abbonamento per continuare."
+            : apiErrorCode === "LICENSE_CANCELED"
+              ? "Abbonamento cancellato. Riattiva il piano per continuare."
+              : apiErrorCode === "TENANT_INACTIVE"
+                ? "Tenant disattivato. Contatta l'amministratore."
+                : null;
 
     const planLimitMessage =
       apiErrorCode === "PLAN_LIMIT"
@@ -108,7 +116,7 @@ api.interceptors.response.use(
     const isNetwork = error.code === "ERR_NETWORK";
     const isTimeout = error.code === "ECONNABORTED";
 
-    if (status === 401 && !originalRequest._retry && !isAuthRoute) {
+    if (status === 401 && apiErrorCode === "UNAUTHORIZED" && !originalRequest._retry && !isAuthRoute) {
       try {
         originalRequest._retry = true;
         const refreshed = await tryRefreshSession();
@@ -120,10 +128,9 @@ api.interceptors.response.use(
           }
           return api.request(originalRequest);
         }
+        logoutAndRedirectToLogin();
       } catch {
-        tokenStorage.clear();
-        useAuthStore.getState().logout();
-        if (window.location.pathname !== "/login") window.location.href = "/login";
+        logoutAndRedirectToLogin();
       }
     }
 

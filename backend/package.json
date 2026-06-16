@@ -12,10 +12,13 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
     "seed:demo-tenant": "tsx prisma/seed-demo-tenant.ts",
+    "privacy:pii-report": "tsx src/scripts/pii-report.ts",
     "privacy:retention:dry-run": "tsx src/scripts/privacy-retention.ts",
     "privacy:retention:run": "tsx src/scripts/privacy-retention.ts --run",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:tenant-isolation": "NODE_ENV=test tsx --test tests/security/*.test.ts",
+    "storage:migration-plan": "tsx src/scripts/storage-migration-plan.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -37,6 +40,8 @@
     "pdf-parse": "^2.4.5",
     "pino": "^9.3.2",
     "pino-http": "^10.1.0",
+    "sharp": "^0.34.5",
+    "stripe": "^22.2.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -48,6 +53,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.6.1",
     "@types/nodemailer": "^6.4.23",
+    "@types/sharp": "^0.31.1",
     "prisma": "^6.19.2",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"

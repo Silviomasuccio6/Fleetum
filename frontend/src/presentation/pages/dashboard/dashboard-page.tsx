@@ -361,8 +361,31 @@ export const DashboardPage = () => {
   const trendStats = useAsync(() => {
     if (!canReportsAdvanced) {
       return Promise.resolve({
+        kpis: {
+          totalStoppages: 0,
+          openStoppages: 0,
+          closedStoppages: 0,
+          criticalOpen: 0,
+          overdueOpen: 0,
+          newStoppagesLast30: 0,
+          closedLast30: 0,
+          averageClosureDays: 0,
+          closureRateWithin7Days: 0,
+          remindersTotal: 0,
+          reminderSuccessRate: 0,
+          estimatedOpenCost: 0
+        },
         charts: {
-          trendStoppages: []
+          trendStoppages: [],
+          byStatus: [],
+          byPriority: [],
+          byWorkshop: [],
+          bySite: []
+        },
+        tables: {
+          longestOpen: [],
+          topVehiclesDowntime: [],
+          reminderFailures: []
         }
       });
     }
@@ -398,6 +421,7 @@ export const DashboardPage = () => {
 
   if (loading) return <FleetumBlockLoader label="Caricamento dashboard" />;
   if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (!data) return <FleetumBlockLoader label="Preparazione dashboard" />;
 
   return (
     <section className="dashboard-enterprise space-y-4">

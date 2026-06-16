@@ -12,6 +12,7 @@ import {
   Wrench
 } from "lucide-react";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { SeoHead } from "../../components/seo/seo-head";
 import "./landing.css";
 
 type SeoPageKey =
@@ -308,95 +309,6 @@ const pages: Record<SeoPageKey, SeoPageConfig> = {
 
 const icons = [CalendarDays, ClipboardSignature, Car, Wrench, BarChart3, ShieldCheck, Gauge];
 
-const setMetaTag = (selector: string, attr: "name" | "property", key: string, content: string) => {
-  let meta = document.head.querySelector<HTMLMetaElement>(selector);
-  if (!meta) {
-    meta = document.createElement("meta");
-    meta.setAttribute(attr, key);
-    document.head.appendChild(meta);
-  }
-  meta.setAttribute("content", content);
-};
-
-const setJsonLd = (id: string, payload: Record<string, unknown>) => {
-  let script = document.head.querySelector<HTMLScriptElement>(`script#${id}`);
-  if (!script) {
-    script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.id = id;
-    document.head.appendChild(script);
-  }
-  script.textContent = JSON.stringify(payload);
-};
-
-const SeoHead = ({ page }: { page: SeoPageConfig }) => {
-  useEffect(() => {
-    const canonical = `https://fleetum.it/${page.slug}`;
-    document.title = page.title;
-    setMetaTag('meta[name="description"]', "name", "description", page.description);
-    setMetaTag('meta[property="og:title"]', "property", "og:title", page.title);
-    setMetaTag('meta[property="og:description"]', "property", "og:description", page.description);
-    setMetaTag('meta[property="og:type"]', "property", "og:type", "website");
-    setMetaTag('meta[property="og:url"]', "property", "og:url", canonical);
-    setMetaTag('meta[name="twitter:card"]', "name", "twitter:card", "summary_large_image");
-
-    let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
-    if (!link) {
-      link = document.createElement("link");
-      link.rel = "canonical";
-      document.head.appendChild(link);
-    }
-    link.href = canonical;
-
-    setJsonLd("fleetum-organization-schema", {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      name: "Fleetum",
-      url: "https://fleetum.it",
-      logo: "https://fleetum.it/brand/fleetum-logo-full-light.svg"
-    });
-
-    setJsonLd("fleetum-software-schema", {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      name: "Fleetum",
-      applicationCategory: "BusinessApplication",
-      operatingSystem: "Web",
-      description: page.description,
-      url: canonical,
-      offers: {
-        "@type": "Offer",
-        priceCurrency: "EUR",
-        availability: "https://schema.org/InStock"
-      }
-    });
-
-    setJsonLd("fleetum-faq-schema", {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      mainEntity: page.faqs.map((faq) => ({
-        "@type": "Question",
-        name: faq.question,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: faq.answer
-        }
-      }))
-    });
-
-    setJsonLd("fleetum-breadcrumb-schema", {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Fleetum", item: "https://fleetum.it/" },
-        { "@type": "ListItem", position: 2, name: page.eyebrow, item: canonical }
-      ]
-    });
-  }, [page]);
-
-  return null;
-};
-
 const SeoHeader = () => (
   <header className="fleetum-seo-header">
     <Link className="fleetum-site-logo" to="/" aria-label="Fleetum homepage">
@@ -423,7 +335,57 @@ export const PublicSeoPage = ({ slug }: { slug: SeoPageKey }) => {
 
   return (
     <main className="fleetum-landing fleetum-seo-page">
-      <SeoHead page={page} />
+      <SeoHead title={page.title} description={page.description} canonicalPath={`/${page.slug}`}>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            name: "Fleetum",
+            url: "https://fleetum.it",
+            logo: "https://fleetum.it/brand/fleetum-logo-full-light.svg"
+          })}
+        </script>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "Fleetum",
+            applicationCategory: "BusinessApplication",
+            operatingSystem: "Web",
+            description: page.description,
+            url: `https://fleetum.it/${page.slug}`,
+            offers: {
+              "@type": "Offer",
+              priceCurrency: "EUR",
+              availability: "https://schema.org/InStock"
+            }
+          })}
+        </script>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: page.faqs.map((faq) => ({
+              "@type": "Question",
+              name: faq.question,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: faq.answer
+              }
+            }))
+          })}
+        </script>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              { "@type": "ListItem", position: 1, name: "Fleetum", item: "https://fleetum.it/" },
+              { "@type": "ListItem", position: 2, name: page.eyebrow, item: `https://fleetum.it/${page.slug}` }
+            ]
+          })}
+        </script>
+      </SeoHead>
       <SeoHeader />
 
       <section className="fleetum-seo-hero">

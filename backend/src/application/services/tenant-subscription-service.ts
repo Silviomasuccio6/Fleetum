@@ -30,7 +30,15 @@ export type TenantSubscriptionUpsertInput = {
 };
 
 const toValidStatus = (value: unknown): TenantSubscriptionStatus => {
-  if (value === "PENDING" || value === "ACTIVE" || value === "SUSPENDED" || value === "EXPIRED" || value === "TRIAL" || value === "PAST_DUE" || value === "CANCELED") {
+  if (
+    value === "PENDING" ||
+    value === "ACTIVE" ||
+    value === "SUSPENDED" ||
+    value === "EXPIRED" ||
+    value === "TRIAL" ||
+    value === "PAST_DUE" ||
+    value === "CANCELED"
+  ) {
     return value;
   }
   return "PENDING";

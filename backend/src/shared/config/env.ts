@@ -12,8 +12,8 @@ const isCiOrTest = process.env.NODE_ENV === "test" || process.env.CI === "true";
 const TEST_JWT_SECRET = "test-jwt-secret-for-ci-only-0000000000000000";
 const TEST_PLATFORM_JWT_SECRET =
   "test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000";
-const TEST_PLATFORM_ADMIN_PASSWORD = "ci-platform-admin-password-0000";
-const TEST_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/fermi_ci?schema=public";
+const TEST_PLATFORM_ADMIN_PASSWORD_HASH = "$2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde";
+const TEST_DATABASE_URL = "postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public";
 const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "smtp").toLowerCase();
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
 
@@ -45,9 +45,9 @@ const JWT_SECRET = required("JWT_SECRET", isCiOrTest ? TEST_JWT_SECRET : undefin
 const PLATFORM_JWT_SECRET = required("PLATFORM_JWT_SECRET", isCiOrTest ? TEST_PLATFORM_JWT_SECRET : undefined);
 const APP_URL = process.env.APP_URL ?? "http://localhost:5173";
 const BACKEND_PUBLIC_URL = process.env.BACKEND_PUBLIC_URL ?? "http://127.0.0.1:4000";
-const PLATFORM_ADMIN_PASSWORD = required(
-  "PLATFORM_ADMIN_PASSWORD",
-  isCiOrTest ? TEST_PLATFORM_ADMIN_PASSWORD : undefined
+const PLATFORM_ADMIN_PASSWORD_HASH = required(
+  "PLATFORM_ADMIN_PASSWORD_HASH",
+  isCiOrTest ? TEST_PLATFORM_ADMIN_PASSWORD_HASH : undefined
 );
 
 if (JWT_SECRET.length < 32) {
@@ -62,8 +62,8 @@ if (PLATFORM_JWT_SECRET.length < 64) {
   throw new Error("PLATFORM_JWT_SECRET must be at least 64 chars");
 }
 
-if (PLATFORM_ADMIN_PASSWORD.length < 20) {
-  throw new Error("PLATFORM_ADMIN_PASSWORD must be at least 20 chars");
+if (!PLATFORM_ADMIN_PASSWORD_HASH.startsWith("$2")) {
+  throw new Error("PLATFORM_ADMIN_PASSWORD_HASH must be a bcrypt hash starting with $2a$ or $2b$");
 }
 
 if (!["smtp", "resend"].includes(EMAIL_PROVIDER)) {
@@ -72,6 +72,12 @@ if (!["smtp", "resend"].includes(EMAIL_PROVIDER)) {
 
 if (!["local", "s3"].includes(STORAGE_PROVIDER)) {
   throw new Error("STORAGE_PROVIDER must be local or s3");
+}
+
+if (STORAGE_PROVIDER === "s3") {
+  for (const name of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]) {
+    if (!process.env[name]) throw new Error(`Missing required env var for S3 storage: ${name}`);
+  }
 }
 
 export const env = {
@@ -84,7 +90,7 @@ export const env = {
 
   DATABASE_URL: required("DATABASE_URL", isCiOrTest ? TEST_DATABASE_URL : undefined),
   JWT_SECRET,
-  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "1d",
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "15m",
   PLATFORM_JWT_SECRET,
   PLATFORM_JWT_EXPIRES_IN: process.env.PLATFORM_JWT_EXPIRES_IN ?? "15m",
 
@@ -112,6 +118,12 @@ export const env = {
   S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
   S3_REGION: process.env.S3_REGION,
   S3_PUBLIC_BASE_URL: process.env.S3_PUBLIC_BASE_URL,
+  S3_SIGNED_URL_EXPIRES_SECONDS: toInt(process.env.S3_SIGNED_URL_EXPIRES_SECONDS ?? "300", "S3_SIGNED_URL_EXPIRES_SECONDS"),
+  PRISMA_SLOW_QUERY_MS: process.env.PRISMA_SLOW_QUERY_MS
+    ? toInt(process.env.PRISMA_SLOW_QUERY_MS, "PRISMA_SLOW_QUERY_MS")
+    : undefined,
+  METRICS_ENABLED: toBool(process.env.METRICS_ENABLED ?? "true"),
+  METRICS_TOKEN: process.env.METRICS_TOKEN,
   PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
 
@@ -131,7 +143,7 @@ export const env = {
     process.env.SLA_PRIORITY_THRESHOLDS ?? '{"LOW":15,"MEDIUM":10,"HIGH":5,"CRITICAL":2}',
 
   PLATFORM_ADMIN_EMAIL: required("PLATFORM_ADMIN_EMAIL", isCiOrTest ? "ci-admin@example.local" : undefined),
-  PLATFORM_ADMIN_PASSWORD,
+  PLATFORM_ADMIN_PASSWORD_HASH,
   PLATFORM_ADMIN_OTP: process.env.PLATFORM_ADMIN_OTP,
   PLATFORM_ALLOWED_IPS_CSV: process.env.PLATFORM_ALLOWED_IPS ?? "",
   PLATFORM_ALERT_EMAILS: toCsvList(process.env.PLATFORM_ALERT_EMAILS),

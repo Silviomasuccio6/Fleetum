@@ -180,7 +180,9 @@ enum RentalCustomerType {
 
 model Tenant {
   id                            String                         @id @default(cuid())
+  /// @pii
   name                          String
+  /// @pii
   vatNumber                     String?
   isActive                      Boolean                        @default(true)
   createdAt                     DateTime                       @default(now())
@@ -212,11 +214,14 @@ model Tenant {
   rentalExtraKmTiers            RentalExtraKmTier[]
   rentalBookingPricingSnapshots RentalBookingPricingSnapshot[]
   privacyAcceptances            PrivacyAcceptance[]
+  storedFileObjects             StoredFileObject[]
   tenantProfile                 TenantProfile?
   tenantBranding                TenantBranding?
   tenantLegalSettings           TenantLegalSettings?
   tenantSubscription            TenantSubscription?
+  billingEvents                 BillingEvent[]
   invoices                      Invoice[]
+  consentLogs                   ConsentLog[]
 
   @@index([isActive])
 }
@@ -245,29 +250,68 @@ model TenantSubscription {
   @@index([stripeSubscriptionId])
 }
 
+model BillingEvent {
+  id           String    @id @default(cuid())
+  eventId      String    @unique
+  provider     String    @default("stripe")
+  type         String
+  tenantId     String?
+  processedAt  DateTime?
+  status       String    @default("RECEIVED")
+  errorMessage String?
+  payload      Json
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  tenant       Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([provider, type])
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
+}
+
 model TenantProfile {
   id                 String    @id @default(cuid())
   tenantId           String    @unique
+  /// @pii
   legalName          String
+  /// @pii
   tradeName          String?
+  /// @pii
   legalForm          String?
+  /// @pii
   vatNumber          String?
+  /// @pii
   taxCode            String?
+  /// @pii
   pec                String?
+  /// @pii
   sdiCode            String?
+  /// @pii
   rea                String?
+  /// @pii
   legalAddress       String?
+  /// @pii
   city               String?
+  /// @pii
   province           String?
+  /// @pii
   postalCode         String?
   country            String    @default("IT")
+  /// @pii
   phone              String?
+  /// @pii
   email              String?
+  /// @pii
   website            String?
+  /// @pii
   adminFirstName     String?
+  /// @pii
   adminLastName      String?
+  /// @pii
   adminEmail         String?
+  /// @pii
   adminPhone         String?
+  /// @pii
   adminRole          String?
   profileCompletedAt DateTime?
   createdAt          DateTime  @default(now())
@@ -284,7 +328,9 @@ model TenantProfile {
 model TenantBranding {
   id            String   @id @default(cuid())
   tenantId      String   @unique
+  /// @pii
   logoFilePath  String?
+  /// @pii
   logoFileName  String?
   logoMimeType  String?
   primaryColor  String?
@@ -298,7 +344,9 @@ model TenantBranding {
 model TenantLegalSettings {
   id                   String   @id @default(cuid())
   tenantId             String   @unique
+  /// @pii
   contractFooterText   String?
+  /// @pii
   defaultContractTerms String?
   privacyNoticeVersion String?
   termsVersion         String?
@@ -312,12 +360,16 @@ model CalendarEvent {
   id           String   @id @default(cuid())
   tenantId     String
   userId       String?
+  /// @pii
   title        String
+  /// @pii
   description  String?
   startAt      DateTime
   endAt        DateTime
   allDay       Boolean  @default(false)
+  /// @pii
   location     String?
+  /// @pii
   attendees    Json?
   reminder     Int      @default(30)
   visibility   String   @default("default")
@@ -336,9 +388,13 @@ model CalendarEvent {
 model User {
   id                    String               @id @default(cuid())
   tenantId              String
+  /// @pii
   email                 String
+  /// @pii
   passwordHash          String
+  /// @pii
   firstName             String
+  /// @pii
   lastName              String
   status                UserStatus           @default(ACTIVE)
   isEmailVerified       Boolean              @default(false)
@@ -363,7 +419,9 @@ model RefreshSession {
   userId       String
   tenantId     String
   tokenHash    String    @unique
+  /// @pii
   userAgent    String?
+  /// @pii
   ipAddress    String?
   expiresAt    DateTime
   revokedAt    DateTime?
@@ -444,11 +502,16 @@ model Site {
   id               String            @id @default(cuid())
   tenantId         String
   name             String
+  /// @pii
   address          String
   city             String
+  /// @pii
   contactName      String?
+  /// @pii
   email            String?
+  /// @pii
   phone            String?
+  /// @pii
   notes            String?
   isActive         Boolean           @default(true)
   createdAt        DateTime          @default(now())
@@ -467,12 +530,18 @@ model Workshop {
   id          String     @id @default(cuid())
   tenantId    String
   name        String
+  /// @pii
   contactName String?
+  /// @pii
   email       String?
+  /// @pii
   phone       String?
+  /// @pii
   whatsapp    String?
+  /// @pii
   address     String?
   city        String?
+  /// @pii
   notes       String?
   isActive    Boolean    @default(true)
   createdAt   DateTime   @default(now())
@@ -488,6 +557,7 @@ model Vehicle {
   id                    String               @id @default(cuid())
   tenantId              String
   siteId                String
+  /// @pii
   plate                 String
   brand                 String
   model                 String
@@ -501,6 +571,7 @@ model Vehicle {
   purchaseDate          DateTime?
   residualValue         Float?
   monthlyFixedCost      Float?
+  /// @pii
   notes                 String?
   isActive              Boolean              @default(true)
   createdAt             DateTime             @default(now())
@@ -546,10 +617,13 @@ model VehicleMaintenance {
   vehicleId       String
   performedAt     DateTime
   maintenanceType String
+  /// @pii
   description     String?
+  /// @pii
   workshopName    String?
   kmAtService     Int?
   cost            Float?
+  /// @pii
   notes           String?
   createdAt       DateTime                       @default(now())
   updatedAt       DateTime                       @updatedAt
@@ -566,7 +640,9 @@ model VehicleMaintenanceAttachment {
   id                 String             @id @default(cuid())
   tenantId           String
   maintenanceId      String
+  /// @pii
   filePath           String
+  /// @pii
   fileName           String
   mimeType           String
   sizeBytes          Int
@@ -582,7 +658,9 @@ model VehicleMaintenanceAttachment {
 model VehiclePhoto {
   id        String   @id @default(cuid())
   vehicleId String
+  /// @pii
   filePath  String
+  /// @pii
   fileName  String
   mimeType  String
   sizeBytes Int
@@ -596,7 +674,9 @@ model VehicleBooklet {
   id                        String    @id @default(cuid())
   tenantId                  String
   vehicleId                 String    @unique
+  /// @pii
   filePath                  String
+  /// @pii
   fileName                  String
   mimeType                  String
   sizeBytes                 Int
@@ -620,22 +700,31 @@ model RentalBooking {
   status               RentalBookingStatus           @default(DRAFT)
   contractStatus       RentalContractStatus          @default(NOT_READY)
   cargosStatus         RentalCargosStatus            @default(NOT_REQUIRED)
+  /// @pii
   customerName         String
+  /// @pii
   customerEmail        String?
+  /// @pii
   customerPhone        String?
+  /// @pii
   customerDocument     String?
   pickupAt             DateTime
   returnAt             DateTime
+  /// @pii
   pickupLocation       String?
+  /// @pii
   returnLocation       String?
   pickupKm             Int?
   returnKm             Int?
   expectedTotal        Float?
   finalTotal           Float?
+  /// @pii
   reason               String?
+  /// @pii
   internalNotes        String?
   contractSignedAt     DateTime?
   cargosSentAt         DateTime?
+  /// @pii
   cargosOutcomeMessage String?
   cargosTransmissionId String?
   createdAt            DateTime                      @default(now())
@@ -667,6 +756,7 @@ model RentalBookingNote {
   bookingId String
   userId    String?
   type      String        @default("NOTE")
+  /// @pii
   message   String
   createdAt DateTime      @default(now())
   tenant    Tenant        @relation(fields: [tenantId], references: [id])
@@ -679,39 +769,73 @@ model RentalCustomer {
   id                      String                     @id @default(cuid())
   tenantId                String
   customerType            RentalCustomerType         @default(PERSONA_FISICA)
+  /// @pii
   firstName               String
+  /// @pii
   lastName                String
+  /// @pii
   drivingLicenseNumber    String                     @default("")
+  /// @pii
   drivingLicenseIssuedAt  DateTime?
+  /// @pii
   drivingLicenseExpiresAt DateTime?
+  /// @pii
   drivingLicenseAuthority String?
+  /// @pii
   drivingLicenseCategory  String?
+  /// @pii
   email                   String?
+  /// @pii
   phone                   String?
+  /// @pii
   dateOfBirth             DateTime?
+  /// @pii
   placeOfBirth            String?
+  /// @pii
   nationality             String?
+  /// @pii
   residenceAddress        String?
+  /// @pii
   taxCode                 String?
+  /// @pii
   documentType            String?
+  /// @pii
   documentNumber          String?
+  /// @pii
   documentIssuedAt        DateTime?
+  /// @pii
   documentExpiresAt       DateTime?
+  /// @pii
   documentAuthority       String?
+  /// @pii
   companyName             String?
+  /// @pii
   companyLegalForm        String?
+  /// @pii
   companyVatNumber        String?
+  /// @pii
   companyTaxCode          String?
+  /// @pii
   companyLegalAddress     String?
+  /// @pii
   companyPec              String?
+  /// @pii
   companySdi              String?
+  /// @pii
   companyRea              String?
+  /// @pii
   legalRepFirstName       String?
+  /// @pii
   legalRepLastName        String?
+  /// @pii
   legalRepTaxCode         String?
+  /// @pii
   legalRepRole            String?
+  /// @pii
   legalRepEmail           String?
+  /// @pii
   legalRepPhone           String?
+  /// @pii
   notes                   String?
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
@@ -734,7 +858,9 @@ model RentalCustomerAttachment {
   tenantId   String
   customerId String
   bookingId  String?
+  /// @pii
   filePath   String
+  /// @pii
   fileName   String
   mimeType   String
   sizeBytes  Int
@@ -879,7 +1005,9 @@ model RentalBookingPricingSnapshot {
   finalSubtotal        Float?
   finalTaxAmount       Float?
   finalTotal           Float?
+  /// @pii
   notes                String?
+  /// @pii
   metadata             Json?
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
@@ -899,15 +1027,25 @@ model ContractTemplate {
   id              String            @id @default(cuid())
   tenantId        String
   name            String
+  /// @pii
   content         String
+  /// @pii
   emailSubject    String?
+  /// @pii
   emailBody       String?
+  /// @pii
   companyName     String?
+  /// @pii
   companyAddress  String?
+  /// @pii
   companyVat      String?
+  /// @pii
   companyEmail    String?
+  /// @pii
   companyPhone    String?
+  /// @pii
   logoFilePath    String?
+  /// @pii
   logoFileName    String?
   logoMimeType    String?
   brandPrimary    String?
@@ -932,15 +1070,22 @@ model BookingContract {
   templateId      String?
   templateVersion Int                       @default(1)
   status          BookingContractStatus     @default(DRAFT)
+  /// @pii
   title           String
+  /// @pii
   content         String
+  /// @pii
   emailTo         String?
+  /// @pii
   emailSubject    String?
+  /// @pii
   emailBody       String?
+  /// @pii
   pdfFileName     String?
   pdfGeneratedAt  DateTime?
   lastSentAt      DateTime?
   signedAt        DateTime?
+  /// @pii
   errorMessage    String?
   createdByUserId String?
   updatedByUserId String?
@@ -966,7 +1111,9 @@ model BookingContractEvent {
   contractId  String
   actorUserId String?
   type        String
+  /// @pii
   message     String
+  /// @pii
   details     Json?
   createdAt   DateTime        @default(now())
   tenant      Tenant          @relation(fields: [tenantId], references: [id])
@@ -982,12 +1129,17 @@ model BookingContractDelivery {
   bookingId    String
   contractId   String
   channel      BookingContractDeliveryChannel @default(EMAIL)
+  /// @pii
   recipient    String
+  /// @pii
   subject      String
+  /// @pii
   body         String
   status       BookingContractDeliveryStatus @default(PENDING)
   sentAt       DateTime?
+  /// @pii
   details      Json?
+  /// @pii
   errorMessage String?
   createdAt    DateTime                      @default(now())
   tenant       Tenant                        @relation(fields: [tenantId], references: [id])
@@ -1005,8 +1157,11 @@ model Stoppage {
   vehicleId                String
   workshopId               String
   createdByUserId          String
+  /// @pii
   reason                   String
+  /// @pii
   notes                    String?
+  /// @pii
   closureSummary           String?
   status                   StoppageStatus   @default(OPEN)
   priority                 StoppagePriority @default(MEDIUM)
@@ -1017,8 +1172,11 @@ model Stoppage {
   reminderAfterDays        Int?
   lastReminderSentAt       DateTime?
   totalRemindersSent       Int              @default(0)
+  /// @pii
   workshopEmailSnapshot    String?
+  /// @pii
   workshopPhoneSnapshot    String?
+  /// @pii
   workshopWhatsappSnapshot String?
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @updatedAt
@@ -1042,7 +1200,9 @@ model StoppageEvent {
   stoppageId String
   userId     String?
   type       String
+  /// @pii
   message    String
+  /// @pii
   payload    Json?
   createdAt  DateTime @default(now())
   stoppage   Stoppage @relation(fields: [stoppageId], references: [id])
@@ -1053,7 +1213,9 @@ model StoppageEvent {
 model StoppagePhoto {
   id         String   @id @default(cuid())
   stoppageId String
+  /// @pii
   filePath   String
+  /// @pii
   fileName   String
   mimeType   String
   sizeBytes  Int
@@ -1069,11 +1231,15 @@ model Reminder {
   stoppageId   String
   type         String
   channel      String
+  /// @pii
   recipient    String
+  /// @pii
   subject      String?
+  /// @pii
   body         String
   sentAt       DateTime @default(now())
   success      Boolean  @default(true)
+  /// @pii
   errorMessage String?
   createdAt    DateTime @default(now())
   tenant       Tenant   @relation(fields: [tenantId], references: [id])
@@ -1090,6 +1256,7 @@ model AuditLog {
   action     String
   resource   String
   resourceId String?
+  /// @pii
   details    Json?
   createdAt  DateTime @default(now())
   tenant     Tenant   @relation(fields: [tenantId], references: [id])
@@ -1120,7 +1287,9 @@ model PrivacyAcceptance {
   noticeId   String
   version    String
   source     String        @default("banner")
+  /// @pii
   ipAddress  String?
+  /// @pii
   userAgent  String?
   acceptedAt DateTime      @default(now())
   createdAt  DateTime      @default(now())
@@ -1132,6 +1301,34 @@ model PrivacyAcceptance {
   @@index([tenantId, acceptedAt])
   @@index([tenantId, userId, acceptedAt])
   @@index([noticeId, acceptedAt])
+}
+
+model ConsentLog {
+  id              String   @id @default(cuid())
+  tenantId        String
+  customerId      String?
+  userId          String?
+  subjectType     String   @default("rental_customer")
+  subjectId       String?
+  consentType     String
+  granted         Boolean
+  channel         String?
+  source          String?
+  /// @pii
+  ipAddress       String?
+  /// @pii
+  userAgent       String?
+  documentCode    String?
+  documentVersion String?
+  /// @pii
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, customerId, createdAt])
+  @@index([tenantId, consentType, createdAt])
+  @@index([tenantId, subjectType, subjectId])
 }
 
 model LoginRateLimitState {
@@ -1148,18 +1345,58 @@ model LoginRateLimitState {
   @@index([scope, blockedUntil])
 }
 
+model PlatformOtpChallenge {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([key, expiresAt])
+}
+
+model StoredFileObject {
+  id           String    @id @default(cuid())
+  tenantId     String
+  provider     String
+  bucket       String?
+  storageKey   String
+  originalName String?
+  mimeType     String?
+  sizeBytes    Int
+  checksumSha256 String?
+  resourceType String?
+  resourceId   String?
+  visibility   String    @default("private")
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, bucket, storageKey])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, resourceType, resourceId])
+  @@index([tenantId, storageKey])
+  @@index([deletedAt])
+}
+
 model EmailQueue {
   id            String           @id @default(cuid())
   tenantId      String?
   type          String
+  /// @pii
   recipient     String
+  /// @pii
   subject       String
+  /// @pii
   body          String
+  /// @pii
   meta          Json?
   status        EmailQueueStatus @default(PENDING)
   attempts      Int              @default(0)
   maxAttempts   Int              @default(5)
   nextAttemptAt DateTime         @default(now())
+  /// @pii
   lastError     String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -1181,14 +1418,23 @@ model Invoice {
   taxRate          Float
   taxAmount        Float
   total            Float
+  /// @pii
   billingName      String
+  /// @pii
   billingVatNumber String?
+  /// @pii
   billingTaxCode   String?
+  /// @pii
   billingAddress   String?
+  /// @pii
   billingEmail     String?
+  /// @pii
   billingPec       String?
+  /// @pii
   billingSdi       String?
+  /// @pii
   notes            String?
+  /// @pii
   pdfFilePath      String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
@@ -1208,6 +1454,7 @@ model Invoice {
 model InvoiceItem {
   id          String   @id @default(cuid())
   invoiceId   String
+  /// @pii
   description String
   quantity    Float
   unitPrice   Float
@@ -1224,10 +1471,13 @@ model InvoiceDelivery {
   id                String                 @id @default(cuid())
   invoiceId         String
   channel           InvoiceDeliveryChannel @default(EMAIL)
+  /// @pii
   recipient         String
   status            InvoiceDeliveryStatus  @default(PENDING)
   provider          String?
+  /// @pii
   providerMessageId String?
+  /// @pii
   errorMessage      String?
   sentAt            DateTime?
   createdAt         DateTime               @default(now())
@@ -1248,9 +1498,13 @@ model WebsiteEvent {
   deviceType    String?
   browser       String?
   country       String?
+  /// @pii
   ipHash        String?
+  /// @pii
   userAgentHash String?
+  /// @pii
   sessionId     String?
+  /// @pii
   metadata      Json?
   createdAt     DateTime         @default(now())
 
@@ -1261,11 +1515,16 @@ model WebsiteEvent {
 
 model DemoLead {
   id                  String         @id @default(cuid())
+  /// @pii
   companyName         String
+  /// @pii
   fullName            String
+  /// @pii
   email               String
+  /// @pii
   phone               String?
   fleetSize           String?
+  /// @pii
   message             String?
   source              String         @default("fleetum.it")
   status              DemoLeadStatus @default(NEW)

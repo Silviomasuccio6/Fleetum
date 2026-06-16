@@ -3,9 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="${ROOT_DIR}/backups"
-CONTAINER_NAME="${1:-fermi_postgres}"
-DB_NAME="${2:-fermi_db}"
-DB_USER="${3:-postgres}"
+CONTAINER_NAME="${1:-fleetum_postgres}"
+DB_NAME="${2:-fleetum}"
+DB_USER="${3:-fleetum}"
 
 mkdir -p "${BACKUP_DIR}"
 STAMP="$(date +%Y%m%d_%H%M%S)"

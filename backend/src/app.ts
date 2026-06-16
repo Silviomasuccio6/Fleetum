@@ -11,6 +11,8 @@ import { errorHandler } from "./interfaces/http/middlewares/error-handler.js";
 import { notFoundHandler } from "./interfaces/http/middlewares/not-found.js";
 import { createPlatformIpAllowlist } from "./interfaces/http/middlewares/platform-ip-allowlist.js";
 import { requestContext } from "./interfaces/http/middlewares/request-context.js";
+import { metricsHandler, observeHttpMetrics } from "./interfaces/http/middlewares/metrics-middleware.js";
+import { metrics } from "./infrastructure/observability/metrics.js";
 
 const sensitiveQueryParams = new Set([
   "token",
@@ -153,6 +155,7 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
   }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   app.use(requestContext);
+  app.use(observeHttpMetrics);
   app.use(
     morgan(
       ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
@@ -163,6 +166,7 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
 export const createApp = () => {
   const app = express();
   applyCommon(app, env.CORS_ORIGIN, localTenantOrigins);
+  app.get("/api/metrics", metricsHandler);
   app.use("/api", apiRouter);
   app.use(notFoundHandler);
   app.use(errorHandler);
@@ -173,14 +177,17 @@ export const createPlatformApp = () => {
   const app = express();
   applyCommon(app, env.PLATFORM_CORS_ORIGIN, localPlatformOrigins);
   app.use(createPlatformIpAllowlist(platformAlertService));
+  app.get("/platform-api/metrics", metricsHandler);
   app.get("/platform-api/health", (_req, res) =>
     res.json({ ok: true, service: "fleetum-platform-api", timestamp: new Date().toISOString() })
   );
   app.get("/platform-api/ready", async (_req, res) => {
     try {
       await prisma.$queryRaw`SELECT 1`;
+      metrics.setDbAvailable(true);
       res.json({ ok: true, db: "up" });
     } catch {
+      metrics.setDbAvailable(false);
       res.status(503).json({ ok: false, db: "down", message: env.NODE_ENV === "production" ? "Database non disponibile" : "Database query failed" });
     }
   });

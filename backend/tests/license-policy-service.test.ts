@@ -64,6 +64,17 @@ test("license policy reads plan from nested details.after payload", async () => 
   assert.equal(entitlements.priceMonthly, 149);
 });
 
+test("license policy defaults to pending when no subscription or audit license exists", async () => {
+  const repo = new FakeAuditRepo();
+  const service = new LicensePolicyService(repo, async () => null);
+
+  const license = await service.getTenantLicense("tenant-without-license");
+
+  assert.equal(license.plan, "STARTER");
+  assert.equal(license.status, "PENDING");
+  assert.equal(license.expiresAt, null);
+});
+
 test("license policy reads plan from raw payload for backward compatibility", async () => {
   const repo = new FakeAuditRepo();
   repo.latest = {

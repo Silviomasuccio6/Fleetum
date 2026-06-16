@@ -1,4 +1,5 @@
 import { Response, Router } from "express";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { extractInvoiceTotalFromPdf } from "../../../application/services/invoice-pdf-parser-service.js";
 import { extractRegistrationDateFromBooklet } from "../../../application/services/vehicle-booklet-parser-service.js";
@@ -14,6 +15,7 @@ import {
 } from "../../../infrastructure/storage/multer.js";
 import { storageProvider } from "../../../infrastructure/storage/storage-provider.js";
 import { PrismaAuditLogRepository } from "../../../infrastructure/repositories/prisma-audit-log-repository.js";
+import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
@@ -32,14 +34,14 @@ const sendStoredFile = async (
     mimeType: string;
   }
 ) => {
-  const fullPath = storageProvider.resolveLocalPath(input.filePath);
   if (!(await storageProvider.exists(input.filePath))) {
     throw new AppError("File non trovato", 404, "NOT_FOUND");
   }
 
+  const payload = await storageProvider.read(input.filePath);
   res.setHeader("Cache-Control", "private, max-age=60");
   res.type(input.mimeType || "application/octet-stream");
-  res.sendFile(fullPath);
+  res.send(payload);
 };
 
 export const uploadsRoutes = () => {
@@ -76,8 +78,93 @@ export const uploadsRoutes = () => {
     });
   };
 
-  const unlinkStoredFile = async (filePath: string) => {
+  const storageBucket = () => (storageProvider.name === "s3" ? env.S3_BUCKET ?? "s3" : "local");
+
+  const checksumFile = async (filePath: string) =>
+    crypto.createHash("sha256").update(await fs.readFile(filePath)).digest("hex");
+
+  const persistUploadedFile = async (input: {
+    tenantId: string;
+    file: Express.Multer.File;
+    key: string;
+    resourceType: string;
+    resourceId?: string | null;
+    removeLocalStaging?: boolean;
+  }) => {
+    const checksumSha256 = await checksumFile(input.file.path);
+    await storageProvider.writeFromFile(input.key, input.file.path, {
+      tenantId: input.tenantId,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId ?? null,
+      originalName: input.file.originalname || input.file.filename,
+      mimeType: input.file.mimetype
+    });
+
+    await prisma.storedFileObject.upsert({
+      where: {
+        provider_bucket_storageKey: {
+          provider: storageProvider.name,
+          bucket: storageBucket(),
+          storageKey: input.key
+        }
+      },
+      create: {
+        tenantId: input.tenantId,
+        provider: storageProvider.name,
+        bucket: storageBucket(),
+        storageKey: input.key,
+        originalName: input.file.originalname || input.file.filename,
+        mimeType: input.file.mimetype,
+        sizeBytes: input.file.size,
+        checksumSha256,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId ?? null,
+        visibility: "private"
+      },
+      update: {
+        tenantId: input.tenantId,
+        originalName: input.file.originalname || input.file.filename,
+        mimeType: input.file.mimetype,
+        sizeBytes: input.file.size,
+        checksumSha256,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId ?? null,
+        visibility: "private",
+        deletedAt: null
+      }
+    });
+
+    if (storageProvider.name === "s3" && input.removeLocalStaging !== false) {
+      await fs.unlink(input.file.path).catch(() => undefined);
+    }
+  };
+
+  const persistUploadedFiles = async (input: {
+    tenantId: string;
+    files: Express.Multer.File[];
+    keys: string[];
+    resourceType: string;
+    resourceId?: string | null;
+    removeLocalStaging?: boolean;
+  }) => {
+    await Promise.all(input.files.map((file, index) => persistUploadedFile({
+      tenantId: input.tenantId,
+      file,
+      key: input.keys[index],
+      resourceType: input.resourceType,
+      resourceId: input.resourceId ?? null,
+      removeLocalStaging: input.removeLocalStaging
+    })));
+  };
+
+  const unlinkStoredFile = async (filePath: string, tenantId?: string) => {
     await storageProvider.delete(filePath);
+    if (tenantId) {
+      await prisma.storedFileObject.updateMany({
+        where: { tenantId, provider: storageProvider.name, bucket: storageBucket(), storageKey: filePath, deletedAt: null },
+        data: { deletedAt: new Date() }
+      });
+    }
   };
 
   router.post(
@@ -94,11 +181,13 @@ export const uploadsRoutes = () => {
 
       const files = (req.files ?? []) as Express.Multer.File[];
       await secureFiles(files);
+      const storageKeys = files.map((file) => storageProvider.buildKey(file.filename));
+      await persistUploadedFiles({ tenantId, files, keys: storageKeys, resourceType: "StoppagePhoto", resourceId: req.params.id });
 
       await prisma.stoppagePhoto.createMany({
-        data: files.map((file) => ({
+        data: files.map((file, index) => ({
           stoppageId: req.params.id,
-          filePath: storageProvider.buildKey(file.filename),
+          filePath: storageKeys[index],
           fileName: file.filename,
           mimeType: file.mimetype,
           sizeBytes: file.size
@@ -152,7 +241,7 @@ export const uploadsRoutes = () => {
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
 
       await prisma.stoppagePhoto.delete({ where: { id: photo.id } });
-      await unlinkStoredFile(photo.filePath);
+      await unlinkStoredFile(photo.filePath, tenantId);
       await auditFileEvent({
         tenantId,
         userId: req.auth?.userId,
@@ -179,11 +268,13 @@ export const uploadsRoutes = () => {
 
       const files = (req.files ?? []) as Express.Multer.File[];
       await secureFiles(files);
+      const storageKeys = files.map((file) => storageProvider.buildKey(file.filename));
+      await persistUploadedFiles({ tenantId, files, keys: storageKeys, resourceType: "VehiclePhoto", resourceId: req.params.id });
 
       await prisma.vehiclePhoto.createMany({
-        data: files.map((file) => ({
+        data: files.map((file, index) => ({
           vehicleId: req.params.id,
-          filePath: storageProvider.buildKey(file.filename),
+          filePath: storageKeys[index],
           fileName: file.filename,
           mimeType: file.mimetype,
           sizeBytes: file.size
@@ -237,7 +328,7 @@ export const uploadsRoutes = () => {
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
 
       await prisma.vehiclePhoto.delete({ where: { id: photo.id } });
-      await unlinkStoredFile(photo.filePath);
+      await unlinkStoredFile(photo.filePath, tenantId);
       await auditFileEvent({
         tenantId,
         userId: req.auth?.userId,
@@ -267,7 +358,8 @@ export const uploadsRoutes = () => {
       await secureFiles([file]);
 
       const storedFilePath = storageProvider.buildKey(file.filename);
-      const detectedRegistrationDate = await extractRegistrationDateFromBooklet(storedFilePath, file.mimetype);
+      const detectedRegistrationDate = await extractRegistrationDateFromBooklet(file.path, file.mimetype);
+      await persistUploadedFile({ tenantId, file, key: storedFilePath, resourceType: "VehicleBooklet", resourceId: req.params.id });
       const nextRegistrationDate = detectedRegistrationDate ?? vehicle.registrationDate ?? null;
       const nextRevisionDueAt = computeVehicleRevisionDueAt({
         registrationDate: nextRegistrationDate,
@@ -306,7 +398,7 @@ export const uploadsRoutes = () => {
             extractedRegistrationDate: true
           }
         });
-        await unlinkStoredFile(existingBooklet.filePath);
+        await unlinkStoredFile(existingBooklet.filePath, tenantId);
       } else {
         booklet = await prisma.vehicleBooklet.create({
           data: {
@@ -394,7 +486,7 @@ export const uploadsRoutes = () => {
       });
       if (!booklet) throw new AppError("Libretto non trovato", 404, "NOT_FOUND");
       await prisma.vehicleBooklet.delete({ where: { id: booklet.id } });
-      await unlinkStoredFile(booklet.filePath);
+      await unlinkStoredFile(booklet.filePath, tenantId);
       await auditFileEvent({
         tenantId,
         userId: req.auth?.userId,
@@ -421,15 +513,24 @@ export const uploadsRoutes = () => {
 
       const files = (req.files ?? []) as Express.Multer.File[];
       await secureFiles(files);
+      const storageKeys = files.map((file) => storageProvider.buildKey(file.filename));
+      await persistUploadedFiles({
+        tenantId,
+        files,
+        keys: storageKeys,
+        resourceType: "VehicleMaintenanceAttachment",
+        resourceId: req.params.id,
+        removeLocalStaging: false
+      });
       const invoiceAnalyzableFiles = files.filter((file) => isInvoiceAnalyzableFile(file)).length;
 
       const createdAttachments = await Promise.all(
-        files.map(async (file) => {
+        files.map(async (file, index) => {
           const created = await prisma.vehicleMaintenanceAttachment.create({
             data: {
               tenantId,
               maintenanceId: req.params.id,
-              filePath: storageProvider.buildKey(file.filename),
+              filePath: storageKeys[index],
               fileName: file.originalname || file.filename,
               mimeType: file.mimetype,
               sizeBytes: file.size,
@@ -491,6 +592,10 @@ export const uploadsRoutes = () => {
           }
         } catch (error) {
           logger.error({ error, maintenanceId: req.params.id, tenantId }, "Background invoice analysis failed");
+        } finally {
+          if (storageProvider.name === "s3") {
+            await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => undefined)));
+          }
         }
       })();
     })
@@ -532,7 +637,7 @@ export const uploadsRoutes = () => {
       if (!attachment) throw new AppError("Allegato non trovato", 404, "NOT_FOUND");
 
       await prisma.vehicleMaintenanceAttachment.delete({ where: { id: attachment.id } });
-      await unlinkStoredFile(attachment.filePath);
+      await unlinkStoredFile(attachment.filePath, tenantId);
       await auditFileEvent({
         tenantId,
         userId: req.auth?.userId,
@@ -576,14 +681,16 @@ export const uploadsRoutes = () => {
 
       const files = (req.files ?? []) as Express.Multer.File[];
       await secureFiles(files);
+      const storageKeys = files.map((file) => storageProvider.buildKey(file.filename));
+      await persistUploadedFiles({ tenantId, files, keys: storageKeys, resourceType: "RentalCustomerAttachment", resourceId: customerId });
 
       await prisma.rentalCustomerAttachment.createMany({
-        data: files.map((file) => ({
+        data: files.map((file, index) => ({
           tenantId,
           customerId,
           bookingId,
           category,
-          filePath: storageProvider.buildKey(file.filename),
+          filePath: storageKeys[index],
           fileName: file.originalname || file.filename,
           mimeType: file.mimetype,
           sizeBytes: file.size
@@ -639,7 +746,7 @@ export const uploadsRoutes = () => {
       if (!attachment) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
 
       await prisma.rentalCustomerAttachment.delete({ where: { id: attachment.id } });
-      await unlinkStoredFile(attachment.filePath);
+      await unlinkStoredFile(attachment.filePath, tenantId);
       await auditFileEvent({
         tenantId,
         userId: req.auth?.userId,

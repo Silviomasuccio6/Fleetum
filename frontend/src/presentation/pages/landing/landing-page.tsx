@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { SeoHead } from "../../components/seo/seo-head";
 import "./landing.css";
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>;
@@ -152,41 +153,6 @@ const usePremiumTilt = <T extends HTMLElement>() => {
   };
 
   return { ref, onPointerMove, onPointerLeave: setNeutral };
-};
-
-const LandingSeo = () => {
-  useEffect(() => {
-    const title = "Fleetum | Il sistema operativo per autonoleggi moderni";
-    const description =
-      "Fleetum centralizza booking noleggi, contratti digitali, clienti, flotta, manutenzioni, scadenze e KPI in una control room SaaS per autonoleggi.";
-    document.title = title;
-
-    const setMeta = (selector: string, attr: "name" | "property", key: string, content: string) => {
-      let meta = document.head.querySelector<HTMLMetaElement>(selector);
-      if (!meta) {
-        meta = document.createElement("meta");
-        meta.setAttribute(attr, key);
-        document.head.appendChild(meta);
-      }
-      meta.setAttribute("content", content);
-    };
-
-    setMeta('meta[name="description"]', "name", "description", description);
-    setMeta('meta[property="og:title"]', "property", "og:title", title);
-    setMeta('meta[property="og:description"]', "property", "og:description", description);
-    setMeta('meta[property="og:type"]', "property", "og:type", "website");
-    setMeta('meta[property="og:url"]', "property", "og:url", "https://fleetum.it/");
-
-    let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
-    if (!canonical) {
-      canonical = document.createElement("link");
-      canonical.rel = "canonical";
-      document.head.appendChild(canonical);
-    }
-    canonical.href = "https://fleetum.it/";
-  }, []);
-
-  return null;
 };
 
 const navItems = [
@@ -780,7 +746,24 @@ export const LandingPage = () => {
 
   return (
     <main className="fleetum-landing">
-      <LandingSeo />
+      <SeoHead
+        title="Fleetum | Il sistema operativo per autonoleggi moderni"
+        description="Fleetum centralizza booking noleggi, contratti digitali, clienti, flotta, manutenzioni, scadenze e KPI in una control room SaaS per autonoleggi."
+        canonicalPath="/"
+      >
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "Fleetum",
+            applicationCategory: "BusinessApplication",
+            operatingSystem: "Web",
+            url: "https://fleetum.it/",
+            description:
+              "Gestionale SaaS per autonoleggi con booking, contratti digitali, flotta, clienti, manutenzioni e KPI."
+          })}
+        </script>
+      </SeoHead>
       <HeroSection />
       <ProofBarSection />
       <ProblemSection />

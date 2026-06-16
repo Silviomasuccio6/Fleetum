@@ -136,7 +136,7 @@ const latestLicenseForTenant = async (tenantId: string): Promise<LicenseSnapshot
     orderBy: { createdAt: "desc" },
     select: { details: true }
   });
-  return parseLicense(row?.details ?? null) ?? { plan: "STARTER", seats: 3, status: "ACTIVE", billingCycle: "monthly", priceMonthly: null };
+  return parseLicense(row?.details ?? null) ?? { plan: "STARTER", seats: 3, status: "PENDING", billingCycle: "monthly", priceMonthly: null };
 };
 
 const nextInvoiceNumber = async () => {

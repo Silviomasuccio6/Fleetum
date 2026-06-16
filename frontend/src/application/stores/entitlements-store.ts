@@ -3,19 +3,26 @@ import { FeatureKey, SaasPlan, ensureKnownPlan } from "../../domain/constants/en
 
 type EntitlementsState = {
   plan: SaasPlan;
+  licenseStatus: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED" | null;
   priceMonthly: number;
   features: FeatureKey[];
   loading: boolean;
   loaded: boolean;
   error: string | null;
   setLoading: (loading: boolean) => void;
-  setEntitlements: (input: { plan: string; priceMonthly: number; features: string[] }) => void;
+  setEntitlements: (input: {
+    plan: string;
+    priceMonthly: number;
+    features: string[];
+    licenseStatus?: EntitlementsState["licenseStatus"];
+  }) => void;
   setError: (message: string | null) => void;
   reset: () => void;
 };
 
 const initialState = {
   plan: "STARTER" as SaasPlan,
+  licenseStatus: null,
   priceMonthly: 49,
   features: [] as FeatureKey[],
   loading: false,
@@ -26,9 +33,10 @@ const initialState = {
 export const useEntitlementsStore = create<EntitlementsState>((set) => ({
   ...initialState,
   setLoading: (loading) => set({ loading }),
-  setEntitlements: ({ plan, priceMonthly, features }) =>
+  setEntitlements: ({ plan, priceMonthly, features, licenseStatus }) =>
     set({
       plan: ensureKnownPlan(plan),
+      licenseStatus: licenseStatus ?? null,
       priceMonthly: Number.isFinite(priceMonthly) && priceMonthly > 0 ? priceMonthly : 49,
       features: features.filter(Boolean) as FeatureKey[],
       loading: false,

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=deploy/backup/lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
 BACKUP_FILE="${BACKUP_FILE:-}"
 BACKUP_SEARCH_DIR="${BACKUP_SEARCH_DIR:-/opt/fleetum/backups/postgres}"
 LEGACY_BACKUP_SEARCH_DIR="${LEGACY_BACKUP_SEARCH_DIR:-/opt/fleetum/backups}"
@@ -38,17 +42,16 @@ if [ -z "$BACKUP_FILE" ]; then
 fi
 
 if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
-  echo "[restore-test] backup file not found. Set BACKUP_FILE=/path/to/dump.sql.gz" >&2
-  exit 2
+  fail "restore test backup file not found. Set BACKUP_FILE=/path/to/dump.sql.gz"
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "[restore-test] docker command not found" >&2
-  exit 2
+  fail "docker command not found"
 fi
 
-echo "[restore-test] using backup: $BACKUP_FILE"
-gzip -t "$BACKUP_FILE"
+log "restore test using backup: $BACKUP_FILE"
+gzip -t "$BACKUP_FILE" || fail "backup gzip integrity check failed: $BACKUP_FILE"
+verify_backup_file "$BACKUP_FILE" "${MIN_POSTGRES_BACKUP_BYTES:-1024}"
 
 docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
 
@@ -59,7 +62,7 @@ docker run -d \
   -e POSTGRES_PASSWORD="$TEST_PASSWORD" \
   "$POSTGRES_IMAGE" >/dev/null
 
-echo "[restore-test] waiting for temporary PostgreSQL"
+log "waiting for temporary PostgreSQL"
 for _ in $(seq 1 60); do
   if docker exec "$TEST_CONTAINER" psql \
     -v ON_ERROR_STOP=1 \
@@ -81,8 +84,7 @@ if [ -n "$COMPAT_ROLES" ]; then
   echo "[restore-test] preparing compatibility roles: $COMPAT_ROLES"
   for role in $COMPAT_ROLES; do
     if ! [[ "$role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      echo "[restore-test] invalid compatibility role name: $role" >&2
-      exit 2
+      fail "invalid compatibility role name: $role"
     fi
 
     docker exec "$TEST_CONTAINER" psql \
@@ -99,14 +101,14 @@ if [ -n "$COMPAT_ROLES" ]; then
   done
 fi
 
-echo "[restore-test] restoring dump into isolated database"
+log "restoring dump into isolated database"
 gunzip -c "$BACKUP_FILE" | docker exec -i "$TEST_CONTAINER" psql \
   -v ON_ERROR_STOP=1 \
   -U "$TEST_USER" \
   -d "$TEST_DB" \
   >/dev/null
 
-echo "[restore-test] verifying restored schema"
+log "verifying restored schema"
 docker exec "$TEST_CONTAINER" psql \
   -v ON_ERROR_STOP=1 \
   -U "$TEST_USER" \
@@ -130,6 +132,10 @@ TABLES_COUNT="$(
     -tAc "select count(*) from information_schema.tables where table_schema = 'public'"
 )"
 
-echo "[restore-test] migrations restored: $MIGRATIONS_COUNT"
-echo "[restore-test] public tables restored: $TABLES_COUNT"
-echo "[restore-test] restore test completed successfully"
+log "migrations restored: $MIGRATIONS_COUNT"
+log "public tables restored: $TABLES_COUNT"
+if [ "$TABLES_COUNT" -lt 1 ]; then
+  fail "restore test produced zero public tables"
+fi
+log "restore test completed successfully"
+notify_backup_success "Fleetum restore test completed successfully using $BACKUP_FILE. Tables: $TABLES_COUNT, migrations: $MIGRATIONS_COUNT"

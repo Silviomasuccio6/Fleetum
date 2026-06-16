@@ -18,6 +18,12 @@ const anonymizeCustomerSchema = z.object({
   deleteAttachments: z.boolean().optional().default(true)
 });
 
+const erasureRequestSchema = z.object({
+  customerId: z.string().trim().min(1),
+  legalBasis: z.string().trim().min(3).max(300).default("GDPR right to erasure request"),
+  deleteAttachments: z.boolean().optional().default(true)
+});
+
 export class PrivacyComplianceController {
   constructor(private readonly service: PrivacyComplianceService) {}
 
@@ -39,6 +45,16 @@ export class PrivacyComplianceController {
       ...payload
     });
     res.json(result);
+  };
+
+  createErasureRequest = async (req: Request, res: Response) => {
+    const payload = erasureRequestSchema.parse(req.body);
+    const result = await this.service.createErasureRequest({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth?.userId,
+      ...payload
+    });
+    res.status(202).json(result);
   };
 
   previewRetention = async (req: Request, res: Response) => {
