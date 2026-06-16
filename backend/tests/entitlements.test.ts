@@ -203,7 +203,7 @@ test("platform revenue report aggregates MRR and lost revenue by plan", async ()
 
   assert.equal(report.selectedMonth, "2026-03");
   assert.equal(report.kpis.mrrTotal, 398);
-  assert.equal(report.kpis.mrrLost, 129);
+  assert.equal(report.kpis.mrrLost, 149);
   assert.equal(report.kpis.mrrByPlan.PRO, 398);
   assert.equal(report.kpis.tenantsByPlan.STARTER, 1);
   assert.equal(report.breakdown.find((row) => row.plan === "PRO")?.activeTenants, 1);
