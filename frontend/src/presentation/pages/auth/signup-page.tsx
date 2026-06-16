@@ -92,6 +92,7 @@ export const SignupPage = () => {
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -119,7 +120,7 @@ export const SignupPage = () => {
     const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
     const target = new URL(providerUrl, window.location.origin);
     target.searchParams.set("intent", "signup");
-    target.searchParams.set("returnTo", "/upgrade?welcome=billing");
+    target.searchParams.set("returnTo", "/activate?welcome=billing");
     window.location.href = target.toString();
   };
 
@@ -210,6 +211,7 @@ export const SignupPage = () => {
       });
       setSession(result.user, true);
       setTenantId(result.tenantId);
+      setRegisteredEmail(form.email);
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
@@ -222,6 +224,7 @@ export const SignupPage = () => {
 
   const startAnotherSignup = () => {
     setTenantId(null);
+    setRegisteredEmail(null);
     setError(null);
     setForm(initialForm);
     setPrivacyAccepted(false);
@@ -229,7 +232,11 @@ export const SignupPage = () => {
   };
 
   const goToBillingAfterSignup = () => {
-    navigate("/upgrade?welcome=billing", { replace: true });
+    const params = new URLSearchParams();
+    if (registeredEmail) params.set("email", registeredEmail);
+    params.set("next", "/activate?welcome=billing");
+    params.set("welcome", "billing");
+    navigate(`/login?${params.toString()}`);
   };
 
   return (
@@ -274,13 +281,13 @@ export const SignupPage = () => {
                 <p className="premium-signup-success__eyebrow">Tenant creato correttamente</p>
                 <h3>Workspace pronto</h3>
                 <p>
-                  Il tenant <strong>{tenantId}</strong> è stato creato. Per usare il gestionale devi scegliere un piano
+                  Il tenant <strong>{tenantId}</strong> è stato creato. Prima di entrare nel gestionale devi scegliere un piano
                   e completare Stripe Checkout con carta valida. La prova dura 14 giorni e il primo addebito parte alla fine del trial.
                 </p>
                 <div className="premium-signup-success__actions">
                   <button type="button" className="premium-login-submit" onClick={goToBillingAfterSignup}>
                     <span className="premium-login-submit-shimmer" aria-hidden />
-                    Scegli piano con Stripe
+                    Scegli piano e attiva con Stripe
                   </button>
                   <button type="button" className="premium-login-social-btn justify-center" onClick={startAnotherSignup}>
                     Crea un altro tenant

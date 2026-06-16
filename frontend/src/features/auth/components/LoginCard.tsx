@@ -286,7 +286,7 @@ export const LoginCard = () => {
               className="premium-login-link"
               onClick={() => navigate("/signup")}
             >
-              Attiva prova con carta →
+              Crea account e scegli piano →
             </button>
           </p>
           <p className="premium-login-signup-text !mt-2 text-[11px] leading-5">

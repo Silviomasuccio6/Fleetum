@@ -16,9 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
 type BillingCycle = "monthly" | "yearly";
+type PlanUpgradeMode = "activation" | "upgrade";
 
 const orderedFeatures = getFeatureListForPlan("ENTERPRISE");
-const annualDiscountRate = 0.18;
+const annualDiscountRate = 0.15;
 
 const planRank: Record<SaasPlan, number> = {
   STARTER: 0,
@@ -69,8 +70,9 @@ const getPlanHighlights = (plan: SaasPlan) => {
   return ["Automazioni avanzate", "Controlli multi-workspace", "Security insights e supporto prioritario"];
 };
 
-export const PlanUpgradePage = () => {
+export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
   const { plan, licenseStatus, loading } = useEntitlements();
+  const isActivationMode = mode === "activation";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [busyPaymentMethod, setBusyPaymentMethod] = useState(false);
@@ -134,7 +136,7 @@ export const PlanUpgradePage = () => {
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              Attiva Fleetum con prova Stripe e carta obbligatoria
+              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Attiva Fleetum con prova Stripe e carta obbligatoria"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">

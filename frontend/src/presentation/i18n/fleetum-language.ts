@@ -19,7 +19,7 @@ const TRANSLATIONS_IT_EN: Record<string, string> = {
   "Accesso in corso...": "Signing in...",
   "Accesso effettuato": "Signed in",
   "Non hai un account?": "Don't have an account?",
-  "Attiva prova con carta →": "Activate trial with card →",
+  "Crea account e scegli piano →": "Create account and choose a plan →",
   "Accedendo confermi di aver letto l'": "By signing in, you confirm you have read the ",
   "informativa privacy": "privacy notice",
   "Crea account": "Create account",

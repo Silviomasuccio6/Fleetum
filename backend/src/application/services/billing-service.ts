@@ -177,8 +177,8 @@ export class BillingService {
     const plan = ensureKnownPlan(input.plan);
     const billingCycle = normalizeBillingCycle(input.billingCycle);
     const priceMonthly = getPlanMonthlyPrice(plan);
-    const successUrl = `${env.APP_URL}/upgrade?checkout=success&plan=${plan}`;
-    const cancelUrl = `${env.APP_URL}/upgrade?checkout=cancelled&plan=${plan}`;
+    const successUrl = `${env.APP_URL}/activate?checkout=success&plan=${plan}`;
+    const cancelUrl = `${env.APP_URL}/activate?checkout=cancelled&plan=${plan}`;
 
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
       if (env.NODE_ENV === "production") {

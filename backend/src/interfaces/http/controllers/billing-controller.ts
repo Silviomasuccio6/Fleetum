@@ -37,7 +37,7 @@ export class BillingController {
       plan: input.plan,
       billingCycle: input.billingCycle
     });
-    res.redirect(`/upgrade?checkout=success&provider=local&plan=${input.plan}`);
+    res.redirect(`/activate?checkout=success&provider=local&plan=${input.plan}`);
   };
 
   webhook = async (req: Request, res: Response) => {

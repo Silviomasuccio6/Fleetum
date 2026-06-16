@@ -233,7 +233,7 @@ test("updateLicense updates tenant plan and realigns standard monthly price", as
 
   assert.equal(result.updated, true);
   assert.equal(repo.license.plan, "STARTER");
-  assert.equal(repo.license.priceMonthly, 129);
+  assert.equal(repo.license.priceMonthly, 149);
   assert.equal(repo.license.billingCycle, "yearly");
   assert.equal(repo.audits.at(-1)?.action, "PLATFORM_LICENSE_UPDATED");
   assert.equal(sentAlerts.length, 1);

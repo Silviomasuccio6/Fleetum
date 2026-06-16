@@ -14,6 +14,7 @@ import { DemoRequestPage, LegalDocumentPage } from "../pages/legal/legal-pages";
 import { LandingPage } from "../pages/landing/landing-page";
 import { PublicSeoPage } from "../pages/landing/seo-pages";
 import { ProtectedRoute } from "./protected-route";
+import { BillingActivatedRoute } from "./billing-activated-route";
 import { GlobalTextTranslator } from "../components/i18n/global-text-translator";
 
 const DashboardPage = lazy(() => import("../pages/dashboard/dashboard-page").then((m) => ({ default: m.DashboardPage })));
@@ -36,6 +37,7 @@ const StatsPage = lazy(() => import("../pages/stats/stats-page").then((m) => ({ 
 const ProfileSettingsPage = lazy(() => import("../pages/profile/profile-settings-page").then((m) => ({ default: m.ProfileSettingsPage })));
 const CompanyProfilePage = lazy(() => import("../pages/profile/company-profile-page").then((m) => ({ default: m.CompanyProfilePage })));
 const PlanUpgradePage = lazy(() => import("../pages/profile/plan-upgrade-page").then((m) => ({ default: m.PlanUpgradePage })));
+const BillingActivationPage = lazy(() => import("../pages/billing/billing-activation-page").then((m) => ({ default: m.BillingActivationPage })));
 
 const withPageLoader = (element: JSX.Element) => <Suspense fallback={<PageLoader />}>{element}</Suspense>;
 
@@ -55,6 +57,14 @@ export const AppRoutes = () => (
       <Route path="/termini" element={<LegalDocumentPage type="terms" />} />
       <Route path="/dpa" element={<LegalDocumentPage type="dpa" />} />
       <Route path="/demo" element={<DemoRequestPage />} />
+      <Route
+        path="/activate"
+        element={
+          <ProtectedRoute>
+            {withPageLoader(<BillingActivationPage />)}
+          </ProtectedRoute>
+        }
+      />
       <Route path="/software-autonoleggio" element={<PublicSeoPage slug="software-autonoleggio" />} />
       <Route path="/software-rent-a-car" element={<PublicSeoPage slug="software-rent-a-car" />} />
       <Route path="/gestionale-flotta" element={<PublicSeoPage slug="gestionale-flotta" />} />
@@ -66,7 +76,9 @@ export const AppRoutes = () => (
       <Route
         element={
           <ProtectedRoute>
-            <AppLayout />
+            <BillingActivatedRoute>
+              <AppLayout />
+            </BillingActivatedRoute>
           </ProtectedRoute>
         }
       >
