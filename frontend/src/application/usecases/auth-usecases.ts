@@ -19,7 +19,7 @@ export const authUseCases = {
       user: any;
       csrfToken: string;
       requiresBilling: boolean;
-      next: "/upgrade";
+      next: "/activate";
     }>("/auth/signup", input),
   login: (input: { email: string; password: string }) =>
     httpClient.post<{ refreshExpiresAt: string; user: any; csrfToken: string }>("/auth/login", input),

@@ -44,8 +44,9 @@ export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   if (!isAuthenticated) return <Navigate to={`/login?next=${encodeURIComponent(returnTo)}`} replace />;
 
-  if (billingGate === "required" && !location.pathname.startsWith("/upgrade")) {
-    return <Navigate to="/upgrade?billing=required" replace />;
+  const isBillingSelfServiceRoute = location.pathname.startsWith("/activate") || location.pathname.startsWith("/upgrade");
+  if (billingGate === "required" && !isBillingSelfServiceRoute) {
+    return <Navigate to="/activate?billing=required" replace />;
   }
 
   return children;
