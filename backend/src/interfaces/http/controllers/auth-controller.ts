@@ -77,7 +77,7 @@ export class AuthController {
       user: result.user,
       csrfToken,
       requiresBilling: true,
-      next: "/upgrade"
+      next: "/activate"
     });
   };
 
