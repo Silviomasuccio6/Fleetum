@@ -1,13 +1,23 @@
 import { z } from "zod";
 import { signupCompanySchema } from "./tenant-profile-validators.js";
 
+const trimString = (value: unknown) => (typeof value === "string" ? value.trim() : value);
+const emptyToUndefined = (value: unknown) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+const requiredText = (min = 2, max = 255) => z.preprocess(trimString, z.string().min(min).max(max));
+const requiredEmail = z.preprocess(trimString, z.string().email().max(320));
+const optionalText = (max = 255) => z.preprocess(emptyToUndefined, z.string().max(max).optional());
+
 export const signupSchema = z.object({
-  tenantName: z.string().min(2),
-  firstName: z.string().min(2),
-  lastName: z.string().min(2),
-  email: z.string().email(),
-  phone: z.string().max(40).optional(),
-  adminRole: z.string().max(80).optional(),
+  tenantName: requiredText(2, 180),
+  firstName: requiredText(2, 80),
+  lastName: requiredText(2, 80),
+  email: requiredEmail,
+  phone: optionalText(40),
+  adminRole: optionalText(80),
   privacyAccepted: z.boolean().optional().default(false),
   company: signupCompanySchema.optional(),
   password: z

@@ -113,6 +113,17 @@ api.interceptors.response.use(
         ? `Feature premium bloccata.${apiDetails?.requiredPlan ? ` Richiede piano ${String(apiDetails.requiredPlan)}.` : ""} Apri "Upgrade piano" per abilitarla.`
         : null;
 
+    const validationMessage = (() => {
+      if (apiErrorCode !== "VALIDATION_ERROR" || !apiDetails) return null;
+      const fieldErrors = apiDetails.fieldErrors as Record<string, unknown> | undefined;
+      if (!fieldErrors || typeof fieldErrors !== "object") return apiMessage ?? "Request non valida";
+      const firstEntry = Object.entries(fieldErrors).find(([, messages]) => Array.isArray(messages) && messages.length > 0);
+      if (!firstEntry) return apiMessage ?? "Request non valida";
+      const [field, messages] = firstEntry;
+      const firstMessage = Array.isArray(messages) ? String(messages[0]) : "valore non valido";
+      return `Campo ${field}: ${firstMessage}`;
+    })();
+
     const isNetwork = error.code === "ERR_NETWORK";
     const isTimeout = error.code === "ECONNABORTED";
 
@@ -156,6 +167,7 @@ api.interceptors.response.use(
     const message =
       planLimitMessage ||
       licenseMessage ||
+      validationMessage ||
       apiMessage ||
       (status === 402 ? "Licenza scaduta. Rinnova per continuare." : null) ||
       (status === 403 ? "Accesso non consentito." : null) ||
