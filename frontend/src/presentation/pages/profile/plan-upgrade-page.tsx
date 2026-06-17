@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowRight, Check, CreditCard, Crown, Download, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
+import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import {
   FeatureKey,
@@ -17,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 
 type BillingCycle = "monthly" | "yearly";
 type PlanUpgradeMode = "activation" | "upgrade";
+type ActivationCheckStatus = "idle" | "checking" | "ready" | "timeout";
 
 const orderedFeatures = getFeatureListForPlan("ENTERPRISE");
 const annualDiscountRate = 0.15;
@@ -71,12 +74,14 @@ const getPlanHighlights = (plan: SaasPlan) => {
 };
 
 export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
+  const navigate = useNavigate();
   const { plan, licenseStatus, loading } = useEntitlements();
   const isActivationMode = mode === "activation";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [busyPaymentMethod, setBusyPaymentMethod] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [activationCheckStatus, setActivationCheckStatus] = useState<ActivationCheckStatus>("idle");
   const [invoices, setInvoices] = useState<Array<{
     id: string;
     invoiceNumber: string;
@@ -121,6 +126,52 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       .then((result) => setInvoices(result.data))
       .catch(() => setInvoices([]));
   }, []);
+
+  useEffect(() => {
+    if (!isActivationMode || checkoutStatus !== "success") {
+      setActivationCheckStatus("idle");
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const maxAttempts = 25;
+    const pollDelayMs = 1500;
+
+    const pollLicense = async (attempt = 1) => {
+      if (cancelled) return;
+      setActivationCheckStatus("checking");
+
+      try {
+        const license = await authUseCases.licenseStatus();
+        if (license.status === "ACTIVE" || license.status === "TRIAL") {
+          setActivationCheckStatus("ready");
+          timeoutId = setTimeout(() => {
+            if (!cancelled) navigate("/dashboard", { replace: true });
+          }, 700);
+          return;
+        }
+      } catch {
+        // The webhook may still be processing; keep polling for a short window.
+      }
+
+      if (attempt >= maxAttempts) {
+        setActivationCheckStatus("timeout");
+        return;
+      }
+
+      timeoutId = setTimeout(() => {
+        void pollLicense(attempt + 1);
+      }, pollDelayMs);
+    };
+
+    void pollLicense();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [checkoutStatus, isActivationMode, navigate]);
 
   return (
     <section className="space-y-5">
@@ -337,8 +388,30 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
 
       {checkoutStatus === "success" ? (
         <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-          <CardContent className="py-4 text-sm font-semibold">
-            Checkout completato. Il piano, il trial e la carta vengono confermati dal webhook Stripe.
+          <CardContent className="flex flex-col gap-2 py-4 text-sm font-semibold md:flex-row md:items-center md:justify-between">
+            <div>
+              <p>Checkout completato. Il piano, il trial e la carta vengono confermati dal webhook Stripe.</p>
+              {activationCheckStatus === "checking" ? (
+                <p className="mt-1 text-xs font-medium text-emerald-700/80 dark:text-emerald-100/75">
+                  Verifico l'attivazione del tuo account. Appena Stripe conferma il webhook ti porto automaticamente in dashboard.
+                </p>
+              ) : null}
+              {activationCheckStatus === "ready" ? (
+                <p className="mt-1 text-xs font-medium text-emerald-700/80 dark:text-emerald-100/75">
+                  Attivazione confermata. Reindirizzamento alla dashboard...
+                </p>
+              ) : null}
+              {activationCheckStatus === "timeout" ? (
+                <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-200">
+                  Il checkout e' completato, ma la conferma webhook sta impiegando piu' del previsto. Riprova tra qualche secondo o aggiorna la pagina.
+                </p>
+              ) : null}
+            </div>
+            {activationCheckStatus === "ready" ? (
+              <Button type="button" size="sm" onClick={() => navigate("/dashboard", { replace: true })}>
+                Vai alla dashboard
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
