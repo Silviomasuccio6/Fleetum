@@ -92,6 +92,17 @@ const optionalText = (value: string) => {
   return cleaned.length > 0 ? cleaned : undefined;
 };
 
+const isRequiredCompanyStepComplete = (form: typeof initialForm) =>
+  form.tenantName.trim().length >= 2 &&
+  /^\d{11}$/.test(form.vatNumber.trim()) &&
+  form.companyEmail.trim().includes("@") &&
+  form.companyPhone.trim().length >= 6 &&
+  form.legalAddress.trim().length >= 4 &&
+  form.city.trim().length >= 2 &&
+  form.province.trim().length >= 2 &&
+  form.postalCode.trim().length >= 4 &&
+  form.country.trim().length === 2;
+
 export const SignupPage = () => {
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
@@ -125,7 +136,7 @@ export const SignupPage = () => {
     const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
     const target = new URL(providerUrl, window.location.origin);
     target.searchParams.set("intent", "signup");
-    target.searchParams.set("returnTo", "/activate?welcome=billing");
+    target.searchParams.set("returnTo", "/onboarding/azienda?from=social");
     window.location.href = target.toString();
   };
 
@@ -137,13 +148,13 @@ export const SignupPage = () => {
     /[^A-Za-z0-9]/.test(form.password);
 
   const stepIsValid = [
-    form.tenantName.trim().length >= 2,
+    isRequiredCompanyStepComplete(form),
     form.firstName.trim().length > 1 && form.lastName.trim().length > 1 && isEmailValid && isPasswordStrong,
     privacyAccepted
   ][currentStep];
 
   const stepErrors = [
-    "Inserisci almeno il nome azienda per continuare.",
+    "Completa i dati societari obbligatori: azienda, P.IVA, email/telefono aziendale e sede legale.",
     "Completa nome, cognome, email valida e una password sicura.",
     "Per creare l'account devi confermare la presa visione dell'informativa privacy."
   ];
@@ -372,7 +383,7 @@ export const SignupPage = () => {
                   </p>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div className="md:col-span-2">
-                      <label className="premium-login-field-label" htmlFor="signup-tenantName">Nome azienda</label>
+                      <label className="premium-login-field-label" htmlFor="signup-tenantName">Nome azienda *</label>
                       <div className={`premium-login-field ${form.tenantName ? "is-ok" : ""}`}>
                         <FieldIcon><Building2 /></FieldIcon>
                         <input
@@ -386,7 +397,7 @@ export const SignupPage = () => {
                       </div>
                     </div>
                     <div>
-                      <label className="premium-login-field-label" htmlFor="signup-vatNumber">Partita IVA</label>
+                      <label className="premium-login-field-label" htmlFor="signup-vatNumber">Partita IVA *</label>
                       <div className={`premium-login-field ${form.vatNumber.length === 11 ? "is-ok" : ""}`}>
                         <FieldIcon><Briefcase /></FieldIcon>
                         <input
@@ -395,6 +406,7 @@ export const SignupPage = () => {
                           value={form.vatNumber}
                           onChange={(event) => setForm((current) => ({ ...current, vatNumber: event.target.value.replace(/\s+/g, "") }))}
                           placeholder="11 cifre"
+                          required
                         />
                       </div>
                     </div>
@@ -425,7 +437,7 @@ export const SignupPage = () => {
                       </div>
                     </div>
                     <div>
-                      <label className="premium-login-field-label" htmlFor="signup-companyEmail">Email aziendale</label>
+                      <label className="premium-login-field-label" htmlFor="signup-companyEmail">Email aziendale *</label>
                       <div className={`premium-login-field ${form.companyEmail.includes("@") ? "is-ok" : ""}`}>
                         <FieldIcon><Mail /></FieldIcon>
                         <input
@@ -435,11 +447,12 @@ export const SignupPage = () => {
                           value={form.companyEmail}
                           onChange={(event) => setForm((current) => ({ ...current, companyEmail: event.target.value }))}
                           placeholder="info@azienda.com"
+                          required
                         />
                       </div>
                     </div>
                     <div>
-                      <label className="premium-login-field-label" htmlFor="signup-companyPhone">Telefono aziendale</label>
+                      <label className="premium-login-field-label" htmlFor="signup-companyPhone">Telefono aziendale *</label>
                       <div className={`premium-login-field ${form.companyPhone ? "is-ok" : ""}`}>
                         <FieldIcon><Phone /></FieldIcon>
                         <input
@@ -448,6 +461,7 @@ export const SignupPage = () => {
                           value={form.companyPhone}
                           onChange={(event) => setForm((current) => ({ ...current, companyPhone: event.target.value }))}
                           placeholder="+39..."
+                          required
                         />
                       </div>
                     </div>
@@ -465,7 +479,7 @@ export const SignupPage = () => {
                       </div>
                     </div>
                     <div className="md:col-span-2">
-                      <label className="premium-login-field-label" htmlFor="signup-legalAddress">Sede legale</label>
+                      <label className="premium-login-field-label" htmlFor="signup-legalAddress">Sede legale *</label>
                       <div className={`premium-login-field ${form.legalAddress ? "is-ok" : ""}`}>
                         <FieldIcon><MapPin /></FieldIcon>
                         <input
@@ -474,12 +488,13 @@ export const SignupPage = () => {
                           value={form.legalAddress}
                           onChange={(event) => setForm((current) => ({ ...current, legalAddress: event.target.value }))}
                           placeholder="Via, numero civico"
+                          required
                         />
                       </div>
                     </div>
                     <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1.55fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,0.65fr)]">
                       <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-city">Comune</label>
+                        <label className="premium-login-field-label" htmlFor="signup-city">Comune *</label>
                         <div className={`premium-login-field ${form.city ? "is-ok" : ""}`}>
                           <FieldIcon><Map /></FieldIcon>
                           <input
@@ -488,11 +503,12 @@ export const SignupPage = () => {
                             value={form.city}
                             onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
                             placeholder="Comune"
+                            required
                           />
                         </div>
                       </div>
                       <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-province">Prov.</label>
+                        <label className="premium-login-field-label" htmlFor="signup-province">Prov. *</label>
                         <div className={`premium-login-field ${form.province ? "is-ok" : ""}`}>
                           <input
                             id="signup-province"
@@ -500,11 +516,12 @@ export const SignupPage = () => {
                             value={form.province}
                             onChange={(event) => setForm((current) => ({ ...current, province: event.target.value.toUpperCase() }))}
                             placeholder="NA"
+                            required
                           />
                         </div>
                       </div>
                       <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-postalCode">CAP</label>
+                        <label className="premium-login-field-label" htmlFor="signup-postalCode">CAP *</label>
                         <div className={`premium-login-field ${form.postalCode ? "is-ok" : ""}`}>
                           <input
                             id="signup-postalCode"
@@ -512,11 +529,12 @@ export const SignupPage = () => {
                             value={form.postalCode}
                             onChange={(event) => setForm((current) => ({ ...current, postalCode: event.target.value }))}
                             placeholder="80100"
+                            required
                           />
                         </div>
                       </div>
                       <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-country">Paese</label>
+                        <label className="premium-login-field-label" htmlFor="signup-country">Paese *</label>
                         <div className="premium-login-field">
                           <input
                             id="signup-country"
@@ -524,6 +542,7 @@ export const SignupPage = () => {
                             value={form.country}
                             onChange={(event) => setForm((current) => ({ ...current, country: event.target.value.toUpperCase() }))}
                             placeholder="IT"
+                            required
                           />
                         </div>
                       </div>

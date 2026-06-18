@@ -6,7 +6,8 @@ Configurare login/registrazione Google in modo sicuro e mantenere il flusso comm
 
 - il login email/password continua ad accedere normalmente;
 - la registrazione crea un tenant in stato `PENDING`;
-- dopo la registrazione l'utente deve passare da `/activate` e scegliere un piano tramite Stripe Checkout;
+- prima di Stripe l'utente deve completare i dati societari minimi del tenant;
+- dopo i dati societari l'utente deve passare da `/activate` e scegliere un piano tramite Stripe Checkout;
 - la prova di 14 giorni viene attivata solo da Stripe, tramite subscription `trialing` confermata dal webhook;
 - anche durante il trial Stripe Checkout deve raccogliere una carta valida (`payment_method_collection=always`);
 - Google OAuth non espone segreti nel frontend o nel repository.
@@ -14,21 +15,25 @@ Configurare login/registrazione Google in modo sicuro e mantenere il flusso comm
 ## Flusso applicativo
 
 1. Registrazione email/password su `/signup`.
-2. Backend crea tenant, admin e subscription interna `PENDING`.
-3. Il frontend crea subito la sessione e reindirizza automaticamente a `/activate?welcome=billing`.
-4. `/activate` crea una Stripe Checkout Session autenticata in `mode=subscription`, con carta obbligatoria anche se il piano parte in trial.
-5. Il webhook Stripe aggiorna la licenza tenant a `TRIAL` o `ACTIVE`.
-6. Dashboard, booking, veicoli, contratti e report restano bloccati finché la licenza non è `TRIAL` o `ACTIVE`.
+2. Il frontend richiede dati societari minimi: ragione sociale, P.IVA, contatti aziendali e sede legale.
+3. Backend crea tenant, admin, profilo aziendale e subscription interna `PENDING`.
+4. Il frontend crea subito la sessione e reindirizza automaticamente a `/activate?welcome=billing`.
+5. `/activate` crea una Stripe Checkout Session autenticata in `mode=subscription`, con carta obbligatoria anche se il piano parte in trial.
+6. Il webhook Stripe aggiorna la licenza tenant a `TRIAL` o `ACTIVE`.
+7. Dashboard, booking, veicoli, contratti e report restano bloccati finché la licenza non è `TRIAL` o `ACTIVE`.
 
 ## Flusso Google OAuth
 
 1. Da `/login` il pulsante Google apre `/api/auth/google` con eventuale `returnTo` interno.
-2. Da `/signup` il pulsante Google apre `/api/auth/google?intent=signup&returnTo=/activate?welcome=billing`.
+2. Da `/signup` il pulsante Google apre `/api/auth/google?intent=signup&returnTo=/onboarding/azienda?from=social`.
 3. Il backend scambia il codice OAuth, crea o recupera l'utente, imposta cookie auth httpOnly e reindirizza a `/auth/social-callback`.
 4. Il frontend finalizza la sessione, controlla `/api/auth/license-status` e:
    - se la licenza è `TRIAL` o `ACTIVE`, manda alla destinazione richiesta;
-   - se la licenza è `PENDING`, `PAST_DUE`, `CANCELED`, `EXPIRED` o non verificabile, manda a `/activate?billing=required`.
-5. Se OAuth non è configurato, il backend non mostra più JSON grezzo al browser: reindirizza a `/auth/social-callback#error=...`.
+   - se la destinazione richiesta è `/onboarding/azienda`, lascia completare i dati societari anche con licenza `PENDING`;
+   - se la licenza è `PENDING`, `PAST_DUE`, `CANCELED`, `EXPIRED` o non verificabile su altre route operative, manda a `/activate?billing=required`.
+5. `/onboarding/azienda` usa i dati recuperati da Google quando disponibili per precompilare referente/email, poi richiede i dati societari minimi.
+6. Dopo il salvataggio dei dati societari, il frontend manda a `/activate?welcome=billing&profile=completed`.
+7. Se OAuth non è configurato, il backend non mostra più JSON grezzo al browser: reindirizza a `/auth/social-callback#error=...`.
 
 ## Variabili backend richieste
 
@@ -100,7 +105,7 @@ Se viene usata anche la sincronizzazione Google Calendar:
 
 - `GOOGLE_CLIENT_SECRET` deve stare solo in `.env` locale o GitHub/VPS secrets.
 - Il frontend apre `/api/auth/google`, non conosce il client secret.
-- Il parametro `returnTo` viene accettato solo se e un path interno, ad esempio `/dashboard` o `/activate`.
+- Il parametro `returnTo` viene accettato solo se e un path interno, ad esempio `/dashboard`, `/onboarding/azienda` o `/activate`.
 - Lo stato OAuth e firmato con `JWT_SECRET` e scade dopo 10 minuti.
 - Non usare redirect assoluti esterni nel parametro `next`/`returnTo`.
 

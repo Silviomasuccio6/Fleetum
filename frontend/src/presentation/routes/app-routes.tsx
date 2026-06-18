@@ -38,6 +38,7 @@ const ProfileSettingsPage = lazy(() => import("../pages/profile/profile-settings
 const CompanyProfilePage = lazy(() => import("../pages/profile/company-profile-page").then((m) => ({ default: m.CompanyProfilePage })));
 const PlanUpgradePage = lazy(() => import("../pages/profile/plan-upgrade-page").then((m) => ({ default: m.PlanUpgradePage })));
 const BillingActivationPage = lazy(() => import("../pages/billing/billing-activation-page").then((m) => ({ default: m.BillingActivationPage })));
+const CompanyOnboardingPage = lazy(() => import("../pages/onboarding/company-onboarding-page").then((m) => ({ default: m.CompanyOnboardingPage })));
 
 const withPageLoader = (element: JSX.Element) => <Suspense fallback={<PageLoader />}>{element}</Suspense>;
 
@@ -62,6 +63,14 @@ export const AppRoutes = () => (
         element={
           <ProtectedRoute>
             {withPageLoader(<BillingActivationPage />)}
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/onboarding/azienda"
+        element={
+          <ProtectedRoute>
+            {withPageLoader(<CompanyOnboardingPage />)}
           </ProtectedRoute>
         }
       />

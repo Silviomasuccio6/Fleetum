@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { Building2, CheckCircle2, FileText, ImagePlus, ShieldCheck, Wand2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   tenantProfileUseCases,
   TenantCompanyProfilePayload,
@@ -79,7 +80,30 @@ const requiredScoreTone = (percentage: number) => {
   return "text-rose-700 bg-rose-50 border-rose-200";
 };
 
-export const CompanyProfilePage = () => {
+type CompanyProfilePageProps = {
+  onboarding?: boolean;
+  nextPath?: string;
+};
+
+const onboardingRequiredFields: Array<keyof TenantCompanyProfilePayload> = [
+  "legalName",
+  "vatNumber",
+  "legalAddress",
+  "city",
+  "province",
+  "postalCode",
+  "email",
+  "phone",
+  "adminFirstName",
+  "adminLastName",
+  "adminEmail"
+];
+
+const missingRequiredOnboardingFields = (form: TenantCompanyProfilePayload) =>
+  onboardingRequiredFields.filter((field) => !String(form[field] ?? "").trim());
+
+export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProfilePageProps) => {
+  const navigate = useNavigate();
   const [form, setForm] = useState<TenantCompanyProfilePayload>(initialForm);
   const [profileState, setProfileState] = useState<TenantCompanyProfileResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,6 +148,19 @@ export const CompanyProfilePage = () => {
     setError(null);
     setSuccess(null);
     try {
+      if (onboarding) {
+        const missingRequiredFields = missingRequiredOnboardingFields(form);
+        if (missingRequiredFields.length > 0) {
+          setError(
+            `Completa i dati obbligatori prima di scegliere il piano: ${missingRequiredFields
+              .map((field) => fieldLabels[field] ?? field)
+              .join(", ")}.`
+          );
+          setSaving(false);
+          return;
+        }
+      }
+
       const result = await tenantProfileUseCases.updateProfile({
         ...form,
         province: form.province?.toUpperCase(),
@@ -131,7 +168,14 @@ export const CompanyProfilePage = () => {
       });
       setProfileState(result);
       setForm(normalizeForm(result));
-      setSuccess("Profilo azienda salvato. I prossimi contratti useranno questi dati.");
+      setSuccess(
+        onboarding
+          ? "Dati aziendali salvati. Ora puoi scegliere il piano e attivare il trial con carta."
+          : "Profilo azienda salvato. I prossimi contratti useranno questi dati."
+      );
+      if (onboarding && nextPath) {
+        navigate(nextPath, { replace: true });
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -176,8 +220,12 @@ export const CompanyProfilePage = () => {
   return (
     <section className="space-y-4">
       <PageHeader
-        title="Profilo Azienda"
-        subtitle="Dati societari, branding e impostazioni usate da contratti, email, WhatsApp, export e report."
+        title={onboarding ? "Completa dati azienda" : "Profilo Azienda"}
+        subtitle={
+          onboarding
+            ? "Google ha velocizzato l'accesso. Prima di scegliere il piano servono i dati societari per contratti, fatture e compliance."
+            : "Dati societari, branding e impostazioni usate da contratti, email, WhatsApp, export e report."
+        }
       />
 
       {error ? <Alert className="border-rose-200 bg-rose-50 text-rose-700">{error}</Alert> : null}
@@ -415,7 +463,7 @@ export const CompanyProfilePage = () => {
             </Button>
             <Button type="submit" disabled={loading || saving} className="gap-2">
               <Wand2 className="h-4 w-4" />
-              {saving ? "Salvataggio..." : "Salva Profilo Azienda"}
+              {saving ? "Salvataggio..." : onboarding ? "Salva e continua ai piani" : "Salva Profilo Azienda"}
             </Button>
           </div>
         </div>

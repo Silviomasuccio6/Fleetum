@@ -44,7 +44,10 @@ export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   if (!isAuthenticated) return <Navigate to={`/login?next=${encodeURIComponent(returnTo)}`} replace />;
 
-  const isBillingSelfServiceRoute = location.pathname.startsWith("/activate") || location.pathname.startsWith("/upgrade");
+  const isBillingSelfServiceRoute =
+    location.pathname.startsWith("/activate") ||
+    location.pathname.startsWith("/upgrade") ||
+    location.pathname.startsWith("/onboarding/azienda");
   if (billingGate === "required" && !isBillingSelfServiceRoute) {
     return <Navigate to="/activate?billing=required" replace />;
   }
