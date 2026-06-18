@@ -106,10 +106,14 @@ export class AuthController {
   };
 
   googleAuthStart = async (req: Request, res: Response) => {
-    const intent = this.parseOAuthIntent(req);
-    const state = this.socialOAuthService.createState("google", intent, this.parseSafeReturnTo(req));
-    const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("google", state);
-    res.redirect(authorizationUrl);
+    try {
+      const intent = this.parseOAuthIntent(req);
+      const state = this.socialOAuthService.createState("google", intent, this.parseSafeReturnTo(req));
+      const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("google", state);
+      res.redirect(authorizationUrl);
+    } catch (error) {
+      this.redirectOauthError(res, (error as Error).message);
+    }
   };
 
   googleAuthCallback = async (req: Request, res: Response) => {
@@ -117,10 +121,14 @@ export class AuthController {
   };
 
   appleAuthStart = async (req: Request, res: Response) => {
-    const intent = this.parseOAuthIntent(req);
-    const state = this.socialOAuthService.createState("apple", intent, this.parseSafeReturnTo(req));
-    const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("apple", state);
-    res.redirect(authorizationUrl);
+    try {
+      const intent = this.parseOAuthIntent(req);
+      const state = this.socialOAuthService.createState("apple", intent, this.parseSafeReturnTo(req));
+      const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("apple", state);
+      res.redirect(authorizationUrl);
+    } catch (error) {
+      this.redirectOauthError(res, (error as Error).message);
+    }
   };
 
   appleAuthCallback = async (req: Request, res: Response) => {

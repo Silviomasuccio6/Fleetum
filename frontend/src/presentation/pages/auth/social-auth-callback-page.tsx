@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
+import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { User } from "../../../domain/entities/models";
 import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { getSafeReturnTo } from "../../routes/safe-return-to";
@@ -23,27 +24,53 @@ export const SocialAuthCallbackPage = () => {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     const providerError = hashParams.get("error");
     if (providerError) {
       setError(providerError);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     const encodedUser = hashParams.get("user");
 
     if (!encodedUser) {
       setError("Risposta OAuth incompleta. Riprova il login social.");
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
-    try {
-      const user = JSON.parse(decodeBase64Url(encodedUser)) as User;
-      const returnTo = getSafeReturnTo(hashParams.get("returnTo"));
-      setSession(user, true);
-      navigate(returnTo, { replace: true });
-    } catch {
-      setError("Impossibile finalizzare il login social.");
-    }
+    const finalizeSocialLogin = async () => {
+      try {
+        const user = JSON.parse(decodeBase64Url(encodedUser)) as User;
+        const returnTo = getSafeReturnTo(hashParams.get("returnTo"));
+        setSession(user, true);
+
+        let nextPath = returnTo;
+        try {
+          const license = await authUseCases.licenseStatus();
+          const billingSelfService = nextPath.startsWith("/activate") || nextPath.startsWith("/upgrade");
+          if (license.status !== "ACTIVE" && license.status !== "TRIAL" && !billingSelfService) {
+            nextPath = "/activate?billing=required";
+          }
+        } catch {
+          nextPath = "/activate?billing=required";
+        }
+
+        if (!cancelled) navigate(nextPath, { replace: true });
+      } catch {
+        if (!cancelled) setError("Impossibile finalizzare il login social.");
+      }
+    };
+
+    void finalizeSocialLogin();
+
+    return () => {
+      cancelled = true;
+    };
   }, [hashParams, navigate, setSession]);
 
   return (
