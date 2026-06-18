@@ -98,6 +98,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const paymentMethodStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("payment_method") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
   const canUpdatePaymentMethod = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE";
+  const hasManagedStripeSubscription = canUpdatePaymentMethod;
 
   const planCards = useMemo(
     () =>
@@ -293,11 +294,12 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
           const priceSuffix = billingCycle === "monthly" ? "/mese" : "/anno";
           const buttonLabel = isCurrent
             ? "Piano attivo"
-            : currentPlan
-              ? entry === "ENTERPRISE"
-                ? "Passa a Piano Enterprise"
-                : `Passa a ${entry}`
+            : hasManagedStripeSubscription
+              ? licenseStatus === "PAST_DUE"
+                ? "Aggiorna carta"
+                : "Cambio da Platform Console"
               : `Prova 14 giorni con carta`;
+          const planCheckoutDisabled = busyPlan !== null || (hasManagedStripeSubscription && !isCurrent);
 
           return (
             <Card
@@ -325,7 +327,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 <div>
                   <p className="text-3xl font-semibold tracking-tight text-foreground">{formatPrice(priceValue)}</p>
                   <p className="text-xs text-muted-foreground">{priceSuffix}</p>
-                  {!currentPlan ? (
+                  {!hasManagedStripeSubscription ? (
                     <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
                       14 giorni di prova, carta richiesta ora, primo addebito dopo il trial.
                     </p>
@@ -357,8 +359,9 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 ) : (
                   <button
                     type="button"
-                    disabled={busyPlan !== null}
+                    disabled={planCheckoutDisabled}
                     onClick={async () => {
+                      if (planCheckoutDisabled) return;
                       setCheckoutError(null);
                       setBusyPlan(entry);
                       try {
@@ -371,9 +374,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                     }}
                     className={cn(
                       "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition",
-                      !currentPlan || isUpgrade
-                        ? "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-14px_rgba(79,70,229,0.65)] hover:brightness-110"
-                        : "border border-input bg-background text-foreground hover:bg-muted"
+                      planCheckoutDisabled
+                        ? "cursor-not-allowed border border-input bg-muted text-muted-foreground opacity-70"
+                        : !currentPlan || isUpgrade
+                          ? "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-14px_rgba(79,70,229,0.65)] hover:brightness-110"
+                          : "border border-input bg-background text-foreground hover:bg-muted"
                     )}
                   >
                     {entry === "ENTERPRISE" ? <Crown className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
@@ -543,7 +548,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .5s both" }}>
         <CardContent className="flex flex-col items-center gap-3 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-muted-foreground">
-            Upgrade o downgrade vengono applicati dal supporto piattaforma. Nessuna perdita dati, nessun blocco operativo.
+            Upgrade o downgrade vengono applicati dalla Platform Console per evitare abbonamenti Stripe duplicati. Nessuna perdita dati, nessun blocco operativo.
           </p>
           <button
             type="button"

@@ -142,7 +142,11 @@ test("checkout sessions always collect a card before starting the Stripe trial",
     }
   } as unknown as Stripe;
 
-  const service = new BillingService(audit, stripeClient);
+  const service = new BillingService(audit, stripeClient, {
+    async findSubscriptionByTenantId() {
+      return null;
+    }
+  });
   const result = await service.createCheckoutSession({
     tenantId: "tenant-card-required",
     userId: "user-card-required",
@@ -161,6 +165,54 @@ test("checkout sessions always collect a card before starting the Stripe trial",
     metadata: { tenantId: "tenant-card-required", plan: "STARTER", billingCycle: "monthly" }
   });
   assert.equal(audit.rows.at(-1)?.action, "BILLING_CHECKOUT_CREATED");
+});
+
+test("checkout sessions reject duplicate Stripe subscriptions for managed statuses", async () => {
+  (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
+  const managedStatuses: TenantSubscriptionSnapshot["status"][] = ["ACTIVE", "TRIAL", "PAST_DUE"];
+
+  for (const status of managedStatuses) {
+    const audit = new FakeAuditRepo();
+    let checkoutCreated = false;
+    const stripeClient = {
+      checkout: {
+        sessions: {
+          create: async () => {
+            checkoutCreated = true;
+            return { id: "cs_should_not_exist", url: "https://checkout.stripe.test/duplicate" };
+          }
+        }
+      }
+    } as unknown as Stripe;
+
+    const service = new BillingService(audit, stripeClient, {
+      async findSubscriptionByTenantId() {
+        return {
+          plan: "PRO",
+          seats: 5,
+          status,
+          expiresAt: null,
+          priceMonthly: 199,
+          billingCycle: "monthly",
+          provider: "stripe",
+          stripeCustomerId: "cus_existing",
+          stripeSubscriptionId: "sub_existing"
+        };
+      }
+    });
+
+    await assert.rejects(
+      () => service.createCheckoutSession({
+        tenantId: `tenant-duplicate-${status}`,
+        userId: "user-duplicate",
+        plan: "ENTERPRISE",
+        billingCycle: "monthly"
+      }),
+      (error) => error instanceof AppError && error.statusCode === 409 && error.code === "STRIPE_SUBSCRIPTION_ALREADY_ACTIVE"
+    );
+
+    assert.equal(checkoutCreated, false);
+  }
 });
 
 test("payment method update creates a setup Checkout session for the Stripe customer", async () => {
