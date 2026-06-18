@@ -23,5 +23,9 @@
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=20.20.0 <21",
+    "npm": ">=10 <11"
   }
 }
