@@ -52,7 +52,10 @@ export const SocialAuthCallbackPage = () => {
         let nextPath = returnTo;
         try {
           const license = await authUseCases.licenseStatus();
-          const billingSelfService = nextPath.startsWith("/activate") || nextPath.startsWith("/upgrade");
+          const billingSelfService =
+            nextPath.startsWith("/activate") ||
+            nextPath.startsWith("/upgrade") ||
+            nextPath.startsWith("/onboarding/azienda");
           if (license.status !== "ACTIVE" && license.status !== "TRIAL" && !billingSelfService) {
             nextPath = "/activate?billing=required";
           }
