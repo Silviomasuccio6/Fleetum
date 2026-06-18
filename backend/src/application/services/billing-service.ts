@@ -47,6 +47,8 @@ type BillingServiceDeps = {
   upsertSubscription(input: TenantSubscriptionUpsertInput): Promise<TenantSubscriptionSnapshot>;
 };
 
+const MANAGED_STRIPE_SUBSCRIPTION_STATUSES = new Set<BillingLicenseStatus>(["ACTIVE", "TRIAL", "PAST_DUE"]);
+
 const PLAN_PRICE_ENV_KEYS: Record<SaasPlan, Record<BillingCycle, keyof typeof env>> = {
   STARTER: {
     monthly: "STRIPE_PRICE_STARTER_MONTHLY",
@@ -179,6 +181,19 @@ export class BillingService {
     const priceMonthly = getPlanMonthlyPrice(plan);
     const successUrl = `${env.APP_URL}/activate?checkout=success&plan=${plan}`;
     const cancelUrl = `${env.APP_URL}/activate?checkout=cancelled&plan=${plan}`;
+
+    const existingSubscription = await this.deps.findSubscriptionByTenantId(input.tenantId);
+    if (
+      existingSubscription?.provider === "stripe" &&
+      existingSubscription.stripeSubscriptionId &&
+      MANAGED_STRIPE_SUBSCRIPTION_STATUSES.has(existingSubscription.status)
+    ) {
+      throw new AppError(
+        "Esiste gia un abbonamento Stripe per questo tenant. Cambia piano dalla Platform Console o aggiorna la carta esistente.",
+        409,
+        "STRIPE_SUBSCRIPTION_ALREADY_ACTIVE"
+      );
+    }
 
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
       if (env.NODE_ENV === "production") {
