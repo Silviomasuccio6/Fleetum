@@ -86,6 +86,12 @@ const initialForm = {
   accentColor: "#5d82c2"
 };
 
+const cleanText = (value: string) => value.trim();
+const optionalText = (value: string) => {
+  const cleaned = cleanText(value);
+  return cleaned.length > 0 ? cleaned : undefined;
+};
+
 export const SignupPage = () => {
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
@@ -175,43 +181,48 @@ export const SignupPage = () => {
     setLoading(true);
 
     try {
+      const tenantName = cleanText(form.tenantName);
+      const firstName = cleanText(form.firstName);
+      const lastName = cleanText(form.lastName);
+      const email = cleanText(form.email).toLowerCase();
+      const companyEmail = optionalText(form.companyEmail)?.toLowerCase() ?? email;
       const result = await authUseCases.signup({
-        tenantName: form.tenantName,
-        firstName: form.firstName,
-        lastName: form.lastName,
-        email: form.email,
+        tenantName,
+        firstName,
+        lastName,
+        email,
         password: form.password,
-        phone: form.adminPhone,
-        adminRole: form.adminRole,
+        phone: optionalText(form.adminPhone),
+        adminRole: optionalText(form.adminRole),
         privacyAccepted,
         company: {
-          legalName: form.tenantName,
-          tradeName: form.tenantName,
-          legalForm: form.legalForm,
-          vatNumber: form.vatNumber,
-          taxCode: form.taxCode,
-          pec: form.pec,
-          sdiCode: form.sdiCode,
-          legalAddress: form.legalAddress,
-          city: form.city,
-          province: form.province,
-          postalCode: form.postalCode,
-          country: form.country,
-          phone: form.companyPhone,
-          email: form.companyEmail || form.email,
-          website: form.website,
-          adminFirstName: form.firstName,
-          adminLastName: form.lastName,
-          adminEmail: form.email,
-          adminPhone: form.adminPhone,
-          adminRole: form.adminRole,
+          legalName: tenantName,
+          tradeName: tenantName,
+          legalForm: optionalText(form.legalForm),
+          vatNumber: optionalText(form.vatNumber),
+          taxCode: optionalText(form.taxCode),
+          pec: optionalText(form.pec)?.toLowerCase(),
+          sdiCode: optionalText(form.sdiCode),
+          legalAddress: optionalText(form.legalAddress),
+          city: optionalText(form.city),
+          province: optionalText(form.province),
+          postalCode: optionalText(form.postalCode),
+          country: optionalText(form.country) ?? "IT",
+          phone: optionalText(form.companyPhone),
+          email: companyEmail,
+          website: optionalText(form.website),
+          adminFirstName: firstName,
+          adminLastName: lastName,
+          adminEmail: email,
+          adminPhone: optionalText(form.adminPhone),
+          adminRole: optionalText(form.adminRole),
           primaryColor: form.primaryColor,
           accentColor: form.accentColor
         }
       });
       setSession(result.user, true);
       setTenantId(result.tenantId);
-      setRegisteredEmail(form.email);
+      setRegisteredEmail(email);
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
