@@ -98,7 +98,6 @@ export const SignupPage = () => {
 
   const [form, setForm] = useState(initialForm);
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -222,10 +221,10 @@ export const SignupPage = () => {
       });
       setSession(result.user, true);
       setTenantId(result.tenantId);
-      setRegisteredEmail(email);
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
+      navigate("/activate?welcome=billing", { replace: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -235,7 +234,6 @@ export const SignupPage = () => {
 
   const startAnotherSignup = () => {
     setTenantId(null);
-    setRegisteredEmail(null);
     setError(null);
     setForm(initialForm);
     setPrivacyAccepted(false);
@@ -243,11 +241,7 @@ export const SignupPage = () => {
   };
 
   const goToBillingAfterSignup = () => {
-    const params = new URLSearchParams();
-    if (registeredEmail) params.set("email", registeredEmail);
-    params.set("next", "/activate?welcome=billing");
-    params.set("welcome", "billing");
-    navigate(`/login?${params.toString()}`);
+    navigate("/activate?welcome=billing", { replace: true });
   };
 
   return (
