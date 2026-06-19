@@ -206,6 +206,18 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
     };
   }, [isItalianCompany, italianGeo]);
 
+  useEffect(() => {
+    if (!isItalianCompany || !italianGeo || form.region || !form.province) return;
+    const matchingProvince = italianGeo.provinces.find(
+      (province) => province.code === form.province?.toUpperCase()
+    );
+    if (!matchingProvince) return;
+
+    setForm((current) =>
+      current.region ? current : { ...current, region: matchingProvince.region }
+    );
+  }, [form.province, form.region, isItalianCompany, italianGeo]);
+
   const updateField = (field: keyof TenantCompanyProfilePayload, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
