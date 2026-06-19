@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { Building2, CheckCircle2, FileText, ImagePlus, ShieldCheck, Wand2 } from "lucide-react";
+import { Building2, CheckCircle2, FileText, Globe2, ImagePlus, Map, ShieldCheck, UploadCloud, Wand2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   tenantProfileUseCases,
@@ -15,6 +15,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Textarea } from "../../components/ui/textarea";
+import { COUNTRIES } from "../../../shared/geo/countries";
+import { loadItalyAdministrativeData, type ItalyAdministrativeData } from "../../../shared/geo/italy-administrative-data";
+import {
+  normalizeItalianVatNumber,
+  normalizePostalCode,
+  normalizeSdiCode,
+  normalizeTaxCode,
+  validateCompanyRegistrationDraft
+} from "../../../shared/validation/company-registration";
 
 const initialForm: TenantCompanyProfilePayload = {
   legalName: "",
@@ -30,6 +39,7 @@ const initialForm: TenantCompanyProfilePayload = {
   province: "",
   postalCode: "",
   country: "IT",
+  region: "",
   phone: "",
   email: "",
   website: "",
@@ -59,7 +69,9 @@ const fieldLabels: Record<string, string> = {
   adminFirstName: "Nome referente",
   adminLastName: "Cognome referente",
   adminEmail: "Email referente",
-  logo: "Logo aziendale"
+  logo: "Logo aziendale",
+  pec: "PEC",
+  sdiCode: "Codice SDI"
 };
 
 const normalizeForm = (data: TenantCompanyProfileResponse): TenantCompanyProfilePayload => ({
@@ -102,6 +114,24 @@ const onboardingRequiredFields: Array<keyof TenantCompanyProfilePayload> = [
 const missingRequiredOnboardingFields = (form: TenantCompanyProfilePayload) =>
   onboardingRequiredFields.filter((field) => !String(form[field] ?? "").trim());
 
+const selectClassName =
+  "flex h-10 w-full rounded-xl border border-input bg-gradient-to-b from-background to-background/85 px-3 py-2 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_24px_-22px_rgba(15,23,42,0.45)] ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
+const companyValidationPayload = (form: TenantCompanyProfilePayload) => ({
+  country: form.country,
+  tenantName: form.legalName,
+  vatNumber: form.vatNumber,
+  taxCode: form.taxCode,
+  pec: form.pec,
+  sdiCode: form.sdiCode,
+  legalAddress: form.legalAddress,
+  city: form.city,
+  province: form.province,
+  postalCode: form.postalCode,
+  companyEmail: form.email,
+  companyPhone: form.phone
+});
+
 export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProfilePageProps) => {
   const navigate = useNavigate();
   const [form, setForm] = useState<TenantCompanyProfilePayload>(initialForm);
@@ -109,6 +139,10 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingVerificationDocument, setUploadingVerificationDocument] = useState(false);
+  const [verificationDocumentFile, setVerificationDocumentFile] = useState<File | null>(null);
+  const [italianGeo, setItalianGeo] = useState<ItalyAdministrativeData | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -118,6 +152,20 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   const missingLabels = useMemo(
     () => completeness.missing.map((key) => fieldLabels[key] ?? key),
     [completeness.missing]
+  );
+  const isItalianCompany = (form.country ?? "IT").toUpperCase() === "IT";
+  const companyValidationErrors = useMemo(() => validateCompanyRegistrationDraft(companyValidationPayload(form)), [form]);
+  const provinceOptions = useMemo(
+    () => (italianGeo?.provinces ?? []).filter((province) => !form.region || province.region === form.region),
+    [italianGeo, form.region]
+  );
+  const municipalityOptions = useMemo(
+    () => (italianGeo?.municipalities ?? []).filter((municipality) => !form.province || municipality.province === form.province),
+    [italianGeo, form.province]
+  );
+  const selectedMunicipality = useMemo(
+    () => (italianGeo?.municipalities ?? []).find((municipality) => municipality.name === form.city && municipality.province === form.province),
+    [italianGeo, form.city, form.province]
   );
 
   const loadProfile = async () => {
@@ -138,8 +186,66 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
     void loadProfile();
   }, []);
 
+  useEffect(() => {
+    if (!isItalianCompany || italianGeo) return;
+    let cancelled = false;
+    setGeoLoading(true);
+    loadItalyAdministrativeData()
+      .then((data) => {
+        if (!cancelled) setItalianGeo(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Non riesco a caricare regioni, province e comuni italiani. Riprova tra qualche secondo.");
+      })
+      .finally(() => {
+        if (!cancelled) setGeoLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isItalianCompany, italianGeo]);
+
   const updateField = (field: keyof TenantCompanyProfilePayload, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleCountryChange = (country: string) => {
+    const normalizedCountry = country.toUpperCase();
+    setForm((current) => ({
+      ...current,
+      country: normalizedCountry,
+      region: normalizedCountry === "IT" ? current.region : "",
+      city: normalizedCountry === "IT" ? current.city : "",
+      province: normalizedCountry === "IT" ? current.province : "",
+      postalCode: normalizedCountry === "IT" ? current.postalCode : ""
+    }));
+  };
+
+  const handleRegionChange = (region: string) => {
+    setForm((current) => ({ ...current, region, province: "", city: "", postalCode: "" }));
+  };
+
+  const handleProvinceChange = (provinceCode: string) => {
+    const province = (italianGeo?.provinces ?? []).find((item) => item.code === provinceCode);
+    setForm((current) => ({
+      ...current,
+      region: province?.region ?? current.region,
+      province: provinceCode,
+      city: "",
+      postalCode: ""
+    }));
+  };
+
+  const handleMunicipalityChange = (municipalityCode: string) => {
+    const municipality = (italianGeo?.municipalities ?? []).find((item) => item.code === municipalityCode);
+    setForm((current) => ({
+      ...current,
+      city: municipality?.name ?? "",
+      province: municipality?.province ?? current.province,
+      region: municipality?.region ?? current.region,
+      postalCode: municipality?.postalCodes.length === 1 ? municipality.postalCodes[0] : ""
+    }));
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -161,11 +267,27 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
         }
       }
 
+      const validationErrors = validateCompanyRegistrationDraft(companyValidationPayload(form));
+      if (validationErrors.length > 0) {
+        setError(validationErrors[0].message);
+        setSaving(false);
+        return;
+      }
+
       const result = await tenantProfileUseCases.updateProfile({
         ...form,
+        vatNumber: normalizeItalianVatNumber(form.vatNumber),
+        taxCode: normalizeTaxCode(form.taxCode),
+        sdiCode: normalizeSdiCode(form.sdiCode),
+        postalCode: isItalianCompany ? normalizePostalCode(form.postalCode) : form.postalCode,
         province: form.province?.toUpperCase(),
         country: form.country?.toUpperCase() || "IT"
       });
+      if (verificationDocumentFile) {
+        setUploadingVerificationDocument(true);
+        await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocumentFile);
+        setVerificationDocumentFile(null);
+      }
       setProfileState(result);
       setForm(normalizeForm(result));
       setSuccess(
@@ -179,6 +301,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      setUploadingVerificationDocument(false);
       setSaving(false);
     }
   };
@@ -230,6 +353,11 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
 
       {error ? <Alert className="border-rose-200 bg-rose-50 text-rose-700">{error}</Alert> : null}
       {success ? <Alert className="border-emerald-200 bg-emerald-50 text-emerald-700">{success}</Alert> : null}
+      {companyValidationErrors.length > 0 && !loading ? (
+        <Alert className="border-amber-200 bg-amber-50 text-amber-800">
+          Primo controllo dati: {companyValidationErrors[0].message}
+        </Alert>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <Card>
@@ -331,11 +459,11 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
             </div>
             <div className="grid gap-1.5">
               <Label>Partita IVA</Label>
-              <Input value={form.vatNumber ?? ""} onChange={(e) => updateField("vatNumber", e.target.value)} />
+              <Input value={form.vatNumber ?? ""} onChange={(e) => updateField("vatNumber", normalizeItalianVatNumber(e.target.value))} />
             </div>
             <div className="grid gap-1.5">
               <Label>Codice fiscale azienda</Label>
-              <Input value={form.taxCode ?? ""} onChange={(e) => updateField("taxCode", e.target.value)} />
+              <Input value={form.taxCode ?? ""} onChange={(e) => updateField("taxCode", normalizeTaxCode(e.target.value))} />
             </div>
             <div className="grid gap-1.5">
               <Label>REA</Label>
@@ -347,7 +475,19 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
             </div>
             <div className="grid gap-1.5">
               <Label>Codice SDI</Label>
-              <Input value={form.sdiCode ?? ""} onChange={(e) => updateField("sdiCode", e.target.value.toUpperCase())} />
+              <Input value={form.sdiCode ?? ""} onChange={(e) => updateField("sdiCode", normalizeSdiCode(e.target.value))} />
+            </div>
+            <div className="grid gap-1.5 xl:col-span-3">
+              <Label className="flex items-center gap-2"><UploadCloud className="h-3.5 w-3.5" /> Visura camerale per verifica aziendale</Label>
+              <Input
+                type="file"
+                accept="application/pdf,image/jpeg,image/png"
+                onChange={(event) => setVerificationDocumentFile(event.target.files?.[0] ?? null)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Opzionale: aiuta a verificare ragione sociale, P.IVA e sede legale. Non dimostra da sola che lo SDI sia attivo.
+              </p>
+              {verificationDocumentFile ? <p className="text-xs font-semibold text-slate-700">File selezionato: {verificationDocumentFile.name}</p> : null}
             </div>
           </CardContent>
         </Card>
@@ -362,21 +502,74 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
               <Input value={form.legalAddress ?? ""} onChange={(e) => updateField("legalAddress", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Comune</Label>
-              <Input value={form.city ?? ""} onChange={(e) => updateField("city", e.target.value)} />
+              <Label className="flex items-center gap-2"><Globe2 className="h-3.5 w-3.5" /> Paese</Label>
+              <select className={selectClassName} value={form.country ?? "IT"} onChange={(e) => handleCountryChange(e.target.value)}>
+                {COUNTRIES.map((country) => (
+                  <option key={country.code} value={country.code}>{country.name}</option>
+                ))}
+              </select>
             </div>
-            <div className="grid gap-1.5">
-              <Label>Provincia</Label>
-              <Input value={form.province ?? ""} onChange={(e) => updateField("province", e.target.value.toUpperCase())} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>CAP</Label>
-              <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", e.target.value)} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Paese</Label>
-              <Input value={form.country ?? "IT"} onChange={(e) => updateField("country", e.target.value.toUpperCase())} />
-            </div>
+            {isItalianCompany ? (
+              <>
+                <div className="grid gap-1.5">
+                  <Label className="flex items-center gap-2"><Map className="h-3.5 w-3.5" /> Regione</Label>
+                  <select className={selectClassName} value={form.region ?? ""} onChange={(e) => handleRegionChange(e.target.value)} disabled={geoLoading || !italianGeo}>
+                    <option value="">{geoLoading ? "Caricamento regioni..." : "Seleziona regione"}</option>
+                    {(italianGeo?.regions ?? []).map((region) => (
+                      <option key={region} value={region}>{region}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Provincia</Label>
+                  <select className={selectClassName} value={form.province ?? ""} onChange={(e) => handleProvinceChange(e.target.value)} disabled={!form.region || !italianGeo}>
+                    <option value="">Seleziona provincia</option>
+                    {provinceOptions.map((province) => (
+                      <option key={province.code} value={province.code}>{province.name} ({province.code})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Comune</Label>
+                  <select
+                    className={selectClassName}
+                    value={selectedMunicipality?.code ?? ""}
+                    onChange={(e) => handleMunicipalityChange(e.target.value)}
+                    disabled={!form.province || !italianGeo}
+                  >
+                    <option value="">Seleziona comune</option>
+                    {municipalityOptions.map((municipality) => (
+                      <option key={municipality.code} value={municipality.code}>{municipality.name}</option>
+                    ))}
+                  </select>
+                  {selectedMunicipality ? (
+                    <p className="text-xs text-muted-foreground">ISTAT {selectedMunicipality.istatCode} · Catastale {selectedMunicipality.cadastralCode ?? "n.d."}</p>
+                  ) : null}
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>CAP</Label>
+                  <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", normalizePostalCode(e.target.value))} />
+                  {selectedMunicipality && selectedMunicipality.postalCodes.length > 1 ? (
+                    <p className="text-xs text-muted-foreground">Comune multi-CAP: inserisci il CAP corretto della sede.</p>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid gap-1.5">
+                  <Label>Comune/Città</Label>
+                  <Input value={form.city ?? ""} onChange={(e) => updateField("city", e.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Provincia/Area</Label>
+                  <Input value={form.province ?? ""} onChange={(e) => updateField("province", e.target.value.toUpperCase())} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Codice postale</Label>
+                  <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", e.target.value)} />
+                </div>
+              </>
+            )}
             <div className="grid gap-1.5">
               <Label>Email aziendale</Label>
               <Input type="email" value={form.email ?? ""} onChange={(e) => updateField("email", e.target.value)} />
@@ -463,7 +656,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
             </Button>
             <Button type="submit" disabled={loading || saving} className="gap-2">
               <Wand2 className="h-4 w-4" />
-              {saving ? "Salvataggio..." : onboarding ? "Salva e continua ai piani" : "Salva Profilo Azienda"}
+              {saving || uploadingVerificationDocument ? "Salvataggio..." : onboarding ? "Salva e continua ai piani" : "Salva Profilo Azienda"}
             </Button>
           </div>
         </div>
