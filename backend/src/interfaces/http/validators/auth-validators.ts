@@ -19,7 +19,7 @@ export const signupSchema = z.object({
   phone: optionalText(40),
   adminRole: optionalText(80),
   privacyAccepted: z.boolean().optional().default(false),
-  company: signupCompanySchema.optional(),
+  company: signupCompanySchema,
   password: z
     .string()
     .min(8)

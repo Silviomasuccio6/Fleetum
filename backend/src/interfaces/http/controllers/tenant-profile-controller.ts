@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
-import { sanitizeImageMetadata, validateImageMagic } from "../../../infrastructure/storage/file-security.js";
+import { sanitizeImageMetadata, validateImageMagic, validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { tenantCompanyProfileSchema } from "../validators/tenant-profile-validators.js";
 
@@ -29,6 +29,14 @@ export class TenantProfileController {
     await validateImageMagic(file.path, file.mimetype);
     await sanitizeImageMetadata(file.path);
     const result = await this.service.setLogo(req.auth!.tenantId, req.auth!.userId, file);
+    res.status(201).json(result);
+  };
+
+  uploadCompanyVerificationDocument = async (req: Request, res: Response) => {
+    const file = req.file;
+    if (!file) throw new AppError("Visura camerale mancante", 400, "COMPANY_VERIFICATION_DOCUMENT_REQUIRED");
+    await validateUploadedFile(file.path, file.mimetype);
+    const result = await this.service.setCompanyVerificationDocument(req.auth!.tenantId, req.auth!.userId, file);
     res.status(201).json(result);
   };
 

@@ -9,7 +9,6 @@ const TRANSLATIONS_IT_EN: Record<string, string> = {
   "Bentornato": "Welcome back",
   "Accedi alla control room operativa della tua azienda.": "Access your company's operating control room.",
   "Continua con Google": "Continue with Google",
-  "Continua con Apple": "Continue with Apple",
   "o continua con email": "or continue with email",
   "Indirizzo email": "Email address",
   "Password": "Password",

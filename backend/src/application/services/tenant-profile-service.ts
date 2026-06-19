@@ -1,7 +1,10 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
+import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { validateCompanyRegistrationDraft } from "../../shared/validation/company-registration.js";
 import type { SignupCompanyInput, TenantCompanyProfileInput } from "../../interfaces/http/validators/tenant-profile-validators.js";
 
 const normalizeText = (value?: string | null) => {
@@ -27,23 +30,24 @@ const profileRequiredKeys = [
 ] as const;
 
 export class TenantProfileService {
-  private validateBusinessRules(input: {
-    country?: string | null;
-    vatNumber?: string | null;
-    pec?: string | null;
-    sdiCode?: string | null;
-    primaryColor?: string | null;
-    accentColor?: string | null;
-  }) {
-    const country = normalizeCountry(input.country);
-    const vat = normalizeVat(input.vatNumber);
-    const sdi = normalizeText(input.sdiCode);
-
-    if (country === "IT" && vat && !/^\d{11}$/.test(vat)) {
-      throw new AppError("Partita IVA non valida (11 cifre).", 400, "TENANT_VAT_INVALID");
-    }
-    if (sdi && !/^[A-Za-z0-9]{7}$/.test(sdi)) {
-      throw new AppError("Codice SDI non valido (7 caratteri alfanumerici).", 400, "TENANT_SDI_INVALID");
+  private validateBusinessRules(input: Partial<TenantCompanyProfileInput | SignupCompanyInput>) {
+    const errors = validateCompanyRegistrationDraft({
+      country: input.country,
+      tenantName: input.legalName,
+      vatNumber: input.vatNumber,
+      taxCode: input.taxCode,
+      pec: input.pec,
+      sdiCode: input.sdiCode,
+      legalAddress: input.legalAddress,
+      city: input.city,
+      province: input.province,
+      postalCode: input.postalCode,
+      companyEmail: input.email,
+      companyPhone: input.phone
+    });
+    if (errors.length > 0) {
+      const first = errors[0];
+      throw new AppError(first.message, 400, first.code);
     }
   }
 
@@ -102,11 +106,24 @@ export class TenantProfileService {
     company?: Partial<SignupCompanyInput> | null;
   }) {
     const legalName = normalizeText(input.company?.legalName) ?? input.tenantName;
-    this.validateBusinessRules({
-      country: input.company?.country,
-      vatNumber: input.company?.vatNumber,
-      sdiCode: input.company?.sdiCode
-    });
+    const hasCompanyOnboardingPayload = Boolean(
+      input.company?.vatNumber ||
+        input.company?.taxCode ||
+        input.company?.pec ||
+        input.company?.sdiCode ||
+        input.company?.legalAddress ||
+        input.company?.city ||
+        input.company?.province ||
+        input.company?.postalCode ||
+        input.company?.email ||
+        input.company?.phone
+    );
+    if (hasCompanyOnboardingPayload) {
+      this.validateBusinessRules({
+        ...input.company,
+        legalName
+      });
+    }
 
     const profile = await prisma.tenantProfile.upsert({
       where: { tenantId: input.tenantId },
@@ -294,6 +311,65 @@ export class TenantProfileService {
     }
 
     return this.getProfile(tenantId);
+  }
+
+  async setCompanyVerificationDocument(tenantId: string, actorUserId: string, file: Express.Multer.File) {
+    const fileBuffer = await fs.readFile(file.path);
+    const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const storageKey = storageProvider.buildKey("tenant-verifications", tenantId, `${Date.now()}-${safeName}`);
+
+    await storageProvider.writeFromFile(storageKey, file.path, {
+      tenantId,
+      resourceType: "TenantCompanyVerificationDocument",
+      resourceId: tenantId,
+      originalName: file.originalname,
+      mimeType: file.mimetype
+    });
+    if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
+
+    const storedFile = await prisma.storedFileObject.create({
+      data: {
+        tenantId,
+        provider: storageProvider.name,
+        bucket: storageProvider.name === "s3" ? env.S3_BUCKET ?? null : null,
+        storageKey,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        checksumSha256,
+        resourceType: "TenantCompanyVerificationDocument",
+        resourceId: tenantId,
+        visibility: "private"
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: actorUserId,
+        action: "TENANT_COMPANY_VERIFICATION_DOCUMENT_UPLOADED",
+        resource: "StoredFileObject",
+        resourceId: storedFile.id,
+        details: {
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          checksumSha256
+        }
+      }
+    });
+
+    return {
+      document: {
+        id: storedFile.id,
+        originalName: storedFile.originalName,
+        mimeType: storedFile.mimeType,
+        sizeBytes: storedFile.sizeBytes,
+        createdAt: storedFile.createdAt,
+        visibility: storedFile.visibility
+      }
+    };
   }
 
   async removeLogo(tenantId: string, actorUserId: string) {

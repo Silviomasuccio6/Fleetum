@@ -29,6 +29,7 @@ import { SettingsService } from "../../../application/services/settings-service.
 import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { env } from "../../../shared/config/env.js";
+import { uploadCompanyVerificationDocument } from "../../../infrastructure/storage/multer.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { metrics } from "../../../infrastructure/observability/metrics.js";
@@ -336,6 +337,12 @@ apiRouter.get("/ready", async (_req, res) => {
 apiRouter.use("/auth", authRoutes(authController));
 apiRouter.use(requireAuth);
 apiRouter.use("/billing", requireCsrfProtection, billingRoutes(billingController));
+apiRouter.post(
+  "/tenant/onboarding/company-verification-document",
+  requireCsrfProtection,
+  uploadCompanyVerificationDocument.single("file"),
+  asyncHandler(tenantProfileController.uploadCompanyVerificationDocument)
+);
 apiRouter.use(requireValidLicense(licensePolicyService));
 apiRouter.use(requireCsrfProtection);
 apiRouter.use("/users", usersRoutes(usersController));

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateCompanyRegistrationDraft } from "../../../shared/validation/company-registration.js";
 
 const emptyToUndefined = (value: unknown) => {
   if (typeof value !== "string") return value;
@@ -11,7 +12,28 @@ const optionalEmail = z.preprocess(emptyToUndefined, z.string().email().max(255)
 const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().max(500).optional());
 const optionalHex = z.preprocess(emptyToUndefined, z.string().regex(/^#[0-9a-fA-F]{6}$/).optional());
 
-export const tenantCompanyProfileSchema = z.object({
+const withCompanyFiscalRules = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.superRefine((value, ctx) => {
+    const errors = validateCompanyRegistrationDraft({
+      country: value.country,
+      tenantName: value.legalName,
+      vatNumber: value.vatNumber,
+      taxCode: value.taxCode,
+      pec: value.pec,
+      sdiCode: value.sdiCode,
+      legalAddress: value.legalAddress,
+      city: value.city,
+      province: value.province,
+      postalCode: value.postalCode,
+      companyEmail: value.email,
+      companyPhone: value.phone
+    });
+    errors.forEach((error) => {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [error.field], message: error.message });
+    });
+  });
+
+export const tenantCompanyProfileSchema = withCompanyFiscalRules(z.object({
   legalName: z.string().trim().min(2).max(180),
   tradeName: optionalText(180),
   legalForm: optionalText(80),
@@ -40,13 +62,9 @@ export const tenantCompanyProfileSchema = z.object({
   defaultContractTerms: optionalText(12000),
   termsVersion: optionalText(40),
   dpaVersion: optionalText(40)
-});
+}));
 
-export const signupCompanySchema = tenantCompanyProfileSchema.partial().extend({
-  legalName: z.string().trim().min(2).max(180),
-  vatNumber: optionalText(32),
-  email: optionalEmail
-});
+export const signupCompanySchema = tenantCompanyProfileSchema;
 
 export type TenantCompanyProfileInput = z.infer<typeof tenantCompanyProfileSchema>;
 export type SignupCompanyInput = z.infer<typeof signupCompanySchema>;
