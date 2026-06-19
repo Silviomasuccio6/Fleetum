@@ -46,6 +46,11 @@ const allowedVehicleBookletMime = new Set([
   "image/webp",
   "application/pdf"
 ]);
+const allowedCompanyVerificationDocumentMime = new Set([
+  "image/jpeg",
+  "image/png",
+  "application/pdf"
+]);
 const allowedRentalCustomerAttachmentMime = new Set([
   "image/jpeg",
   "image/png",
@@ -69,5 +74,9 @@ export const uploadRentalCustomerAttachments = createDiskUpload(allowedRentalCus
 
 export const uploadContractLogo = createDiskUpload(allowedImageMime, {
   fileSize: 8 * 1024 * 1024,
+  files: 1
+});
+export const uploadCompanyVerificationDocument = createDiskUpload(allowedCompanyVerificationDocumentMime, {
+  fileSize: 12 * 1024 * 1024,
   files: 1
 });

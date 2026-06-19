@@ -54,22 +54,12 @@ const EyeIcon = ({ hidden }: { hidden: boolean }) => (
   </svg>
 );
 
-const AppleLogo = () => (
-  <svg className="premium-login-social-icon" viewBox="0 0 24 24" aria-hidden>
-    <path
-      fill="currentColor"
-      d="M16.37 12.6c.03 3.12 2.74 4.16 2.77 4.18-.02.08-.43 1.5-1.42 2.97-.86 1.26-1.75 2.5-3.16 2.53-1.38.03-1.82-.82-3.4-.82-1.58 0-2.07.8-3.37.85-1.36.05-2.4-1.36-3.27-2.61-1.77-2.56-3.12-7.23-1.31-10.37.9-1.56 2.52-2.55 4.28-2.58 1.33-.03 2.58.9 3.4.9.82 0 2.37-1.11 3.98-.95.67.03 2.54.27 3.75 2.03-.1.06-2.24 1.31-2.25 3.87Zm-2.1-8.76c.72-.87 1.2-2.08 1.06-3.28-1.04.04-2.3.69-3.05 1.56-.67.77-1.26 2.01-1.1 3.2 1.16.09 2.36-.59 3.08-1.48Z"
-    />
-  </svg>
-);
-
 export const LoginCard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const setSession = useAuthStore((state) => state.setSession);
   const apiBaseUrl = getApiBaseUrl();
   const googleAuthUrl = (import.meta.env.VITE_GOOGLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/google`;
-  const appleAuthUrl = (import.meta.env.VITE_APPLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/apple`;
 
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -138,9 +128,8 @@ export const LoginCard = () => {
     }
   };
 
-  const openSocialAuth = (provider: "google" | "apple") => {
-    const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
-    const target = new URL(providerUrl, window.location.origin);
+  const openGoogleAuth = () => {
+    const target = new URL(googleAuthUrl, window.location.origin);
     target.searchParams.set("returnTo", returnTo);
     window.location.href = target.toString();
   };
@@ -161,24 +150,15 @@ export const LoginCard = () => {
 
 
         <form onSubmit={onSubmit} className="premium-login-form" noValidate>
-          <div className="premium-login-social-grid">
+          <div className="premium-login-social-grid premium-login-social-grid--single">
             <button
               type="button"
               data-cursor="hover"
-              className="premium-login-social-btn"
-              onClick={() => openSocialAuth("google")}
+              className="premium-login-social-btn premium-login-social-btn--google"
+              onClick={openGoogleAuth}
             >
               <GoogleLogo />
-              <span>Google</span>
-            </button>
-            <button
-              type="button"
-              data-cursor="hover"
-              className="premium-login-social-btn"
-              onClick={() => openSocialAuth("apple")}
-            >
-              <AppleLogo />
-              <span>Apple Account</span>
+              <span>Continua con Google</span>
             </button>
           </div>
 

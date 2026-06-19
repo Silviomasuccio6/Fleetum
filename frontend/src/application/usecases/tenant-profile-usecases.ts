@@ -54,5 +54,15 @@ export const tenantProfileUseCases = {
       suppressSuccessToast: true
     });
   },
+  uploadCompanyVerificationDocument: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return httpClient.post<{
+      document: { id: string; originalName: string | null; mimeType: string | null; sizeBytes: number; visibility: string };
+    }>("/tenant/onboarding/company-verification-document", formData, {
+      suppressSuccessToast: true,
+      timeoutMs: 120000
+    });
+  },
   removeLogo: () => httpClient.delete("/tenant/branding/logo")
 };

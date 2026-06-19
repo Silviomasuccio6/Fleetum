@@ -1,10 +1,20 @@
-import { type CSSProperties, type ReactNode, FormEvent, useEffect, useState } from "react";
-import { AtSign, Briefcase, Building2, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, Star, User } from "lucide-react";
+import { type CSSProperties, type ReactNode, FormEvent, useEffect, useMemo, useState } from "react";
+import { AtSign, Briefcase, Building2, FileText, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, Star, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
+import { tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
+import { COUNTRIES } from "../../../shared/geo/countries";
+import { loadItalyAdministrativeData, type ItalyAdministrativeData } from "../../../shared/geo/italy-administrative-data";
+import {
+  normalizeItalianVatNumber,
+  normalizePostalCode,
+  normalizeSdiCode,
+  normalizeTaxCode,
+  validateCompanyRegistrationDraft
+} from "../../../shared/validation/company-registration";
 import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
 import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
 import "../../../features/auth/premium-login.css";
@@ -47,16 +57,6 @@ const GoogleLogo = () => (
   </svg>
 );
 
-const AppleLogo = () => (
-  <svg className="premium-login-social-icon" viewBox="0 0 24 24" aria-hidden>
-    <path
-      fill="currentColor"
-      d="M16.37 12.6c.03 3.12 2.74 4.16 2.77 4.18-.02.08-.43 1.5-1.42 2.97-.86 1.26-1.75 2.5-3.16 2.53-1.38.03-1.82-.82-3.4-.82-1.58 0-2.07.8-3.37.85-1.36.05-2.4-1.36-3.27-2.61-1.77-2.56-3.12-7.23-1.31-10.37.9-1.56 2.52-2.55 4.28-2.58 1.33-.03 2.58.9 3.4.9.82 0 2.37-1.11 3.98-.95.67.03 2.54.27 3.75 2.03-.1.06-2.24 1.31-2.25 3.87Zm-2.1-8.76c.72-.87 1.2-2.08 1.06-3.28-1.04.04-2.3.69-3.05 1.56-.67.77-1.26 2.01-1.1 3.2 1.16.09 2.36-.59 3.08-1.48Z"
-    />
-  </svg>
-);
-
-
 const FieldIcon = ({ children }: { children: ReactNode }) => (
   <span className="premium-login-field-icon-wrap">{children}</span>
 );
@@ -69,8 +69,10 @@ const initialForm = {
   pec: "",
   sdiCode: "",
   legalAddress: "",
+  region: "",
   city: "",
   province: "",
+  municipalityCode: "",
   postalCode: "",
   country: "IT",
   companyPhone: "",
@@ -83,7 +85,8 @@ const initialForm = {
   email: "",
   password: "",
   primaryColor: "#21375d",
-  accentColor: "#5d82c2"
+  accentColor: "#5d82c2",
+  chamberOfCommerceFile: null as File | null
 };
 
 const cleanText = (value: string) => value.trim();
@@ -92,16 +95,7 @@ const optionalText = (value: string) => {
   return cleaned.length > 0 ? cleaned : undefined;
 };
 
-const isRequiredCompanyStepComplete = (form: typeof initialForm) =>
-  form.tenantName.trim().length >= 2 &&
-  /^\d{11}$/.test(form.vatNumber.trim()) &&
-  form.companyEmail.trim().includes("@") &&
-  form.companyPhone.trim().length >= 6 &&
-  form.legalAddress.trim().length >= 4 &&
-  form.city.trim().length >= 2 &&
-  form.province.trim().length >= 2 &&
-  form.postalCode.trim().length >= 4 &&
-  form.country.trim().length === 2;
+const isRequiredCompanyStepComplete = (form: typeof initialForm) => validateCompanyRegistrationDraft(form).length === 0;
 
 export const SignupPage = () => {
   const navigate = useNavigate();
@@ -113,10 +107,11 @@ export const SignupPage = () => {
   const [loading, setLoading] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [italianGeo, setItalianGeo] = useState<ItalyAdministrativeData | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
 
   const apiBaseUrl = getApiBaseUrl();
   const googleAuthUrl = (import.meta.env.VITE_GOOGLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/google`;
-  const appleAuthUrl = (import.meta.env.VITE_APPLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/apple`;
 
 
   useEffect(() => {
@@ -132,14 +127,47 @@ export const SignupPage = () => {
     };
   }, []);
 
-  const openSocialAuth = (provider: "google" | "apple") => {
-    const providerUrl = provider === "google" ? googleAuthUrl : appleAuthUrl;
-    const target = new URL(providerUrl, window.location.origin);
+  useEffect(() => {
+    if (form.country !== "IT" || italianGeo) return;
+    let cancelled = false;
+    setGeoLoading(true);
+    void loadItalyAdministrativeData()
+      .then((data) => {
+        if (!cancelled) setItalianGeo(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Non riesco a caricare comuni e province italiane. Riprova tra qualche secondo.");
+      })
+      .finally(() => {
+        if (!cancelled) setGeoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.country, italianGeo]);
+
+  const openGoogleSignup = () => {
+    const target = new URL(googleAuthUrl, window.location.origin);
     target.searchParams.set("intent", "signup");
     target.searchParams.set("returnTo", "/onboarding/azienda?from=social");
     window.location.href = target.toString();
   };
 
+  const isItalianCompany = form.country === "IT";
+  const companyStepErrors = useMemo(() => validateCompanyRegistrationDraft(form), [form]);
+  const selectedRegion = form.region;
+  const provinceOptions = useMemo(
+    () => (italianGeo?.provinces ?? []).filter((province) => !selectedRegion || province.region === selectedRegion),
+    [italianGeo, selectedRegion]
+  );
+  const municipalityOptions = useMemo(
+    () => (italianGeo?.municipalities ?? []).filter((municipality) => !form.province || municipality.province === form.province),
+    [italianGeo, form.province]
+  );
+  const selectedMunicipality = useMemo(
+    () => (italianGeo?.municipalities ?? []).find((municipality) => municipality.code === form.municipalityCode),
+    [italianGeo, form.municipalityCode]
+  );
   const isEmailValid = form.email.trim().includes("@");
   const isPasswordStrong =
     form.password.length >= 8 &&
@@ -154,10 +182,49 @@ export const SignupPage = () => {
   ][currentStep];
 
   const stepErrors = [
-    "Completa i dati societari obbligatori: azienda, P.IVA, email/telefono aziendale e sede legale.",
+    companyStepErrors[0]?.message ?? "Completa i dati societari obbligatori: azienda, P.IVA, PEC, email/telefono aziendale e sede legale.",
     "Completa nome, cognome, email valida e una password sicura.",
     "Per creare l'account devi confermare la presa visione dell'informativa privacy."
   ];
+  const handleCountryChange = (country: string) => {
+    const normalizedCountry = country.toUpperCase();
+    setForm((current) => ({
+      ...current,
+      country: normalizedCountry,
+      region: normalizedCountry === "IT" ? current.region : "",
+      province: normalizedCountry === "IT" ? current.province : "",
+      municipalityCode: normalizedCountry === "IT" ? current.municipalityCode : ""
+    }));
+  };
+
+  const handleRegionChange = (region: string) => {
+    setForm((current) => ({ ...current, region, province: "", municipalityCode: "", city: "", postalCode: "" }));
+  };
+
+  const handleProvinceChange = (provinceCode: string) => {
+    const province = (italianGeo?.provinces ?? []).find((item) => item.code === provinceCode);
+    setForm((current) => ({
+      ...current,
+      region: province?.region ?? current.region,
+      province: provinceCode,
+      municipalityCode: "",
+      city: "",
+      postalCode: ""
+    }));
+  };
+
+  const handleMunicipalityChange = (municipalityCode: string) => {
+    const municipality = (italianGeo?.municipalities ?? []).find((item) => item.code === municipalityCode);
+    setForm((current) => ({
+      ...current,
+      municipalityCode,
+      city: municipality?.name ?? "",
+      province: municipality?.province ?? current.province,
+      region: municipality?.region ?? current.region,
+      postalCode: municipality?.postalCodes.length === 1 ? municipality.postalCodes[0] : ""
+    }));
+  };
+
   const signupProgress = Math.round(((currentStep + 1) / SIGNUP_STEPS.length) * 100);
   const signupProgressStyle = { "--signup-progress": `${signupProgress}%` } as CSSProperties;
 
@@ -196,6 +263,7 @@ export const SignupPage = () => {
       const lastName = cleanText(form.lastName);
       const email = cleanText(form.email).toLowerCase();
       const companyEmail = optionalText(form.companyEmail)?.toLowerCase() ?? email;
+      const verificationDocument = form.chamberOfCommerceFile;
       const result = await authUseCases.signup({
         tenantName,
         firstName,
@@ -209,14 +277,14 @@ export const SignupPage = () => {
           legalName: tenantName,
           tradeName: tenantName,
           legalForm: optionalText(form.legalForm),
-          vatNumber: optionalText(form.vatNumber),
-          taxCode: optionalText(form.taxCode),
+          vatNumber: optionalText(normalizeItalianVatNumber(form.vatNumber)),
+          taxCode: optionalText(normalizeTaxCode(form.taxCode)),
           pec: optionalText(form.pec)?.toLowerCase(),
-          sdiCode: optionalText(form.sdiCode),
+          sdiCode: optionalText(normalizeSdiCode(form.sdiCode)),
           legalAddress: optionalText(form.legalAddress),
           city: optionalText(form.city),
           province: optionalText(form.province),
-          postalCode: optionalText(form.postalCode),
+          postalCode: optionalText(normalizePostalCode(form.postalCode) || form.postalCode),
           country: optionalText(form.country) ?? "IT",
           phone: optionalText(form.companyPhone),
           email: companyEmail,
@@ -231,6 +299,9 @@ export const SignupPage = () => {
         }
       });
       setSession(result.user, true);
+      if (verificationDocument) {
+        await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocument);
+      }
       setTenantId(result.tenantId);
       setForm(initialForm);
       setPrivacyAccepted(false);
@@ -316,24 +387,15 @@ export const SignupPage = () => {
               </div>
             ) : (
             <form onSubmit={onSubmit} className="premium-login-form" noValidate>
-              <div className="premium-login-social-grid">
+              <div className="premium-login-social-grid premium-login-social-grid--single">
                 <button
                   type="button"
                   data-cursor="hover"
-                  className="premium-login-social-btn"
-                  onClick={() => openSocialAuth("google")}
+                  className="premium-login-social-btn premium-login-social-btn--google"
+                  onClick={openGoogleSignup}
                 >
                   <GoogleLogo />
                   <span>Continua con Google</span>
-                </button>
-                <button
-                  type="button"
-                  data-cursor="hover"
-                  className="premium-login-social-btn"
-                  onClick={() => openSocialAuth("apple")}
-                >
-                  <AppleLogo />
-                  <span>Continua con Apple</span>
                 </button>
               </div>
 
@@ -398,13 +460,13 @@ export const SignupPage = () => {
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-vatNumber">Partita IVA *</label>
-                      <div className={`premium-login-field ${form.vatNumber.length === 11 ? "is-ok" : ""}`}>
+                      <div className={`premium-login-field ${normalizeItalianVatNumber(form.vatNumber).length === 11 ? "is-ok" : ""}`}>
                         <FieldIcon><Briefcase /></FieldIcon>
                         <input
                           id="signup-vatNumber"
                           name="vatNumber"
                           value={form.vatNumber}
-                          onChange={(event) => setForm((current) => ({ ...current, vatNumber: event.target.value.replace(/\s+/g, "") }))}
+                          onChange={(event) => setForm((current) => ({ ...current, vatNumber: normalizeItalianVatNumber(event.target.value) }))}
                           placeholder="11 cifre"
                           required
                         />
@@ -431,7 +493,7 @@ export const SignupPage = () => {
                           id="signup-taxCode"
                           name="taxCode"
                           value={form.taxCode}
-                          onChange={(event) => setForm((current) => ({ ...current, taxCode: event.target.value.toUpperCase() }))}
+                          onChange={(event) => setForm((current) => ({ ...current, taxCode: normalizeTaxCode(event.target.value) }))}
                           placeholder="Opzionale"
                         />
                       </div>
@@ -492,61 +554,150 @@ export const SignupPage = () => {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1.55fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,0.65fr)]">
+                    <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                       <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-city">Comune *</label>
-                        <div className={`premium-login-field ${form.city ? "is-ok" : ""}`}>
-                          <FieldIcon><Map /></FieldIcon>
-                          <input
-                            id="signup-city"
-                            name="city"
-                            value={form.city}
-                            onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
-                            placeholder="Comune"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-province">Prov. *</label>
-                        <div className={`premium-login-field ${form.province ? "is-ok" : ""}`}>
-                          <input
-                            id="signup-province"
-                            name="province"
-                            value={form.province}
-                            onChange={(event) => setForm((current) => ({ ...current, province: event.target.value.toUpperCase() }))}
-                            placeholder="NA"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-postalCode">CAP *</label>
-                        <div className={`premium-login-field ${form.postalCode ? "is-ok" : ""}`}>
-                          <input
-                            id="signup-postalCode"
-                            name="postalCode"
-                            value={form.postalCode}
-                            onChange={(event) => setForm((current) => ({ ...current, postalCode: event.target.value }))}
-                            placeholder="80100"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <label className="premium-login-field-label" htmlFor="signup-country">Paese *</label>
-                        <div className="premium-login-field">
-                          <input
+                        <label className="premium-login-field-label" htmlFor="signup-country">Nazione *</label>
+                        <div className="premium-login-field is-ok">
+                          <FieldIcon><Globe /></FieldIcon>
+                          <select
                             id="signup-country"
                             name="country"
                             value={form.country}
-                            onChange={(event) => setForm((current) => ({ ...current, country: event.target.value.toUpperCase() }))}
-                            placeholder="IT"
+                            onChange={(event) => handleCountryChange(event.target.value)}
                             required
-                          />
+                          >
+                            {COUNTRIES.map((country) => (
+                              <option key={country.code} value={country.code}>{country.name}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
+                      {isItalianCompany ? (
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-region">Regione *</label>
+                          <div className={`premium-login-field ${form.region ? "is-ok" : ""}`}>
+                            <FieldIcon><Map /></FieldIcon>
+                            <select
+                              id="signup-region"
+                              name="region"
+                              value={form.region}
+                              onChange={(event) => handleRegionChange(event.target.value)}
+                              required
+                              disabled={geoLoading || !italianGeo}
+                            >
+                              <option value="">{geoLoading ? "Caricamento regioni..." : "Seleziona regione"}</option>
+                              {(italianGeo?.regions ?? []).map((region) => (
+                                <option key={region} value={region}>{region}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
+                    {isItalianCompany ? (
+                      <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.65fr)]">
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-province">Provincia *</label>
+                          <div className={`premium-login-field ${form.province ? "is-ok" : ""}`}>
+                            <select
+                              id="signup-province"
+                              name="province"
+                              value={form.province}
+                              onChange={(event) => handleProvinceChange(event.target.value)}
+                              required
+                              disabled={!form.region || !italianGeo}
+                            >
+                              <option value="">Seleziona provincia</option>
+                              {provinceOptions.map((province) => (
+                                <option key={province.code} value={province.code}>{province.name} ({province.code})</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-municipality">Comune *</label>
+                          <div className={`premium-login-field ${form.city ? "is-ok" : ""}`}>
+                            <FieldIcon><Map /></FieldIcon>
+                            <select
+                              id="signup-municipality"
+                              name="municipalityCode"
+                              value={form.municipalityCode}
+                              onChange={(event) => handleMunicipalityChange(event.target.value)}
+                              required
+                              disabled={!form.province || !italianGeo}
+                            >
+                              <option value="">Seleziona comune</option>
+                              {municipalityOptions.map((municipality) => (
+                                <option key={municipality.code} value={municipality.code}>{municipality.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {selectedMunicipality ? (
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              ISTAT {selectedMunicipality.istatCode} · Catastale {selectedMunicipality.cadastralCode ?? "n.d."}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-postalCode">CAP *</label>
+                          <div className={`premium-login-field ${form.postalCode ? "is-ok" : ""}`}>
+                            <input
+                              id="signup-postalCode"
+                              name="postalCode"
+                              value={form.postalCode}
+                              onChange={(event) => setForm((current) => ({ ...current, postalCode: normalizePostalCode(event.target.value) }))}
+                              placeholder="80100"
+                              required
+                            />
+                          </div>
+                          {selectedMunicipality && selectedMunicipality.postalCodes.length > 1 ? (
+                            <p className="mt-1 text-[11px] text-slate-500">Comune multi-CAP: inserisci il CAP corretto della sede.</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]">
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-city">Città *</label>
+                          <div className={`premium-login-field ${form.city ? "is-ok" : ""}`}>
+                            <FieldIcon><Map /></FieldIcon>
+                            <input
+                              id="signup-city"
+                              name="city"
+                              value={form.city}
+                              onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
+                              placeholder="Città"
+                              required
+                            />
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-province">Provincia/Area</label>
+                          <div className={`premium-login-field ${form.province ? "is-ok" : ""}`}>
+                            <input
+                              id="signup-province"
+                              name="province"
+                              value={form.province}
+                              onChange={(event) => setForm((current) => ({ ...current, province: event.target.value.toUpperCase() }))}
+                              placeholder="Area"
+                            />
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <label className="premium-login-field-label" htmlFor="signup-postalCode">Codice postale *</label>
+                          <div className={`premium-login-field ${form.postalCode ? "is-ok" : ""}`}>
+                            <input
+                              id="signup-postalCode"
+                              name="postalCode"
+                              value={form.postalCode}
+                              onChange={(event) => setForm((current) => ({ ...current, postalCode: event.target.value }))}
+                              placeholder="Codice postale"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-pec">PEC</label>
                       <div className={`premium-login-field ${form.pec.includes("@") ? "is-ok" : ""}`}>
@@ -569,10 +720,34 @@ export const SignupPage = () => {
                           id="signup-sdiCode"
                           name="sdiCode"
                           value={form.sdiCode}
-                          onChange={(event) => setForm((current) => ({ ...current, sdiCode: event.target.value.toUpperCase() }))}
+                          onChange={(event) => setForm((current) => ({ ...current, sdiCode: normalizeSdiCode(event.target.value) }))}
                           placeholder="7 caratteri"
                         />
                       </div>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Formato controllato. La verifica effettiva sarà manuale o tramite provider; la PEC resta obbligatoria.
+                      </p>
+                    </div>
+                    <div className="md:col-span-2 rounded-2xl border border-slate-200/70 bg-white/65 p-3">
+                      <label className="premium-login-field-label" htmlFor="signup-chamber-doc">Visura camerale per verifica aziendale</label>
+                      <div className="premium-login-field mt-1">
+                        <FieldIcon><FileText /></FieldIcon>
+                        <input
+                          id="signup-chamber-doc"
+                          name="chamberOfCommerceFile"
+                          type="file"
+                          accept="application/pdf,image/jpeg,image/png"
+                          onChange={(event) => setForm((current) => ({ ...current, chamberOfCommerceFile: event.target.files?.[0] ?? null }))}
+                        />
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                        Opzionale in questa fase: serve a verificare ragione sociale, P.IVA e sede legale. Non dimostra da sola che lo SDI sia attivo.
+                      </p>
+                      {form.chamberOfCommerceFile ? (
+                        <p className="mt-1 text-xs font-semibold text-slate-700">
+                          File selezionato: {form.chamberOfCommerceFile.name}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 </div>
