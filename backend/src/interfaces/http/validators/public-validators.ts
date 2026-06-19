@@ -56,6 +56,7 @@ export const publicAnalyticsEventSchema = z.object({
   utmMedium: z.preprocess(emptyToUndefined, z.string().trim().max(120).optional()),
   utmCampaign: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
   sessionId: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
+  consentVersion: z.string().trim().min(1).max(64),
   metadata: z.record(z.string(), z.unknown()).optional()
 });
 

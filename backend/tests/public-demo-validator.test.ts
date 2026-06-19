@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { publicDemoRequestSchema } from "../src/interfaces/http/validators/public-validators.js";
+import { publicAnalyticsEventSchema, publicDemoRequestSchema } from "../src/interfaces/http/validators/public-validators.js";
 
 test("public demo request accepts valid B2B lead", () => {
   const parsed = publicDemoRequestSchema.parse({
@@ -40,4 +40,15 @@ test("public demo request rejects invalid email and unsafe oversize payload", ()
       message: "x".repeat(1300)
     });
   });
+});
+
+test("public analytics requires an explicit consent version", () => {
+  const parsed = publicAnalyticsEventSchema.parse({
+    eventType: "PAGE_VIEW",
+    path: "/",
+    consentVersion: "2026-06-19"
+  });
+
+  assert.equal(parsed.consentVersion, "2026-06-19");
+  assert.throws(() => publicAnalyticsEventSchema.parse({ eventType: "PAGE_VIEW", path: "/" }));
 });

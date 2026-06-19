@@ -1,5 +1,6 @@
 import rateLimit from "express-rate-limit";
 import crypto from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { Router } from "express";
 import { AcceptInviteUseCase } from "../../../application/usecases/auth/accept-invite-usecase.js";
 import { LoginUseCase } from "../../../application/usecases/auth/login-usecase.js";
@@ -214,7 +215,10 @@ apiRouter.post("/public/analytics/event", publicAnalyticsRateLimit, asyncHandler
       userAgentHash: privacyHash(String(userAgent)),
       deviceType: detectDevice(String(userAgent)),
       browser: detectBrowser(String(userAgent)),
-      metadata: input.metadata ? (input.metadata as any) : undefined
+      metadata: {
+        ...(input.metadata ?? {}),
+        consentVersion: input.consentVersion
+      } as Prisma.InputJsonValue
     }
   });
   res.status(202).json({ ok: true });

@@ -1,49 +1,39 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import {
+  COOKIE_PREFERENCES_OPEN_EVENT,
+  readCookieConsent,
+  saveCookieConsent
+} from "../../../shared/privacy/cookie-consent";
 import "./cookie-consent-banner.css";
 
-type Consent = {
-  necessary: true;
-  analytics: boolean;
-  marketing: boolean;
-  version: string;
-  acceptedAt: string;
-};
-
-const STORAGE_KEY = "fleetum_cookie_consent_v1";
-const VERSION = "2026-05-17";
-
-const saveConsent = (analytics: boolean, marketing: boolean) => {
-  const consent: Consent = {
-    necessary: true,
-    analytics,
-    marketing,
-    version: VERSION,
-    acceptedAt: new Date().toISOString()
-  };
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(consent));
-  window.dispatchEvent(new CustomEvent("fleetum-cookie-consent", { detail: consent }));
-};
-
 export const CookieConsentBanner = () => {
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(() => !readCookieConsent());
   const [expanded, setExpanded] = useState(false);
-  const [analytics, setAnalytics] = useState(false);
-  const [marketing, setMarketing] = useState(false);
+  const [analytics, setAnalytics] = useState(() => readCookieConsent()?.analytics ?? false);
+  const [marketing, setMarketing] = useState(() => readCookieConsent()?.marketing ?? false);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) setVisible(true);
-    } catch {
+    const openPreferences = () => {
+      const consent = readCookieConsent();
+      setAnalytics(consent?.analytics ?? false);
+      setMarketing(consent?.marketing ?? false);
+      setExpanded(true);
       setVisible(true);
-    }
+    };
+
+    window.addEventListener(COOKIE_PREFERENCES_OPEN_EVENT, openPreferences);
+    return () => window.removeEventListener(COOKIE_PREFERENCES_OPEN_EVENT, openPreferences);
   }, []);
 
   if (!visible) return null;
 
   const accept = (nextAnalytics: boolean, nextMarketing: boolean) => {
-    saveConsent(nextAnalytics, nextMarketing);
+    const consent = saveCookieConsent({ analytics: nextAnalytics, marketing: nextMarketing });
+    if (consent.analytics) {
+      trackPublicEvent("PAGE_VIEW", { source: "cookie_consent_granted" });
+    }
     setVisible(false);
   };
 
@@ -65,9 +55,9 @@ export const CookieConsentBanner = () => {
         ) : null}
       </div>
       <div className="fleetum-cookie-actions">
-        <button type="button" onClick={() => accept(false, false)}>Solo necessari</button>
+        <button type="button" className="is-necessary" onClick={() => accept(false, false)}>Solo necessari</button>
         <button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "Chiudi preferenze" : "Gestisci"}</button>
-        <button type="button" className="is-primary" onClick={() => accept(expanded ? analytics : true, expanded ? marketing : true)}>Accetta</button>
+        <button type="button" className="is-primary" onClick={() => accept(expanded ? analytics : true, expanded ? marketing : true)}>Accetta tutto</button>
       </div>
     </section>
   );

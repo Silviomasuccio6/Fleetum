@@ -15,13 +15,14 @@ type LegalDocument = {
 const privacyDocument: LegalDocument = {
   badge: "Privacy",
   title: "Informativa privacy Fleetum",
-  version: "2026-05-17",
+  version: "2026-06-19 - bozza",
   intro:
     "Questa informativa descrive in modo operativo come Fleetum supporta i clienti SaaS nella gestione di dati, documenti, contratti e processi di flotta. Il testo finale deve essere validato dal titolare e dal consulente privacy prima dell'uso definitivo.",
   sections: [
     { title: "Dati trattati", body: "Dati anagrafici, contatti, dati aziendali, documenti, patente, prenotazioni, contratti, firme, veicoli, manutenzioni, scadenze, log tecnici e audit applicativi." },
     { title: "Finalita", body: "Erogazione del gestionale, gestione noleggi, contratti, comunicazioni operative, sicurezza, assistenza, obblighi amministrativi e miglioramento del servizio." },
     { title: "Ruoli privacy", body: "Il cliente SaaS opera normalmente come titolare del trattamento sui dati dei propri clienti. Fleetum opera come fornitore/responsabile tecnico secondo accordi contrattuali e DPA da finalizzare." },
+    { title: "Fornitori attivi", body: "Fleetum usa OVH per infrastruttura, Stripe per billing, Resend per email e Google OAuth per l'accesso con Google. AWS S3 e' attualmente documentato per backup offsite; l'eventuale storage documentale applicativo va dichiarato solo dopo effettiva attivazione e verifica." },
     { title: "Conservazione", body: "I dati sono conservati per il tempo necessario a finalita contrattuali, fiscali, operative e di sicurezza. Le policy di retention devono essere configurate e validate per ogni contesto produttivo." },
     { title: "Diritti", body: "Accesso, rettifica, cancellazione, limitazione, opposizione e portabilita possono essere esercitati tramite i canali privacy indicati dal titolare del trattamento." }
   ]
@@ -30,13 +31,13 @@ const privacyDocument: LegalDocument = {
 const cookieDocument: LegalDocument = {
   badge: "Cookie",
   title: "Cookie Policy",
-  version: "2026-05-17",
-  intro: "Fleetum usa cookie tecnici necessari al funzionamento e puo usare strumenti analytics solo dopo consenso esplicito.",
+  version: "2026-06-19 - bozza",
+  intro: "Fleetum usa tecnologie necessarie al funzionamento e attiva gli analytics interni solo dopo consenso esplicito.",
   sections: [
-    { title: "Cookie necessari", body: "Servono per sicurezza, sessione, preferenze essenziali e navigazione. Non possono essere disattivati senza compromettere il servizio." },
-    { title: "Analytics", body: "Eventuali analytics vengono caricati solo dopo consenso. In assenza di consenso restano bloccati." },
-    { title: "Marketing", body: "Eventuali strumenti marketing o remarketing richiedono consenso separato e revocabile." },
-    { title: "Revoca", body: "Puoi modificare le preferenze cancellando il consenso nel browser o usando il banner preferenze quando disponibile." }
+    { title: "Tecnologie necessarie", body: "Servono per sicurezza e per memorizzare la tua scelta cookie. Non possono essere disattivate senza compromettere il servizio." },
+    { title: "Analytics", body: "Gli analytics interni sono disabilitati per impostazione predefinita. Vengono attivati solo dopo il consenso esplicito alla categoria Analytics." },
+    { title: "Marketing", body: "Non risultano strumenti marketing attivi. Qualsiasi futura attivazione richiedera consenso separato, policy aggiornata e nuova versione del banner." },
+    { title: "Revoca", body: "Puoi aprire Preferenze cookie nel footer in ogni momento, modificare la scelta oppure mantenere solo le tecnologie necessarie." }
   ]
 };
 

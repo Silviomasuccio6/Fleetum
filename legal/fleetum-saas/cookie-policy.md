@@ -1,14 +1,14 @@
 ---
 title: "Cookie Policy Fleetum"
 owner: "Fleetum"
-version: "0.1.0-draft"
+version: "0.2.0-draft"
 status: "draft"
 review_required: true
 review_type:
   - legal
   - privacy
   - security
-last_updated: "2026-05-24"
+last_updated: "2026-06-19"
 applicability: "Fleetum SaaS"
 ---
 
@@ -35,92 +35,37 @@ applicability: "Fleetum SaaS"
 - `{{fleetum_governing_law}}`
 - `{{fleetum_court}}`
 
-## 1. Cosa sono i cookie
+## 1. Ambito
 
-Questa sezione definisce cosa sono i cookie per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
+Questa bozza descrive cookie, localStorage, sessionStorage e tecnologie di tracciamento del sito pubblico Fleetum. Non copre cookie o tecnologie gestite direttamente da fornitori esterni nelle rispettive pagine, quali Stripe Checkout o Google OAuth.
 
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
+## 2. Tecnologie necessarie
 
-## 2. Cookie tecnici
+Fleetum conserva localmente la scelta dell'utente con la chiave `fleetum_cookie_consent_v1`. La chiave contiene solo categorie selezionate, versione e timestamp della scelta; non abilita analytics o marketing da sola.
 
-Questa sezione definisce cookie tecnici per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
+## 3. Analytics interni
 
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
+Gli eventi analytics interni Fleetum sono disabilitati finche l'utente non abilita esplicitamente la categoria Analytics. Dopo l'opt-in, Fleetum puo registrare pagina, referrer, parametri UTM, identificativo di sessione pseudonimo, tipo browser/dispositivo e hash tecnici dell'IP e user agent. Il consenso attuale e' versionato `2026-06-19`.
 
-## 3. Cookie analytics
+## 4. Marketing e strumenti terzi
 
-Questa sezione definisce cookie analytics per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
+Alla data di aggiornamento non e' confermato alcun pixel marketing di terze parti attivo sul sito Fleetum. Se ne viene attivato uno, Fleetum deve aggiornare questa policy, incrementare la versione del consenso e bloccare lo script fino all'opt-in.
 
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
+## 5. Gestione e revoca
 
-## 4. Cookie marketing e profilazione
+Il banner iniziale offre `Solo necessari`, gestione granulare e `Accetta tutto`. L'utente puo riaprire il pannello tramite il comando permanente `Preferenze cookie` nel footer pubblico e modificare la scelta in ogni momento.
 
-Questa sezione definisce cookie marketing e profilazione per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
+## 6. Inventario tecnico rilevato
 
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-## 5. Strumenti terzi
-
-Questa sezione definisce strumenti terzi per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
-
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-## 6. Gestione consenso
-
-Questa sezione definisce gestione consenso per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
-
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-## 7. Revoca consenso
-
-Questa sezione definisce revoca consenso per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
-
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-## 8. Durata cookie
-
-Questa sezione definisce durata cookie per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
-
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-## 9. Contatti
-
-Questa sezione definisce contatti per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
-
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-## 10. Link alla privacy policy
-
-Questa sezione definisce link alla privacy policy per il contesto Fleetum, usando dati e configurazioni multi-tenant quando applicabile. Il testo deve essere adattato al piano sottoscritto, alle funzionalita' effettivamente abilitate e agli accordi firmati con il cliente.
-
-- Ambito operativo: descrivere cosa viene incluso e cosa resta escluso.
-- Responsabilita': indicare obblighi di Fleetum, del cliente e degli utenti autorizzati.
-- Evidenze: collegare ove possibile audit log, versioni documento, timestamp e identificativi tecnici.
-
-
-## Tabella cookie
-
-| Nome cookie | Tipo | Finalita | Durata | Fornitore | Consenso richiesto |
+| Nome | Tipo | Finalita | Durata | Fornitore | Consenso richiesto |
 |---|---|---|---|---|---|
-| {cookie_name} | {cookie_type} | {cookie_purpose} | {cookie_duration} | {cookie_provider} | {cookie_consent_required} |
+| `fleetum_cookie_consent_v1` | localStorage | Memorizzare la scelta privacy | Fino alla cancellazione browser o a nuova versione consenso | Fleetum | No, necessario |
+| `fleetum_public_session` | sessionStorage | Correlare eventi analytics interni dopo opt-in | Sessione browser | Fleetum | Si, Analytics |
+| Eventi analytics interni | Evento server-side | Misurazione visite e CTA dopo opt-in | Da definire e validare | Fleetum | Si, Analytics |
+
+## 7. Contatti e verifiche
+
+I contatti privacy definitivi devono usare `{{fleetum_privacy_email}}` e `{{fleetum_pec}}`. Prima della pubblicazione e' obbligatoria una scansione reale di produzione per verificare cookie, storage browser, script, SDK, pixel e pagine Stripe/Google effettivamente caricate.
 
 TODO_PRIVACY_REVIEW: collegare la cookie policy al CMP/cookie banner reale usato in produzione.
 TODO_LEGAL_REVIEW: validare testo pubblico e meccanismi di consenso/revoca.

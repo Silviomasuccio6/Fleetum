@@ -1,14 +1,14 @@
 ---
 title: "Subprocessor List Fleetum"
 owner: "Fleetum"
-version: "0.1.0-draft"
+version: "0.2.0-draft"
 status: "draft"
 review_required: true
 review_type:
   - legal
   - privacy
   - security
-last_updated: "2026-05-24"
+last_updated: "2026-06-19"
 applicability: "Fleetum SaaS"
 ---
 
@@ -45,6 +45,18 @@ applicability: "Fleetum SaaS"
 | {analytics_provider} | Analytics | Eventi anonimi/pseudonimi | {country} | Sub-responsabile | {provider_dpa_url} | Privacy-first |
 | {monitoring_provider} | Monitoring/error tracking | Log tecnici | {country} | Sub-responsabile | {provider_dpa_url} | Mascherare PII |
 | {backup_provider} | Backup | Copie dati applicativi | {country} | Sub-responsabile | {provider_dpa_url} | Retention da validare |
+
+## Configurazione Fleetum verificata al 2026-06-19
+
+| Fornitore | Servizio effettivo | Dati/categorie | Localizzazione nota | Stato da pubblicare |
+|---|---|---|---|---|
+| OVHcloud | VPS, backend e database PostgreSQL | Dati applicativi e log tecnici | Datacenter/regione da confermare | Non pubblicare senza DPA e localizzazione confermata |
+| Amazon AWS S3 | Backup offsite database e uploads | Copie database e uploads | `eu-north-1`, Stoccolma | Non indicare come storage documentale live finche non attivato; verificare cifratura e lifecycle |
+| Stripe | Subscription, checkout, billing e webhook | Dati billing, identificativi Stripe e metadati pagamento | Dipende dall'entita' contrattuale/account | Validare ruolo e DPA/Data Transfers Addendum |
+| Resend | Email transazionali e operative | Destinatari, template e metadati di invio | USA/da verificare in base al servizio | Validare DPA e trasferimenti |
+| Google OAuth | Login/signup con Google | Nome profilo, email e identificativi OAuth necessari all'accesso | Da validare | Inserire nella privacy policy come autenticazione attiva, non come Calendar |
+
+TODO_PRIVACY_REVIEW: confermare se ogni fornitore agisce come sub-responsabile, responsabile autonomo o titolare autonomo per il singolo flusso e definire il meccanismo di notifica ai clienti business.
 
 TODO_PRIVACY_REVIEW: completare con fornitori reali prima della pubblicazione.
 TODO_SECURITY_REVIEW: validare misure, cifratura, localizzazione e accessi.

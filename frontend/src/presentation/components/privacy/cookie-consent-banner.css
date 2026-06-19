@@ -26,6 +26,8 @@
 .fleetum-cookie-banner a { color: #1d4ed8; font-weight: 900; }
 .fleetum-cookie-actions { display: flex; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
 .fleetum-cookie-actions button { border: 1px solid #dbe5f2; border-radius: 999px; background: #fff; min-height: 42px; padding: 0 15px; font: inherit; font-size: .86rem; font-weight: 900; cursor: pointer; color: #0f172a; }
+.fleetum-cookie-actions button:focus-visible { outline: 3px solid rgba(37,99,255,.42); outline-offset: 3px; }
+.fleetum-cookie-actions .is-necessary { color: #07111f; border-color: #0f172a; background: #edf3ff; box-shadow: 0 18px 38px -28px rgba(15,23,42,.72); }
 .fleetum-cookie-actions .is-primary { color: #fff; border-color: transparent; background: linear-gradient(135deg, #0b1220, #2563ff 55%, #00b8a9); box-shadow: 0 18px 38px -24px rgba(37,99,255,.88); }
 .fleetum-cookie-options { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .fleetum-cookie-options label { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #dbe5f2; border-radius: 999px; padding: 8px 11px; background: #f8fbff; font-weight: 850; }
