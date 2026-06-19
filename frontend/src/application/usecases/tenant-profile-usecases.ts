@@ -14,6 +14,7 @@ export type TenantCompanyProfilePayload = {
   province?: string;
   postalCode?: string;
   country?: string;
+  region?: string;
   phone?: string;
   email?: string;
   website?: string;
