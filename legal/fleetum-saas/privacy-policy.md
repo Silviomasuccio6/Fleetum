@@ -1,14 +1,14 @@
 ---
 title: "Privacy Policy Fleetum"
 owner: "Fleetum"
-version: "0.1.0-draft"
+version: "0.2.0-draft"
 status: "draft"
 review_required: true
 review_type:
   - legal
   - privacy
   - security
-last_updated: "2026-05-24"
+last_updated: "2026-06-19"
 applicability: "Fleetum SaaS"
 ---
 
@@ -38,6 +38,17 @@ applicability: "Fleetum SaaS"
 ## Ruoli privacy
 
 Fleetum puo agire come titolare del trattamento per dati relativi a prospect, clienti business, utenti amministrativi, supporto, billing e sicurezza della piattaforma. Fleetum puo agire come responsabile del trattamento quando tratta dati inseriti dagli autonoleggi nel gestionale per conto del cliente titolare.
+
+## Configurazione operativa verificata al 2026-06-19
+
+- Google OAuth e' attivo per login e signup Fleetum con scope `openid email profile`; Google Calendar resta un'integrazione separata da indicare solo se attivata.
+- Apple OAuth non e' offerto nell'interfaccia di signup corrente e non deve essere dichiarato come servizio attivo.
+- Stripe e' usato per abbonamenti, checkout e billing; Fleetum non deve memorizzare dati completi di carta.
+- Resend e' usato per email transazionali e operative.
+- AWS S3 in `eu-north-1` (Stoccolma) e' usato per backup offsite. Lo storage applicativo di documenti resta `local` finche `STORAGE_PROVIDER=s3` non viene effettivamente attivato e verificato.
+- Gli analytics interni del sito pubblico restano disabilitati fino al consenso esplicito Analytics, versione `2026-06-19`.
+
+TODO_PRIVACY_REVIEW: validare ruoli, categorie dati e trasferimenti associati a Google OAuth, Stripe, Resend, OVH e AWS prima della pubblicazione finale.
 
 ## 1. Fleetum come titolare per dati dei clienti business
 

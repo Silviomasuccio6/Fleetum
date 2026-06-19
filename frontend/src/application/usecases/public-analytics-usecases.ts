@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
+import { readCookieConsent } from "../../shared/privacy/cookie-consent";
 
 export type PublicAnalyticsEventType =
   | "PAGE_VIEW"
@@ -24,6 +25,9 @@ const sessionId = () => {
 
 export const trackPublicEvent = (eventType: PublicAnalyticsEventType, metadata?: Record<string, unknown>) => {
   if (typeof window === "undefined") return;
+  const consent = readCookieConsent();
+  if (!consent?.analytics) return;
+
   const url = new URL(window.location.href);
   const payload = {
     eventType,
@@ -33,6 +37,7 @@ export const trackPublicEvent = (eventType: PublicAnalyticsEventType, metadata?:
     utmMedium: url.searchParams.get("utm_medium") || undefined,
     utmCampaign: url.searchParams.get("utm_campaign") || undefined,
     sessionId: sessionId(),
+    consentVersion: consent.version,
     metadata
   };
 

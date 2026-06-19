@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { openCookiePreferences } from "../../../shared/privacy/cookie-consent";
 import { SeoHead } from "../../components/seo/seo-head";
 import "./landing.css";
 
@@ -730,6 +731,7 @@ const LandingFooter = () => {
         <Link to="/prezzi">Prezzi</Link>
         <Link to="/privacy">Privacy</Link>
         <Link to="/cookie">Cookie</Link>
+        <button type="button" onClick={openCookiePreferences}>Preferenze cookie</button>
         <Link to="/termini">Termini</Link>
         <Link to="/dpa">DPA</Link>
         <Link to="/login">Login</Link>
