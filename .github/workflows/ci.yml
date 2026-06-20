@@ -104,6 +104,7 @@ jobs:
           test -f frontend/public/robots.txt
           test -f frontend/public/sitemap.xml
           grep -q "fleetum.it/demo" frontend/public/sitemap.xml
+          npm run verify:prerender -w frontend
 
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high

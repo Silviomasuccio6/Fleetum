@@ -48,7 +48,11 @@ fleetum.it, www.fleetum.it {
 
 	route {
 		root * /srv/fleetum
-		try_files {path} /index.html
+		@landing_root path /
+		rewrite @landing_root /index.html
+		@prerendered_public path /software-autonoleggio /software-rent-a-car /gestionale-flotta /booking-noleggi /contratti-noleggio-digitali /report-redditivita-veicolo /prezzi /demo /privacy /cookie /termini /dpa
+		rewrite @prerendered_public {path}/index.html
+		try_files {path} /spa.html
 		file_server
 	}
 }
