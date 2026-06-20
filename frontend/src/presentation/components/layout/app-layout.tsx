@@ -172,6 +172,7 @@ export const AppLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, user, setUser, logout } = useAuthStore();
+  const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -781,16 +782,18 @@ export const AppLayout = () => {
                     </Badge>
                   </div>
                   <div className="mt-2 grid gap-1">
-                    <Button
-                      variant="ghost"
-                      className="justify-start"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        navigate("/upgrade");
-                      }}
-                    >
-                      Upgrade piano
-                    </Button>
+                    {canManageBilling ? (
+                      <Button
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          navigate("/upgrade");
+                        }}
+                      >
+                        Upgrade piano
+                      </Button>
+                    ) : null}
                     <Button
                       variant="ghost"
                       className="justify-start"

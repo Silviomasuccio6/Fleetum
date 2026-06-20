@@ -1,15 +1,16 @@
 import { Router } from "express";
 import { BillingController } from "../controllers/billing-controller.js";
+import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
 
 export const billingRoutes = (controller: BillingController) => {
   const router = Router();
-  router.post("/checkout-session", asyncHandler(controller.createCheckoutSession));
-  router.post("/payment-method-session", asyncHandler(controller.createPaymentMethodSession));
-  router.get("/local-complete", asyncHandler(controller.localComplete));
-  router.get("/invoices", asyncHandler(controller.invoices));
-  router.get("/invoices/:invoiceId", asyncHandler(controller.invoice));
-  router.get("/invoices/:invoiceId/pdf", asyncHandler(controller.invoicePdf));
+  router.post("/checkout-session", requirePermissions("billing:manage"), asyncHandler(controller.createCheckoutSession));
+  router.post("/payment-method-session", requirePermissions("billing:manage"), asyncHandler(controller.createPaymentMethodSession));
+  router.get("/local-complete", requirePermissions("billing:manage"), asyncHandler(controller.localComplete));
+  router.get("/invoices", requirePermissions("billing:read"), asyncHandler(controller.invoices));
+  router.get("/invoices/:invoiceId", requirePermissions("billing:read"), asyncHandler(controller.invoice));
+  router.get("/invoices/:invoiceId/pdf", requirePermissions("billing:read"), asyncHandler(controller.invoicePdf));
   return router;
 };
 
