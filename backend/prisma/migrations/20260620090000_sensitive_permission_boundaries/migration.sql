@@ -22,12 +22,11 @@ WITH grants (role_key, permission_key) AS (
     ('MANAGER'::"RoleKey", 'reports:export'),
     ('MANAGER'::"RoleKey", 'vehicle:economics:read')
 )
-INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt")
+INSERT INTO "RolePermission" ("id", "roleId", "permissionId")
 SELECT
   'rp_' || md5(role."id" || ':' || permission."id"),
   role."id",
-  permission."id",
-  CURRENT_TIMESTAMP
+  permission."id"
 FROM grants
 JOIN "Role" AS role ON role."key" = grants.role_key
 JOIN "Permission" AS permission ON permission."key" = grants.permission_key
