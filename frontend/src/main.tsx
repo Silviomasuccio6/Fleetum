@@ -1,5 +1,5 @@
 import React from "react";
-import ReactDOM from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { BrowserRouter } from "react-router-dom";
 import { initTheme } from "./infrastructure/theme/theme-manager";
@@ -9,7 +9,7 @@ import "./presentation/styles/global.css";
 
 initTheme();
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+const app = (
   <React.StrictMode>
     <HelmetProvider>
       <BrowserRouter>
@@ -19,3 +19,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </HelmetProvider>
   </React.StrictMode>
 );
+
+const rootElement = document.getElementById("root");
+if (!rootElement) throw new Error("Fleetum root element is missing.");
+
+if (rootElement.dataset.prerendered === "true") {
+  hydrateRoot(rootElement, app);
+} else {
+  createRoot(rootElement).render(app);
+}

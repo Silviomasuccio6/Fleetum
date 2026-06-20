@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173 --strictPort",
     "dev:platform": "vite --host 127.0.0.1 --port 5174 --strictPort",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/prerender-public-pages.mjs",
+    "verify:prerender": "node scripts/verify-prerendered-pages.mjs",
     "analyze": "ANALYZE=true npm run build",
     "preview": "vite preview",
     "preview:platform": "vite preview --host 127.0.0.1 --port 5174 --strictPort",

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, Check, Mail, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
+import { SeoHead } from "../../components/seo/seo-head";
 import "./legal-pages.css";
 
 type LegalDocument = {
@@ -11,6 +12,8 @@ type LegalDocument = {
   intro: string;
   sections: Array<{ title: string; body: string }>;
 };
+
+type LegalDocumentType = "privacy" | "cookie" | "terms" | "dpa";
 
 const privacyDocument: LegalDocument = {
   badge: "Privacy",
@@ -67,19 +70,54 @@ const dpaDocument: LegalDocument = {
   ]
 };
 
-const documents: Record<string, LegalDocument> = {
+const documents: Record<LegalDocumentType, LegalDocument> = {
   privacy: privacyDocument,
   cookie: cookieDocument,
   terms: termsDocument,
   dpa: dpaDocument
 };
 
-export const LegalDocumentPage = ({ type }: { type: keyof typeof documents }) => {
+const documentSeo = {
+  privacy: {
+    title: "Privacy Policy Fleetum | Gestione dati per autonoleggi",
+    description: "Informativa privacy Fleetum per il SaaS dedicato a booking, contratti, flotte e aziende di autonoleggio.",
+    canonicalPath: "/privacy"
+  },
+  cookie: {
+    title: "Cookie Policy Fleetum | Preferenze e strumenti di misurazione",
+    description: "Cookie Policy Fleetum: cookie tecnici, analytics e preferenze di consenso per il sito e il SaaS.",
+    canonicalPath: "/cookie"
+  },
+  terms: {
+    title: "Termini e condizioni Fleetum | SaaS per autonoleggi",
+    description: "Termini e condizioni operative per utilizzare Fleetum, il gestionale SaaS per autonoleggi e flotte.",
+    canonicalPath: "/termini"
+  },
+  dpa: {
+    title: "DPA Fleetum | Accordo sul trattamento dei dati",
+    description: "Schema tecnico-organizzativo del Data Processing Agreement Fleetum per i clienti SaaS.",
+    canonicalPath: "/dpa"
+  }
+} satisfies Record<LegalDocumentType, { title: string; description: string; canonicalPath: string }>;
+
+export const LegalDocumentPage = ({ type }: { type: LegalDocumentType }) => {
   const navigate = useNavigate();
   const document = documents[type];
+  const seo = documentSeo[type];
 
   return (
     <main className="fleetum-legal-page">
+      <SeoHead title={seo.title} description={seo.description} canonicalPath={seo.canonicalPath}>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            name: document.title,
+            url: `https://fleetum.it${seo.canonicalPath}`,
+            description: seo.description
+          })}
+        </script>
+      </SeoHead>
       <div className="fleetum-legal-shell">
         <div className="fleetum-legal-topbar">
           <button type="button" onClick={() => navigate(-1)}><ArrowLeft size={17} /> Indietro</button>
@@ -150,6 +188,21 @@ export const DemoRequestPage = () => {
 
   return (
     <main className="fleetum-legal-page fleetum-demo-page">
+      <SeoHead
+        title="Richiedi una demo Fleetum | Gestionale per autonoleggi"
+        description="Richiedi una demo Fleetum per vedere booking, contratti digitali, flotta, clienti e KPI nel tuo autonoleggio."
+        canonicalPath="/demo"
+      >
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            name: "Richiedi una demo Fleetum",
+            url: "https://fleetum.it/demo",
+            description: "Richiedi una demo del gestionale SaaS Fleetum per autonoleggi e flotte."
+          })}
+        </script>
+      </SeoHead>
       <div className="fleetum-legal-shell fleetum-demo-shell">
         <div className="fleetum-legal-topbar">
           <Link to="/">← Torna al sito</Link>
