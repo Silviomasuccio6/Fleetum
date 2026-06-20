@@ -8,22 +8,22 @@ export const privacyComplianceRoutes = (controller: PrivacyComplianceController)
 
   router.get(
     "/data-subjects/customers/:customerId/export",
-    requirePermissions("vehicles:read"),
+    requirePermissions("privacy:export"),
     asyncHandler(controller.exportCustomerData)
   );
   router.post(
     "/data-subjects/customers/:customerId/anonymize",
-    requirePermissions("users:write"),
+    requirePermissions("privacy:manage"),
     asyncHandler(controller.anonymizeCustomer)
   );
   router.get(
     "/retention/preview",
-    requirePermissions("users:read"),
+    requirePermissions("privacy:manage"),
     asyncHandler(controller.previewRetention)
   );
   router.post(
     "/retention/run",
-    requirePermissions("users:write"),
+    requirePermissions("privacy:manage"),
     asyncHandler(controller.runRetention)
   );
 

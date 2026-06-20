@@ -8,12 +8,12 @@ export const gdprRoutes = (controller: PrivacyComplianceController) => {
 
   router.post(
     "/erasure-request",
-    requirePermissions("users:write"),
+    requirePermissions("privacy:manage"),
     asyncHandler(controller.createErasureRequest)
   );
   router.get(
     "/data-export/:customerId",
-    requirePermissions("vehicles:read"),
+    requirePermissions("privacy:export"),
     asyncHandler(controller.exportCustomerData)
   );
 

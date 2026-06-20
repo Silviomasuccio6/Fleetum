@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Check, CreditCard, Crown, Download, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import {
@@ -75,6 +76,7 @@ const getPlanHighlights = (plan: SaasPlan) => {
 
 export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const { plan, licenseStatus, loading } = useEntitlements();
   const isActivationMode = mode === "activation";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
@@ -99,6 +101,8 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
   const canUpdatePaymentMethod = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE";
   const hasManagedStripeSubscription = canUpdatePaymentMethod;
+  const canReadBilling = user?.permissions.includes("billing:read") ?? false;
+  const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
 
   const planCards = useMemo(
     () =>
@@ -123,10 +127,14 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   );
 
   useEffect(() => {
+    if (!canReadBilling) {
+      setInvoices([]);
+      return;
+    }
     billingUseCases.listInvoices()
       .then((result) => setInvoices(result.data))
       .catch(() => setInvoices([]));
-  }, []);
+  }, [canReadBilling]);
 
   useEffect(() => {
     if (!isActivationMode || checkoutStatus !== "success") {
@@ -222,7 +230,15 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </Card>
       ) : null}
 
-      {canUpdatePaymentMethod ? (
+      {!canManageBilling ? (
+        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <CardContent className="py-4 text-sm">
+            Solo l'amministratore dell'azienda puo gestire abbonamento, fatture e metodo di pagamento.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canUpdatePaymentMethod && canManageBilling ? (
         <Card className="border-sky-200/80 bg-sky-50/80 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
           <CardContent className="flex flex-col gap-3 py-4 text-sm md:flex-row md:items-center md:justify-between">
             <div>
@@ -292,14 +308,16 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         {planCards.map(({ entry, features, monthlyPrice, yearlyPrice, isCurrent, isUpgrade, accent, highlights }, index) => {
           const priceValue = billingCycle === "monthly" ? monthlyPrice : yearlyPrice;
           const priceSuffix = billingCycle === "monthly" ? "/mese" : "/anno";
-          const buttonLabel = isCurrent
-            ? "Piano attivo"
-            : hasManagedStripeSubscription
-              ? licenseStatus === "PAST_DUE"
-                ? "Aggiorna carta"
-                : "Cambio da Platform Console"
-              : `Prova 14 giorni con carta`;
-          const planCheckoutDisabled = busyPlan !== null || (hasManagedStripeSubscription && !isCurrent);
+          const buttonLabel = !canManageBilling
+            ? "Solo amministratore"
+            : isCurrent
+              ? "Piano attivo"
+              : hasManagedStripeSubscription
+                ? licenseStatus === "PAST_DUE"
+                  ? "Aggiorna carta"
+                  : "Cambio da Platform Console"
+                : "Prova 14 giorni con carta";
+          const planCheckoutDisabled = !canManageBilling || busyPlan !== null || (hasManagedStripeSubscription && !isCurrent);
 
           return (
             <Card
@@ -459,7 +477,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {invoices.length === 0 ? (
+          {!canReadBilling ? (
+            <div className="rounded-2xl border border-dashed border-border/80 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
+              Le fatture sono visibili solo agli utenti autorizzati alla gestione billing.
+            </div>
+          ) : invoices.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/80 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
               Nessuna fattura disponibile. Quando Fleetum emette un documento per il tuo tenant, lo trovi qui.
             </div>

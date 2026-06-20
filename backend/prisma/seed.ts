@@ -18,12 +18,20 @@ const permissionKeys = [
   "stoppages:remind",
   "users:read",
   "users:write",
-  "stats:read"
+  "stats:read",
+  "billing:read",
+  "billing:manage",
+  "privacy:export",
+  "privacy:manage",
+  "reports:export",
+  "vehicle:economics:read"
 ];
 
 const rolePermissions: Record<RoleKey, string[]> = {
   ADMIN: permissionKeys,
-  MANAGER: permissionKeys.filter((key) => key !== "users:write"),
+  MANAGER: permissionKeys.filter(
+    (key) => !["users:write", "billing:read", "billing:manage", "privacy:export", "privacy:manage"].includes(key)
+  ),
   OPERATOR: [
     "dashboard:read",
     "sites:read",

@@ -27,6 +27,7 @@ import { Select } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { useAsync } from "../../hooks/use-async";
 import { useEntitlements } from "../../hooks/use-entitlements";
+import { useAuthStore } from "../../../application/stores/auth-store";
 
 const priorityLabel: Record<string, string> = {
   LOW: "Bassa",
@@ -110,6 +111,8 @@ export const StatsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { can, requiredPlan } = useEntitlements();
+  const canViewVehicleEconomics = useAuthStore((state) => state.user?.permissions.includes("vehicle:economics:read") ?? false);
+  const canExportReports = useAuthStore((state) => state.user?.permissions.includes("reports:export") ?? false);
   const canReportsAdvanced = can("reports_advanced");
   const canAdvancedFilters = can("advanced_filters");
   const canExportCsv = can("export_csv");
@@ -236,8 +239,8 @@ export const StatsPage = () => {
   );
 
   const profitability = useAsync(
-    () => (canReportsAdvanced ? statsUseCases.vehicleProfitability(profitabilityParams) : Promise.resolve(null)),
-    [profitabilityParams, canReportsAdvanced, refreshKey]
+    () => (canReportsAdvanced && canViewVehicleEconomics ? statsUseCases.vehicleProfitability(profitabilityParams) : Promise.resolve(null)),
+    [profitabilityParams, canReportsAdvanced, canViewVehicleEconomics, refreshKey]
   );
 
   const trendData = useMemo(
@@ -549,12 +552,12 @@ export const StatsPage = () => {
             ) : null}
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {canExportCsv ? (
+              {canExportCsv && canExportReports ? (
                 <Button variant="default" onClick={downloadXlsx}>
                   Export Enterprise XLSX
                 </Button>
               ) : null}
-              {canExportCsv ? (
+              {canExportCsv && canExportReports ? (
                 <Button variant="outline" onClick={downloadCsv}>
                   Export CSV
                 </Button>
@@ -585,13 +588,13 @@ export const StatsPage = () => {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => void downloadVehicleProfitability("pdf")} disabled={!canReportsAdvanced}>
+                <Button variant="outline" onClick={() => void downloadVehicleProfitability("pdf")} disabled={!canReportsAdvanced || !canViewVehicleEconomics || !canExportReports}>
                   PDF
                 </Button>
-                <Button variant="outline" onClick={() => void downloadVehicleProfitability("xlsx")} disabled={!canReportsAdvanced}>
+                <Button variant="outline" onClick={() => void downloadVehicleProfitability("xlsx")} disabled={!canReportsAdvanced || !canViewVehicleEconomics || !canExportReports}>
                   Excel
                 </Button>
-                <Button variant="outline" onClick={() => void downloadVehicleProfitability("csv")} disabled={!canReportsAdvanced}>
+                <Button variant="outline" onClick={() => void downloadVehicleProfitability("csv")} disabled={!canReportsAdvanced || !canViewVehicleEconomics || !canExportReports}>
                   CSV
                 </Button>
               </div>
@@ -619,7 +622,11 @@ export const StatsPage = () => {
               <p className="text-sm text-destructive">{profitability.error}</p>
             ) : null}
 
-            {profitability.data ? (
+            {!canViewVehicleEconomics ? (
+              <div className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
+                I dati economici dei veicoli sono riservati agli amministratori e ai responsabili autorizzati.
+              </div>
+            ) : profitability.data ? (
               <>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                   <CardStat title="Fatturato generato" value={formatCurrency(profitability.data.summary.totalRevenue)} />
