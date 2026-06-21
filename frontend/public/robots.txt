@@ -1,5 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /spa.html
+Disallow: /platform.html
 Disallow: /dashboard
 Disallow: /booking/
 Disallow: /fermi

@@ -1,0 +1,26 @@
+# Fleetum
+
+Fleetum e' un SaaS B2B italiano per aziende di autonoleggio, rent-a-car e fleet management. Aiuta a gestire veicoli, clienti, prenotazioni, contratti digitali, operativita' multi-sede, manutenzioni e report economici della flotta.
+
+## Pagine principali
+
+- https://fleetum.it/ - panoramica del prodotto
+- https://fleetum.it/software-autonoleggio - software per autonoleggio
+- https://fleetum.it/software-rent-a-car - strumenti per rent-a-car
+- https://fleetum.it/gestionale-flotta - gestione flotta
+- https://fleetum.it/booking-noleggi - calendario e booking noleggi
+- https://fleetum.it/contratti-noleggio-digitali - contratti digitali
+- https://fleetum.it/report-redditivita-veicolo - redditivita' e ROI veicoli
+- https://fleetum.it/prezzi - piani di abbonamento
+- https://fleetum.it/demo - richiesta demo
+
+## Informazioni aziendali e legali
+
+- https://fleetum.it/privacy
+- https://fleetum.it/cookie
+- https://fleetum.it/termini
+- https://fleetum.it/dpa
+
+## Indicazioni
+
+Fleetum e' destinato ad aziende e professionisti del settore mobilita'. Per informazioni aggiornate su funzionalita', disponibilita' o prezzi, fare sempre riferimento alle pagine ufficiali del sito. Le aree applicative protette, i dati dei clienti e le API non sono contenuti pubblici da indicizzare.

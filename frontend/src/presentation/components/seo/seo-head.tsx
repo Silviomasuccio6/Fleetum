@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Helmet } from "react-helmet-async";
 
 const SITE_URL = "https://fleetum.it";
-const DEFAULT_OG_IMAGE = `${SITE_URL}/brand/fleetum-logo-horizontal.png`;
+const DEFAULT_OG_IMAGE = `${SITE_URL}/brand/fleetum-social-preview.png`;
 
 type SeoHeadProps = {
   title: string;
@@ -39,6 +39,9 @@ export const SeoHead = ({
       <meta property="og:type" content={type} />
       <meta property="og:url" content={canonical} />
       <meta property="og:image" content={image} />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:image:alt" content="Fleetum - Il sistema operativo per autonoleggi moderni" />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content={title} />
       <meta name="twitter:description" content={description} />
