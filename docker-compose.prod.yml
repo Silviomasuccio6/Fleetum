@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${FLEETUM_BACKEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-backend:latest}
+    image: ${FLEETUM_BACKEND_IMAGE:?FLEETUM_BACKEND_IMAGE must be set to an immutable GHCR image tag}
     container_name: fleetum_backend
     restart: unless-stopped
     env_file:
@@ -15,7 +15,7 @@ services:
       - fleetum_private
 
   caddy:
-    image: ${FLEETUM_FRONTEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend:latest}
+    image: ${FLEETUM_FRONTEND_IMAGE:?FLEETUM_FRONTEND_IMAGE must be set to an immutable GHCR image tag}
     container_name: fleetum_caddy
     restart: unless-stopped
     depends_on:
