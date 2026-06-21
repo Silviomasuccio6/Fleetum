@@ -53,8 +53,13 @@ ENV_FILE=/opt/fleetum/env/compose.env \
 
 ```bash
 cd /opt/fleetum/app
-docker compose --env-file /opt/fleetum/env/compose.env -f docker-compose.prod.yml up -d
+FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
+FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+ENV_FILE=/opt/fleetum/env/compose.env \
+./deploy/scripts/safe-production-deploy.sh
 ```
+
+Never restart production with an unqualified `docker compose up -d`: `docker-compose.prod.yml` requires immutable backend and frontend image tags to prevent an accidental fallback to `latest`.
 
 ## Health checks
 

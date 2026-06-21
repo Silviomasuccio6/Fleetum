@@ -1599,7 +1599,7 @@ export const PlatformAdminPage = () => {
 
       {activeSection === "billing" ? (
         <div className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <Card className="platform-stat-card">
               <CardContent className="p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Fatture</p>
@@ -1976,6 +1976,18 @@ export const PlatformAdminPage = () => {
                 <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">{websiteAnalytics?.totals.visitToDemoRate ?? 0}%</p>
               </CardContent>
             </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Signup avviati</p>
+                <p className="mt-2 text-2xl font-semibold text-amber-600 dark:text-amber-300">{websiteAnalytics?.totals.signupStarted ?? 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Visita → signup</p>
+                <p className="mt-2 text-2xl font-semibold text-violet-600 dark:text-violet-300">{websiteAnalytics?.totals.visitToSignupRate ?? 0}%</p>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
@@ -1985,14 +1997,14 @@ export const PlatformAdminPage = () => {
                   <Globe2 className="h-4 w-4 text-primary" />
                   Website Analytics
                 </CardTitle>
-                <p className="text-xs text-muted-foreground">Tracking privacy-friendly: IP hashato, user-agent ridotto, nessun cookie invasivo di default.</p>
+                <p className="text-xs text-muted-foreground">Tracking first-party solo dopo consenso Analytics: IP hashato, referrer ridotto al dominio e nessun cookie invasivo.</p>
               </CardHeader>
               <CardContent>
                 {(websiteAnalytics?.trend.length ?? 0) === 0 ? (
                   <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-card/50 py-12 text-center">
                     <Globe2 className="h-7 w-7 text-muted-foreground" />
                     <p className="font-semibold text-foreground">Nessun evento sito ancora raccolto</p>
-                    <p className="max-w-md text-sm text-muted-foreground">Da ora la platform può ricevere PAGE_VIEW, CTA_CLICK, DEMO_FORM_SUBMIT e signup events tramite endpoint pubblico.</p>
+                    <p className="max-w-md text-sm text-muted-foreground">Dopo il consenso Analytics, la platform riceve PAGE_VIEW, CTA_CLICK, DEMO_FORM_SUBMIT e signup events tramite endpoint pubblico.</p>
                   </div>
                 ) : (
                   <div className="h-72 rounded-2xl border border-border/70 bg-background/70 p-3">

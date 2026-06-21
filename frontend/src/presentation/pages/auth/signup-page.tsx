@@ -5,6 +5,7 @@ import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
 import { COUNTRIES } from "../../../shared/geo/countries";
 import { loadItalyAdministrativeData, type ItalyAdministrativeData } from "../../../shared/geo/italy-administrative-data";
@@ -147,6 +148,7 @@ export const SignupPage = () => {
   }, [form.country, italianGeo]);
 
   const openGoogleSignup = () => {
+    trackPublicEvent("SIGNUP_STARTED", { entry: "google" });
     const target = new URL(googleAuthUrl, window.location.origin);
     target.searchParams.set("intent", "signup");
     target.searchParams.set("returnTo", "/onboarding/azienda?from=social");
@@ -228,6 +230,10 @@ export const SignupPage = () => {
   const signupProgress = Math.round(((currentStep + 1) / SIGNUP_STEPS.length) * 100);
   const signupProgressStyle = { "--signup-progress": `${signupProgress}%` } as CSSProperties;
 
+  useEffect(() => {
+    trackPublicEvent("SIGNUP_VIEW", { page: "signup" });
+  }, []);
+
   const goToNextStep = () => {
     setError(null);
     setTenantId(null);
@@ -237,6 +243,7 @@ export const SignupPage = () => {
       return;
     }
 
+    if (currentStep === 0) trackPublicEvent("SIGNUP_STARTED", { entry: "company_details" });
     setCurrentStep((step) => Math.min(step + 1, SIGNUP_STEPS.length - 1));
   };
 
@@ -303,6 +310,7 @@ export const SignupPage = () => {
         await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocument);
       }
       setTenantId(result.tenantId);
+      trackPublicEvent("SIGNUP_COMPLETED", { source: "email" });
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);

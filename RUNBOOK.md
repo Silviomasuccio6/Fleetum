@@ -235,9 +235,13 @@ Procedura produzione:
    PLATFORM_ADMIN_PASSWORD_HASH=$2b$12$...
    ```
 4. Non committare mai la password in chiaro, l'hash reale o il file env di produzione.
-5. Riavviare il backend tramite deploy GitHub Actions o, in emergenza controllata:
+5. Riavviare il backend tramite deploy GitHub Actions. Non usare mai `docker compose up` senza tag immutabili: il compose production rifiuta volutamente configurazioni senza immagini esplicite.
+   In emergenza controllata usare il deploy sicuro con i tag della release:
    ```bash
-   docker compose -f docker-compose.prod.yml up -d backend
+   FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
+   FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+   ENV_FILE=/opt/fleetum/env/compose.env \
+   ./deploy/scripts/safe-production-deploy.sh
    ```
 6. Verificare login Platform: email `PLATFORM_ADMIN_EMAIL`, password originale e OTP email.
 

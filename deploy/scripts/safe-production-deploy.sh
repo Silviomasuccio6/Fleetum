@@ -43,11 +43,9 @@ save_current_release() {
   current_backend="$(current_container_image fleetum_backend)"
   current_frontend="$(current_container_image fleetum_caddy)"
 
-  if [ -z "$current_backend" ]; then
-    current_backend="ghcr.io/silviomasuccio6/fleetum-backend:latest"
-  fi
-  if [ -z "$current_frontend" ]; then
-    current_frontend="ghcr.io/silviomasuccio6/fleetum-frontend:latest"
+  if [ -z "$current_backend" ] || [ -z "$current_frontend" ]; then
+    log "ERROR: cannot determine the currently deployed immutable images; refusing an unsafe deploy"
+    return 1
   fi
 
   log "saving current release to $LAST_DEPLOY_FILE"
