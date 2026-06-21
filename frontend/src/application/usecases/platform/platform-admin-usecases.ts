@@ -151,9 +151,12 @@ export type PlatformWebsiteAnalytics = {
     uniqueVisitors: number;
     ctaClicks: number;
     demoSubmits: number;
+    signupStarted: number;
     signupCompleted: number;
     visitToDemoRate: number;
     demoToSignupRate: number;
+    visitToSignupRate: number;
+    signupStartToCompletionRate: number;
   };
   trend: Array<{ date: string; pageViews: number; ctaClicks: number; demoSubmits: number; signups: number }>;
   topPages: Array<{ label: string; value: number }>;

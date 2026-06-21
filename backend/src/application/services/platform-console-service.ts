@@ -293,6 +293,7 @@ export class PlatformConsoleService {
 
     const pageViews = eventCounts.get("PAGE_VIEW") ?? 0;
     const demoSubmits = eventCounts.get("DEMO_FORM_SUBMIT") ?? 0;
+    const signupStarted = eventCounts.get("SIGNUP_STARTED") ?? 0;
     const signupCompleted = eventCounts.get("SIGNUP_COMPLETED") ?? 0;
 
     return {
@@ -305,9 +306,12 @@ export class PlatformConsoleService {
           uniqueVisitors: uniqueKeys.size,
           ctaClicks: eventCounts.get("CTA_CLICK") ?? 0,
           demoSubmits,
+          signupStarted,
           signupCompleted,
           visitToDemoRate: pct(demoSubmits, pageViews),
-          demoToSignupRate: pct(signupCompleted, demoSubmits)
+          demoToSignupRate: pct(signupCompleted, demoSubmits),
+          visitToSignupRate: pct(signupCompleted, pageViews),
+          signupStartToCompletionRate: pct(signupCompleted, signupStarted)
         },
         trend: [...byDay.values()],
         topPages: top(pathCounts),

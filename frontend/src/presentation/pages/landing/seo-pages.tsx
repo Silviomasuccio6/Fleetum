@@ -309,6 +309,10 @@ const pages: Record<SeoPageKey, SeoPageConfig> = {
 
 const icons = [CalendarDays, ClipboardSignature, Car, Wrench, BarChart3, ShieldCheck, Gauge];
 
+const trackSeoCta = (placement: string, destination: "demo" | "login", page?: string) => {
+  trackPublicEvent(destination === "login" ? "LOGIN_CLICK" : "CTA_CLICK", { placement, destination, page });
+};
+
 const SeoHeader = () => (
   <header className="fleetum-seo-header">
     <Link className="fleetum-site-logo" to="/" aria-label="Fleetum homepage">
@@ -320,7 +324,7 @@ const SeoHeader = () => (
       <Link to="/contratti-noleggio-digitali">Contratti</Link>
       <Link to="/prezzi">Prezzi</Link>
     </nav>
-    <Link className="fleetum-btn fleetum-btn--primary" to="/demo">
+    <Link className="fleetum-btn fleetum-btn--primary" to="/demo" onClick={() => trackSeoCta("seo_header", "demo")}>
       Richiedi demo <ArrowRight size={16} />
     </Link>
   </header>
@@ -331,6 +335,7 @@ export const PublicSeoPage = ({ slug }: { slug: SeoPageKey }) => {
 
   useEffect(() => {
     trackPublicEvent("PAGE_VIEW", { page: slug });
+    if (slug === "prezzi") trackPublicEvent("PRICING_VIEW", { placement: "seo_page" });
   }, [slug]);
 
   return (
@@ -394,10 +399,10 @@ export const PublicSeoPage = ({ slug }: { slug: SeoPageKey }) => {
           <h1>{page.h1}</h1>
           <p>{page.intro}</p>
           <div className="fleetum-seo-actions">
-            <Link className="fleetum-btn fleetum-btn--primary" to="/demo">
+            <Link className="fleetum-btn fleetum-btn--primary" to="/demo" onClick={() => trackSeoCta("seo_hero", "demo", slug)}>
               Richiedi demo <ArrowRight size={16} />
             </Link>
-            <Link className="fleetum-btn fleetum-btn--ghost" to="/login">
+            <Link className="fleetum-btn fleetum-btn--ghost" to="/login" onClick={() => trackSeoCta("seo_hero", "login", slug)}>
               Accedi
             </Link>
           </div>
@@ -472,7 +477,7 @@ export const PublicSeoPage = ({ slug }: { slug: SeoPageKey }) => {
       <section className="fleetum-seo-cta">
         <h2>Vuoi vedere Fleetum applicato al tuo autonoleggio?</h2>
         <p>Raccontaci flotta, sedi e flusso operativo: ti mostriamo come impostare booking, contratti e report.</p>
-        <Link className="fleetum-btn fleetum-btn--primary" to="/demo">
+        <Link className="fleetum-btn fleetum-btn--primary" to="/demo" onClick={() => trackSeoCta("seo_final_cta", "demo", slug)}>
           Richiedi demo <ArrowRight size={16} />
         </Link>
       </section>
