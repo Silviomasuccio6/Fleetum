@@ -32,6 +32,8 @@
 ## Docker e container
 
 - [ ] Immagini buildate da CI o processo controllato.
+- [ ] Spazio libero VPS verificato (`df -h /`); almeno 10 GB disponibili prima del pull immagini.
+- [ ] `docker system df` verificato se il deploy precedente ha lasciato cache o immagini obsolete.
 - [ ] Nessun `.env` copiato nell'immagine.
 - [ ] Container backend avviato.
 - [ ] Container Caddy avviato.
