@@ -52,6 +52,7 @@ Risposta della richiesta OTP: sempre generica. Questo evita di rivelare se un in
 - Massimo 5 tentativi sul singolo OTP.
 - Massimo 3 email OTP inviate per IP/email in un'ora; la quarta richiesta blocca per un'ora.
 - Password salvata con bcrypt cost 12.
+- Tutti i JWT Platform emessi prima del reset vengono rifiutati al successivo utilizzo.
 - I reset completati e bloccati notificano `PLATFORM_ALERT_EMAILS` se configurato.
 
 ## Persistenza
