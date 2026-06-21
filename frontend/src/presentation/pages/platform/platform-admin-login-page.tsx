@@ -197,7 +197,11 @@ export const PlatformAdminLoginPage = () => {
                 <button className="premium-login-secondary-action" type="button" onClick={backToCredentials} disabled={loading}>
                   Cambia email o password
                 </button>
-              ) : null}
+              ) : (
+                <button className="premium-login-secondary-action" type="button" onClick={() => navigate("/password-recovery")} disabled={loading}>
+                  Password dimenticata?
+                </button>
+              )}
             </form>
           </section>
         </div>

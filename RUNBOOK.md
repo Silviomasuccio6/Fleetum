@@ -217,8 +217,23 @@ login. Non modificare `PLATFORM_JWT_EXPIRES_IN`: la Platform Console usa un JWT 
 ## Password Platform Console
 
 La Platform Console usa email + password + OTP email. La password admin non deve mai
-essere salvata in chiaro: il backend accetta solo `PLATFORM_ADMIN_PASSWORD_HASH`, un
-hash bcrypt che inizia con `$2a$` o `$2b$`.
+essere salvata in chiaro. Il bootstrap usa `PLATFORM_ADMIN_PASSWORD_HASH`, un hash
+bcrypt che inizia con `$2a$` o `$2b$`.
+
+### Recupero password standard
+
+Usare `https://platform.fleetum.it/#/password-recovery` dall'IP autorizzato:
+
+1. Inserire `PLATFORM_ADMIN_EMAIL`.
+2. Inserire l'OTP ricevuto via Resend, valido 8 minuti.
+3. Impostare e confermare una nuova password di almeno 16 caratteri.
+4. Tornare al login Platform.
+
+Il reset salva il nuovo hash bcrypt nel database (`PlatformAdminCredential`) e non
+richiede la modifica manuale del file env. Le richieste sono limitate per IP/email e
+gli OTP sono monouso. Dettagli: `docs/technical/platform-password-recovery.md`.
+
+### Bootstrap o recovery d'emergenza
 
 Per rigenerare l'hash:
 

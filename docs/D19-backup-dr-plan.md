@@ -4,8 +4,8 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Script backup/restore:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/ops/backup-db.sh`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/ops/restore-db-test.sh`
+  - `ops/backup-db.sh`
+  - `ops/restore-db-test.sh`
 - Richiamo in runbook/checklist.
 
 ## Gap

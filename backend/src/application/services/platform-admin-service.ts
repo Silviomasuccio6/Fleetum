@@ -104,17 +104,32 @@ const maskEmail = (email: string) => email.replace(/^(.{2}).*(@.*)$/, "$1***$2")
 
 const createOtpCode = () => crypto.randomInt(100_000, 1_000_000).toString();
 
-const createOtpKey = (email: string) => email;
+type PlatformOtpPurpose = "login" | "password-reset";
 
-const platformOtpEmailHtml = (code: string) => `
+const createOtpKey = (email: string, purpose: PlatformOtpPurpose) => `${purpose}:${email}`;
+
+const platformOtpEmailHtml = (code: string, purpose: PlatformOtpPurpose) => {
+  const copy = purpose === "password-reset"
+    ? {
+        heading: "Reimposta la password Platform",
+        description: "Usa questo codice per reimpostare la password della Platform Console. Il codice scade tra 8 minuti.",
+        footer: "Se non hai richiesto il cambio password, non condividere il codice e verifica subito i log di accesso."
+      }
+    : {
+        heading: "Codice di verifica amministratore",
+        description: "Usa questo codice per completare l'accesso alla Platform Console founder-only. Il codice scade tra 8 minuti.",
+        footer: "Se non sei stato tu, cambia subito la password platform e verifica i log di accesso. Non inoltrare questo codice."
+      };
+
+  return `
   <div style="margin:0;padding:0;background:#07111f;font-family:Inter,Manrope,Arial,sans-serif;color:#e6ecf2;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:radial-gradient(circle at 20% 0%,rgba(37,99,255,.35),transparent 34rem),radial-gradient(circle at 80% 8%,rgba(0,184,169,.22),transparent 30rem),#07111f;padding:40px 16px;">
       <tr><td align="center">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;border:1px solid rgba(230,236,242,.14);border-radius:28px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.035));box-shadow:0 28px 90px rgba(0,0,0,.38);">
           <tr><td style="padding:30px 32px 12px;">
             <div style="display:inline-block;border:1px solid rgba(75,140,255,.38);border-radius:999px;background:rgba(37,99,255,.16);padding:8px 12px;font-size:12px;letter-spacing:.20em;text-transform:uppercase;color:#ffffff;font-weight:900;">Fleetum Platform Console</div>
-            <h1 style="margin:16px 0 10px;font-size:30px;line-height:1.1;letter-spacing:-.04em;color:#fff;">Codice di verifica amministratore</h1>
-            <p style="margin:0;color:#a7b3c7;font-size:15px;line-height:1.65;">Usa questo codice per completare l'accesso alla Platform Console founder-only. Il codice scade tra 8 minuti.</p>
+            <h1 style="margin:16px 0 10px;font-size:30px;line-height:1.1;letter-spacing:-.04em;color:#fff;">${copy.heading}</h1>
+            <p style="margin:0;color:#a7b3c7;font-size:15px;line-height:1.65;">${copy.description}</p>
           </td></tr>
           <tr><td style="padding:18px 32px 28px;">
             <div style="border:1px solid rgba(50,221,209,.28);border-radius:22px;background:rgba(5,12,24,.72);padding:24px;text-align:center;">
@@ -123,27 +138,128 @@ const platformOtpEmailHtml = (code: string) => `
             </div>
           </td></tr>
           <tr><td style="padding:0 32px 32px;">
-            <p style="margin:0;color:#7f8da6;font-size:13px;line-height:1.6;">Se non sei stato tu, cambia subito la password platform e verifica i log di accesso. Non inoltrare questo codice.</p>
+            <p style="margin:0;color:#7f8da6;font-size:13px;line-height:1.6;">${copy.footer}</p>
           </td></tr>
         </table>
       </td></tr>
     </table>
   </div>
 `;
+};
+
+type PlatformOtpRecord = {
+  key: string;
+  codeHash: string;
+  expiresAt: Date;
+  attempts: number;
+};
+
+type PlatformAdminAuthStore = {
+  findPasswordCredential: (email: string) => Promise<{ passwordHash: string } | null>;
+  findActiveOtp: (key: string, now: Date) => Promise<PlatformOtpRecord | null>;
+  deleteExpiredOtps: (now: Date) => Promise<void>;
+  upsertOtp: (input: Omit<PlatformOtpRecord, "attempts"> & { attempts?: number }) => Promise<void>;
+  deleteOtp: (key: string) => Promise<void>;
+  incrementOtpAttempts: (key: string) => Promise<void>;
+  updatePasswordAndConsumeOtp: (input: { email: string; passwordHash: string; changedAt: Date; otpKey: string }) => Promise<void>;
+};
+
+const platformAdminAuthStore: PlatformAdminAuthStore = {
+  findPasswordCredential: (email) =>
+    prisma.platformAdminCredential.findUnique({
+      where: { email },
+      select: { passwordHash: true }
+    }),
+  findActiveOtp: (key, now) =>
+    prisma.platformOtpChallenge.findFirst({
+      where: { key, expiresAt: { gt: now } }
+    }),
+  deleteExpiredOtps: async (now) => {
+    await prisma.platformOtpChallenge.deleteMany({ where: { expiresAt: { lt: now } } });
+  },
+  upsertOtp: async ({ key, codeHash, expiresAt, attempts = 0 }) => {
+    await prisma.platformOtpChallenge.upsert({
+      where: { key },
+      create: { key, codeHash, expiresAt, attempts },
+      update: { codeHash, expiresAt, attempts }
+    });
+  },
+  deleteOtp: async (key) => {
+    await prisma.platformOtpChallenge.deleteMany({ where: { key } });
+  },
+  incrementOtpAttempts: async (key) => {
+    await prisma.platformOtpChallenge.update({
+      where: { key },
+      data: { attempts: { increment: 1 } }
+    });
+  },
+  updatePasswordAndConsumeOtp: async ({ email, passwordHash, changedAt, otpKey }) => {
+    await prisma.$transaction([
+      prisma.platformAdminCredential.upsert({
+        where: { email },
+        create: { email, passwordHash, passwordChangedAt: changedAt, lastResetAt: changedAt },
+        update: { passwordHash, passwordChangedAt: changedAt, lastResetAt: changedAt }
+      }),
+      prisma.platformOtpChallenge.deleteMany({ where: { key: otpKey } })
+    ]);
+  }
+};
 
 export class PlatformAdminService {
   constructor(
     private readonly repository: PlatformAdminRepository,
     private readonly alerts: PlatformAlertService,
-    private readonly loginGuard: PlatformLoginGuardService
+    private readonly loginGuard: PlatformLoginGuardService,
+    private readonly authStore: PlatformAdminAuthStore = platformAdminAuthStore,
+    private readonly mailer: Pick<typeof emailSender, "send"> = emailSender
   ) {}
+
+  private isPlatformAdminEmail(email: string) {
+    return constantTimeEqual(email, env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase());
+  }
+
+  private async passwordHashFor(email: string) {
+    const credential = await this.authStore.findPasswordCredential(email);
+
+    return credential?.passwordHash ?? env.PLATFORM_ADMIN_PASSWORD_HASH;
+  }
+
+  private async issueOtp(email: string, purpose: PlatformOtpPurpose) {
+    const code = createOtpCode();
+    const now = new Date();
+    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+    const expiresAt = new Date(Date.now() + PLATFORM_OTP_TTL_MS);
+    const challengeKey = createOtpKey(email, purpose);
+
+    await this.authStore.deleteExpiredOtps(now);
+    await this.authStore.upsertOtp({ key: challengeKey, codeHash, expiresAt });
+
+    const reset = purpose === "password-reset";
+    await this.mailer.send({
+      to: email,
+      subject: reset ? "Codice recupero password Platform Console Fleetum" : "Codice accesso Platform Console Fleetum",
+      text: [
+        "Fleetum Platform Console",
+        `${reset ? "Codice recupero password" : "Codice OTP"}: ${code}`,
+        "Scadenza: 8 minuti.",
+        reset
+          ? "Se non hai richiesto il cambio password, non condividere questo codice."
+          : "Se non sei stato tu, verifica subito la sicurezza dell'account platform."
+      ].join("\n"),
+      html: platformOtpEmailHtml(code, purpose),
+      fromName: "Fleetum Security"
+    });
+  }
 
   async login(input: { email: string; password: string; ip: string; otp?: string }) {
     const normalizedEmail = input.email.trim().toLowerCase();
     await this.loginGuard.assertAllowed(input.ip, normalizedEmail);
 
-    const emailOk = constantTimeEqual(normalizedEmail, env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase());
-    const passwordOk = await bcrypt.compare(input.password, env.PLATFORM_ADMIN_PASSWORD_HASH);
+    const emailOk = this.isPlatformAdminEmail(normalizedEmail);
+    const passwordOk = await bcrypt.compare(
+      input.password,
+      emailOk ? await this.passwordHashFor(normalizedEmail) : env.PLATFORM_ADMIN_PASSWORD_HASH
+    );
 
     if (!emailOk || !passwordOk) {
       const failure = await this.loginGuard.registerFailure(input.ip, normalizedEmail);
@@ -167,44 +283,12 @@ export class PlatformAdminService {
       throw new AppError("Credenziali platform admin non valide", 401, "UNAUTHORIZED");
     }
 
-    const challengeKey = createOtpKey(normalizedEmail);
+    const challengeKey = createOtpKey(normalizedEmail, "login");
     const now = new Date();
-    const challenge = await prisma.platformOtpChallenge.findFirst({
-      where: { key: challengeKey, expiresAt: { gt: now } }
-    });
+    const challenge = await this.authStore.findActiveOtp(challengeKey, now);
 
     if (!input.otp) {
-      const code = createOtpCode();
-      const codeHash = crypto.createHash("sha256").update(code).digest("hex");
-      const expiresAt = new Date(Date.now() + PLATFORM_OTP_TTL_MS);
-      await prisma.platformOtpChallenge.deleteMany({ where: { expiresAt: { lt: now } } });
-      await prisma.platformOtpChallenge.upsert({
-        where: { key: challengeKey },
-        create: {
-          key: challengeKey,
-          codeHash,
-          expiresAt,
-          attempts: 0
-        },
-        update: {
-          codeHash,
-          expiresAt,
-          attempts: 0
-        }
-      });
-
-      await emailSender.send({
-        to: env.PLATFORM_ADMIN_EMAIL,
-        subject: "Codice accesso Platform Console Fleetum",
-        text: [
-          "Fleetum Platform Console",
-          `Codice OTP: ${code}`,
-          "Scadenza: 8 minuti.",
-          "Se non sei stato tu, verifica subito la sicurezza dell'account platform."
-        ].join("\n"),
-        html: platformOtpEmailHtml(code),
-        fromName: "Fleetum Security"
-      });
+      await this.issueOtp(normalizedEmail, "login");
 
       return {
         requiresOtp: true,
@@ -213,12 +297,12 @@ export class PlatformAdminService {
     }
 
     if (!challenge) {
-      await prisma.platformOtpChallenge.deleteMany({ where: { key: challengeKey } });
+      await this.authStore.deleteOtp(challengeKey);
       throw new AppError("Codice OTP scaduto. Richiedi un nuovo codice.", 401, "PLATFORM_OTP_EXPIRED");
     }
 
     if (challenge.attempts >= 5) {
-      await prisma.platformOtpChallenge.deleteMany({ where: { key: challengeKey } });
+      await this.authStore.deleteOtp(challengeKey);
       await this.loginGuard.registerFailure(input.ip, normalizedEmail);
       throw new AppError("Troppi tentativi OTP. Richiedi un nuovo codice.", 401, "PLATFORM_OTP_LOCKED");
     }
@@ -227,14 +311,11 @@ export class PlatformAdminService {
     const otpOk = constantTimeEqual(otpHash, challenge.codeHash);
 
     if (!otpOk) {
-      await prisma.platformOtpChallenge.update({
-        where: { key: challengeKey },
-        data: { attempts: { increment: 1 } }
-      });
+      await this.authStore.incrementOtpAttempts(challengeKey);
       throw new AppError("Codice OTP non valido", 401, "PLATFORM_OTP_INVALID");
     }
 
-    await prisma.platformOtpChallenge.deleteMany({ where: { key: challengeKey } });
+    await this.authStore.deleteOtp(challengeKey);
 
     await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
 
@@ -255,6 +336,79 @@ export class PlatformAdminService {
       token,
       user: { id: "platform-admin", email: env.PLATFORM_ADMIN_EMAIL, firstName: "Platform", lastName: "Admin", roles: ["PLATFORM_ADMIN"] }
     };
+  }
+
+  async requestPasswordReset(input: { email: string; ip: string }) {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    await this.loginGuard.requestPasswordReset(input.ip, normalizedEmail);
+
+    // The same response avoids exposing whether a Platform account exists.
+    const message = "Se l'indirizzo e autorizzato, riceverai un codice OTP per reimpostare la password.";
+    if (!this.isPlatformAdminEmail(normalizedEmail)) {
+      return { message };
+    }
+
+    await this.issueOtp(normalizedEmail, "password-reset");
+    await this.alerts.notify({
+      type: "PLATFORM_PASSWORD_RESET_REQUESTED",
+      actor: normalizedEmail,
+      sourceIp: input.ip,
+      details: "Password reset OTP issued"
+    });
+
+    return { message };
+  }
+
+  async confirmPasswordReset(input: { email: string; otp: string; newPassword: string; ip: string }) {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    await this.loginGuard.assertPasswordResetAllowed(input.ip, normalizedEmail);
+
+    if (!this.isPlatformAdminEmail(normalizedEmail)) {
+      throw new AppError("Codice OTP non valido o scaduto", 401, "PLATFORM_PASSWORD_RESET_INVALID");
+    }
+
+    const challengeKey = createOtpKey(normalizedEmail, "password-reset");
+    const now = new Date();
+    const challenge = await this.authStore.findActiveOtp(challengeKey, now);
+
+    if (!challenge) {
+      await this.authStore.deleteOtp(challengeKey);
+      throw new AppError("Codice OTP scaduto. Richiedi un nuovo codice.", 401, "PLATFORM_PASSWORD_RESET_EXPIRED");
+    }
+
+    if (challenge.attempts >= 5) {
+      await this.authStore.deleteOtp(challengeKey);
+      await this.alerts.notify({
+        type: "PLATFORM_PASSWORD_RESET_LOCKED",
+        actor: normalizedEmail,
+        sourceIp: input.ip,
+        details: "Password reset OTP locked after too many attempts"
+      });
+      throw new AppError("Troppi tentativi OTP. Richiedi un nuovo codice.", 401, "PLATFORM_PASSWORD_RESET_LOCKED");
+    }
+
+    const otpHash = crypto.createHash("sha256").update(input.otp).digest("hex");
+    if (!constantTimeEqual(otpHash, challenge.codeHash)) {
+      await this.authStore.incrementOtpAttempts(challengeKey);
+      throw new AppError("Codice OTP non valido o scaduto", 401, "PLATFORM_PASSWORD_RESET_INVALID");
+    }
+
+    const passwordHash = await bcrypt.hash(input.newPassword, 12);
+    await this.authStore.updatePasswordAndConsumeOtp({
+      email: normalizedEmail,
+      passwordHash,
+      changedAt: now,
+      otpKey: challengeKey
+    });
+    await this.loginGuard.clearPasswordReset(input.ip, normalizedEmail);
+    await this.alerts.notify({
+      type: "PLATFORM_PASSWORD_RESET_COMPLETED",
+      actor: normalizedEmail,
+      sourceIp: input.ip,
+      details: "Platform password changed through OTP recovery"
+    });
+
+    return { message: "Password aggiornata. Accedi con le nuove credenziali." };
   }
 
   async listTenantsWithLicenses() {

@@ -4,8 +4,8 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - API route e validator come requisiti impliciti:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/interfaces/http/routes`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/interfaces/http/validators`
+  - `backend/src/interfaces/http/routes`
+  - `backend/src/interfaces/http/validators`
 
 ## Gap
 - SRS funzionale formale: NON TROVATO

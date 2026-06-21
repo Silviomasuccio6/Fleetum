@@ -4,8 +4,8 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Token tema e componenti UI:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/frontend/src/presentation/styles/global.css`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/frontend/src/presentation/components/ui`
+  - `frontend/src/presentation/styles/global.css`
+  - `frontend/src/presentation/components/ui`
 
 ## Gap
 - UX spec formalizzata per flussi core: NON TROVATO

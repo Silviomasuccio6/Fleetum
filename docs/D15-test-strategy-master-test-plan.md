@@ -4,8 +4,8 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Test backend e frontend presenti:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/tests`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/frontend/tests`
+  - `backend/tests`
+  - `frontend/tests`
 - Script test in package.json backend/frontend.
 
 ## Gap

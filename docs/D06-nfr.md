@@ -4,8 +4,8 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Timeouts e rate limit presenti nel codice:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/app.ts`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/frontend/src/infrastructure/api/http-client.ts`
+  - `backend/src/app.ts`
+  - `frontend/src/infrastructure/api/http-client.ts`
 
 ## Gap
 - Catalogo NFR con SLO/SLA numerici: NON TROVATO

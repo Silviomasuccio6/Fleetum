@@ -3,7 +3,7 @@
 Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
-- `/Users/silvio/Downloads/Gestione-Fermi-master-2/README.md`
+- `README.md`
 
 ## Sintesi as-is
 - Obiettivo prodotto e stack tecnico presenti.

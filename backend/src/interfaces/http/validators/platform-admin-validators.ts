@@ -9,6 +9,16 @@ export const platformLoginSchema = z.object({
   otp: z.string().trim().regex(/^\d{6}$/).optional()
 });
 
+export const platformPasswordResetRequestSchema = z.object({
+  email: z.string().email().max(320)
+});
+
+export const platformPasswordResetConfirmSchema = z.object({
+  email: z.string().email().max(320),
+  otp: z.string().trim().regex(/^\d{6}$/),
+  newPassword: z.string().min(16).max(256)
+});
+
 export const updateLicenseSchema = z.object({
   plan: z.enum(["STARTER", "PRO", "ENTERPRISE"]),
   seats: z.number().int().min(1).max(10000),

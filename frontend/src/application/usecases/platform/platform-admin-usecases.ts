@@ -231,6 +231,26 @@ export const platformAdminUseCases = {
     if (data.token) platformAuthStorage.set(data.token);
     return data;
   },
+  requestPasswordReset: async (email: string) => {
+    const response = await fetch(`${apiBase}/auth/password-reset/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Richiesta recupero password fallita");
+    return data as { message: string };
+  },
+  confirmPasswordReset: async (input: { email: string; otp: string; newPassword: string }) => {
+    const response = await fetch(`${apiBase}/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Cambio password fallito");
+    return data as { message: string };
+  },
   logout: () => platformAuthStorage.clear(),
   listTenants: async () => {
     const response = await fetch(`${apiBase}/tenants`, { headers: { ...authHeaders() } });

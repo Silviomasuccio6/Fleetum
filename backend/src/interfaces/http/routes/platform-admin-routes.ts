@@ -8,6 +8,8 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
   const router = Router();
 
   router.post("/auth/login", platformAuthRateLimit, asyncHandler(controller.login));
+  router.post("/auth/password-reset/request", asyncHandler(controller.requestPasswordReset));
+  router.post("/auth/password-reset/confirm", asyncHandler(controller.confirmPasswordReset));
   router.get("/overview", requirePlatformAuth, asyncHandler(controller.overview));
   router.get("/analytics/website", requirePlatformAuth, asyncHandler(controller.websiteAnalytics));
   router.get("/demo-leads", requirePlatformAuth, asyncHandler(controller.demoLeads));

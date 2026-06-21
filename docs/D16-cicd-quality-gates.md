@@ -4,7 +4,7 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Pipeline CI:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/.github/workflows/ci.yml`
+  - `.github/workflows/ci.yml`
 - Gate presenti: lint, build, backend tests, frontend tests, npm audit high.
 
 ## Gap

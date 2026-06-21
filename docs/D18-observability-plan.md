@@ -4,8 +4,8 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Logging applicativo pino + morgan:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/infrastructure/logging/logger.ts`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/app.ts`
+  - `backend/src/infrastructure/logging/logger.ts`
+  - `backend/src/app.ts`
 - Health/readiness endpoint implementati.
 
 ## Gap

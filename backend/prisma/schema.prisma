@@ -1356,6 +1356,18 @@ model PlatformOtpChallenge {
   @@index([key, expiresAt])
 }
 
+// Singleton credential override for the founder-only Platform Console.
+// The environment hash remains the bootstrap fallback until the first reset.
+model PlatformAdminCredential {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String
+  passwordChangedAt DateTime @default(now())
+  lastResetAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 model StoredFileObject {
   id           String    @id @default(cuid())
   tenantId     String
