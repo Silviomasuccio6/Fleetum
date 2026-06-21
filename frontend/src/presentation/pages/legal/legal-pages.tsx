@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Mail, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { SeoHead } from "../../components/seo/seo-head";
 import "./legal-pages.css";
 
@@ -155,6 +156,11 @@ export const DemoRequestPage = () => {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState("");
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+
+  useEffect(() => {
+    trackPublicEvent("PAGE_VIEW", { page: "demo" });
+    trackPublicEvent("DEMO_FORM_VIEW", { placement: "demo_page" });
+  }, []);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

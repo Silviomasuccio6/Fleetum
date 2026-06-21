@@ -1,28 +1,25 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  COOKIE_CONSENT_EVENT,
+  COOKIE_CONSENT_STORAGE_KEY,
+  type CookieConsent,
+  readCookieConsent
+} from "../../../infrastructure/privacy/cookie-consent";
 import "./cookie-consent-banner.css";
 
-type Consent = {
-  necessary: true;
-  analytics: boolean;
-  marketing: boolean;
-  version: string;
-  acceptedAt: string;
-};
-
-const STORAGE_KEY = "fleetum_cookie_consent_v1";
 const VERSION = "2026-05-17";
 
 const saveConsent = (analytics: boolean, marketing: boolean) => {
-  const consent: Consent = {
+  const consent: CookieConsent = {
     necessary: true,
     analytics,
     marketing,
     version: VERSION,
     acceptedAt: new Date().toISOString()
   };
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(consent));
-  window.dispatchEvent(new CustomEvent("fleetum-cookie-consent", { detail: consent }));
+  window.localStorage.setItem(COOKIE_CONSENT_STORAGE_KEY, JSON.stringify(consent));
+  window.dispatchEvent(new CustomEvent(COOKIE_CONSENT_EVENT, { detail: consent }));
 };
 
 export const CookieConsentBanner = () => {
@@ -33,8 +30,7 @@ export const CookieConsentBanner = () => {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) setVisible(true);
+      if (!readCookieConsent()) setVisible(true);
     } catch {
       setVisible(true);
     }

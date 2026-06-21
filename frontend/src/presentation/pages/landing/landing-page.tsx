@@ -163,6 +163,10 @@ const navItems = [
   { label: "Demo", href: "#demo" },
 ];
 
+const trackCtaClick = (placement: string, destination: "demo" | "signup" | "login", extra?: Record<string, string>) => {
+  trackPublicEvent("CTA_CLICK", { placement, destination, ...extra });
+};
+
 const painPoints = [
   { icon: CalendarDays, title: "Prenotazioni sparse", text: "Telefonate, chat e fogli separati rendono difficile capire subito disponibilita, uscite e rientri." },
   { icon: FileCheck2, title: "Contratti da rincorrere", text: "PDF, firme, invii e versioni restano scollegati da cliente, veicolo e prenotazione." },
@@ -257,8 +261,8 @@ const LandingHeader = () => {
         {navItems.map((item) => <a key={item.href} href={item.href}>{item.label}</a>)}
       </nav>
       <div className="fleetum-site-actions">
-        <Link to="/login" className="fleetum-btn fleetum-btn--ghost">Accedi</Link>
-        <Link to="/demo" className="fleetum-btn fleetum-btn--primary">Richiedi demo <ArrowRight className="h-4 w-4" /></Link>
+        <Link to="/login" className="fleetum-btn fleetum-btn--ghost" onClick={() => trackPublicEvent("LOGIN_CLICK", { placement: "header" })}>Accedi</Link>
+        <Link to="/demo" className="fleetum-btn fleetum-btn--primary" onClick={() => trackCtaClick("header", "demo")}>Richiedi demo <ArrowRight className="h-4 w-4" /></Link>
         <button className="fleetum-mobile-toggle" type="button" aria-label="Apri menu" onClick={() => setOpen((value) => !value)}>
           {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
@@ -266,8 +270,8 @@ const LandingHeader = () => {
       {open ? (
         <div className="fleetum-mobile-menu">
           {navItems.map((item) => <a key={item.href} href={item.href} onClick={() => setOpen(false)}>{item.label}</a>)}
-          <Link to="/login" onClick={() => setOpen(false)}>Accedi</Link>
-          <Link to="/demo" onClick={() => setOpen(false)}>Richiedi demo</Link>
+          <Link to="/login" onClick={() => { setOpen(false); trackPublicEvent("LOGIN_CLICK", { placement: "mobile_header" }); }}>Accedi</Link>
+          <Link to="/demo" onClick={() => { setOpen(false); trackCtaClick("mobile_header", "demo"); }}>Richiedi demo</Link>
         </div>
       ) : null}
     </header>
@@ -360,8 +364,8 @@ const HeroSection = () => (
           Fleetum collega prenotazioni, contratti digitali, clienti, veicoli, manutenzioni, scadenze e KPI in una control room progettata per rent a car e flotte aziendali.
         </p>
         <div className="fleetum-hero__actions">
-          <Link to="/demo" className="fleetum-btn fleetum-btn--hero">Vedi Fleetum in azione <ChevronRight className="h-5 w-5" /></Link>
-          <Link to="/login" className="fleetum-btn fleetum-btn--secondary">Accedi al gestionale</Link>
+          <Link to="/demo" className="fleetum-btn fleetum-btn--hero" onClick={() => trackCtaClick("hero", "demo")}>Vedi Fleetum in azione <ChevronRight className="h-5 w-5" /></Link>
+          <Link to="/login" className="fleetum-btn fleetum-btn--secondary" onClick={() => trackPublicEvent("LOGIN_CLICK", { placement: "hero" })}>Accedi al gestionale</Link>
         </div>
         <div className="fleetum-trust-row">
           <TrustPill>Booking mensile</TrustPill>
@@ -503,7 +507,7 @@ const BookingControlRoomSection = () => (
         <li><Check className="h-4 w-4" /> Stato manutenzione e revisione vicino alla targa</li>
         <li><Check className="h-4 w-4" /> Cliente e contratto collegati alla prenotazione</li>
       </ul>
-      <Link to="/login" className="fleetum-link-cta">Apri una demo operativa <ArrowRight className="h-4 w-4" /></Link>
+      <Link to="/login" className="fleetum-link-cta" onClick={() => trackPublicEvent("LOGIN_CLICK", { placement: "booking_showcase" })}>Apri una demo operativa <ArrowRight className="h-4 w-4" /></Link>
     </Reveal>
     <Reveal className="fleetum-calendar-showcase" delay={120}>
       <div className="fleetum-calendar-toolbar">
@@ -673,7 +677,12 @@ const SecuritySection = () => (
   </section>
 );
 
-const PricingSection = () => (
+const PricingSection = () => {
+  useEffect(() => {
+    trackPublicEvent("PRICING_VIEW", { placement: "landing" });
+  }, []);
+
+  return (
   <section className="fleetum-section fleetum-pricing" id="prezzi">
     <SectionHeading
       eyebrow="Prezzi"
@@ -692,13 +701,20 @@ const PricingSection = () => (
             <ul>
               {plan.features.map((feature) => <li key={feature}><Check className="h-4 w-4" />{feature}</li>)}
             </ul>
-            <Link to={plan.name === "Enterprise" ? "/demo" : "/signup"} className={plan.highlight ? "fleetum-btn fleetum-btn--primary" : "fleetum-btn fleetum-btn--dark"}>{plan.name === "Enterprise" ? "Parla con noi" : "Inizia ora"}</Link>
+            <Link
+              to={plan.name === "Enterprise" ? "/demo" : "/signup"}
+              className={plan.highlight ? "fleetum-btn fleetum-btn--primary" : "fleetum-btn fleetum-btn--dark"}
+              onClick={() => trackCtaClick("pricing_card", plan.name === "Enterprise" ? "demo" : "signup", { plan: plan.name.toLowerCase() })}
+            >
+              {plan.name === "Enterprise" ? "Parla con noi" : "Inizia ora"}
+            </Link>
           </article>
         </Reveal>
       ))}
     </div>
   </section>
-);
+  );
+};
 
 const FinalCtaSection = () => (
   <section className="fleetum-final-cta">
@@ -708,8 +724,8 @@ const FinalCtaSection = () => (
         <h2>Porta il tuo autonoleggio in una control room digitale.</h2>
         <span>Crea il workspace, configura azienda e flotta, poi gestisci prenotazioni e contratti con un flusso professionale.</span>
         <div>
-          <Link to="/demo" className="fleetum-btn fleetum-btn--light">Richiedi demo</Link>
-          <Link to="/signup" className="fleetum-btn fleetum-btn--outline-light">Crea account</Link>
+          <Link to="/demo" className="fleetum-btn fleetum-btn--light" onClick={() => trackCtaClick("final_cta", "demo")}>Richiedi demo</Link>
+          <Link to="/signup" className="fleetum-btn fleetum-btn--outline-light" onClick={() => trackCtaClick("final_cta", "signup")}>Crea account</Link>
         </div>
       </div>
     </Reveal>

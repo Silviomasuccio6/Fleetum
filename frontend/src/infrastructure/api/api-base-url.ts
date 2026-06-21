@@ -2,7 +2,7 @@ const DEFAULT_API_BASE_URL = "http://localhost:4000/api";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 export const getApiBaseUrl = () => {
-  const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined) || DEFAULT_API_BASE_URL;
+  const configured = (import.meta.env?.VITE_API_BASE_URL as string | undefined) || DEFAULT_API_BASE_URL;
 
   if (typeof window === "undefined") return configured;
 
@@ -28,4 +28,3 @@ export const getApiOrigin = () => {
     return typeof window !== "undefined" ? window.location.origin : "";
   }
 };
-
