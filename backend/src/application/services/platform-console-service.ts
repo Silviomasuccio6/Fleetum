@@ -373,8 +373,8 @@ export class PlatformConsoleService {
         api: { status: "UP", responseTimeMs: Date.now() - started },
         db: { status: dbStatus },
         email: {
-          status: env.EMAIL_PROVIDER === "resend" ? (env.RESEND_API_KEY ? "CONFIGURED" : "MISSING_KEY") : "SMTP",
-          provider: env.EMAIL_PROVIDER,
+          status: env.RESEND_API_KEY ? "CONFIGURED" : "MISSING_KEY",
+          provider: "resend",
           pending: pendingEmail,
           failed: failedEmail
         },

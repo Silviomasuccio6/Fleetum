@@ -6,7 +6,7 @@ Stato: PRESENTE-PARZIALE
 - API implementate via route/controller:
   - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/interfaces/http/routes`
   - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/interfaces/http/controllers`
-- Integrazioni Google/Apple/SMTP nel codice env+service.
+- Integrazioni Google/Apple/Resend nel codice env+service.
 
 ## Gap
 - OpenAPI/Swagger/Postman ufficiale: NON TROVATO

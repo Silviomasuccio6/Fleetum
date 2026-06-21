@@ -139,10 +139,9 @@ jobs:
       PLATFORM_JWT_SECRET: test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000
       PLATFORM_ADMIN_PASSWORD_HASH: $2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde
       PLATFORM_ADMIN_EMAIL: ci-admin@example.local
-      EMAIL_PROVIDER: smtp
-      SMTP_HOST: localhost
-      SMTP_USER: ci@example.local
-      SMTP_PASS: ci-smtp-pass-placeholder
+      EMAIL_PROVIDER: resend
+      RESEND_API_KEY: re_ci_placeholder
+      RESEND_FROM: Fleetum <onboarding@resend.dev>
       STORAGE_PROVIDER: local
       UPLOAD_DIR: uploads-test
 

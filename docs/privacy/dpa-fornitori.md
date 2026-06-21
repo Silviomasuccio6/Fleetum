@@ -15,7 +15,7 @@ Questo documento definisce la base per gli accordi di trattamento dati con forni
 | Hosting/app server | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | Obbligatorio prima produzione |
 | PostgreSQL managed/self-hosted | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | Include backup |
 | Object storage allegati | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | Preferire storage UE/cifrato |
-| Email provider | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | SMTP/transactional |
+| Email provider | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | Resend transactional |
 | WhatsApp provider | DA DEFINIRE | Sub-responsabile/autonomo da valutare | DA DEFINIRE | MANCANTE | MANCANTE | WhatsApp Business/API o fallback wa.me |
 | Monitoring/error tracking | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | Sentry/altro |
 | Backup/DR | DA DEFINIRE | Sub-responsabile | DA DEFINIRE | MANCANTE | MANCANTE | Retention e cifratura |

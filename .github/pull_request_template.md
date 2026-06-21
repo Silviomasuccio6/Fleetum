@@ -29,7 +29,7 @@ Describe what this PR changes and why.
 - [ ] Auth/session/CSRF
 - [ ] Multi-tenant data access
 - [ ] Billing/Stripe/license policy
-- [ ] Email/Resend/SMTP
+- [ ] Email/Resend
 - [ ] PDF/contracts/documents
 - [ ] Upload/storage
 - [ ] Docker/deploy/Caddy

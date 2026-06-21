@@ -58,7 +58,7 @@ export class EmailQueueService {
 
         const sent = await emailSender.send({ to: item.recipient, subject: item.subject, text: item.body, html, fromName, replyTo, attachments });
 
-        // Mark as sent immediately after SMTP success to avoid duplicate sends on DB side-effects failures.
+        // Mark as sent immediately after Resend success to avoid duplicate sends on DB side-effects failures.
         await prisma.emailQueue.update({
           where: { id: item.id },
           data: {
