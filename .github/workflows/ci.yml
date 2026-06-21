@@ -103,6 +103,8 @@ jobs:
         run: |
           test -f frontend/public/robots.txt
           test -f frontend/public/sitemap.xml
+          test -f frontend/public/llms.txt
+          test -f frontend/public/brand/fleetum-social-preview.png
           grep -q "fleetum.it/demo" frontend/public/sitemap.xml
           npm run verify:prerender -w frontend
 

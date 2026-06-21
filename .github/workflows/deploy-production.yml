@@ -376,6 +376,8 @@ jobs:
 
           curl -fsS --max-time 20 https://fleetum.it/robots.txt | grep -q "Sitemap"
           curl -fsS --max-time 20 https://fleetum.it/sitemap.xml | grep -q "fleetum.it/demo"
+          curl -fsS --max-time 20 https://fleetum.it/llms.txt | grep -q "# Fleetum"
+          curl -fsSI --max-time 20 https://fleetum.it/brand/fleetum-social-preview.png | grep -qi "content-type: image/png"
 
   notify-failure:
     name: Create deploy failure issue
