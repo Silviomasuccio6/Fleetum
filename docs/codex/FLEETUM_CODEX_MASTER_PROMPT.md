@@ -49,7 +49,7 @@ Non committare mai:
 - segreti JWT tenant e platform (nomi variabili JWT documentati nel file env example).
 - password admin platform production (nome variabile documentato nel file env example).
 - segreti Stripe production (nomi variabili Stripe documentati nel file env example).
-- chiavi provider email production (nome variabile provider email documentato nel file env example) e password SMTP.
+- chiavi Resend production (RESEND_API_KEY e RESEND_FROM, documentate nel file env example).
 - SSH private key, GitHub token, Cloudflare/AWS/R2 secrets.
 
 Usare solo:

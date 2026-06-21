@@ -27,6 +27,9 @@ COPY --from=build /app/backend/node_modules ./node_modules
 COPY --from=build /app/backend/dist ./dist
 COPY --from=build /app/backend/prisma ./prisma
 
+# Fail the image build if the transactional email runtime dependency is missing.
+RUN node -e "require.resolve('resend')"
+
 RUN chown -R node:node /app
 USER node
 

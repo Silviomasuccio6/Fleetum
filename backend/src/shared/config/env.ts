@@ -14,7 +14,7 @@ const TEST_PLATFORM_JWT_SECRET =
   "test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000";
 const TEST_PLATFORM_ADMIN_PASSWORD_HASH = "$2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde";
 const TEST_DATABASE_URL = "postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public";
-const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "smtp").toLowerCase();
+const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
 
 const toInt = (value: string, name: string) => {
@@ -66,8 +66,8 @@ if (!PLATFORM_ADMIN_PASSWORD_HASH.startsWith("$2")) {
   throw new Error("PLATFORM_ADMIN_PASSWORD_HASH must be a bcrypt hash starting with $2a$ or $2b$");
 }
 
-if (!["smtp", "resend"].includes(EMAIL_PROVIDER)) {
-  throw new Error("EMAIL_PROVIDER must be smtp or resend");
+if (EMAIL_PROVIDER !== "resend") {
+  throw new Error("EMAIL_PROVIDER must be resend");
 }
 
 if (!["local", "s3"].includes(STORAGE_PROVIDER)) {
@@ -127,15 +127,9 @@ export const env = {
   PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
 
-  EMAIL_PROVIDER: EMAIL_PROVIDER as "smtp" | "resend",
-  SMTP_HOST: required("SMTP_HOST", EMAIL_PROVIDER === "resend" || isCiOrTest ? "localhost" : undefined),
-  SMTP_PORT: toInt(process.env.SMTP_PORT ?? "465", "SMTP_PORT"),
-  SMTP_SECURE: toBool(process.env.SMTP_SECURE ?? "true"),
-  SMTP_USER: required("SMTP_USER", EMAIL_PROVIDER === "resend" || isCiOrTest ? "ci@example.local" : undefined),
-  SMTP_PASS: required("SMTP_PASS", EMAIL_PROVIDER === "resend" || isCiOrTest ? "ci-smtp-pass-placeholder" : undefined),
-  SMTP_FROM: process.env.SMTP_FROM ?? "",
-  RESEND_API_KEY: process.env.RESEND_API_KEY,
-  RESEND_FROM: process.env.RESEND_FROM ?? process.env.SMTP_FROM ?? "Fleetum <onboarding@resend.dev>",
+  EMAIL_PROVIDER: "resend" as const,
+  RESEND_API_KEY: required("RESEND_API_KEY", isCiOrTest ? "re_ci_placeholder" : undefined),
+  RESEND_FROM: required("RESEND_FROM", isCiOrTest ? "Fleetum <onboarding@resend.dev>" : undefined),
   DEMO_LEAD_RECIPIENT_EMAIL: process.env.DEMO_LEAD_RECIPIENT_EMAIL,
 
   CRON_REMINDER_SCHEDULE: process.env.CRON_REMINDER_SCHEDULE ?? "*/10 * * * *",

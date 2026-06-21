@@ -8,7 +8,7 @@ Fleetum is a multi-tenant SaaS platform for car rental companies, fleet operatio
 - Frontend: React, TypeScript, Vite, Zustand, Tailwind, Recharts.
 - Production: Docker Compose, Caddy, PostgreSQL, GitHub Actions.
 - Payments: Stripe.
-- Email: Resend/SMTP depending on environment.
+- Email: Resend transactional email API.
 
 ## Repository Structure
 
