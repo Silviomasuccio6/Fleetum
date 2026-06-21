@@ -4,7 +4,7 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Runbook operativo:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/RUNBOOK.md`
+  - `RUNBOOK.md`
 
 ## Gap
 - SOP supporto L1/L2/L3 dettagliate: NON TROVATO

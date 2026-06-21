@@ -4,7 +4,7 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Checklist rilascio:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/RELEASE_CHECKLIST.md`
+  - `RELEASE_CHECKLIST.md`
 
 ## Gap
 - Piano cutover minuto per minuto: NON TROVATO

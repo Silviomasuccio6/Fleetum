@@ -4,12 +4,12 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Helmet/CORS/rate-limit/error handler:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/app.ts`
+  - `backend/src/app.ts`
 - CSRF middleware:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/interfaces/http/middlewares/csrf-protection.ts`
+  - `backend/src/interfaces/http/middlewares/csrf-protection.ts`
 - Login guard + IP allowlist platform:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/application/services/platform-login-guard-service.ts`
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src/interfaces/http/middlewares/platform-ip-allowlist.ts`
+  - `backend/src/application/services/platform-login-guard-service.ts`
+  - `backend/src/interfaces/http/middlewares/platform-ip-allowlist.ts`
 
 ## Gap
 - Threat model STRIDE/LINDDUN formalizzato: NON TROVATO

@@ -3,7 +3,7 @@
 Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
-- Visione funzionale generale in `/Users/silvio/Downloads/Gestione-Fermi-master-2/README.md`
+- Visione funzionale generale in `README.md`
 - KPI tecnici parziali in UI/statistiche (codice), ma non documento prodotto.
 
 ## Gap

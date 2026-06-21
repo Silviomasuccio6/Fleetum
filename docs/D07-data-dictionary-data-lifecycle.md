@@ -4,7 +4,7 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Schema dati applicativo:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/prisma/schema.prisma`
+  - `backend/prisma/schema.prisma`
 
 ## Gap
 - Data dictionary business-friendly (campo, significato, owner): NON TROVATO

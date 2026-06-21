@@ -4,7 +4,7 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Sezione incident response minima in:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/RUNBOOK.md`
+  - `RUNBOOK.md`
 
 ## Gap
 - Playbook incident strutturato per severita: NON TROVATO

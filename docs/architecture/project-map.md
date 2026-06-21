@@ -180,3 +180,9 @@ legal/*
 ```
 
 Usare `docs/codex/FLEETUM_CODEX_MASTER_PROMPT.md` come regola permanente per Codex e collaboratori.
+
+Riferimenti tecnici aggiornati:
+
+- `docs/technical/fleetum-system-reference.md`: architettura e flussi Fleetum.
+- `docs/technical/api-catalog.md`: catalogo endpoint tenant, pubblici e Platform.
+- `docs/technical/website-build-brief.md`: specifica per landing e sito pubblico.

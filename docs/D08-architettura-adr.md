@@ -4,9 +4,9 @@ Stato: PRESENTE-PARZIALE
 
 ## Evidenze repository
 - Architettura a layer nel backend (application/domain/infrastructure/interfaces):
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/backend/src`
+  - `backend/src`
 - Frontend React con route e store:
-  - `/Users/silvio/Downloads/Gestione-Fermi-master-2/frontend/src`
+  - `frontend/src`
 
 ## Gap
 - Diagrammi architetturali ufficiali: NON TROVATO
