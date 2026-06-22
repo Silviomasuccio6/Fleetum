@@ -7,9 +7,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 BACKUP_DIR="${BACKUP_DIR:-/opt/fleetum/backups/postgres}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
-COMPOSE_FILE="${COMPOSE_FILE:-/opt/fleetum/app/docker-compose.prod.yml}"
-ENV_FILE="${ENV_FILE:-/opt/fleetum/env/compose.env}"
-SERVICE_NAME="${POSTGRES_SERVICE_NAME:-postgres}"
+POSTGRES_CONTAINER_NAME="${POSTGRES_CONTAINER_NAME:-fleetum_postgres}"
 DB_USER="${POSTGRES_USER:-fleetum}"
 DB_NAME="${POSTGRES_DB:-fleetum}"
 PG_DUMP_DATABASE_URL="${PG_DUMP_DATABASE_URL:-${DIRECT_URL:-}}"
@@ -40,18 +38,12 @@ if [ -n "$PG_DUMP_DATABASE_URL" ]; then
     pg_dump "$PG_DUMP_DATABASE_URL" --no-owner --no-privileges \
     | gzip -9 > "$TMP_FILE" || fail "managed pg_dump failed"
 else
-  [ -f "$COMPOSE_FILE" ] || fail "compose file not found: $COMPOSE_FILE"
-  cd "$(dirname "$COMPOSE_FILE")"
+  docker inspect "$POSTGRES_CONTAINER_NAME" >/dev/null 2>&1 || \
+    fail "PostgreSQL container not found: $POSTGRES_CONTAINER_NAME"
 
-  if [ -f "$ENV_FILE" ]; then
-    COMPOSE_ENV_ARGS=(--env-file "$ENV_FILE")
-  else
-    COMPOSE_ENV_ARGS=()
-  fi
-
-  docker compose "${COMPOSE_ENV_ARGS[@]}" -f "$COMPOSE_FILE" exec -T "$SERVICE_NAME" \
+  docker exec -i "$POSTGRES_CONTAINER_NAME" \
     pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges \
-    | gzip -9 > "$TMP_FILE" || fail "compose pg_dump failed"
+    | gzip -9 > "$TMP_FILE" || fail "container pg_dump failed"
 fi
 
 mv "$TMP_FILE" "$OUTPUT_FILE"

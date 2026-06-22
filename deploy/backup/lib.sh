@@ -123,16 +123,39 @@ require_offsite_config() {
   fail "offsite backup is required: set OFFSITE_RCLONE_TARGET or OFFSITE_S3_URI"
 }
 
+resolve_rclone_bin() {
+  local candidate="${RCLONE_BIN:-}"
+
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  if command -v rclone >/dev/null 2>&1; then
+    command -v rclone
+    return 0
+  fi
+
+  candidate="$HOME/bin/rclone"
+  if [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  fail "OFFSITE_RCLONE_TARGET is set but rclone was not found in PATH or $HOME/bin/rclone"
+}
+
 copy_to_offsite() {
   local file="$1"
   local category="$2"
   require_offsite_config
 
   if [ -n "${OFFSITE_RCLONE_TARGET:-}" ]; then
-    command -v rclone >/dev/null 2>&1 || fail "OFFSITE_RCLONE_TARGET set but rclone is not installed"
-    local target="${OFFSITE_RCLONE_TARGET%/}/$category"
+    local rclone_bin target
+    rclone_bin="$(resolve_rclone_bin)"
+    target="${OFFSITE_RCLONE_TARGET%/}/$category"
     log "copying $file to offsite rclone target: $target"
-    rclone copyto "$file" "$target/$(basename "$file")" --transfers "${RCLONE_TRANSFERS:-4}" || fail "offsite rclone upload failed for $file"
+    "$rclone_bin" copyto "$file" "$target/$(basename "$file")" --transfers "${RCLONE_TRANSFERS:-4}" || fail "offsite rclone upload failed for $file"
     return 0
   fi
 
@@ -161,11 +184,12 @@ prune_offsite_backups() {
   local retention_days="$2"
 
   if [ -n "${OFFSITE_RCLONE_TARGET:-}" ]; then
-    command -v rclone >/dev/null 2>&1 || fail "rclone is not installed"
-    local target="${OFFSITE_RCLONE_TARGET%/}/$category"
+    local rclone_bin target
+    rclone_bin="$(resolve_rclone_bin)"
+    target="${OFFSITE_RCLONE_TARGET%/}/$category"
     log "pruning offsite rclone target older than ${retention_days}d: $target"
-    rclone delete "$target" --min-age "${retention_days}d" || fail "offsite rclone retention failed for $target"
-    rclone rmdirs "$target" --leave-root >/dev/null 2>&1 || true
+    "$rclone_bin" delete "$target" --min-age "${retention_days}d" || fail "offsite rclone retention failed for $target"
+    "$rclone_bin" rmdirs "$target" --leave-root >/dev/null 2>&1 || true
     return 0
   fi
 
