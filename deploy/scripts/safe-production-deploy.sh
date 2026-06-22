@@ -12,6 +12,12 @@ HEALTH_URL="${HEALTH_URL:-https://api.fleetum.it/api/ready}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-12}"
 HEALTH_SLEEP_SECONDS="${HEALTH_SLEEP_SECONDS:-5}"
 MIN_FREE_DISK_GB="${MIN_FREE_DISK_GB:-10}"
+MAX_DISK_USAGE_PERCENT="${MAX_DISK_USAGE_PERCENT:-90}"
+DISK_ALERT_WARNING_PERCENT="${DISK_ALERT_WARNING_PERCENT:-80}"
+DISK_ALERT_CRITICAL_PERCENT="${DISK_ALERT_CRITICAL_PERCENT:-90}"
+DISK_ALERT_COOLDOWN_HOURS="${DISK_ALERT_COOLDOWN_HOURS:-24}"
+DISK_ALERT_ENV_FILE="${DISK_ALERT_ENV_FILE:-/opt/fleetum/env/backup.env}"
+DISK_ALERT_SCRIPT="${DISK_ALERT_SCRIPT:-$APP_DIR/deploy/scripts/disk-capacity-alert.sh}"
 CLEANUP_DOCKER_IMAGES="${CLEANUP_DOCKER_IMAGES:-true}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -44,8 +50,59 @@ disk_available_kib() {
   df -Pk "$APP_DIR" | awk 'NR == 2 { print $4 }'
 }
 
+disk_used_percent() {
+  df -Pk "$APP_DIR" | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }'
+}
+
 format_kib_as_gib() {
   awk -v kib="$1" 'BEGIN { printf "%.1f", kib / 1024 / 1024 }'
+}
+
+validate_positive_integer() {
+  local name="$1"
+  local value="$2"
+
+  if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    log "$name must be a positive integer, received: $value"
+    exit 2
+  fi
+}
+
+validate_percent() {
+  local name="$1"
+  local value="$2"
+
+  if ! [[ "$value" =~ ^[1-9][0-9]?$|^100$ ]]; then
+    log "$name must be an integer between 1 and 100, received: $value"
+    exit 2
+  fi
+}
+
+report_disk_state() {
+  local phase="$1"
+
+  log "disk report: $phase"
+  df -h "$APP_DIR" || true
+  docker system df || true
+}
+
+check_disk_alert_thresholds() {
+  local phase="$1"
+
+  if [ ! -x "$DISK_ALERT_SCRIPT" ]; then
+    log "WARNING: disk alert script is missing or not executable: $DISK_ALERT_SCRIPT"
+    return 0
+  fi
+
+  if ! APP_DIR="$APP_DIR" \
+    DISK_ALERT_ENV_FILE="$DISK_ALERT_ENV_FILE" \
+    DISK_ALERT_WARNING_PERCENT="$DISK_ALERT_WARNING_PERCENT" \
+    DISK_ALERT_CRITICAL_PERCENT="$DISK_ALERT_CRITICAL_PERCENT" \
+    DISK_ALERT_COOLDOWN_HOURS="$DISK_ALERT_COOLDOWN_HOURS" \
+    DRY_RUN="$DRY_RUN" \
+    "$DISK_ALERT_SCRIPT" --check "$phase"; then
+    log "WARNING: disk alert check failed; deploy safety checks remain active"
+  fi
 }
 
 is_fleetum_application_image() {
@@ -136,21 +193,26 @@ cleanup_docker_storage() {
 
 ensure_minimum_disk_space() {
   local phase="$1"
-  local available_kib required_kib available_gib
+  local available_kib required_kib available_gib used_percent
 
-  if ! [[ "$MIN_FREE_DISK_GB" =~ ^[1-9][0-9]*$ ]]; then
-    log "MIN_FREE_DISK_GB must be a positive integer, received: $MIN_FREE_DISK_GB"
-    exit 2
-  fi
+  validate_positive_integer "MIN_FREE_DISK_GB" "$MIN_FREE_DISK_GB"
+  validate_percent "MAX_DISK_USAGE_PERCENT" "$MAX_DISK_USAGE_PERCENT"
 
   available_kib="$(disk_available_kib)"
   required_kib=$((MIN_FREE_DISK_GB * 1024 * 1024))
   available_gib="$(format_kib_as_gib "$available_kib")"
+  used_percent="$(disk_used_percent)"
 
-  log "available disk before $phase: ${available_gib} GiB (minimum: ${MIN_FREE_DISK_GB} GiB)"
+  log "disk before $phase: ${used_percent}% used, ${available_gib} GiB free (minimum: ${MIN_FREE_DISK_GB} GiB; maximum usage: ${MAX_DISK_USAGE_PERCENT}%)"
   if [ "$available_kib" -lt "$required_kib" ]; then
     log "ERROR: insufficient disk space before $phase. Free Docker storage or expand the VPS disk, then retry."
-    docker system df || true
+    report_disk_state "insufficient space before $phase"
+    exit 1
+  fi
+
+  if [ "$used_percent" -ge "$MAX_DISK_USAGE_PERCENT" ]; then
+    log "ERROR: filesystem usage is above the configured deployment limit before $phase. Free Docker storage or expand the VPS disk, then retry."
+    report_disk_state "usage limit exceeded before $phase"
     exit 1
   fi
 }
@@ -238,15 +300,25 @@ main() {
 
   # Keep the active release, rollback release and target image while reclaiming stale layers.
   cleanup_docker_storage "image pull"
+  check_disk_alert_thresholds "pre-pull"
   ensure_minimum_disk_space "image pull"
 
   export FLEETUM_BACKEND_IMAGE
   export FLEETUM_FRONTEND_IMAGE
 
   log "pulling target images"
-  run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull
+  if ! run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull; then
+    report_disk_state "failed image pull"
+    check_disk_alert_thresholds "failed-image-pull"
+    exit 1
+  fi
 
+  check_disk_alert_thresholds "post-pull"
+  ensure_minimum_disk_space "database and uploads backup"
   backup_before_migration
+  # Backups can consume storage; never migrate if the remaining capacity is unsafe.
+  check_disk_alert_thresholds "pre-migration"
+  ensure_minimum_disk_space "Prisma migration"
 
   log "running Prisma migrations"
   run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm backend \
@@ -262,6 +334,8 @@ main() {
 
   # A successful deploy is the safest point to remove stale Fleetum release images.
   cleanup_docker_storage "post-deploy maintenance"
+  report_disk_state "post-deploy"
+  check_disk_alert_thresholds "post-deploy"
 
   log "deploy completed successfully"
 }

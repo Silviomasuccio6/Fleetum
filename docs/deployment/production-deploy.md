@@ -20,7 +20,7 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 3. Upload deployment manifests to the VPS.
 4. Save currently running image tags in `/opt/fleetum/last-deploy.txt`.
 5. Reclaim unused Docker build cache, dangling layers and obsolete Fleetum image tags while preserving the running, rollback and target releases.
-6. Verify at least `10 GB` is free on the VPS filesystem before pulling images; abort before migration if the threshold is not met.
+6. Verify both the free-space and usage thresholds before pulling images, after the pull and again before Prisma migration; abort before migration if a threshold is not met.
 7. Pull the selected images on the VPS.
 8. Backup database with `deploy/backup/backup-postgres.sh`.
 9. Backup uploads with `deploy/backup/backup-uploads.sh`.
@@ -28,7 +28,7 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 11. Restart services.
 12. Health check `/api/ready`.
 13. Automatic application rollback if health fails.
-14. Repeat safe Docker cleanup after a healthy release, then perform public health checks and log review.
+14. Repeat safe Docker cleanup after a healthy release, emit a `df -h` / `docker system df` report, then perform public health checks and log review.
 
 ## Images
 
@@ -43,13 +43,25 @@ The workflow also updates `latest`, but the deploy step passes the explicit SHA-
 
 ### Disk capacity guard
 
-The deploy script reserves `10 GB` of free filesystem capacity by default before it pulls a new image. It only removes:
+The deploy script reserves `10 GB` of free filesystem capacity by default and blocks deployment at `90%` filesystem usage. It checks these limits before the image pull, after the pull and immediately before Prisma migration. It only removes:
 
 - Docker build cache;
 - dangling image layers;
 - old `ghcr.io/silviomasuccio6/fleetum-backend` and `fleetum-frontend` tags that are not active, not the rollback release and not the target release.
 
-It never prunes PostgreSQL, named volumes, `/opt/fleetum/uploads`, local backups or arbitrary third-party images. Override the threshold only deliberately with `MIN_FREE_DISK_GB`, for example `MIN_FREE_DISK_GB=15`.
+It never prunes PostgreSQL, named volumes, `/opt/fleetum/uploads`, local backups or arbitrary third-party images. The final deploy log prints a safe capacity report using `df -h` and `docker system df`.
+
+Configure these non-secret GitHub production Variables only when a different capacity policy is required:
+
+```txt
+FLEETUM_MIN_FREE_DISK_GB=10
+FLEETUM_MAX_DISK_USAGE_PERCENT=90
+FLEETUM_DISK_ALERT_WARNING_PERCENT=80
+FLEETUM_DISK_ALERT_CRITICAL_PERCENT=90
+FLEETUM_DISK_ALERT_COOLDOWN_HOURS=24
+```
+
+The disk alert uses the existing Resend configuration from `/opt/fleetum/env/backup.env`. Set `DISK_ALERT_EMAIL` there to override `BACKUP_ALERT_EMAIL`; no alert credential belongs in GitHub Variables or the repository. Alerts are sent once per severity level and then rate-limited by the cooldown state file.
 
 If a deploy stops for low disk space, investigate before retrying:
 
@@ -59,7 +71,7 @@ docker system df
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 ```
 
-The current 72 GB VPS should be expanded before file volume or customer count grows materially. Docker image retention is a safety net, not a substitute for capacity planning.
+The current 72 GB VPS should be expanded to **120-160 GB** before file volume or customer count grows materially. Docker image retention is a safety net, not a substitute for capacity planning.
 
 ## Migration command
 

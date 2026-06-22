@@ -160,6 +160,11 @@ jobs:
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
           FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE || vars.ENV_FILE }}
           FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE || vars.LAST_DEPLOY_FILE }}
+          FLEETUM_MIN_FREE_DISK_GB: ${{ vars.FLEETUM_MIN_FREE_DISK_GB || '10' }}
+          FLEETUM_MAX_DISK_USAGE_PERCENT: ${{ vars.FLEETUM_MAX_DISK_USAGE_PERCENT || '90' }}
+          FLEETUM_DISK_ALERT_WARNING_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_WARNING_PERCENT || '80' }}
+          FLEETUM_DISK_ALERT_CRITICAL_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_CRITICAL_PERCENT || '90' }}
+          FLEETUM_DISK_ALERT_COOLDOWN_HOURS: ${{ vars.FLEETUM_DISK_ALERT_COOLDOWN_HOURS || '24' }}
         run: |
           set -euo pipefail
 
@@ -183,6 +188,18 @@ jobs:
           FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           FLEETUM_ENV_FILE="$(printf '%s' "$FLEETUM_ENV_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           FLEETUM_LAST_DEPLOY_FILE="$(printf '%s' "$FLEETUM_LAST_DEPLOY_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          for disk_variable in \
+            FLEETUM_MIN_FREE_DISK_GB \
+            FLEETUM_MAX_DISK_USAGE_PERCENT \
+            FLEETUM_DISK_ALERT_WARNING_PERCENT \
+            FLEETUM_DISK_ALERT_CRITICAL_PERCENT \
+            FLEETUM_DISK_ALERT_COOLDOWN_HOURS; do
+            disk_value="${!disk_variable}"
+            if ! [[ "$disk_value" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::$disk_variable must be a positive integer."
+              exit 1
+            fi
+          done
 
           if [ "$missing" -ne 0 ]; then
             echo "::error::Production deploy configuration is incomplete. Add the missing GitHub Secrets/Variables in the production environment or repository settings."
@@ -195,6 +212,7 @@ jobs:
           echo "App dir: $FLEETUM_APP_DIR"
           echo "Compose env file: $FLEETUM_ENV_FILE"
           echo "Last deploy file: $FLEETUM_LAST_DEPLOY_FILE"
+          echo "Disk guard configured: yes"
 
       - name: Configure SSH key
         env:
@@ -302,6 +320,11 @@ jobs:
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
           FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE || vars.ENV_FILE }}
           FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE || vars.LAST_DEPLOY_FILE }}
+          FLEETUM_MIN_FREE_DISK_GB: ${{ vars.FLEETUM_MIN_FREE_DISK_GB || '10' }}
+          FLEETUM_MAX_DISK_USAGE_PERCENT: ${{ vars.FLEETUM_MAX_DISK_USAGE_PERCENT || '90' }}
+          FLEETUM_DISK_ALERT_WARNING_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_WARNING_PERCENT || '80' }}
+          FLEETUM_DISK_ALERT_CRITICAL_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_CRITICAL_PERCENT || '90' }}
+          FLEETUM_DISK_ALERT_COOLDOWN_HOURS: ${{ vars.FLEETUM_DISK_ALERT_COOLDOWN_HOURS || '24' }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
@@ -327,13 +350,16 @@ jobs:
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "cd '$FLEETUM_APP_DIR' && chmod +x deploy/scripts/*.sh deploy/backup/*.sh && FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
+            "cd '$FLEETUM_APP_DIR' && chmod +x deploy/scripts/*.sh deploy/backup/*.sh && FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' MIN_FREE_DISK_GB='$FLEETUM_MIN_FREE_DISK_GB' MAX_DISK_USAGE_PERCENT='$FLEETUM_MAX_DISK_USAGE_PERCENT' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
 
       - name: Install managed backup cron
         env:
           FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
           FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
+          FLEETUM_DISK_ALERT_WARNING_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_WARNING_PERCENT || '80' }}
+          FLEETUM_DISK_ALERT_CRITICAL_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_CRITICAL_PERCENT || '90' }}
+          FLEETUM_DISK_ALERT_COOLDOWN_HOURS: ${{ vars.FLEETUM_DISK_ALERT_COOLDOWN_HOURS || '24' }}
         run: |
           set -euo pipefail
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
@@ -348,7 +374,7 @@ jobs:
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
           FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "APP_DIR='$FLEETUM_APP_DIR' '$FLEETUM_APP_DIR/deploy/backup/install-cron.sh'"
+            "APP_DIR='$FLEETUM_APP_DIR' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' '$FLEETUM_APP_DIR/deploy/backup/install-cron.sh'"
 
       - name: Production health checks
         run: |
