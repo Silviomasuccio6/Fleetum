@@ -59,6 +59,7 @@ For aws-cli targets, configure bucket lifecycle to expire `postgres/` and `uploa
 ```cron
 15 2 * * * /opt/fleetum/app/deploy/backup/backup-postgres.sh >> /opt/fleetum/logs/backup-postgres.log 2>&1
 30 2 * * * /opt/fleetum/app/deploy/backup/backup-uploads.sh >> /opt/fleetum/logs/backup-uploads.log 2>&1
+*/30 * * * * /opt/fleetum/app/deploy/scripts/disk-capacity-alert.sh --check cron >> /opt/fleetum/logs/disk-capacity.log 2>&1
 ```
 
 Production deploys install this schedule automatically through:
@@ -67,7 +68,7 @@ Production deploys install this schedule automatically through:
 /opt/fleetum/app/deploy/backup/install-cron.sh
 ```
 
-The scripts auto-load `/opt/fleetum/env/backup.env`, so cron does not need to inline secrets.
+The scripts auto-load `/opt/fleetum/env/backup.env`, so cron does not need to inline secrets. The disk monitor runs every 30 minutes and uses the same Resend alert channel; production deploy installs the configured non-secret thresholds into its cron entry.
 
 ## Manual backup
 

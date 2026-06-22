@@ -371,6 +371,7 @@ Schedulazione:
 ```cron
 15 2 * * * /opt/fleetum/app/deploy/backup/backup-postgres.sh >> /opt/fleetum/logs/backup-postgres.log 2>&1
 30 2 * * * /opt/fleetum/app/deploy/backup/backup-uploads.sh >> /opt/fleetum/logs/backup-uploads.log 2>&1
+*/30 * * * * /opt/fleetum/app/deploy/scripts/disk-capacity-alert.sh --check cron >> /opt/fleetum/logs/disk-capacity.log 2>&1
 ```
 
 Restore test mensile:
@@ -480,6 +481,54 @@ curl -fsS https://api.fleetum.it/api/ready
 Il backend production non deve necessariamente pubblicare la porta `4000` sull'host:
 Caddy raggiunge il container tramite rete Docker. Per questo il safe deploy usa l'URL
 pubblico `https://api.fleetum.it/api/ready` invece di `http://127.0.0.1:4000/api/ready`.
+
+### Capacita' disco e prevenzione deploy falliti
+
+Il deploy non elimina mai volumi PostgreSQL, upload, backup validi o immagini necessarie al
+rollback. Prima del pull, dopo il pull e prima di `prisma migrate deploy` controlla:
+
+```txt
+FLEETUM_MIN_FREE_DISK_GB=10
+FLEETUM_MAX_DISK_USAGE_PERCENT=90
+```
+
+Il workflow legge questi valori come GitHub Variables dell'environment `production`; lasciare
+i default salvo capacity planning esplicito. Il deploy si ferma prima della migration quando
+lo spazio libero e' insufficiente o l'uso filesystem raggiunge il limite configurato.
+
+Gli alert email usano il canale Resend gia' configurato in `/opt/fleetum/env/backup.env`:
+
+```txt
+DISK_ALERT_EMAIL=ops@example.com
+```
+
+Se `DISK_ALERT_EMAIL` e' vuoto viene usato `BACKUP_ALERT_EMAIL`. Le soglie non-secret sono:
+
+```txt
+FLEETUM_DISK_ALERT_WARNING_PERCENT=80
+FLEETUM_DISK_ALERT_CRITICAL_PERCENT=90
+FLEETUM_DISK_ALERT_COOLDOWN_HOURS=24
+```
+
+Il report post-deploy mostra soltanto metriche aggregate tramite `df -h` e `docker system df`.
+Per testare senza inviare email:
+
+```bash
+cd /opt/fleetum/app
+DRY_RUN=true DISK_USAGE_PERCENT_OVERRIDE=80 \
+  ./deploy/scripts/disk-capacity-alert.sh --check manual-test
+```
+
+Se il disco supera l'80%, controllare prima cache e immagini Fleetum obsolete:
+
+```bash
+df -h /
+docker system df
+```
+
+Non eseguire `docker system prune --volumes` in produzione. Se il consumo cresce in modo
+strutturale, pianificare l'espansione VPS a **120-160 GB**: la pulizia immagini non sostituisce
+capacita' per database, documenti, backup locali e release rollback.
 
 Se il health check fallisce dopo `up -d`, lo script esegue rollback applicativo automatico
 alle immagini salvate in `/opt/fleetum/last-deploy.txt`.
