@@ -4,7 +4,7 @@ import { platformAdminUseCases } from "../../../application/usecases/platform/pl
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
 import "../../../features/auth/premium-login.css";
 
-type RecoveryStep = "request" | "confirm" | "complete";
+type RecoveryStep = "request" | "confirm";
 
 const MailIcon = () => (
   <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
@@ -93,10 +93,13 @@ export const PlatformPasswordRecoveryPage = () => {
     setLoading(true);
     try {
       const result = await platformAdminUseCases.confirmPasswordReset({ email: email.trim(), otp, newPassword });
+      if (!result.token) {
+        throw new Error("Password aggiornata, ma la sessione Platform non e disponibile. Accedi con le nuove credenziali.");
+      }
       setNotice(result.message);
       setNewPassword("");
       setConfirmPassword("");
-      setStep("complete");
+      navigate("/console", { replace: true });
     } catch (confirmError) {
       setError((confirmError as Error).message);
     } finally {
@@ -104,12 +107,10 @@ export const PlatformPasswordRecoveryPage = () => {
     }
   };
 
-  const heading = step === "complete" ? "Password aggiornata" : "Recupera password Platform";
+  const heading = "Recupera password Platform";
   const description = step === "request"
     ? "Inserisci l'email amministratore per ricevere il codice OTP."
-    : step === "confirm"
-      ? "Inserisci il codice ricevuto e scegli una nuova password sicura."
-      : "Puoi tornare al login con le nuove credenziali.";
+    : "Inserisci il codice ricevuto e scegli una nuova password sicura.";
 
   return (
     <div className="premium-login-root premium-login-root--clean">
@@ -171,12 +172,6 @@ export const PlatformPasswordRecoveryPage = () => {
               </form>
             ) : null}
 
-            {step === "complete" ? (
-              <div className="premium-login-form">
-                {notice ? <p className="premium-login-success premium-login-error--block" role="status">{notice}</p> : null}
-                <button className="premium-login-submit" type="button" onClick={() => navigate("/login")}>Torna al login Platform</button>
-              </div>
-            ) : null}
           </section>
         </div>
       </main>

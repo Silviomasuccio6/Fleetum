@@ -249,7 +249,8 @@ export const platformAdminUseCases = {
     });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Cambio password fallito");
-    return data as { message: string };
+    if (data.token) platformAuthStorage.set(data.token);
+    return data as { message: string; token?: string };
   },
   logout: () => platformAuthStorage.clear(),
   listTenants: async () => {

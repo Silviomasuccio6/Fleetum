@@ -13,7 +13,7 @@ Permettere al founder autorizzato di recuperare la password della Platform Conso
 2. Inserire l'email amministratore configurata in `PLATFORM_ADMIN_EMAIL`.
 3. Ricevere un OTP Resend a 6 cifre.
 4. Inserire OTP, nuova password di almeno 16 caratteri e conferma.
-5. Tornare al login Platform con le nuove credenziali.
+5. Entrare direttamente nella Platform Console: il reset OTP verifica gia l'identita e il browser riceve una nuova sessione Platform.
 
 La pagina e `#/password-recovery`. Il routing usa HashRouter per compatibilita con hosting statico.
 
@@ -65,6 +65,8 @@ Risposta della richiesta OTP: sempre generica. Questo evita di rivelare se un in
 - `lastResetAt`
 
 Prima del primo reset, il login usa `PLATFORM_ADMIN_PASSWORD_HASH` come fallback bootstrap. Dopo un reset, il database diventa la fonte della password. Non rimuovere comunque l'hash ambiente: serve per bootstrap e recovery d'emergenza controllato.
+
+L'hash bootstrap deve essere un bcrypt completo di 60 caratteri. In produzione il compose usa `env_file.format: raw`, cosi Docker Compose non interpreta i caratteri `$` contenuti in bcrypt. Mantieni il valore non quotato nel file `/opt/fleetum/env/backend.env`.
 
 ## Deploy
 
