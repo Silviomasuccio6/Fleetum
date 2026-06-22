@@ -11,6 +11,8 @@ UPLOADS_DIR="${UPLOADS_DIR:-/opt/fleetum/uploads}"
 HEALTH_URL="${HEALTH_URL:-https://api.fleetum.it/api/ready}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-12}"
 HEALTH_SLEEP_SECONDS="${HEALTH_SLEEP_SECONDS:-5}"
+MIN_FREE_DISK_GB="${MIN_FREE_DISK_GB:-10}"
+CLEANUP_DOCKER_IMAGES="${CLEANUP_DOCKER_IMAGES:-true}"
 DRY_RUN="${DRY_RUN:-false}"
 
 : "${FLEETUM_BACKEND_IMAGE:?FLEETUM_BACKEND_IMAGE is required}"
@@ -36,6 +38,121 @@ current_container_image() {
   fi
 
   docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true
+}
+
+disk_available_kib() {
+  df -Pk "$APP_DIR" | awk 'NR == 2 { print $4 }'
+}
+
+format_kib_as_gib() {
+  awk -v kib="$1" 'BEGIN { printf "%.1f", kib / 1024 / 1024 }'
+}
+
+is_fleetum_application_image() {
+  case "$1" in
+    ghcr.io/silviomasuccio6/fleetum-backend:*|ghcr.io/silviomasuccio6/fleetum-frontend:*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+append_protected_image() {
+  local image="$1"
+  if [ -n "$image" ] && is_fleetum_application_image "$image"; then
+    PROTECTED_IMAGES+=("$image")
+  fi
+}
+
+is_protected_image() {
+  local image="$1"
+  local protected
+  for protected in "${PROTECTED_IMAGES[@]}"; do
+    if [ "$image" = "$protected" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_protected_images() {
+  local release_image
+
+  PROTECTED_IMAGES=()
+  append_protected_image "$(current_container_image fleetum_backend)"
+  append_protected_image "$(current_container_image fleetum_caddy)"
+  append_protected_image "$FLEETUM_BACKEND_IMAGE"
+  append_protected_image "$FLEETUM_FRONTEND_IMAGE"
+  append_protected_image "ghcr.io/silviomasuccio6/fleetum-backend:latest"
+  append_protected_image "ghcr.io/silviomasuccio6/fleetum-frontend:latest"
+
+  if [ -f "$LAST_DEPLOY_FILE" ]; then
+    while IFS= read -r release_image; do
+      append_protected_image "$release_image"
+    done < <(
+      awk -F= '
+        /^(PREVIOUS|NEW)_(BACKEND|FRONTEND)_IMAGE=ghcr\.io\/silviomasuccio6\/fleetum-(backend|frontend):/ {
+          print $2
+        }
+      ' "$LAST_DEPLOY_FILE"
+    )
+  fi
+}
+
+cleanup_docker_storage() {
+  local phase="$1"
+  local image
+
+  if [ "$CLEANUP_DOCKER_IMAGES" != "true" ]; then
+    log "Docker image cleanup disabled for $phase"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = "true" ]; then
+    log "dry-run would prune Docker build cache, dangling layers and obsolete Fleetum images before $phase"
+    return 0
+  fi
+
+  load_protected_images
+  log "pruning unused Docker build cache before $phase"
+  docker builder prune -af
+
+  while IFS= read -r image; do
+    if ! is_fleetum_application_image "$image" || is_protected_image "$image"; then
+      continue
+    fi
+
+    log "removing obsolete Fleetum image tag: $image"
+    if ! docker image rm "$image"; then
+      log "unable to remove image tag (it may still be referenced): $image"
+    fi
+  done < <(docker image ls --format '{{.Repository}}:{{.Tag}}')
+
+  log "pruning dangling Docker image layers before $phase"
+  docker image prune -f
+}
+
+ensure_minimum_disk_space() {
+  local phase="$1"
+  local available_kib required_kib available_gib
+
+  if ! [[ "$MIN_FREE_DISK_GB" =~ ^[1-9][0-9]*$ ]]; then
+    log "MIN_FREE_DISK_GB must be a positive integer, received: $MIN_FREE_DISK_GB"
+    exit 2
+  fi
+
+  available_kib="$(disk_available_kib)"
+  required_kib=$((MIN_FREE_DISK_GB * 1024 * 1024))
+  available_gib="$(format_kib_as_gib "$available_kib")"
+
+  log "available disk before $phase: ${available_gib} GiB (minimum: ${MIN_FREE_DISK_GB} GiB)"
+  if [ "$available_kib" -lt "$required_kib" ]; then
+    log "ERROR: insufficient disk space before $phase. Free Docker storage or expand the VPS disk, then retry."
+    docker system df || true
+    exit 1
+  fi
 }
 
 save_current_release() {
@@ -119,6 +236,10 @@ main() {
 
   save_current_release
 
+  # Keep the active release, rollback release and target image while reclaiming stale layers.
+  cleanup_docker_storage "image pull"
+  ensure_minimum_disk_space "image pull"
+
   export FLEETUM_BACKEND_IMAGE
   export FLEETUM_FRONTEND_IMAGE
 
@@ -138,6 +259,9 @@ main() {
     rollback_after_failed_health
     exit 1
   fi
+
+  # A successful deploy is the safest point to remove stale Fleetum release images.
+  cleanup_docker_storage "post-deploy maintenance"
 
   log "deploy completed successfully"
 }
