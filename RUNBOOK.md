@@ -360,6 +360,11 @@ Backup manuale:
 /opt/fleetum/app/deploy/backup/backup-uploads.sh
 ```
 
+Per PostgreSQL locale Docker, il backup usa il container `fleetum_postgres` direttamente:
+non dipende dai tag immagine richiesti dal compose applicativo. Se rclone e' installato in
+`/home/fleetum/bin`, configurare `RCLONE_BIN=/home/fleetum/bin/rclone` in
+`/opt/fleetum/env/backup.env` per renderlo disponibile anche al cron.
+
 Cron giornaliero installato dal deploy:
 
 ```bash
@@ -543,6 +548,47 @@ Migration destructive richiedono reverse migration testata o restore da backup.
 4. Se necessario, rollback applicativo alla release precedente.
 5. Ripristinare DB da backup solo in caso di corruzione dati confermata.
 6. Aprire post-mortem con timeline e azioni correttive.
+
+## Manutenzione sicurezza VPS e reboot
+
+### Finestra standard
+
+- Pianificare una finestra di 10 minuti in fascia a basso traffico e sospendere deploy concorrenti.
+- Comunicare agli operatori una breve indisponibilita' prevista; il database locale e i container
+  ripartono automaticamente con `restart: unless-stopped` e Docker abilitato al boot.
+- Prima di applicare aggiornamenti, eseguire e verificare backup PostgreSQL e uploads con offsite
+  obbligatorio. Non procedere se uno dei due backup o la verifica offsite fallisce.
+- Registrare in un maintenance log data UTC, inizio/fine, versione kernel precedente/successiva,
+  pacchetti applicati, health check e downtime misurato.
+
+### Sequenza operativa
+
+```bash
+# Preflight
+df -h /
+docker ps
+curl -fsS https://api.fleetum.it/api/ready
+/opt/fleetum/app/deploy/backup/backup-postgres.sh
+/opt/fleetum/app/deploy/backup/backup-uploads.sh
+
+# Aggiornamento e reboot: eseguire solo nella finestra approvata.
+sudo apt update
+sudo apt upgrade
+sudo reboot
+```
+
+Dopo il boot verificare `systemctl is-active docker`, `systemctl is-active cron`,
+`docker ps`, `/api/ready`, Platform health interna, landing, login e un booking esistente.
+
+### Rollback
+
+- Se il VPS non torna raggiungibile entro 10 minuti, usare la console del provider per verificare
+  boot, rete e console seriale; non ripetere deploy applicativi finche' il sistema non e' stabile.
+- Se Docker riparte ma la nuova release applicativa non e' sana, usare
+  `deploy/scripts/rollback-production.sh` e verificare `/api/ready`.
+- Gli aggiornamenti OS non hanno rollback automatico: se un kernel/package causa regressioni,
+  avviare il kernel precedente dal bootloader o ripristinare snapshot/provider backup secondo la
+  procedura OVH. Non ripristinare il database per un problema esclusivamente di sistema operativo.
 
 ## Rollback applicativo
 - Conservare sempre l'artefatto della release precedente.

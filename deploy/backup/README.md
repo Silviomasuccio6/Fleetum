@@ -33,6 +33,7 @@ Works well with Cloudflare R2, AWS S3 and Backblaze B2.
 ```bash
 rclone config
 OFFSITE_RCLONE_TARGET=fleetum-r2:fleetum-backups
+RCLONE_BIN=/home/fleetum/bin/rclone
 ```
 
 Backups are uploaded to:
@@ -68,7 +69,7 @@ Production deploys install this schedule automatically through:
 /opt/fleetum/app/deploy/backup/install-cron.sh
 ```
 
-The scripts auto-load `/opt/fleetum/env/backup.env`, so cron does not need to inline secrets. The disk monitor runs every 30 minutes and uses the same Resend alert channel; production deploy installs the configured non-secret thresholds into its cron entry.
+The scripts auto-load `/opt/fleetum/env/backup.env`, so cron does not need to inline secrets. `RCLONE_BIN` is useful when rclone is installed in the Fleetum user's `~/bin` directory, which is not always present in cron's PATH. The disk monitor runs every 30 minutes and uses the same Resend alert channel; production deploy installs the configured non-secret thresholds into its cron entry.
 
 ## Manual backup
 
