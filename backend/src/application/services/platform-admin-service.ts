@@ -224,6 +224,26 @@ export class PlatformAdminService {
     return credential?.passwordHash ?? env.PLATFORM_ADMIN_PASSWORD_HASH;
   }
 
+  private createPlatformSession() {
+    const token = jwt.sign(
+      {
+        userId: "platform-admin",
+        tenantId: "platform",
+        roles: ["PLATFORM_ADMIN"],
+        permissions: ["platform:manage"],
+        platformAdmin: true,
+        tokenType: "platform"
+      },
+      env.PLATFORM_JWT_SECRET,
+      { expiresIn: env.PLATFORM_JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"] }
+    );
+
+    return {
+      token,
+      user: { id: "platform-admin", email: env.PLATFORM_ADMIN_EMAIL, firstName: "Platform", lastName: "Admin", roles: ["PLATFORM_ADMIN"] }
+    };
+  }
+
   private async issueOtp(email: string, purpose: PlatformOtpPurpose) {
     const code = createOtpCode();
     const now = new Date();
@@ -319,23 +339,7 @@ export class PlatformAdminService {
 
     await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
 
-    const token = jwt.sign(
-      {
-        userId: "platform-admin",
-        tenantId: "platform",
-        roles: ["PLATFORM_ADMIN"],
-        permissions: ["platform:manage"],
-        platformAdmin: true,
-        tokenType: "platform"
-      },
-      env.PLATFORM_JWT_SECRET,
-      { expiresIn: env.PLATFORM_JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"] }
-    );
-
-    return {
-      token,
-      user: { id: "platform-admin", email: env.PLATFORM_ADMIN_EMAIL, firstName: "Platform", lastName: "Admin", roles: ["PLATFORM_ADMIN"] }
-    };
+    return this.createPlatformSession();
   }
 
   async requestPasswordReset(input: { email: string; ip: string }) {
@@ -401,6 +405,7 @@ export class PlatformAdminService {
       otpKey: challengeKey
     });
     await this.loginGuard.clearPasswordReset(input.ip, normalizedEmail);
+    await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
     await this.alerts.notify({
       type: "PLATFORM_PASSWORD_RESET_COMPLETED",
       actor: normalizedEmail,
@@ -408,7 +413,12 @@ export class PlatformAdminService {
       details: "Platform password changed through OTP recovery"
     });
 
-    return { message: "Password aggiornata. Accedi con le nuove credenziali." };
+    // The reset OTP proves control of the founder email from an allowlisted IP.
+    // Create the Platform session directly to avoid retyping the new password.
+    return {
+      message: "Password aggiornata. Accesso Platform completato.",
+      ...this.createPlatformSession()
+    };
   }
 
   async listTenantsWithLicenses() {

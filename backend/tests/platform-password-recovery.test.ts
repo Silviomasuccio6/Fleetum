@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import { PlatformAdminService } from "../src/application/services/platform-admin-service.js";
 import { env } from "../src/shared/config/env.js";
 
@@ -18,6 +19,7 @@ const makeService = () => {
   let passwordHash: string | null = null;
   let resetRequests = 0;
   let resetsCleared = 0;
+  let loginSuccesses = 0;
 
   const authStore = {
     findPasswordCredential: async () => passwordHash ? { passwordHash } : null,
@@ -47,7 +49,7 @@ const makeService = () => {
   const loginGuard = {
     assertAllowed: async () => {},
     registerFailure: async () => ({ locked: false, failures: 1 }),
-    registerSuccess: async () => {},
+    registerSuccess: async () => { loginSuccesses += 1; },
     requestPasswordReset: async () => { resetRequests += 1; },
     assertPasswordResetAllowed: async () => {},
     clearPasswordReset: async () => { resetsCleared += 1; }
@@ -66,10 +68,18 @@ const makeService = () => {
     }
   );
 
-  return { service, otps, sentMessages, getPasswordHash: () => passwordHash, getResetRequests: () => resetRequests, getResetsCleared: () => resetsCleared };
+  return {
+    service,
+    otps,
+    sentMessages,
+    getPasswordHash: () => passwordHash,
+    getResetRequests: () => resetRequests,
+    getResetsCleared: () => resetsCleared,
+    getLoginSuccesses: () => loginSuccesses
+  };
 };
 
-test("platform password recovery sends a separate reset OTP and persists a bcrypt password hash", async () => {
+test("platform password recovery persists a bcrypt hash and creates a platform session", async () => {
   const fixture = makeService();
   const email = env.PLATFORM_ADMIN_EMAIL;
 
@@ -90,8 +100,11 @@ test("platform password recovery sends a separate reset OTP and persists a bcryp
   });
 
   assert.match(result.message, /Password aggiornata/i);
+  assert.equal(typeof result.token, "string");
+  assert.equal(jwt.verify(result.token!, env.PLATFORM_JWT_SECRET).tokenType, "platform");
   assert.equal(fixture.otps.has(`password-reset:${email}`), false);
   assert.equal(fixture.getResetsCleared(), 1);
+  assert.equal(fixture.getLoginSuccesses(), 1);
   assert.equal(await bcrypt.compare("a-new-platform-password-with-16-chars", fixture.getPasswordHash()!), true);
 });
 

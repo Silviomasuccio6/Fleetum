@@ -62,8 +62,8 @@ if (PLATFORM_JWT_SECRET.length < 64) {
   throw new Error("PLATFORM_JWT_SECRET must be at least 64 chars");
 }
 
-if (!PLATFORM_ADMIN_PASSWORD_HASH.startsWith("$2")) {
-  throw new Error("PLATFORM_ADMIN_PASSWORD_HASH must be a bcrypt hash starting with $2a$ or $2b$");
+if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(PLATFORM_ADMIN_PASSWORD_HASH)) {
+  throw new Error("PLATFORM_ADMIN_PASSWORD_HASH must be a complete bcrypt hash generated with bcryptjs");
 }
 
 if (EMAIL_PROVIDER !== "resend") {

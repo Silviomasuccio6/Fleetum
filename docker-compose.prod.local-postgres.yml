@@ -22,7 +22,10 @@ services:
     container_name: fleetum_backend
     restart: unless-stopped
     env_file:
-      - /opt/fleetum/env/backend.env
+      # Bcrypt hashes contain `$`; raw keeps them intact instead of interpolating them.
+      - path: /opt/fleetum/env/backend.env
+        required: true
+        format: raw
     depends_on:
       postgres:
         condition: service_healthy
