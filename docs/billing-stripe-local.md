@@ -15,13 +15,12 @@ Ogni nuovo tenant parte in `PENDING`. L'accesso operativo al gestionale si abili
 `BILLING_TRIAL_DAYS` configura il trial dentro Stripe Checkout: il trial di 14 giorni non viene più assegnato localmente allo signup.
 Fleetum richiede sempre una carta valida prima di iniziare il trial: la Checkout Session usa `payment_method_collection=always` e l'eventuale assenza del metodo di pagamento a fine trial cancella la subscription Stripe invece di lasciare accessi gratuiti non fatturabili.
 
-Gli utenti possono aprire il Customer Portal ufficiale Stripe dal gestionale per gestire carta, fatture, cambio piano e cancellazione. Rimane disponibile anche una sessione Stripe Checkout `mode=setup` per la sola sostituzione della carta. Fleetum non riceve né conserva dati della carta.
+Gli utenti possono aprire il Customer Portal ufficiale Stripe dal gestionale per gestire fatture, cambio piano e cancellazione. La sostituzione della carta resta su una sessione Stripe Checkout `mode=setup` dedicata: Fleetum non espone un'azione per rimuovere il metodo di pagamento e non riceve né conserva dati della carta.
 
 ## Customer Portal Stripe
 
 Nel dashboard Stripe, per ogni ambiente (Test e Live), abilita il Customer Portal e configura almeno:
 
-- aggiornamento metodo di pagamento;
 - storico fatture;
 - cambio piano solo tra i sei `Price ID` Fleetum configurati;
 - cancellazione abbonamento secondo la policy commerciale scelta.

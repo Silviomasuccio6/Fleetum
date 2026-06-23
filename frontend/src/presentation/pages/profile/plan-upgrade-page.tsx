@@ -246,7 +246,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             <div>
               <p className="font-semibold">Abbonamento e metodo di pagamento</p>
               <p className="text-sky-800/80 dark:text-sky-100/75">
-                Gestisci in sicurezza su Stripe carta, fatture, piano e cancellazione. Fleetum non riceve ne conserva dati della carta.
+                Gestisci su Stripe fatture, piano e cancellazione. Per sostituire la carta usa l'azione dedicata: Fleetum non offre la rimozione del metodo di pagamento.
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
@@ -267,7 +267,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 }}
               >
                 <ExternalLink className="h-4 w-4" />
-                {busyPortal ? "Apertura Stripe..." : "Gestisci su Stripe"}
+                {busyPortal ? "Apertura Stripe..." : "Gestisci abbonamento"}
               </Button>
               <Button
                 type="button"
