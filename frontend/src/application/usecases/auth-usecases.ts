@@ -40,6 +40,7 @@ export const authUseCases = {
         expiresAt: string | null;
         daysRemaining: number | null;
         expiringSoon: boolean;
+        provider: "stripe" | "local";
       };
     }>("/auth/me/entitlements"),
   licenseStatus: () =>
@@ -50,6 +51,7 @@ export const authUseCases = {
       expiresAt: string | null;
       daysRemaining: number | null;
       expiringSoon: boolean;
+      provider: "stripe" | "local";
     }>("/auth/license-status"),
   privacyCurrent: () =>
     httpClient.get<{

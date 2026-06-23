@@ -64,6 +64,26 @@ const PLAN_PRICE_ENV_KEYS: Record<SaasPlan, Record<BillingCycle, keyof typeof en
   }
 };
 
+const resolvePlanAndCycleFromStripePrice = (source: Record<string, unknown>): { plan: SaasPlan; billingCycle: BillingCycle } | null => {
+  const priceId = [
+    stripeId(getNested(source, "items.data.0.price")),
+    stripeId(getNested(source, "lines.data.0.price")),
+    stripeId(getNested(source, "lines.data.0.pricing.price_details.price"))
+  ].find(Boolean);
+
+  if (!priceId) return null;
+
+  for (const plan of ["STARTER", "PRO", "ENTERPRISE"] as const) {
+    for (const billingCycle of ["monthly", "yearly"] as const) {
+      if (env[PLAN_PRICE_ENV_KEYS[plan][billingCycle]] === priceId) {
+        return { plan, billingCycle };
+      }
+    }
+  }
+
+  return null;
+};
+
 const getNested = (source: unknown, path: string): unknown => {
   let current = source;
   for (const key of path.split(".")) {
@@ -189,7 +209,7 @@ export class BillingService {
       MANAGED_STRIPE_SUBSCRIPTION_STATUSES.has(existingSubscription.status)
     ) {
       throw new AppError(
-        "Esiste gia un abbonamento Stripe per questo tenant. Cambia piano dalla Platform Console o aggiorna la carta esistente.",
+        "Esiste gia un abbonamento Stripe per questo tenant. Gestisci piano e carta dal Customer Portal Stripe.",
         409,
         "STRIPE_SUBSCRIPTION_ALREADY_ACTIVE"
       );
@@ -318,6 +338,41 @@ export class BillingService {
     });
 
     return { mode: "stripe", checkoutUrl: session.url };
+  }
+
+  async createCustomerPortalSession(input: { tenantId: string; userId: string }) {
+    if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
+      throw new AppError("Stripe non configurato", 500, "STRIPE_NOT_CONFIGURED");
+    }
+
+    const subscription = await this.deps.findSubscriptionByTenantId(input.tenantId);
+    if (subscription?.provider !== "stripe" || !subscription.stripeCustomerId) {
+      throw new AppError(
+        "Completa prima il checkout Stripe per gestire abbonamento e carta.",
+        409,
+        "STRIPE_CUSTOMER_MISSING"
+      );
+    }
+
+    const session = await this.stripeClient.billingPortal.sessions.create({
+      customer: subscription.stripeCustomerId,
+      return_url: env.STRIPE_PORTAL_RETURN_URL || `${env.APP_URL}/upgrade?portal=returned`,
+      configuration: env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID || undefined
+    });
+
+    await this.auditRepository.create({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      action: "BILLING_CUSTOMER_PORTAL_SESSION_CREATED",
+      resource: "billing",
+      resourceId: session.id,
+      details: {
+        stripeCustomerId: subscription.stripeCustomerId,
+        hasConfigurationOverride: Boolean(env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID)
+      }
+    });
+
+    return { portalUrl: session.url };
   }
 
   async completeLocalCheckout(input: { tenantId: string; userId: string; plan: string; billingCycle?: string }) {
@@ -514,8 +569,10 @@ export class BillingService {
     if (!tenantId) return null;
 
     const current = await this.deps.findSubscriptionByTenantId(tenantId);
-    const plan = ensureKnownPlan(String(metadata.plan ?? current?.plan ?? "STARTER"));
-    const billingCycle = normalizeBillingCycle(String(metadata.billingCycle ?? current?.billingCycle ?? "monthly"));
+    // Customer Portal can change the subscription price without changing historical metadata.
+    const priceSelection = resolvePlanAndCycleFromStripePrice(source);
+    const plan = priceSelection?.plan ?? ensureKnownPlan(String(metadata.plan ?? current?.plan ?? "STARTER"));
+    const billingCycle = priceSelection?.billingCycle ?? normalizeBillingCycle(String(metadata.billingCycle ?? current?.billingCycle ?? "monthly"));
     const currentPeriodEnd = source.current_period_end ?? getNested(source, "lines.data.0.period.end");
     const expiresAt = unixToIso(currentPeriodEnd) ?? current?.expiresAt ?? null;
     const customerId = stripeId(source.customer) ?? fallback?.fallbackCustomerId ?? current?.stripeCustomerId ?? null;
@@ -526,7 +583,7 @@ export class BillingService {
       seats: current?.seats ?? 3,
       status,
       expiresAt,
-      priceMonthly: current?.priceMonthly ?? getPlanMonthlyPrice(plan),
+      priceMonthly: priceSelection ? getPlanMonthlyPrice(plan) : current?.priceMonthly ?? getPlanMonthlyPrice(plan),
       billingCycle,
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscriptionId,

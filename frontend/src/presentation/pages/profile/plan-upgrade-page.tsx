@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Check, CreditCard, Crown, Download, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Check, CreditCard, Crown, Download, ExternalLink, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
@@ -77,11 +77,12 @@ const getPlanHighlights = (plan: SaasPlan) => {
 export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const { plan, licenseStatus, loading } = useEntitlements();
+  const { plan, licenseStatus, provider, loading } = useEntitlements();
   const isActivationMode = mode === "activation";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [busyPaymentMethod, setBusyPaymentMethod] = useState(false);
+  const [busyPortal, setBusyPortal] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [activationCheckStatus, setActivationCheckStatus] = useState<ActivationCheckStatus>("idle");
   const [invoices, setInvoices] = useState<Array<{
@@ -98,9 +99,10 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const currentPlan = loading || (licenseStatus !== "ACTIVE" && licenseStatus !== "TRIAL") ? null : plan;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
   const paymentMethodStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("payment_method") : null;
+  const portalStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("portal") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
   const canUpdatePaymentMethod = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE";
-  const hasManagedStripeSubscription = canUpdatePaymentMethod;
+  const hasManagedStripeSubscription = provider === "stripe" && canUpdatePaymentMethod;
   const canReadBilling = user?.permissions.includes("billing:read") ?? false;
   const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
 
@@ -242,32 +244,52 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         <Card className="border-sky-200/80 bg-sky-50/80 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
           <CardContent className="flex flex-col gap-3 py-4 text-sm md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="font-semibold">Metodo di pagamento</p>
+              <p className="font-semibold">Abbonamento e metodo di pagamento</p>
               <p className="text-sky-800/80 dark:text-sky-100/75">
-                Puoi sostituire la carta tramite Stripe. Fleetum non mostra un'azione per rimuoverla: serve sempre un metodo valido
-                per trial, rinnovi e recupero pagamenti falliti.
+                Gestisci su Stripe fatture, piano e cancellazione. Per sostituire la carta usa l'azione dedicata: Fleetum non offre la rimozione del metodo di pagamento.
               </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0 border-sky-300 bg-white/80 text-sky-900 hover:bg-white dark:border-sky-500/40 dark:bg-slate-950/40 dark:text-sky-100"
-              disabled={busyPaymentMethod}
-              onClick={async () => {
-                setCheckoutError(null);
-                setBusyPaymentMethod(true);
-                try {
-                  const session = await billingUseCases.createPaymentMethodSession();
-                  window.location.href = session.checkoutUrl;
-                } catch (error) {
-                  setCheckoutError((error as Error).message);
-                  setBusyPaymentMethod(false);
-                }
-              }}
-            >
-              <CreditCard className="h-4 w-4" />
-              {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
-            </Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button
+                type="button"
+                className="bg-sky-700 text-white hover:bg-sky-800 dark:bg-sky-500 dark:hover:bg-sky-400"
+                disabled={busyPortal}
+                onClick={async () => {
+                  setCheckoutError(null);
+                  setBusyPortal(true);
+                  try {
+                    const session = await billingUseCases.createCustomerPortalSession();
+                    window.location.href = session.portalUrl;
+                  } catch (error) {
+                    setCheckoutError((error as Error).message);
+                    setBusyPortal(false);
+                  }
+                }}
+              >
+                <ExternalLink className="h-4 w-4" />
+                {busyPortal ? "Apertura Stripe..." : "Gestisci abbonamento"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-sky-300 bg-white/80 text-sky-900 hover:bg-white dark:border-sky-500/40 dark:bg-slate-950/40 dark:text-sky-100"
+                disabled={busyPaymentMethod}
+                onClick={async () => {
+                  setCheckoutError(null);
+                  setBusyPaymentMethod(true);
+                  try {
+                    const session = await billingUseCases.createPaymentMethodSession();
+                    window.location.href = session.checkoutUrl;
+                  } catch (error) {
+                    setCheckoutError((error as Error).message);
+                    setBusyPaymentMethod(false);
+                  }
+                }}
+              >
+                <CreditCard className="h-4 w-4" />
+                {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -313,9 +335,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             : isCurrent
               ? "Piano attivo"
               : hasManagedStripeSubscription
-                ? licenseStatus === "PAST_DUE"
-                  ? "Aggiorna carta"
-                  : "Cambio da Platform Console"
+                ? "Gestisci su Stripe"
                 : "Prova 14 giorni con carta";
           const planCheckoutDisabled = !canManageBilling || busyPlan !== null || (hasManagedStripeSubscription && !isCurrent);
 
@@ -459,6 +479,14 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <CardContent className="py-4 text-sm font-semibold">
             Aggiornamento carta annullato. Il metodo di pagamento precedente resta invariato.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {portalStatus === "returned" ? (
+        <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Gestione Stripe completata. Le modifiche a piano e abbonamento vengono applicate quando arriva il webhook verificato.
           </CardContent>
         </Card>
       ) : null}

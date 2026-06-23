@@ -7,6 +7,7 @@ export const billingRoutes = (controller: BillingController) => {
   const router = Router();
   router.post("/checkout-session", requirePermissions("billing:manage"), asyncHandler(controller.createCheckoutSession));
   router.post("/payment-method-session", requirePermissions("billing:manage"), asyncHandler(controller.createPaymentMethodSession));
+  router.post("/customer-portal-session", requirePermissions("billing:manage"), asyncHandler(controller.createCustomerPortalSession));
   router.get("/local-complete", requirePermissions("billing:manage"), asyncHandler(controller.localComplete));
   router.get("/invoices", requirePermissions("billing:read"), asyncHandler(controller.invoices));
   router.get("/invoices/:invoiceId", requirePermissions("billing:read"), asyncHandler(controller.invoice));
