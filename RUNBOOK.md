@@ -319,11 +319,20 @@ Retention: 30 giorni
 Ultimo restore drill documentato:
 
 ```txt
-Data: 2026-06-04
-Ambiente: locale isolato con schema Fleetum corrente, nessun impatto produzione
-Esito: PASS su DB, StoredFileObject e uploads canary; resta da provare backup offsite reale
-Report: docs/deployment/restore-drills/2026-06-04-restore-drill.md
+Data: 2026-06-23
+Ambiente: VPS production, sorgente offsite, PostgreSQL e filesystem temporanei isolati
+Esito: PASS su download offsite, restore DB, conteggi critici e file sentinella uploads
+RPO osservato: 14 minuti e 5 secondi
+RTO osservato: 7 secondi per download, restore e verifiche tecniche
+Report: docs/deployment/restore-drills/2026-06-23-offsite-restore-drill.md
 ```
+
+Limite noto del drill del 2026-06-23: al momento della prova `StoredFileObject` e il
+volume uploads di produzione erano vuoti. Il flusso archivio uploads e' stato quindi
+verificato con una sentinella temporanea senza dati personali, inclusa nel backup,
+recuperata in una directory privata e rimossa subito dalla produzione. Ripetere il
+drill dopo il primo upload reale, verificando anche la corrispondenza tra metadata DB
+e file recuperato senza esporre il documento pubblicamente.
 
 Configurazione production:
 
