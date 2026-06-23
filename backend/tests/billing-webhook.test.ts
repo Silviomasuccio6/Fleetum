@@ -261,6 +261,64 @@ test("payment method update creates a setup Checkout session for the Stripe cust
   assert.equal(audit.rows.at(-1)?.action, "BILLING_PAYMENT_METHOD_SESSION_CREATED");
 });
 
+test("customer portal creates a tenant-scoped Stripe session and records an audit event", async () => {
+  (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
+  (env as Record<string, unknown>).STRIPE_PORTAL_RETURN_URL = "https://fleetum.test/upgrade?portal=returned";
+  (env as Record<string, unknown>).STRIPE_BILLING_PORTAL_CONFIGURATION_ID = "bpc_test_configuration";
+  const audit = new FakeAuditRepo();
+  const createdSessions: Array<Record<string, unknown>> = [];
+  const stripeClient = {
+    billingPortal: {
+      sessions: {
+        create: async (params: Record<string, unknown>) => {
+          createdSessions.push(params);
+          return { id: "bps_test_customer_portal", url: "https://billing.stripe.test/session" };
+        }
+      }
+    }
+  } as unknown as Stripe;
+  const service = new BillingService(audit, stripeClient, {
+    async findSubscriptionByTenantId() {
+      return {
+        plan: "PRO",
+        seats: 5,
+        status: "ACTIVE",
+        expiresAt: null,
+        priceMonthly: 199,
+        billingCycle: "monthly",
+        provider: "stripe",
+        stripeCustomerId: "cus_customer_portal",
+        stripeSubscriptionId: "sub_customer_portal"
+      };
+    }
+  });
+
+  const result = await service.createCustomerPortalSession({ tenantId: "tenant-portal", userId: "user-portal" });
+
+  assert.equal(result.portalUrl, "https://billing.stripe.test/session");
+  assert.deepEqual(createdSessions, [{
+    customer: "cus_customer_portal",
+    return_url: "https://fleetum.test/upgrade?portal=returned",
+    configuration: "bpc_test_configuration"
+  }]);
+  assert.equal(audit.rows.at(-1)?.action, "BILLING_CUSTOMER_PORTAL_SESSION_CREATED");
+  assert.equal(audit.rows.at(-1)?.details?.stripeCustomerId, "cus_customer_portal");
+});
+
+test("customer portal session rejects tenants without a Stripe customer", async () => {
+  (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
+  const service = new BillingService(new FakeAuditRepo(), {} as Stripe, {
+    async findSubscriptionByTenantId() {
+      return null;
+    }
+  });
+
+  await assert.rejects(
+    () => service.createCustomerPortalSession({ tenantId: "tenant-missing-customer", userId: "user-portal" }),
+    (error) => error instanceof AppError && error.statusCode === 409 && error.code === "STRIPE_CUSTOMER_MISSING"
+  );
+});
+
 test("billing webhook verifies Stripe signature and persists checkout.session.completed as license update", async () => {
   const { audit, events, service, sign, subscriptions } = makeHarness();
   const event = baseEvent("evt_checkout_completed", "checkout.session.completed", {
@@ -354,6 +412,38 @@ test("billing webhook is idempotent by Stripe event id", async () => {
   assert.equal(events.get("evt_duplicate")?.status, "PROCESSED");
   assert.equal(upserts.length, 1);
   assert.equal(audit.rows.length, 1);
+});
+
+test("subscription update resolves plan and billing cycle from the Stripe Price ID selected in Customer Portal", async () => {
+  (env as Record<string, unknown>).STRIPE_PRICE_PRO_YEARLY = "price_portal_pro_yearly";
+  const { service, sign, subscriptions } = makeHarness();
+  subscriptions.set("tenant-portal-price", {
+    plan: "STARTER",
+    seats: 3,
+    status: "ACTIVE",
+    expiresAt: null,
+    priceMonthly: 149,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_portal_price",
+    stripeSubscriptionId: "sub_portal_price"
+  });
+
+  const result = await service.handleWebhook(sign(baseEvent("evt_portal_price_change", "customer.subscription.updated", {
+    id: "sub_portal_price",
+    object: "subscription",
+    status: "active",
+    customer: "cus_portal_price",
+    current_period_end: 1_800_000_000,
+    // Metadata can be historical after a Portal change; Price ID is the source of truth.
+    metadata: { tenantId: "tenant-portal-price", plan: "STARTER", billingCycle: "monthly" },
+    items: { data: [{ price: { id: "price_portal_pro_yearly" } }] }
+  })));
+
+  assert.deepEqual(result, { received: true, ignored: false });
+  assert.equal(subscriptions.get("tenant-portal-price")?.plan, "PRO");
+  assert.equal(subscriptions.get("tenant-portal-price")?.billingCycle, "yearly");
+  assert.equal(subscriptions.get("tenant-portal-price")?.priceMonthly, 199);
 });
 
 test("invoice.payment_failed resolves tenant from existing subscription and marks license past due", async () => {

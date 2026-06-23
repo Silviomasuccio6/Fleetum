@@ -22,6 +22,7 @@ export type LicenseInfo = {
   expiringSoon: boolean;
   priceMonthly: number | null;
   billingCycle: BillingCycle;
+  provider: "stripe" | "local";
 };
 
 const defaultLicense: LicenseInfo = {
@@ -32,7 +33,8 @@ const defaultLicense: LicenseInfo = {
   daysRemaining: null,
   expiringSoon: false,
   priceMonthly: null,
-  billingCycle: "monthly"
+  billingCycle: "monthly",
+  provider: "local"
 };
 
 const toValidStatus = (value: unknown): LicenseStatus => {
@@ -97,7 +99,8 @@ export class LicensePolicyService {
         daysRemaining,
         expiringSoon: daysRemaining !== null && daysRemaining >= 0 && daysRemaining <= 7,
         priceMonthly: persisted.priceMonthly,
-        billingCycle: persisted.billingCycle
+        billingCycle: persisted.billingCycle,
+        provider: persisted.provider
       };
     }
 
@@ -122,7 +125,8 @@ export class LicensePolicyService {
       daysRemaining,
       expiringSoon: daysRemaining !== null && daysRemaining >= 0 && daysRemaining <= 7,
       priceMonthly: toPositiveNumberOrNull(raw.priceMonthly),
-      billingCycle: normalizeBillingCycle(typeof raw.billingCycle === "string" ? raw.billingCycle : "monthly")
+      billingCycle: normalizeBillingCycle(typeof raw.billingCycle === "string" ? raw.billingCycle : "monthly"),
+      provider: raw.provider === "stripe" ? "stripe" : "local"
     };
   }
 

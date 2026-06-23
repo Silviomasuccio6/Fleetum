@@ -15,7 +15,27 @@ Ogni nuovo tenant parte in `PENDING`. L'accesso operativo al gestionale si abili
 `BILLING_TRIAL_DAYS` configura il trial dentro Stripe Checkout: il trial di 14 giorni non viene più assegnato localmente allo signup.
 Fleetum richiede sempre una carta valida prima di iniziare il trial: la Checkout Session usa `payment_method_collection=always` e l'eventuale assenza del metodo di pagamento a fine trial cancella la subscription Stripe invece di lasciare accessi gratuiti non fatturabili.
 
-Gli utenti possono sostituire la carta dal gestionale tramite una sessione Stripe Checkout `mode=setup`. Fleetum non espone un'azione per rimuovere il metodo di pagamento: per trial, rinnovi e recupero pagamenti falliti deve rimanere sempre disponibile una carta predefinita su customer/subscription Stripe.
+Gli utenti possono aprire il Customer Portal ufficiale Stripe dal gestionale per gestire carta, fatture, cambio piano e cancellazione. Rimane disponibile anche una sessione Stripe Checkout `mode=setup` per la sola sostituzione della carta. Fleetum non riceve né conserva dati della carta.
+
+## Customer Portal Stripe
+
+Nel dashboard Stripe, per ogni ambiente (Test e Live), abilita il Customer Portal e configura almeno:
+
+- aggiornamento metodo di pagamento;
+- storico fatture;
+- cambio piano solo tra i sei `Price ID` Fleetum configurati;
+- cancellazione abbonamento secondo la policy commerciale scelta.
+
+Le modifiche nel Portal generano webhook Stripe. Fleetum riconcilia piano e ciclo dal `Price ID` della subscription e aggiorna il tenant solo dopo il webhook con firma valida.
+
+Variabili opzionali:
+
+```env
+# Se vuota, Fleetum torna a /upgrade?portal=returned.
+STRIPE_PORTAL_RETURN_URL=https://fleetum.it/upgrade?portal=returned
+# Se vuota, Stripe usa la configurazione Customer Portal predefinita dell'ambiente.
+STRIPE_BILLING_PORTAL_CONFIGURATION_ID=bpc_...
+```
 
 ## Stati licenza
 
@@ -85,6 +105,10 @@ CAP qualsiasi
   - pubblico
   - riceve eventi Stripe
   - aggiorna licenza tenant tramite tabella subscription, BillingEvent e audit log
+
+- `POST /api/billing/customer-portal-session`
+  - autenticato tenant, richiede permesso `billing:manage`
+  - restituisce un URL temporaneo del Customer Portal Stripe per il customer del tenant
 
 ## Note produzione
 

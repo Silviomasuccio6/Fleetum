@@ -139,6 +139,7 @@ test("license policy prefers persisted tenant subscription over audit fallback",
 
   assert.equal(license.plan, "PRO");
   assert.equal(license.seats, 7);
+  assert.equal(license.provider, "stripe");
   assert.equal(license.status, "PAST_DUE");
   assert.equal(license.priceMonthly, 199);
   assert.equal(license.billingCycle, "yearly");

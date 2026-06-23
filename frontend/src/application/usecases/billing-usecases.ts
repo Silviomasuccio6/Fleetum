@@ -16,6 +16,12 @@ export const billingUseCases = {
       {},
       { suppressSuccessToast: true }
     ),
+  createCustomerPortalSession: () =>
+    httpClient.post<{ portalUrl: string }>(
+      "/billing/customer-portal-session",
+      {},
+      { suppressSuccessToast: true }
+    ),
   listInvoices: () =>
     httpClient.get<{
       data: Array<{

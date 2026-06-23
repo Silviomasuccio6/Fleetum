@@ -4,6 +4,7 @@ import { FeatureKey, SaasPlan, ensureKnownPlan } from "../../domain/constants/en
 type EntitlementsState = {
   plan: SaasPlan;
   licenseStatus: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED" | null;
+  provider: "stripe" | "local" | null;
   priceMonthly: number;
   features: FeatureKey[];
   loading: boolean;
@@ -15,6 +16,7 @@ type EntitlementsState = {
     priceMonthly: number;
     features: string[];
     licenseStatus?: EntitlementsState["licenseStatus"];
+    provider?: EntitlementsState["provider"];
   }) => void;
   setError: (message: string | null) => void;
   reset: () => void;
@@ -23,6 +25,7 @@ type EntitlementsState = {
 const initialState = {
   plan: "STARTER" as SaasPlan,
   licenseStatus: null,
+  provider: null,
   priceMonthly: 49,
   features: [] as FeatureKey[],
   loading: false,
@@ -33,10 +36,11 @@ const initialState = {
 export const useEntitlementsStore = create<EntitlementsState>((set) => ({
   ...initialState,
   setLoading: (loading) => set({ loading }),
-  setEntitlements: ({ plan, priceMonthly, features, licenseStatus }) =>
+  setEntitlements: ({ plan, priceMonthly, features, licenseStatus, provider }) =>
     set({
       plan: ensureKnownPlan(plan),
       licenseStatus: licenseStatus ?? null,
+      provider: provider ?? null,
       priceMonthly: Number.isFinite(priceMonthly) && priceMonthly > 0 ? priceMonthly : 49,
       features: features.filter(Boolean) as FeatureKey[],
       loading: false,
