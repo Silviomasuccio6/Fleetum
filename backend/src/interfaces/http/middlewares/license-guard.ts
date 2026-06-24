@@ -37,7 +37,7 @@ export const requireValidLicense = (licensePolicyService: LicensePolicyService) 
           throw new AppError("Completa Stripe Checkout con una carta valida per attivare la prova di 14 giorni e usare il gestionale.", 402, "LICENSE_PENDING");
         }
         if (access.reason === "LICENSE_PAST_DUE") {
-          throw new AppError("Pagamento non riuscito. Aggiorna l'abbonamento per continuare.", 402, "LICENSE_PAST_DUE");
+          throw new AppError("Pagamento non riuscito. Sostituisci la carta dalla pagina Upgrade per continuare.", 402, "LICENSE_PAST_DUE");
         }
         if (access.reason === "LICENSE_CANCELED") {
           throw new AppError("Abbonamento cancellato. Riattiva il piano per continuare.", 402, "LICENSE_CANCELED");
