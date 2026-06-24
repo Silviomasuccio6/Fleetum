@@ -101,7 +101,7 @@ api.interceptors.response.use(
         : apiErrorCode === "LICENSE_SUSPENDED"
           ? "Licenza sospesa. Contatta il supporto."
           : apiErrorCode === "LICENSE_PAST_DUE"
-            ? "Pagamento non riuscito. Aggiorna l'abbonamento per continuare."
+            ? "Pagamento non riuscito. Sostituisci la carta dalla pagina Upgrade per continuare."
             : apiErrorCode === "LICENSE_CANCELED"
               ? "Abbonamento cancellato. Riattiva il piano per continuare."
               : apiErrorCode === "TENANT_INACTIVE"

@@ -65,6 +65,7 @@ Per il sito pubblico usare solo `analytics/event` e `demo-request`. Mai chiamare
 | GET | `/invoices` | `billing:read` | elenco fatture SaaS tenant |
 | GET | `/invoices/:invoiceId` | `billing:read` | dettaglio fattura |
 | GET | `/invoices/:invoiceId/pdf` | `billing:read` | PDF fattura |
+| POST | `/customer-portal-session` | `billing:manage` | URL temporaneo Customer Portal Stripe per il tenant |
 | POST | `/webhook` | Stripe signature | eventi Stripe, idempotenti |
 
 La UI non attiva licenze dal `success_url`: lo stato arriva dal webhook verificato.

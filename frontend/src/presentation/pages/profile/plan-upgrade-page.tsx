@@ -198,12 +198,12 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Attiva Fleetum con prova Stripe e carta obbligatoria"}
+              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Attiva Fleetum con 14 giorni di prova"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
-              Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial,
-              ma il metodo di pagamento resta necessario per mantenere attivo il gestionale.
+              Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial;
+              poi l'abbonamento si rinnova automaticamente secondo il ciclo scelto, salvo annullamento. I prezzi mostrati includono IVA.
             </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -212,6 +212,9 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
               </span>
               <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
                 Sconto annuale {Math.round(annualDiscountRate * 100)}%
+              </span>
+              <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
+                Rinnovo automatico
               </span>
               {currentPlan ? (
                 <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
@@ -364,7 +367,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
 
                 <div>
                   <p className="text-3xl font-semibold tracking-tight text-foreground">{formatPrice(priceValue)}</p>
-                  <p className="text-xs text-muted-foreground">{priceSuffix}</p>
+                  <p className="text-xs text-muted-foreground">{priceSuffix}, IVA inclusa</p>
                   {!hasManagedStripeSubscription ? (
                     <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
                       14 giorni di prova, carta richiesta ora, primo addebito dopo il trial.

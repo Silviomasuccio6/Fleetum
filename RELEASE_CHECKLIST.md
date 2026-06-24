@@ -11,6 +11,7 @@
 - [ ] backup DB eseguito e restore testato
 - [ ] health/readiness endpoint verificati in staging
 - [ ] piano rollback documentato e provato
+- [ ] cutover Stripe Live completato seguendo `docs/deployment/stripe-live-cutover.md`
 
 ## Verifiche raccomandate entro 7 giorni dal rilascio
 - [ ] logging centralizzato e retention definita
