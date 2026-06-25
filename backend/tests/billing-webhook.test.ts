@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Stripe from "stripe";
 import { BillingService } from "../src/application/services/billing-service.js";
+import { BillingLifecycleEmailInput, BillingLifecycleNotifierLike } from "../src/application/services/billing-lifecycle-notifier.js";
 import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput } from "../src/application/services/tenant-subscription-service.js";
 import { AuditLogRepository, AuditLogRow } from "../src/domain/repositories/audit-log-repository.js";
 import { AppError } from "../src/shared/errors/app-error.js";
@@ -64,6 +65,25 @@ const makeHarness = (stripeClient?: Stripe) => {
   const events = new Map<string, StoredBillingEvent>();
   const subscriptions = new Map<string, TenantSubscriptionSnapshot>();
   const upserts: TenantSubscriptionUpsertInput[] = [];
+  const notifications: Array<{ type: string; input: Record<string, unknown> }> = [];
+  const notificationInput = (input: object): Record<string, unknown> => ({ ...input }) as Record<string, unknown>;
+  const notifier: BillingLifecycleNotifierLike = {
+    async notifyPaymentFailed(input: BillingLifecycleEmailInput) {
+      notifications.push({ type: "BILLING_PAYMENT_FAILED", input: notificationInput(input) });
+    },
+    async notifySubscriptionSuspended(input: BillingLifecycleEmailInput) {
+      notifications.push({ type: "BILLING_SUBSCRIPTION_SUSPENDED", input: notificationInput(input) });
+    },
+    async notifySubscriptionReactivated(input: BillingLifecycleEmailInput) {
+      notifications.push({ type: "BILLING_SUBSCRIPTION_REACTIVATED", input: notificationInput(input) });
+    },
+    async notifySubscriptionCanceled(input: BillingLifecycleEmailInput) {
+      notifications.push({ type: "BILLING_SUBSCRIPTION_CANCELED", input: notificationInput(input) });
+    },
+    async notifyCardExpiring(input) {
+      notifications.push({ type: "BILLING_CARD_EXPIRING", input: notificationInput(input) });
+    }
+  };
 
   const service = new BillingService(audit, stripeClient ?? stripe, {
     async createBillingEvent(event, tenantId) {
@@ -101,7 +121,7 @@ const makeHarness = (stripeClient?: Stripe) => {
       subscriptions.set(input.tenantId, snapshot);
       return snapshot;
     }
-  });
+  }, notifier);
 
   const sign = (event: Record<string, unknown>) => {
     const payload = JSON.stringify(event);
@@ -109,7 +129,7 @@ const makeHarness = (stripeClient?: Stripe) => {
     return { signature, rawBody: Buffer.from(payload), body: event };
   };
 
-  return { audit, events, service, sign, subscriptions, upserts };
+  return { audit, events, notifications, service, sign, subscriptions, upserts };
 };
 
 const baseEvent = (id: string, type: string, object: Record<string, unknown>) => ({
@@ -447,7 +467,7 @@ test("subscription update resolves plan and billing cycle from the Stripe Price 
 });
 
 test("invoice.payment_failed resolves tenant from existing subscription and marks license past due", async () => {
-  const { service, sign, subscriptions } = makeHarness();
+  const { notifications, service, sign, subscriptions } = makeHarness();
   subscriptions.set("tenant-past-due", {
     plan: "PRO",
     seats: 5,
@@ -469,6 +489,9 @@ test("invoice.payment_failed resolves tenant from existing subscription and mark
   })));
 
   assert.equal(subscriptions.get("tenant-past-due")?.status, "PAST_DUE");
+  assert.equal(notifications.at(-1)?.type, "BILLING_PAYMENT_FAILED");
+  assert.equal(notifications.at(-1)?.input.tenantId, "tenant-past-due");
+  assert.equal(notifications.at(-1)?.input.nextStatus, "PAST_DUE");
 });
 
 test("customer.subscription.created with trialing status activates Stripe trial", async () => {
@@ -488,7 +511,7 @@ test("customer.subscription.created with trialing status activates Stripe trial"
 });
 
 test("invoice.paid reactivates tenant after successful payment", async () => {
-  const { service, sign, subscriptions } = makeHarness();
+  const { notifications, service, sign, subscriptions } = makeHarness();
   subscriptions.set("tenant-recovered", {
     plan: "PRO",
     seats: 5,
@@ -510,10 +533,12 @@ test("invoice.paid reactivates tenant after successful payment", async () => {
   })));
 
   assert.equal(subscriptions.get("tenant-recovered")?.status, "ACTIVE");
+  assert.equal(notifications.at(-1)?.type, "BILLING_SUBSCRIPTION_REACTIVATED");
+  assert.equal(notifications.at(-1)?.input.previousStatus, "PAST_DUE");
 });
 
 test("customer.subscription.deleted marks license canceled", async () => {
-  const { service, sign, subscriptions } = makeHarness();
+  const { notifications, service, sign, subscriptions } = makeHarness();
   subscriptions.set("tenant-canceled", {
     plan: "ENTERPRISE",
     seats: 10,
@@ -535,6 +560,63 @@ test("customer.subscription.deleted marks license canceled", async () => {
   })));
 
   assert.equal(subscriptions.get("tenant-canceled")?.status, "CANCELED");
+  assert.equal(notifications.at(-1)?.type, "BILLING_SUBSCRIPTION_CANCELED");
+});
+
+test("customer.subscription.updated with unpaid status suspends the tenant after dunning", async () => {
+  const { notifications, service, sign, subscriptions } = makeHarness();
+  subscriptions.set("tenant-suspended", {
+    plan: "PRO",
+    seats: 4,
+    status: "PAST_DUE",
+    expiresAt: null,
+    priceMonthly: 199,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_suspended",
+    stripeSubscriptionId: "sub_suspended"
+  });
+
+  await service.handleWebhook(sign(baseEvent("evt_subscription_unpaid", "customer.subscription.updated", {
+    id: "sub_suspended",
+    object: "subscription",
+    status: "unpaid",
+    customer: "cus_suspended",
+    current_period_end: 1_800_000_000,
+    metadata: {}
+  })));
+
+  assert.equal(subscriptions.get("tenant-suspended")?.status, "SUSPENDED");
+  assert.equal(notifications.at(-1)?.type, "BILLING_SUBSCRIPTION_SUSPENDED");
+  assert.equal(notifications.at(-1)?.input.previousStatus, "PAST_DUE");
+});
+
+test("customer.source.expiring notifies tenant to replace expiring card", async () => {
+  const { notifications, service, sign, subscriptions } = makeHarness();
+  subscriptions.set("tenant-card-expiring", {
+    plan: "STARTER",
+    seats: 3,
+    status: "ACTIVE",
+    expiresAt: null,
+    priceMonthly: 149,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_expiring",
+    stripeSubscriptionId: "sub_expiring"
+  });
+
+  await service.handleWebhook(sign(baseEvent("evt_card_expiring", "customer.source.expiring", {
+    id: "card_expiring",
+    object: "card",
+    customer: "cus_expiring",
+    exp_month: 8,
+    exp_year: 2026
+  })));
+
+  assert.equal(notifications.at(-1)?.type, "BILLING_CARD_EXPIRING");
+  assert.equal(notifications.at(-1)?.input.tenantId, "tenant-card-expiring");
+  assert.equal(notifications.at(-1)?.input.expMonth, 8);
+  assert.equal(notifications.at(-1)?.input.expYear, 2026);
 });
 
 test("billing webhook rejects missing or invalid Stripe signature", async () => {
