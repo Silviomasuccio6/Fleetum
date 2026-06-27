@@ -12,6 +12,13 @@ import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput, readTenantSubscription, upsertTenantSubscription } from "./tenant-subscription-service.js";
+import {
+  BillingLifecycleEmailInput,
+  BillingLifecycleNotifier,
+  BillingLifecycleNotifierLike,
+  BillingLifecycleStatus
+} from "./billing-lifecycle-notifier.js";
+import { logger } from "../../infrastructure/logging/logger.js";
 
 type BillingLicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 type StripeClient = Stripe;
@@ -111,7 +118,8 @@ const stripeStatusToLicense = (stripeStatus: string): BillingLicenseStatus => {
   if (stripeStatus === "active") return "ACTIVE";
   if (stripeStatus === "trialing") return "TRIAL";
   if (stripeStatus === "incomplete") return "PENDING";
-  if (stripeStatus === "past_due" || stripeStatus === "unpaid") return "PAST_DUE";
+  if (stripeStatus === "past_due") return "PAST_DUE";
+  if (stripeStatus === "unpaid") return "SUSPENDED";
   if (stripeStatus === "canceled") return "CANCELED";
   if (stripeStatus === "incomplete_expired") return "EXPIRED";
   return "SUSPENDED";
@@ -184,7 +192,8 @@ export class BillingService {
   constructor(
     private readonly auditRepository: AuditLogRepository,
     private readonly stripeClient: StripeClient | null = createStripeClient(),
-    deps: Partial<BillingServiceDeps> = {}
+    deps: Partial<BillingServiceDeps> = {},
+    private readonly lifecycleNotifier: BillingLifecycleNotifierLike = new BillingLifecycleNotifier()
   ) {
     this.deps = { ...defaultDeps, ...deps };
   }
@@ -468,22 +477,36 @@ export class BillingService {
 
     if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
       const status = stripeStatusToLicense(String(dataObject.status ?? ""));
-      const tenantId = await this.applyStripeObject(dataObject, status);
-      return { tenantId };
+      const applied = await this.applyStripeObject(dataObject, status, undefined, event.type);
+      return { tenantId: applied?.tenantId ?? null };
     }
 
     if (event.type === "customer.subscription.deleted") {
-      const tenantId = await this.applyStripeObject(dataObject, "CANCELED");
-      return { tenantId };
+      const applied = await this.applyStripeObject(dataObject, "CANCELED", undefined, event.type);
+      return { tenantId: applied?.tenantId ?? null };
     }
 
     if (event.type === "invoice.payment_failed") {
-      const tenantId = await this.applyStripeObject(dataObject, "PAST_DUE");
-      return { tenantId };
+      const applied = await this.applyStripeObject(dataObject, "PAST_DUE", undefined, event.type);
+      return { tenantId: applied?.tenantId ?? null };
     }
 
     if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
-      const tenantId = await this.applyStripeObject(dataObject, "ACTIVE");
+      const applied = await this.applyStripeObject(dataObject, "ACTIVE", undefined, event.type);
+      return { tenantId: applied?.tenantId ?? null };
+    }
+
+    if (event.type === "customer.source.expiring") {
+      const tenantId = await this.resolveTenantId(dataObject);
+      if (tenantId) {
+        await this.safeNotify("BILLING_CARD_EXPIRING", tenantId, () =>
+          this.lifecycleNotifier.notifyCardExpiring({
+            tenantId,
+            expMonth: Number(dataObject.exp_month) || null,
+            expYear: Number(dataObject.exp_year) || null
+          })
+        );
+      }
       return { tenantId };
     }
 
@@ -540,7 +563,8 @@ export class BillingService {
     const direct = metadata.tenantId ?? source.client_reference_id;
     if (typeof direct === "string" && direct.trim()) return direct;
 
-    const subscriptionId = stripeId(source.subscription) ?? stripeId(source.id);
+    const sourceObject = typeof source.object === "string" ? source.object : null;
+    const subscriptionId = stripeId(source.subscription) ?? (sourceObject === "subscription" ? stripeId(source.id) : null);
     if (subscriptionId) {
       const row = await this.deps.findSubscriptionByStripeSubscriptionId(subscriptionId);
       if (row) return row.tenantId;
@@ -560,7 +584,11 @@ export class BillingService {
     fallbackCustomerId?: string | null;
     fallbackSubscriptionId?: string | null;
     fallbackMetadata?: Record<string, unknown>;
-  }) {
+  }, eventType?: string): Promise<{
+    tenantId: string;
+    previousStatus: BillingLifecycleStatus | null;
+    nextStatus: BillingLifecycleStatus;
+  } | null> {
     const metadata = {
       ...(fallback?.fallbackMetadata ?? {}),
       ...(typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {})
@@ -576,9 +604,10 @@ export class BillingService {
     const currentPeriodEnd = source.current_period_end ?? getNested(source, "lines.data.0.period.end");
     const expiresAt = unixToIso(currentPeriodEnd) ?? current?.expiresAt ?? null;
     const customerId = stripeId(source.customer) ?? fallback?.fallbackCustomerId ?? current?.stripeCustomerId ?? null;
-    const subscriptionId = stripeId(source.subscription) ?? stripeId(source.id) ?? fallback?.fallbackSubscriptionId ?? current?.stripeSubscriptionId ?? null;
+    const sourceObject = typeof source.object === "string" ? source.object : null;
+    const subscriptionId = stripeId(source.subscription) ?? (sourceObject === "subscription" ? stripeId(source.id) : null) ?? fallback?.fallbackSubscriptionId ?? current?.stripeSubscriptionId ?? null;
 
-    await this.writeLicense(tenantId, null, {
+    const nextPayload: LicenseAuditPayload = {
       plan,
       seats: current?.seats ?? 3,
       status,
@@ -589,12 +618,89 @@ export class BillingService {
       stripeSubscriptionId: subscriptionId,
       provider: "stripe",
       updatedAt: new Date().toISOString()
+    };
+
+    await this.writeLicense(tenantId, null, nextPayload, current);
+    await this.notifyBillingTransition({
+      tenantId,
+      eventType,
+      previous: current,
+      next: nextPayload,
+      stripeInvoiceId: sourceObject === "invoice" ? stripeId(source.id) : null,
+      hostedInvoiceUrl: sourceObject === "invoice" && typeof source.hosted_invoice_url === "string" ? source.hosted_invoice_url : null
     });
 
-    return tenantId;
+    return { tenantId, previousStatus: current?.status ?? null, nextStatus: status };
   }
 
-  private async writeLicense(tenantId: string, userId: string | null, next: LicenseAuditPayload) {
+  private async notifyBillingTransition(input: {
+    tenantId: string;
+    eventType?: string;
+    previous: TenantSubscriptionSnapshot | null;
+    next: LicenseAuditPayload;
+    stripeInvoiceId?: string | null;
+    hostedInvoiceUrl?: string | null;
+  }) {
+    const previousStatus = input.previous?.status ?? null;
+    const payload: BillingLifecycleEmailInput = {
+      tenantId: input.tenantId,
+      plan: input.next.plan,
+      billingCycle: input.next.billingCycle,
+      previousStatus,
+      nextStatus: input.next.status,
+      expiresAt: input.next.expiresAt,
+      stripeCustomerId: input.next.stripeCustomerId,
+      stripeSubscriptionId: input.next.stripeSubscriptionId,
+      stripeInvoiceId: input.stripeInvoiceId,
+      hostedInvoiceUrl: input.hostedInvoiceUrl,
+      graceDays: env.BILLING_PAST_DUE_GRACE_DAYS
+    };
+
+    if (input.eventType === "invoice.payment_failed" || input.next.status === "PAST_DUE") {
+      await this.safeNotify("BILLING_PAYMENT_FAILED", input.tenantId, () =>
+        this.lifecycleNotifier.notifyPaymentFailed(payload)
+      );
+      return;
+    }
+
+    if (input.next.status === "SUSPENDED" && previousStatus !== "SUSPENDED") {
+      await this.safeNotify("BILLING_SUBSCRIPTION_SUSPENDED", input.tenantId, () =>
+        this.lifecycleNotifier.notifySubscriptionSuspended(payload)
+      );
+      return;
+    }
+
+    if (input.next.status === "CANCELED" && previousStatus !== "CANCELED") {
+      await this.safeNotify("BILLING_SUBSCRIPTION_CANCELED", input.tenantId, () =>
+        this.lifecycleNotifier.notifySubscriptionCanceled(payload)
+      );
+      return;
+    }
+
+    if ((input.next.status === "ACTIVE" || input.next.status === "TRIAL") && previousStatus && ["PAST_DUE", "SUSPENDED", "EXPIRED", "CANCELED"].includes(previousStatus)) {
+      await this.safeNotify("BILLING_SUBSCRIPTION_REACTIVATED", input.tenantId, () =>
+        this.lifecycleNotifier.notifySubscriptionReactivated(payload)
+      );
+    }
+  }
+
+  private async safeNotify(action: string, tenantId: string, callback: () => Promise<void>) {
+    try {
+      await callback();
+    } catch (error) {
+      logger.warn({ error, tenantId, action }, "Billing lifecycle notification failed");
+      await this.auditRepository.create({
+        tenantId,
+        userId: null,
+        action: "BILLING_NOTIFICATION_FAILED",
+        resource: "billing",
+        resourceId: tenantId,
+        details: { action }
+      }).catch(() => undefined);
+    }
+  }
+
+  private async writeLicense(tenantId: string, userId: string | null, next: LicenseAuditPayload, previous?: TenantSubscriptionSnapshot | null) {
     const subscription = await this.deps.upsertSubscription({
       tenantId,
       plan: next.plan,
@@ -617,6 +723,19 @@ export class BillingService {
       details: {
         source: "billing",
         persisted: true,
+        before: previous
+          ? {
+              plan: previous.plan,
+              seats: previous.seats,
+              status: previous.status,
+              expiresAt: previous.expiresAt,
+              priceMonthly: previous.priceMonthly,
+              billingCycle: previous.billingCycle,
+              provider: previous.provider,
+              stripeCustomerId: previous.stripeCustomerId,
+              stripeSubscriptionId: previous.stripeSubscriptionId
+            }
+          : null,
         after: {
           ...next,
           subscription

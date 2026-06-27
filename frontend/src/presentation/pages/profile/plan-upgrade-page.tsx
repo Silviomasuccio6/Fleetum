@@ -17,6 +17,7 @@ import { useEntitlements } from "../../hooks/use-entitlements";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { getBillingStatusNotice } from "./billing-status-copy";
 
 type BillingCycle = "monthly" | "yearly";
 type PlanUpgradeMode = "activation" | "upgrade";
@@ -105,6 +106,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const hasManagedStripeSubscription = provider === "stripe" && canUpdatePaymentMethod;
   const canReadBilling = user?.permissions.includes("billing:read") ?? false;
   const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
+  const billingStatusNotice = getBillingStatusNotice(licenseStatus);
 
   const planCards = useMemo(
     () =>
@@ -236,6 +238,27 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         <Card className="border-amber-300/70 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
           <CardContent className="py-4 text-sm">
             Solo l'amministratore dell'azienda puo gestire abbonamento, fatture e metodo di pagamento.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {billingStatusNotice ? (
+        <Card
+          className={cn(
+            billingStatusNotice.tone === "info" && "border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100",
+            billingStatusNotice.tone === "warning" && "border-amber-300/80 bg-amber-50/85 text-amber-900 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100",
+            billingStatusNotice.tone === "danger" && "border-rose-300/80 bg-rose-50/85 text-rose-900 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-100",
+            billingStatusNotice.tone === "success" && "border-emerald-300/80 bg-emerald-50/85 text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100"
+          )}
+        >
+          <CardContent className="flex flex-col gap-3 py-4 text-sm md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-semibold">{billingStatusNotice.title}</p>
+              <p className="mt-1 opacity-85">{billingStatusNotice.body}</p>
+            </div>
+            <span className="inline-flex shrink-0 items-center justify-center rounded-full border border-current/20 bg-white/55 px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] dark:bg-slate-950/30">
+              {billingStatusNotice.actionLabel}
+            </span>
           </CardContent>
         </Card>
       ) : null}
