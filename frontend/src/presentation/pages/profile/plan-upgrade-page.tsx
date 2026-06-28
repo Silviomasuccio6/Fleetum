@@ -102,11 +102,49 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const paymentMethodStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("payment_method") : null;
   const portalStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("portal") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
-  const canUpdatePaymentMethod = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE";
+  const canUpdatePaymentMethod =
+    licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED";
   const hasManagedStripeSubscription = provider === "stripe" && canUpdatePaymentMethod;
   const canReadBilling = user?.permissions.includes("billing:read") ?? false;
   const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
   const billingStatusNotice = getBillingStatusNotice(licenseStatus);
+
+  const openPaymentMethodSession = async () => {
+    setCheckoutError(null);
+    setBusyPaymentMethod(true);
+    try {
+      const session = await billingUseCases.createPaymentMethodSession();
+      window.location.href = session.checkoutUrl;
+    } catch (error) {
+      setCheckoutError((error as Error).message);
+      setBusyPaymentMethod(false);
+    }
+  };
+
+  const openCustomerPortalSession = async () => {
+    setCheckoutError(null);
+    setBusyPortal(true);
+    try {
+      const session = await billingUseCases.createCustomerPortalSession();
+      window.location.href = session.portalUrl;
+    } catch (error) {
+      setCheckoutError((error as Error).message);
+      setBusyPortal(false);
+    }
+  };
+
+  const scrollToPlans = () => {
+    document.getElementById("billing-plans")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleBillingNoticeAction = () => {
+    if (!canManageBilling) return;
+    if ((licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED") && hasManagedStripeSubscription) {
+      void openPaymentMethodSession();
+      return;
+    }
+    scrollToPlans();
+  };
 
   const planCards = useMemo(
     () =>
@@ -256,14 +294,19 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
               <p className="font-semibold">{billingStatusNotice.title}</p>
               <p className="mt-1 opacity-85">{billingStatusNotice.body}</p>
             </div>
-            <span className="inline-flex shrink-0 items-center justify-center rounded-full border border-current/20 bg-white/55 px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] dark:bg-slate-950/30">
+            <button
+              type="button"
+              disabled={!canManageBilling || busyPaymentMethod}
+              onClick={handleBillingNoticeAction}
+              className="inline-flex shrink-0 items-center justify-center rounded-full border border-current/20 bg-white/65 px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950/30 dark:hover:bg-slate-950/45"
+            >
               {billingStatusNotice.actionLabel}
-            </span>
+            </button>
           </CardContent>
         </Card>
       ) : null}
 
-      {canUpdatePaymentMethod && canManageBilling ? (
+      {hasManagedStripeSubscription && canManageBilling ? (
         <Card className="border-sky-200/80 bg-sky-50/80 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
           <CardContent className="flex flex-col gap-3 py-4 text-sm md:flex-row md:items-center md:justify-between">
             <div>
@@ -277,17 +320,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 type="button"
                 className="bg-sky-700 text-white hover:bg-sky-800 dark:bg-sky-500 dark:hover:bg-sky-400"
                 disabled={busyPortal}
-                onClick={async () => {
-                  setCheckoutError(null);
-                  setBusyPortal(true);
-                  try {
-                    const session = await billingUseCases.createCustomerPortalSession();
-                    window.location.href = session.portalUrl;
-                  } catch (error) {
-                    setCheckoutError((error as Error).message);
-                    setBusyPortal(false);
-                  }
-                }}
+                onClick={() => void openCustomerPortalSession()}
               >
                 <ExternalLink className="h-4 w-4" />
                 {busyPortal ? "Apertura Stripe..." : "Gestisci abbonamento"}
@@ -297,17 +330,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 variant="outline"
                 className="border-sky-300 bg-white/80 text-sky-900 hover:bg-white dark:border-sky-500/40 dark:bg-slate-950/40 dark:text-sky-100"
                 disabled={busyPaymentMethod}
-                onClick={async () => {
-                  setCheckoutError(null);
-                  setBusyPaymentMethod(true);
-                  try {
-                    const session = await billingUseCases.createPaymentMethodSession();
-                    window.location.href = session.checkoutUrl;
-                  } catch (error) {
-                    setCheckoutError((error as Error).message);
-                    setBusyPaymentMethod(false);
-                  }
-                }}
+                onClick={() => void openPaymentMethodSession()}
               >
                 <CreditCard className="h-4 w-4" />
                 {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
@@ -349,7 +372,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div id="billing-plans" className="grid scroll-mt-24 gap-4 lg:grid-cols-3">
         {planCards.map(({ entry, features, monthlyPrice, yearlyPrice, isCurrent, isUpgrade, accent, highlights }, index) => {
           const priceValue = billingCycle === "monthly" ? monthlyPrice : yearlyPrice;
           const priceSuffix = billingCycle === "monthly" ? "/mese" : "/anno";
