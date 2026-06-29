@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChartColumnIncreasing,
   ClipboardList,
+  CreditCard,
   Gauge,
   KanbanSquare,
   LogOut,
@@ -61,6 +62,13 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     title: "Panoramica",
     items: [
       { key: "dashboard", to: "/dashboard", label: "Dashboard", icon: Gauge, match: (path) => path === "/dashboard" },
+      {
+        key: "billing",
+        to: "/upgrade",
+        label: "Piano e fatturazione",
+        icon: CreditCard,
+        match: (path) => path.startsWith("/upgrade")
+      },
       {
         key: "booking",
         to: "/booking",
@@ -475,7 +483,7 @@ export const AppLayout = () => {
       }
       return null;
     };
-    if (location.pathname.startsWith("/upgrade")) return "Upgrade piano";
+    if (location.pathname.startsWith("/upgrade")) return "Piano e fatturazione";
     for (const section of visibleNavSections) {
       const match = findActiveLabel(section.items);
       if (match) return match;
@@ -791,7 +799,7 @@ export const AppLayout = () => {
                           navigate("/upgrade");
                         }}
                       >
-                        Upgrade piano
+                        Piano e fatturazione
                       </Button>
                     ) : null}
                     <Button
