@@ -11,6 +11,18 @@ const optionalText = (max = 255) => z.preprocess(emptyToUndefined, z.string().ma
 const optionalEmail = z.preprocess(emptyToUndefined, z.string().email().max(255).optional());
 const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().max(500).optional());
 const optionalHex = z.preprocess(emptyToUndefined, z.string().regex(/^#[0-9a-fA-F]{6}$/).optional());
+const countryCode = z.preprocess(
+  (value) => {
+    const normalized = emptyToUndefined(value);
+    return typeof normalized === "string" ? normalized.toUpperCase() : normalized;
+  },
+  z.string().regex(/^[A-Z]{2}$/, "Seleziona una nazione valida.").optional()
+).default("IT");
+const validationFieldPath: Record<string, string> = {
+  tenantName: "legalName",
+  companyEmail: "email",
+  companyPhone: "phone"
+};
 
 const withCompanyFiscalRules = <T extends z.ZodTypeAny>(schema: T) =>
   schema.superRefine((value, ctx) => {
@@ -29,7 +41,7 @@ const withCompanyFiscalRules = <T extends z.ZodTypeAny>(schema: T) =>
       companyPhone: value.phone
     });
     errors.forEach((error) => {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [error.field], message: error.message });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [validationFieldPath[error.field] ?? error.field], message: error.message });
     });
   });
 
@@ -44,9 +56,9 @@ export const tenantCompanyProfileSchema = withCompanyFiscalRules(z.object({
   rea: optionalText(64),
   legalAddress: optionalText(255),
   city: optionalText(120),
-  province: optionalText(8),
+  province: optionalText(120),
   postalCode: optionalText(16),
-  country: z.preprocess(emptyToUndefined, z.string().max(2).optional()).default("IT"),
+  country: countryCode,
   phone: optionalText(40),
   email: optionalEmail,
   website: optionalUrl,

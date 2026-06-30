@@ -157,28 +157,28 @@ test("company onboarding updates tenant identity and creates the first site befo
 
   const service = new TenantProfileService();
   await service.updateProfile("tenant_1", "user_1", {
-    legalName: "Fleetum Test Srl",
+    legalName: "Rossi Noleggi Srl",
     vatNumber: "07643520567",
     taxCode: "07643520567",
-    pec: "fleetum.test@pec.example.com",
+    pec: "rossi.noleggi@pec.invalid",
     sdiCode: "M5UXCR1",
     legalAddress: "Via Roma 1",
     city: "Roma",
     province: "RM",
     postalCode: "00118",
     country: "IT",
-    email: "info@example.com",
+    email: "amministrazione@rossinoleggi.invalid",
     phone: "+3906123456",
     adminFirstName: "Mario",
     adminLastName: "Rossi",
-    adminEmail: "mario.rossi@example.com"
+    adminEmail: "mario.rossi@rossinoleggi.invalid"
   });
 
   assert.equal(calls.tenantUpdate.where.id, "tenant_1");
-  assert.equal(calls.tenantUpdate.data.name, "Fleetum Test Srl");
+  assert.equal(calls.tenantUpdate.data.name, "Rossi Noleggi Srl");
   assert.equal(calls.tenantUpdate.data.vatNumber, "07643520567");
   assert.equal(calls.siteCreate.data.tenantId, "tenant_1");
-  assert.equal(calls.siteCreate.data.name, "Fleetum Test Srl");
+  assert.equal(calls.siteCreate.data.name, "Rossi Noleggi Srl");
   assert.equal(calls.siteCreate.data.address, "Via Roma 1");
   assert.equal(calls.siteCreate.data.city, "Roma");
   assert.equal(calls.auditLog.data.action, "TENANT_PROFILE_UPDATED");

@@ -19,10 +19,11 @@ import { Textarea } from "../../components/ui/textarea";
 import { COUNTRIES } from "../../../shared/geo/countries";
 import { loadItalyAdministrativeData, type ItalyAdministrativeData } from "../../../shared/geo/italy-administrative-data";
 import {
-  normalizeItalianVatNumber,
   normalizePostalCode,
+  normalizePostalCodeForCountry,
   normalizeSdiCode,
   normalizeTaxCode,
+  normalizeVatNumberForCountry,
   validateCompanyRegistrationDraft
 } from "../../../shared/validation/company-registration";
 
@@ -232,14 +233,18 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
 
   const handleCountryChange = (country: string) => {
     const normalizedCountry = country.toUpperCase();
-    setForm((current) => ({
-      ...current,
-      country: normalizedCountry,
-      region: normalizedCountry === "IT" ? current.region : "",
-      city: normalizedCountry === "IT" ? current.city : "",
-      province: normalizedCountry === "IT" ? current.province : "",
-      postalCode: normalizedCountry === "IT" ? current.postalCode : ""
-    }));
+    setForm((current) => {
+      const currentCountry = (current.country ?? "IT").toUpperCase();
+      if (currentCountry === normalizedCountry) return { ...current, country: normalizedCountry };
+      return {
+        ...current,
+        country: normalizedCountry,
+        region: "",
+        city: "",
+        province: "",
+        postalCode: ""
+      };
+    });
   };
 
   const handleRegionChange = (region: string) => {
@@ -296,10 +301,10 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
 
       const result = await tenantProfileUseCases.updateProfile({
         ...form,
-        vatNumber: normalizeItalianVatNumber(form.vatNumber),
+        vatNumber: normalizeVatNumberForCountry(form.vatNumber, form.country),
         taxCode: normalizeTaxCode(form.taxCode),
         sdiCode: normalizeSdiCode(form.sdiCode),
-        postalCode: isItalianCompany ? normalizePostalCode(form.postalCode) : form.postalCode,
+        postalCode: normalizePostalCodeForCountry(form.postalCode, form.country),
         province: form.province?.toUpperCase(),
         country: form.country?.toUpperCase() || "IT"
       });
@@ -478,8 +483,12 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
               <Input placeholder="SRL, SPA, SNC..." value={form.legalForm ?? ""} onChange={(e) => updateField("legalForm", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Partita IVA</Label>
-              <Input value={form.vatNumber ?? ""} onChange={(e) => updateField("vatNumber", normalizeItalianVatNumber(e.target.value))} />
+              <Label>{isItalianCompany ? "Partita IVA" : "VAT / Tax ID"} *</Label>
+              <Input
+                value={form.vatNumber ?? ""}
+                onChange={(e) => updateField("vatNumber", normalizeVatNumberForCountry(e.target.value, form.country))}
+                placeholder={isItalianCompany ? "11 cifre" : "Identificativo fiscale aziendale"}
+              />
             </div>
             <div className="grid gap-1.5">
               <Label>Codice fiscale azienda</Label>
@@ -581,12 +590,12 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
                   <Input value={form.city ?? ""} onChange={(e) => updateField("city", e.target.value)} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Provincia/Area</Label>
+                  <Label>Provincia/Area *</Label>
                   <Input value={form.province ?? ""} onChange={(e) => updateField("province", e.target.value.toUpperCase())} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Codice postale</Label>
-                  <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", e.target.value)} />
+                  <Label>Codice postale *</Label>
+                  <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", normalizePostalCodeForCountry(e.target.value, form.country))} />
                 </div>
               </>
             )}
