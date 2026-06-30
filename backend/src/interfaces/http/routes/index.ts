@@ -337,6 +337,7 @@ apiRouter.get("/ready", async (_req, res) => {
 apiRouter.use("/auth", authRoutes(authController));
 apiRouter.use(requireAuth);
 apiRouter.use("/billing", requireCsrfProtection, billingRoutes(billingController));
+apiRouter.use("/tenant", requireCsrfProtection, tenantProfileRoutes(tenantProfileController));
 apiRouter.post(
   "/tenant/onboarding/company-verification-document",
   requireCsrfProtection,
@@ -351,7 +352,6 @@ apiRouter.use("/stoppages", stoppagesRoutes(stoppagesController, requireFeature)
 apiRouter.use("/stats", statsRoutes(statsController, requireFeature));
 apiRouter.use("/notifications", notificationsRoutes(notificationsController));
 apiRouter.use("/settings", settingsRoutes(settingsController));
-apiRouter.use("/tenant", tenantProfileRoutes(tenantProfileController));
 apiRouter.use("/gdpr", gdprRoutes(privacyComplianceController));
 apiRouter.use("/privacy", privacyComplianceRoutes(privacyComplianceController));
 apiRouter.use("/audit", auditRoutes(auditController));

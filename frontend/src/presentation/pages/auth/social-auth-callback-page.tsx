@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
+import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { User } from "../../../domain/entities/models";
 import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { getSafeReturnTo } from "../../routes/safe-return-to";
@@ -52,15 +53,18 @@ export const SocialAuthCallbackPage = () => {
         let nextPath = returnTo;
         try {
           const license = await authUseCases.licenseStatus();
-          const billingSelfService =
-            nextPath.startsWith("/activate") ||
-            nextPath.startsWith("/upgrade") ||
-            nextPath.startsWith("/onboarding/azienda");
-          if (license.status !== "ACTIVE" && license.status !== "TRIAL" && !billingSelfService) {
-            nextPath = "/activate?billing=required";
+          const hasOperativeLicense = license.status === "ACTIVE" || license.status === "TRIAL";
+
+          if (!hasOperativeLicense) {
+            const profile = await tenantProfileUseCases.getProfile().catch(() => null);
+            if (!isCompanyProfileReadyForBilling(profile)) {
+              nextPath = "/onboarding/azienda?from=social";
+            } else if (!nextPath.startsWith("/activate") && !nextPath.startsWith("/upgrade")) {
+              nextPath = "/activate?billing=required";
+            }
           }
         } catch {
-          nextPath = "/activate?billing=required";
+          nextPath = "/onboarding/azienda?from=social";
         }
 
         if (!cancelled) navigate(nextPath, { replace: true });

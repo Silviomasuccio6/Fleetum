@@ -97,6 +97,32 @@ export class TenantProfileService {
     };
   }
 
+  async ensureDefaultsForTenant(input: {
+    tenantId: string;
+    company?: Partial<SignupCompanyInput> | null;
+  }) {
+    await prisma.tenantBranding.upsert({
+      where: { tenantId: input.tenantId },
+      create: {
+        tenantId: input.tenantId,
+        primaryColor: input.company?.primaryColor ?? "#21375d",
+        accentColor: input.company?.accentColor ?? "#5d82c2",
+        fontFamily: input.company?.fontFamily ?? "helvetica"
+      },
+      update: {}
+    });
+
+    await prisma.tenantLegalSettings.upsert({
+      where: { tenantId: input.tenantId },
+      create: {
+        tenantId: input.tenantId,
+        contractFooterText: "Contratto generato dal gestionale aziendale. Verificare i dati prima della sottoscrizione.",
+        privacyNoticeVersion: "2026-05-05"
+      },
+      update: {}
+    });
+  }
+
   async ensureForTenant(input: {
     tenantId: string;
     tenantName: string;
@@ -141,26 +167,7 @@ export class TenantProfileService {
       update: {}
     });
 
-    await prisma.tenantBranding.upsert({
-      where: { tenantId: input.tenantId },
-      create: {
-        tenantId: input.tenantId,
-        primaryColor: input.company?.primaryColor ?? "#21375d",
-        accentColor: input.company?.accentColor ?? "#5d82c2",
-        fontFamily: input.company?.fontFamily ?? "helvetica"
-      },
-      update: {}
-    });
-
-    await prisma.tenantLegalSettings.upsert({
-      where: { tenantId: input.tenantId },
-      create: {
-        tenantId: input.tenantId,
-        contractFooterText: "Contratto generato dal gestionale aziendale. Verificare i dati prima della sottoscrizione.",
-        privacyNoticeVersion: "2026-05-05"
-      },
-      update: {}
-    });
+    await this.ensureDefaultsForTenant({ tenantId: input.tenantId, company: input.company });
 
     return profile;
   }
@@ -179,14 +186,7 @@ export class TenantProfileService {
       }
     });
     if (!tenant) throw new AppError("Tenant non trovato", 404, "TENANT_NOT_FOUND");
-    const firstAdmin = tenant.users[0];
-    await this.ensureForTenant({
-      tenantId,
-      tenantName: tenant.name,
-      adminFirstName: firstAdmin?.firstName,
-      adminLastName: firstAdmin?.lastName,
-      adminEmail: firstAdmin?.email
-    });
+    await this.ensureDefaultsForTenant({ tenantId });
     const [profile, branding, legalSettings] = await Promise.all([
       prisma.tenantProfile.findUnique({ where: { tenantId } }),
       prisma.tenantBranding.findUnique({ where: { tenantId } }),
@@ -224,6 +224,31 @@ export class TenantProfileService {
           fontFamily: input.fontFamily ?? null
         }
       });
+
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: {
+          name: profilePayload.tradeName ?? profilePayload.legalName,
+          vatNumber: profilePayload.vatNumber
+        }
+      });
+
+      const existingSite = await tx.site.findFirst({
+        where: { tenantId, deletedAt: null },
+        select: { id: true }
+      });
+      if (!existingSite && profilePayload.legalAddress && profilePayload.city) {
+        await tx.site.create({
+          data: {
+            tenantId,
+            name: profilePayload.tradeName ?? profilePayload.legalName,
+            address: profilePayload.legalAddress,
+            city: profilePayload.city,
+            email: profilePayload.email,
+            phone: profilePayload.phone
+          }
+        });
+      }
 
       const legalSettings = await tx.tenantLegalSettings.upsert({
         where: { tenantId },

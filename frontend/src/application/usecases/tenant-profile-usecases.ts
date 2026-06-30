@@ -43,6 +43,26 @@ export type TenantCompanyProfileResponse = {
   };
 };
 
+export const COMPANY_PROFILE_BILLING_REQUIRED_FIELDS = [
+  "legalName",
+  "vatNumber",
+  "legalAddress",
+  "city",
+  "province",
+  "postalCode",
+  "email",
+  "phone",
+  "adminFirstName",
+  "adminLastName",
+  "adminEmail"
+] as const;
+
+export const isCompanyProfileReadyForBilling = (response: TenantCompanyProfileResponse | null | undefined) => {
+  const profile = response?.profile;
+  if (!profile) return false;
+  return COMPANY_PROFILE_BILLING_REQUIRED_FIELDS.every((field) => String(profile[field] ?? "").trim().length > 0);
+};
+
 export const tenantProfileUseCases = {
   getProfile: () => httpClient.get<TenantCompanyProfileResponse>("/tenant/profile"),
   completeness: () => httpClient.get<TenantCompanyProfileResponse["completeness"]>("/tenant/profile/completeness"),
