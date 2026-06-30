@@ -6,6 +6,7 @@ import {
   TenantCompanyProfilePayload,
   TenantCompanyProfileResponse
 } from "../../../application/usecases/tenant-profile-usecases";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Alert } from "../../components/ui/alert";
@@ -134,6 +135,7 @@ const companyValidationPayload = (form: TenantCompanyProfilePayload) => ({
 
 export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProfilePageProps) => {
   const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.user);
   const [form, setForm] = useState<TenantCompanyProfilePayload>(initialForm);
   const [profileState, setProfileState] = useState<TenantCompanyProfileResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -174,7 +176,13 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
     try {
       const result = await tenantProfileUseCases.getProfile();
       setProfileState(result);
-      setForm(normalizeForm(result));
+      const nextForm = normalizeForm(result);
+      if (!result.profile && currentUser) {
+        nextForm.adminFirstName = currentUser.firstName;
+        nextForm.adminLastName = currentUser.lastName;
+        nextForm.adminEmail = currentUser.email;
+      }
+      setForm(nextForm);
     } catch (err) {
       setError((err as Error).message);
     } finally {
