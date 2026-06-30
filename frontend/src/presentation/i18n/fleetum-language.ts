@@ -91,6 +91,7 @@ const TRANSLATIONS_IT_EN: Record<string, string> = {
   "Profilo": "Profile",
   "Profilo Azienda": "Company Profile",
   "Upgrade piano": "Upgrade plan",
+  "Piano e fatturazione": "Plan and billing",
   "Logout": "Logout",
   "Esci": "Logout",
   "Filtri": "Filters",
