@@ -4,7 +4,13 @@ import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
-import { validateCompanyRegistrationDraft } from "../../shared/validation/company-registration.js";
+import {
+  normalizeItalianVatNumber,
+  normalizePostalCodeForCountry,
+  normalizeSdiCode,
+  normalizeTaxCode,
+  validateCompanyRegistrationDraft
+} from "../../shared/validation/company-registration.js";
 import type { SignupCompanyInput, TenantCompanyProfileInput } from "../../interfaces/http/validators/tenant-profile-validators.js";
 
 const normalizeText = (value?: string | null) => {
@@ -13,7 +19,11 @@ const normalizeText = (value?: string | null) => {
 };
 
 const normalizeCountry = (value?: string | null) => (normalizeText(value) ?? "IT").toUpperCase();
-const normalizeVat = (value?: string | null) => normalizeText(value)?.replace(/\s+/g, "") ?? null;
+const normalizeVat = (value?: string | null, country?: string | null) => {
+  const normalizedCountry = normalizeCountry(country);
+  if (normalizedCountry === "IT") return normalizeItalianVatNumber(value) || null;
+  return normalizeText(value)?.replace(/\s+/g, "").toUpperCase() ?? null;
+};
 
 const profileRequiredKeys = [
   "legalName",
@@ -76,15 +86,15 @@ export class TenantProfileService {
       legalName: normalizeText(input.legalName)!,
       tradeName: normalizeText(input.tradeName),
       legalForm: normalizeText(input.legalForm),
-      vatNumber: normalizeVat(input.vatNumber),
-      taxCode: normalizeText(input.taxCode),
-      pec: normalizeText(input.pec),
-      sdiCode: normalizeText(input.sdiCode)?.toUpperCase() ?? null,
+      vatNumber: normalizeVat(input.vatNumber, country),
+      taxCode: normalizeTaxCode(input.taxCode) || null,
+      pec: normalizeText(input.pec)?.toLowerCase() ?? null,
+      sdiCode: normalizeSdiCode(input.sdiCode) || null,
       rea: normalizeText(input.rea),
       legalAddress: normalizeText(input.legalAddress),
       city: normalizeText(input.city),
       province: normalizeText(input.province)?.toUpperCase() ?? null,
-      postalCode: normalizeText(input.postalCode),
+      postalCode: normalizePostalCodeForCountry(input.postalCode, country) || null,
       country,
       phone: normalizeText(input.phone),
       email: normalizeText(input.email)?.toLowerCase() ?? null,

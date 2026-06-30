@@ -12,8 +12,10 @@ import { loadItalyAdministrativeData, type ItalyAdministrativeData } from "../..
 import {
   normalizeItalianVatNumber,
   normalizePostalCode,
+  normalizePostalCodeForCountry,
   normalizeSdiCode,
   normalizeTaxCode,
+  normalizeVatNumberForCountry,
   validateCompanyRegistrationDraft
 } from "../../../shared/validation/company-registration";
 import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
@@ -176,6 +178,9 @@ export const SignupPage = () => {
     /[A-Z]/.test(form.password) &&
     /\d/.test(form.password) &&
     /[^A-Za-z0-9]/.test(form.password);
+  const vatFieldLooksComplete = isItalianCompany
+    ? normalizeItalianVatNumber(form.vatNumber).length === 11
+    : form.vatNumber.replace(/[^a-zA-Z0-9]/g, "").length >= 4;
 
   const stepIsValid = [
     isRequiredCompanyStepComplete(form),
@@ -190,13 +195,18 @@ export const SignupPage = () => {
   ];
   const handleCountryChange = (country: string) => {
     const normalizedCountry = country.toUpperCase();
-    setForm((current) => ({
-      ...current,
-      country: normalizedCountry,
-      region: normalizedCountry === "IT" ? current.region : "",
-      province: normalizedCountry === "IT" ? current.province : "",
-      municipalityCode: normalizedCountry === "IT" ? current.municipalityCode : ""
-    }));
+    setForm((current) => {
+      if (current.country === normalizedCountry) return { ...current, country: normalizedCountry };
+      return {
+        ...current,
+        country: normalizedCountry,
+        region: "",
+        province: "",
+        municipalityCode: "",
+        city: "",
+        postalCode: ""
+      };
+    });
   };
 
   const handleRegionChange = (region: string) => {
@@ -270,6 +280,7 @@ export const SignupPage = () => {
       const lastName = cleanText(form.lastName);
       const email = cleanText(form.email).toLowerCase();
       const companyEmail = optionalText(form.companyEmail)?.toLowerCase() ?? email;
+      const country = optionalText(form.country) ?? "IT";
       const verificationDocument = form.chamberOfCommerceFile;
       const result = await authUseCases.signup({
         tenantName,
@@ -284,15 +295,15 @@ export const SignupPage = () => {
           legalName: tenantName,
           tradeName: tenantName,
           legalForm: optionalText(form.legalForm),
-          vatNumber: optionalText(normalizeItalianVatNumber(form.vatNumber)),
+          vatNumber: optionalText(normalizeVatNumberForCountry(form.vatNumber, country)),
           taxCode: optionalText(normalizeTaxCode(form.taxCode)),
           pec: optionalText(form.pec)?.toLowerCase(),
           sdiCode: optionalText(normalizeSdiCode(form.sdiCode)),
           legalAddress: optionalText(form.legalAddress),
           city: optionalText(form.city),
           province: optionalText(form.province),
-          postalCode: optionalText(normalizePostalCode(form.postalCode) || form.postalCode),
-          country: optionalText(form.country) ?? "IT",
+          postalCode: optionalText(normalizePostalCodeForCountry(form.postalCode, country)),
+          country,
           phone: optionalText(form.companyPhone),
           email: companyEmail,
           website: optionalText(form.website),
@@ -467,15 +478,15 @@ export const SignupPage = () => {
                       </div>
                     </div>
                     <div>
-                      <label className="premium-login-field-label" htmlFor="signup-vatNumber">Partita IVA *</label>
-                      <div className={`premium-login-field ${normalizeItalianVatNumber(form.vatNumber).length === 11 ? "is-ok" : ""}`}>
+                      <label className="premium-login-field-label" htmlFor="signup-vatNumber">{isItalianCompany ? "Partita IVA" : "VAT / Tax ID"} *</label>
+                      <div className={`premium-login-field ${vatFieldLooksComplete ? "is-ok" : ""}`}>
                         <FieldIcon><Briefcase /></FieldIcon>
                         <input
                           id="signup-vatNumber"
                           name="vatNumber"
                           value={form.vatNumber}
-                          onChange={(event) => setForm((current) => ({ ...current, vatNumber: normalizeItalianVatNumber(event.target.value) }))}
-                          placeholder="11 cifre"
+                          onChange={(event) => setForm((current) => ({ ...current, vatNumber: normalizeVatNumberForCountry(event.target.value, current.country) }))}
+                          placeholder={isItalianCompany ? "11 cifre" : "Identificativo fiscale aziendale"}
                           required
                         />
                       </div>
@@ -680,7 +691,7 @@ export const SignupPage = () => {
                           </div>
                         </div>
                         <div className="min-w-0">
-                          <label className="premium-login-field-label" htmlFor="signup-province">Provincia/Area</label>
+                          <label className="premium-login-field-label" htmlFor="signup-province">Provincia/Area *</label>
                           <div className={`premium-login-field ${form.province ? "is-ok" : ""}`}>
                             <input
                               id="signup-province"
@@ -688,6 +699,7 @@ export const SignupPage = () => {
                               value={form.province}
                               onChange={(event) => setForm((current) => ({ ...current, province: event.target.value.toUpperCase() }))}
                               placeholder="Area"
+                              required
                             />
                           </div>
                         </div>
@@ -698,7 +710,7 @@ export const SignupPage = () => {
                               id="signup-postalCode"
                               name="postalCode"
                               value={form.postalCode}
-                              onChange={(event) => setForm((current) => ({ ...current, postalCode: event.target.value }))}
+                              onChange={(event) => setForm((current) => ({ ...current, postalCode: normalizePostalCodeForCountry(event.target.value, current.country) }))}
                               placeholder="Codice postale"
                               required
                             />
