@@ -178,6 +178,54 @@ enum RentalCustomerType {
   PERSONA_GIURIDICA
 }
 
+enum RentalPaymentMethodStatus {
+  SETUP_PENDING
+  ACTIVE
+  FAILED
+  REQUIRES_ACTION
+  EXPIRED
+  REMOVED
+}
+
+enum RentalDepositStatus {
+  DRAFT
+  AUTHORIZING
+  AUTHORIZED
+  PARTIALLY_CAPTURED
+  CAPTURED
+  RELEASED
+  CANCELED
+  FAILED
+  EXPIRED
+}
+
+enum RentalExtraChargeStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  NOTIFIED
+  PAYMENT_PROCESSING
+  PAID
+  FAILED
+  REQUIRES_ACTION
+  CANCELED
+  REFUNDED
+  DISPUTED
+}
+
+enum RentalExtraChargeType {
+  FINE
+  DAMAGE
+  DEDUCTIBLE
+  FUEL
+  TOLL
+  LATE_RETURN
+  CLEANING
+  MISSING_ACCESSORY
+  ADMIN_FEE
+  OTHER
+}
+
 model Tenant {
   id                            String                         @id @default(cuid())
   /// @pii
@@ -204,6 +252,11 @@ model Tenant {
   rentalBookingNotes            RentalBookingNote[]
   rentalCustomers               RentalCustomer[]
   rentalCustomerAttachments     RentalCustomerAttachment[]
+  rentalCustomerPaymentProfiles RentalCustomerPaymentProfile[]
+  rentalCustomerPaymentMethods  RentalCustomerPaymentMethod[]
+  rentalDeposits                RentalDeposit[]
+  rentalExtraCharges            RentalExtraCharge[]
+  rentalPaymentEvents           RentalPaymentEvent[]
   contractTemplates             ContractTemplate[]
   bookingContracts              BookingContract[]
   bookingContractEvents         BookingContractEvent[]
@@ -408,6 +461,11 @@ model User {
   invitationTokens      InvitationToken[]
   refreshSessions       RefreshSession[]
   rentalBookingsCreated RentalBooking[]      @relation("RentalBookingCreator")
+  rentalPaymentMethodsCreated RentalCustomerPaymentMethod[] @relation("RentalPaymentMethodCreator")
+  rentalDepositsCreated       RentalDeposit[]               @relation("RentalDepositCreator")
+  rentalDepositsApproved      RentalDeposit[]               @relation("RentalDepositApprover")
+  rentalExtraChargesCreated   RentalExtraCharge[]           @relation("RentalExtraChargeCreator")
+  rentalExtraChargesApproved  RentalExtraCharge[]           @relation("RentalExtraChargeApprover")
   privacyAcceptances    PrivacyAcceptance[]
 
   @@unique([tenantId, email])
@@ -585,6 +643,8 @@ model Vehicle {
   maintenances          VehicleMaintenance[]
   costs                 VehicleCost[]
   rentalBookings        RentalBooking[]
+  rentalDeposits        RentalDeposit[]
+  rentalExtraCharges    RentalExtraCharge[]
   rentalPriceLists      RentalPriceList[]
 
   @@index([tenantId, siteId])
@@ -738,6 +798,10 @@ model RentalBooking {
   attachments          RentalCustomerAttachment[]
   contract             BookingContract?
   pricingSnapshot      RentalBookingPricingSnapshot?
+  paymentMethods       RentalCustomerPaymentMethod[]
+  rentalDeposits       RentalDeposit[]
+  rentalExtraCharges   RentalExtraCharge[]
+  rentalPaymentEvents  RentalPaymentEvent[]
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
@@ -843,6 +907,11 @@ model RentalCustomer {
   tenant                  Tenant                     @relation(fields: [tenantId], references: [id])
   bookings                RentalBooking[]
   attachments             RentalCustomerAttachment[]
+  paymentProfiles         RentalCustomerPaymentProfile[]
+  paymentMethods          RentalCustomerPaymentMethod[]
+  rentalDeposits          RentalDeposit[]
+  rentalExtraCharges      RentalExtraCharge[]
+  rentalPaymentEvents     RentalPaymentEvent[]
 
   @@index([tenantId, customerType])
   @@index([tenantId, lastName, firstName])
@@ -872,6 +941,187 @@ model RentalCustomerAttachment {
 
   @@index([tenantId, customerId, createdAt])
   @@index([tenantId, bookingId])
+}
+
+model RentalCustomerPaymentProfile {
+  id               String                        @id @default(cuid())
+  tenantId         String
+  rentalCustomerId String
+  stripeCustomerId String
+  status           String                        @default("ACTIVE")
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  deletedAt        DateTime?
+  tenant           Tenant                        @relation(fields: [tenantId], references: [id])
+  rentalCustomer   RentalCustomer                @relation(fields: [rentalCustomerId], references: [id])
+  paymentMethods   RentalCustomerPaymentMethod[]
+  paymentEvents    RentalPaymentEvent[]
+
+  @@unique([tenantId, rentalCustomerId])
+  @@unique([stripeCustomerId])
+  @@index([tenantId, rentalCustomerId])
+  @@index([tenantId, status])
+  @@index([tenantId, deletedAt])
+}
+
+model RentalCustomerPaymentMethod {
+  id                    String                    @id @default(cuid())
+  tenantId              String
+  paymentProfileId      String
+  rentalCustomerId      String
+  bookingId             String?
+  stripeCustomerId      String
+  stripePaymentMethodId String
+  stripeSetupIntentId   String?
+  cardBrand             String?
+  cardLast4             String?
+  cardExpMonth          Int?
+  cardExpYear           Int?
+  /// @pii
+  cardholderName        String?
+  status                RentalPaymentMethodStatus @default(SETUP_PENDING)
+  mandateAccepted       Boolean                   @default(false)
+  mandateAcceptedAt     DateTime?
+  /// @pii
+  mandateIp             String?
+  /// @pii
+  mandateUserAgent      String?
+  termsVersion          String?
+  isDefault             Boolean                   @default(false)
+  createdByUserId       String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  deletedAt             DateTime?
+  tenant                Tenant                    @relation(fields: [tenantId], references: [id])
+  paymentProfile        RentalCustomerPaymentProfile @relation(fields: [paymentProfileId], references: [id])
+  rentalCustomer        RentalCustomer            @relation(fields: [rentalCustomerId], references: [id])
+  booking               RentalBooking?            @relation(fields: [bookingId], references: [id])
+  createdBy             User?                     @relation("RentalPaymentMethodCreator", fields: [createdByUserId], references: [id])
+  rentalDeposits        RentalDeposit[]
+  rentalExtraCharges    RentalExtraCharge[]
+  paymentEvents         RentalPaymentEvent[]
+
+  @@unique([stripePaymentMethodId])
+  @@index([tenantId, rentalCustomerId])
+  @@index([tenantId, bookingId])
+  @@index([tenantId, status])
+  @@index([tenantId, deletedAt])
+  @@index([stripeSetupIntentId])
+}
+
+model RentalDeposit {
+  id                    String                     @id @default(cuid())
+  tenantId              String
+  bookingId             String
+  rentalCustomerId      String
+  vehicleId             String?
+  paymentMethodId       String
+  stripePaymentIntentId String?
+  amountCents           Int
+  capturedAmountCents   Int                        @default(0)
+  currency              String                     @default("EUR")
+  status                RentalDepositStatus        @default(DRAFT)
+  failureReason         String?
+  authorizedAt          DateTime?
+  capturedAt            DateTime?
+  releasedAt            DateTime?
+  createdByUserId       String?
+  approvedByUserId      String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  deletedAt             DateTime?
+  tenant                Tenant                     @relation(fields: [tenantId], references: [id])
+  booking               RentalBooking              @relation(fields: [bookingId], references: [id])
+  rentalCustomer        RentalCustomer             @relation(fields: [rentalCustomerId], references: [id])
+  vehicle               Vehicle?                   @relation(fields: [vehicleId], references: [id])
+  paymentMethod         RentalCustomerPaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  createdBy             User?                      @relation("RentalDepositCreator", fields: [createdByUserId], references: [id])
+  approvedBy            User?                      @relation("RentalDepositApprover", fields: [approvedByUserId], references: [id])
+  paymentEvents         RentalPaymentEvent[]
+
+  @@index([tenantId, bookingId])
+  @@index([tenantId, rentalCustomerId])
+  @@index([tenantId, status])
+  @@index([tenantId, deletedAt])
+  @@index([stripePaymentIntentId])
+}
+
+model RentalExtraCharge {
+  id                    String                     @id @default(cuid())
+  tenantId              String
+  bookingId             String
+  rentalCustomerId      String
+  vehicleId             String?
+  paymentMethodId       String?
+  stripePaymentIntentId String?
+  type                  RentalExtraChargeType
+  /// @pii
+  description           String
+  amountCents           Int
+  adminFeeCents         Int                        @default(0)
+  totalAmountCents      Int
+  currency              String                     @default("EUR")
+  status                RentalExtraChargeStatus    @default(DRAFT)
+  /// @pii
+  evidenceFileUrl       String?
+  notifiedAt            DateTime?
+  chargedAt             DateTime?
+  failureReason         String?
+  createdByUserId       String?
+  approvedByUserId      String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  deletedAt             DateTime?
+  tenant                Tenant                     @relation(fields: [tenantId], references: [id])
+  booking               RentalBooking              @relation(fields: [bookingId], references: [id])
+  rentalCustomer        RentalCustomer             @relation(fields: [rentalCustomerId], references: [id])
+  vehicle               Vehicle?                   @relation(fields: [vehicleId], references: [id])
+  paymentMethod         RentalCustomerPaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  createdBy             User?                      @relation("RentalExtraChargeCreator", fields: [createdByUserId], references: [id])
+  approvedBy            User?                      @relation("RentalExtraChargeApprover", fields: [approvedByUserId], references: [id])
+  paymentEvents         RentalPaymentEvent[]
+
+  @@index([tenantId, bookingId])
+  @@index([tenantId, rentalCustomerId])
+  @@index([tenantId, status])
+  @@index([tenantId, type])
+  @@index([tenantId, deletedAt])
+  @@index([stripePaymentIntentId])
+}
+
+model RentalPaymentEvent {
+  id               String                       @id @default(cuid())
+  tenantId         String
+  provider         String                       @default("stripe")
+  eventId          String
+  type             String
+  paymentProfileId String?
+  paymentMethodId  String?
+  depositId        String?
+  extraChargeId    String?
+  bookingId        String?
+  rentalCustomerId String?
+  processedAt      DateTime?
+  status           String                       @default("RECEIVED")
+  errorMessage     String?
+  payload          Json
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  deletedAt        DateTime?
+  tenant           Tenant                       @relation(fields: [tenantId], references: [id])
+  paymentProfile   RentalCustomerPaymentProfile? @relation(fields: [paymentProfileId], references: [id])
+  paymentMethod    RentalCustomerPaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  deposit          RentalDeposit?               @relation(fields: [depositId], references: [id])
+  extraCharge      RentalExtraCharge?           @relation(fields: [extraChargeId], references: [id])
+  booking          RentalBooking?               @relation(fields: [bookingId], references: [id])
+  rentalCustomer   RentalCustomer?              @relation(fields: [rentalCustomerId], references: [id])
+
+  @@unique([provider, eventId])
+  @@index([tenantId, type])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, bookingId])
+  @@index([tenantId, rentalCustomerId])
+  @@index([tenantId, deletedAt])
 }
 
 model RentalPriceList {
