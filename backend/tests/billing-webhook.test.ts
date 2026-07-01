@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Stripe from "stripe";
-import { BillingService } from "../src/application/services/billing-service.js";
+import { BillingService, RentalStripeWebhookHandler } from "../src/application/services/billing-service.js";
 import { BillingLifecycleEmailInput, BillingLifecycleNotifierLike } from "../src/application/services/billing-lifecycle-notifier.js";
 import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput } from "../src/application/services/tenant-subscription-service.js";
 import { AuditLogRepository, AuditLogRow } from "../src/domain/repositories/audit-log-repository.js";
@@ -56,7 +56,7 @@ const snapshotFromInput = (input: TenantSubscriptionUpsertInput): TenantSubscrip
   stripeSubscriptionId: input.stripeSubscriptionId ?? null
 });
 
-const makeHarness = (stripeClient?: Stripe) => {
+const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalStripeWebhookHandler) => {
   (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
   (env as Record<string, unknown>).STRIPE_WEBHOOK_SECRET = webhookSecret;
 
@@ -121,7 +121,7 @@ const makeHarness = (stripeClient?: Stripe) => {
       subscriptions.set(input.tenantId, snapshot);
       return snapshot;
     }
-  }, notifier);
+  }, notifier, rentalStripeWebhookHandler);
 
   const sign = (event: Record<string, unknown>) => {
     const payload = JSON.stringify(event);
@@ -617,6 +617,38 @@ test("customer.source.expiring notifies tenant to replace expiring card", async 
   assert.equal(notifications.at(-1)?.input.tenantId, "tenant-card-expiring");
   assert.equal(notifications.at(-1)?.input.expMonth, 8);
   assert.equal(notifications.at(-1)?.input.expYear, 2026);
+});
+
+test("rental payment checkout setup webhook is delegated and does not update SaaS billing card", async () => {
+  let delegated = false;
+  const rentalHandler: RentalStripeWebhookHandler = {
+    async handleStripeEvent(event) {
+      delegated = true;
+      assert.equal(event.type, "checkout.session.completed");
+      return { tenantId: "tenant-rental", received: true };
+    }
+  };
+  const { audit, service, sign, upserts } = makeHarness(undefined, rentalHandler);
+
+  await service.handleWebhook(sign(baseEvent("evt_rental_setup_completed", "checkout.session.completed", {
+    id: "cs_rental_setup",
+    object: "checkout.session",
+    mode: "setup",
+    customer: "cus_rental_customer",
+    setup_intent: "seti_rental",
+    client_reference_id: "booking-rental",
+    metadata: {
+      domain: "rental_payments",
+      purpose: "rental_guarantee_card",
+      tenantId: "tenant-rental",
+      bookingId: "booking-rental",
+      rentalCustomerId: "customer-rental"
+    }
+  })));
+
+  assert.equal(delegated, true);
+  assert.equal(upserts.length, 0, "rental setup must not mutate TenantSubscription");
+  assert.equal(audit.rows.some((row) => row.action === "BILLING_PAYMENT_METHOD_UPDATED"), false);
 });
 
 test("billing webhook rejects missing or invalid Stripe signature", async () => {
