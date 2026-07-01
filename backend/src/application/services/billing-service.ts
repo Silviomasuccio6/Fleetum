@@ -32,6 +32,15 @@ type BillingEventRecord = {
   processedAt: Date | null;
 };
 
+export type RentalStripeWebhookHandler = {
+  handleStripeEvent(event: Stripe.Event): Promise<{
+    tenantId?: string | null;
+    ignored?: boolean;
+    duplicate?: boolean;
+    received?: boolean;
+  }>;
+};
+
 type LicenseAuditPayload = {
   plan: SaasPlan;
   seats: number;
@@ -114,6 +123,39 @@ const unixToIso = (value: unknown) => {
 
 const jsonPayload = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value ?? {}));
 
+const metadataFromObject = (source: unknown): Record<string, string> => {
+  if (!source || typeof source !== "object") return {};
+  const metadata = (source as { metadata?: unknown }).metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  return Object.fromEntries(
+    Object.entries(metadata as Record<string, unknown>)
+      .filter(([, value]) => typeof value === "string")
+      .map(([key, value]) => [key, String(value)])
+  );
+};
+
+const isRentalPaymentEvent = (event: Stripe.Event, dataObject?: Record<string, unknown>) => {
+  const metadata = metadataFromObject(dataObject ?? event.data.object);
+  if (metadata.domain === "rental_payments") return true;
+
+  const rentalCandidateEvents = new Set([
+    "payment_intent.succeeded",
+    "payment_intent.payment_failed",
+    "payment_intent.amount_capturable_updated",
+    "payment_intent.canceled",
+    "charge.refunded",
+    "charge.dispute.created",
+    "charge.dispute.closed"
+  ]);
+
+  return rentalCandidateEvents.has(event.type) && Boolean(
+    metadata.rentalDepositId ||
+    metadata.rentalExtraChargeId ||
+    metadata.purpose === "rental_deposit" ||
+    metadata.purpose === "rental_extra_charge"
+  );
+};
+
 const stripeStatusToLicense = (stripeStatus: string): BillingLicenseStatus => {
   if (stripeStatus === "active") return "ACTIVE";
   if (stripeStatus === "trialing") return "TRIAL";
@@ -193,7 +235,8 @@ export class BillingService {
     private readonly auditRepository: AuditLogRepository,
     private readonly stripeClient: StripeClient | null = createStripeClient(),
     deps: Partial<BillingServiceDeps> = {},
-    private readonly lifecycleNotifier: BillingLifecycleNotifierLike = new BillingLifecycleNotifier()
+    private readonly lifecycleNotifier: BillingLifecycleNotifierLike = new BillingLifecycleNotifier(),
+    private readonly rentalStripeWebhookHandler?: RentalStripeWebhookHandler
   ) {
     this.deps = { ...defaultDeps, ...deps };
   }
@@ -448,6 +491,14 @@ export class BillingService {
 
   private async processStripeEvent(event: Stripe.Event, dataObject?: Record<string, unknown>) {
     if (!dataObject) return { ignored: true, tenantId: null };
+
+    if (this.rentalStripeWebhookHandler && isRentalPaymentEvent(event, dataObject)) {
+      const result = await this.rentalStripeWebhookHandler.handleStripeEvent(event);
+      return {
+        ignored: result.ignored ?? false,
+        tenantId: result.tenantId ?? await this.resolveTenantId(dataObject)
+      };
+    }
 
     if (event.type === "checkout.session.completed") {
       const session = dataObject as unknown as Stripe.Checkout.Session & Record<string, unknown>;
