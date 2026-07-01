@@ -93,6 +93,7 @@ export const AppRoutes = () => (
       >
         <Route path="dashboard" element={withPageLoader(<DashboardPage />)} />
         <Route path="booking" element={withPageLoader(<RentalBookingsPage />)} />
+        <Route path="rental-bookings/:bookingId" element={withPageLoader(<RentalBookingsPage />)} />
         <Route path="booking/contratti" element={withPageLoader(<RentalContractsPage />)} />
         <Route path="booking/listini" element={withPageLoader(<RentalPricingPage />)} />
         <Route path="fermi" element={withPageLoader(<StoppagesListPage />)} />

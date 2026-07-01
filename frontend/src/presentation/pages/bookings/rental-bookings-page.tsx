@@ -24,8 +24,9 @@ import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useRentalMonthAvailability } from "../../hooks/use-rental-month-availability";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CalendarCheck2, CalendarDays, Car, ChevronLeft, ChevronRight, Clock3, Plus, RotateCcw, Search, UserPlus } from "lucide-react";
+import { RentalPaymentGuaranteePanel } from "../../components/rental-payments/RentalPaymentGuaranteePanel";
 
 type Site = {
   id: string;
@@ -408,6 +409,7 @@ const defaultTemplateEditor = (): TemplateFormState => ({
 
 export const RentalBookingsPage = () => {
   const navigate = useNavigate();
+  const { bookingId: routeBookingId } = useParams<{ bookingId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sites, setSites] = useState<Site[]>([]);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
@@ -479,6 +481,7 @@ export const RentalBookingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const paymentSetupStatus = searchParams.get("payment_setup") ?? searchParams.get("rental_payment");
 
   const forceCloseBookingModal = useCallback(() => {
     setBookingModalOpen(false);
@@ -786,11 +789,11 @@ export const RentalBookingsPage = () => {
   }, []);
 
   useEffect(() => {
-    const bookingIdFromQuery = searchParams.get("bookingId");
+    const bookingIdFromQuery = routeBookingId ?? searchParams.get("bookingId");
     if (bookingIdFromQuery && bookingIdFromQuery !== selectedBookingId) {
       setSelectedBookingId(bookingIdFromQuery);
     }
-  }, [searchParams, selectedBookingId]);
+  }, [routeBookingId, searchParams, selectedBookingId]);
 
   useEffect(() => {
     const currentBookingId = searchParams.get("bookingId");
@@ -2189,6 +2192,8 @@ export const RentalBookingsPage = () => {
                     </Button>
                   </div>
                 </div>
+
+                <RentalPaymentGuaranteePanel booking={selectedBooking} paymentSetupStatus={paymentSetupStatus} />
 
                 <div className="space-y-2 rounded-lg border p-3">
                   <Label>Transizione stato</Label>
