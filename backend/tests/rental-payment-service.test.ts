@@ -244,6 +244,90 @@ test("authentication_required maps extra charge to REQUIRES_ACTION", async () =>
   assert.equal(finalStatus, "REQUIRES_ACTION");
 });
 
+test("partial deposit capture is final and stores captured timestamp", async () => {
+  setStripeTestEnv();
+  let updateData: Record<string, unknown> | null = null;
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      capture: async () => ({ id: "pi_deposit", status: "succeeded" })
+    }
+  });
+  const service = new RentalPaymentService(new FakeAuditRepo(), stripe, {
+    async findDepositById() {
+      return {
+        id: "deposit-1",
+        tenantId: "tenant-1",
+        bookingId: "booking-1",
+        rentalCustomerId: "customer-1",
+        vehicleId: "vehicle-1",
+        paymentMethodId: "rpm-active",
+        stripePaymentIntentId: "pi_deposit",
+        amountCents: 50_000,
+        capturedAmountCents: 0,
+        currency: "EUR",
+        status: "AUTHORIZED",
+        failureReason: null
+      } as never;
+    },
+    async updateDeposit(_tenantId, _depositId, data) {
+      const saved = data as Record<string, unknown>;
+      updateData = saved;
+      return {
+        id: "deposit-1",
+        tenantId: "tenant-1",
+        bookingId: "booking-1",
+        rentalCustomerId: "customer-1",
+        vehicleId: "vehicle-1",
+        paymentMethodId: "rpm-active",
+        stripePaymentIntentId: "pi_deposit",
+        amountCents: 50_000,
+        capturedAmountCents: Number(saved.capturedAmountCents),
+        currency: "EUR",
+        status: String(saved.status),
+        failureReason: null
+      } as never;
+    }
+  });
+
+  const result = await service.captureDeposit({
+    tenantId: "tenant-1",
+    depositId: "deposit-1",
+    amountToCaptureCents: 20_000,
+    userId: "user-1"
+  });
+
+  assert.equal(result.status, "PARTIALLY_CAPTURED");
+  assert.equal(result.capturedAmountCents, 20_000);
+  assert.ok(updateData?.capturedAt instanceof Date);
+});
+
+test("partially captured deposits cannot be captured again", async () => {
+  setStripeTestEnv();
+  const service = new RentalPaymentService(new FakeAuditRepo(), fakeStripeBase(), {
+    async findDepositById() {
+      return {
+        id: "deposit-1",
+        tenantId: "tenant-1",
+        bookingId: "booking-1",
+        rentalCustomerId: "customer-1",
+        vehicleId: "vehicle-1",
+        paymentMethodId: "rpm-active",
+        stripePaymentIntentId: "pi_deposit",
+        amountCents: 50_000,
+        capturedAmountCents: 20_000,
+        currency: "EUR",
+        status: "PARTIALLY_CAPTURED",
+        failureReason: null
+      } as never;
+    }
+  });
+
+  await assert.rejects(
+    () => service.captureDeposit({ tenantId: "tenant-1", depositId: "deposit-1", userId: "user-1" }),
+    (error) => error instanceof AppError && error.code === "RENTAL_DEPOSIT_NOT_CAPTURABLE"
+  );
+});
+
 test("rental webhook duplicate is not processed twice", async () => {
   setStripeTestEnv();
   let processed = false;
