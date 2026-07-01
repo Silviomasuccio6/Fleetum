@@ -14,26 +14,81 @@ jobs:
     name: Monthly restore test on VPS
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: production
+    env:
+      FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR || '/opt/fleetum/app' }}
+      FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
+      FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
+      FLEETUM_VPS_SSH_KEY: ${{ secrets.FLEETUM_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate VPS restore test configuration
+        run: |
+          set -euo pipefail
+
+          require_value() {
+            local value="$1"
+            local name="$2"
+            if [ -z "$value" ]; then
+              echo "::error::Missing $name. Configure the canonical FLEETUM_* value, or the legacy fallback."
+              exit 1
+            fi
+          }
+
+          require_value "$FLEETUM_VPS_HOST" "repository/environment variable FLEETUM_VPS_HOST (or legacy VPS_HOST)"
+          require_value "$FLEETUM_VPS_USER" "repository/environment variable FLEETUM_VPS_USER (or legacy VPS_USER)"
+          require_value "$FLEETUM_VPS_SSH_KEY" "repository/environment secret FLEETUM_VPS_SSH_KEY (or legacy VPS_SSH_KEY)"
+          require_value "$FLEETUM_APP_DIR" "repository/environment variable FLEETUM_APP_DIR (or legacy APP_DIR)"
+
+          FLEETUM_VPS_HOST="$(printf '%s' "$FLEETUM_VPS_HOST" | tr -d '\r\n[:space:]')"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#ssh://}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
+          FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
+          FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
+          FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n')"
+
+          if ! [[ "$FLEETUM_VPS_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[A-Za-z0-9.-]+$ ]]; then
+            echo "::error::FLEETUM_VPS_HOST must be only an IPv4 address or hostname, without protocol, user, port, spaces or quotes."
+            exit 1
+          fi
+
+          if [[ "$FLEETUM_VPS_SSH_KEY" != *"BEGIN "*PRIVATE*" KEY"* ]]; then
+            echo "::error::FLEETUM_VPS_SSH_KEY is not a valid private SSH key. Store the full private key, not the public key."
+            exit 1
+          fi
+
+          {
+            echo "FLEETUM_VPS_HOST=$FLEETUM_VPS_HOST"
+            echo "FLEETUM_VPS_USER=$FLEETUM_VPS_USER"
+            echo "FLEETUM_APP_DIR=$FLEETUM_APP_DIR"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [[ "$FLEETUM_VPS_SSH_KEY" == *\\n* ]]; then
+            printf '%b' "$FLEETUM_VPS_SSH_KEY" > ~/.ssh/fleetum_vps
+          else
+            printf '%s\n' "$FLEETUM_VPS_SSH_KEY" > ~/.ssh/fleetum_vps
+          fi
+          chmod 600 ~/.ssh/fleetum_vps
+          ssh-keyscan -T 10 -H "$FLEETUM_VPS_HOST" >> ~/.ssh/known_hosts
+
       - name: Run non-destructive restore test on VPS
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          FLEETUM_APP_DIR: /opt/fleetum/app
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          envs: FLEETUM_APP_DIR
-          script_stop: true
-          script: |
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
+            "FLEETUM_APP_DIR='$FLEETUM_APP_DIR' bash -se" <<'REMOTE_SCRIPT'
             set -euo pipefail
             cd "$FLEETUM_APP_DIR"
             chmod +x deploy/backup/*.sh
             ./deploy/backup/restore-postgres-test.sh
+          REMOTE_SCRIPT
 
       - name: Create failure issue
         if: failure()
@@ -48,6 +103,8 @@ jobs:
               `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               '',
               'Immediate actions:',
+              '- Check GitHub Actions variables FLEETUM_VPS_HOST, FLEETUM_VPS_USER and FLEETUM_APP_DIR.',
+              '- Check GitHub Actions secret FLEETUM_VPS_SSH_KEY.',
               '- Check latest PostgreSQL backup integrity.',
               '- Check VPS Docker availability and disk space.',
               '- Check offsite backup configuration and credentials.',
