@@ -80,11 +80,38 @@ const ACTIVE_DEPOSIT_STATUSES: RentalDepositStatus[] = [
   RentalDepositStatus.PARTIALLY_CAPTURED
 ];
 
+const CAPTURABLE_DEPOSIT_STATUSES: readonly RentalDepositStatus[] = [
+  RentalDepositStatus.AUTHORIZED,
+  RentalDepositStatus.PARTIALLY_CAPTURED
+];
+
+const RELEASABLE_DEPOSIT_STATUSES: readonly RentalDepositStatus[] = [
+  RentalDepositStatus.AUTHORIZING,
+  RentalDepositStatus.AUTHORIZED,
+  RentalDepositStatus.PARTIALLY_CAPTURED
+];
+
 const CHARGEABLE_EXTRA_STATUSES: RentalExtraChargeStatus[] = [
   RentalExtraChargeStatus.APPROVED,
   RentalExtraChargeStatus.NOTIFIED,
   RentalExtraChargeStatus.FAILED,
   RentalExtraChargeStatus.REQUIRES_ACTION
+];
+
+const APPROVABLE_EXTRA_STATUSES: readonly RentalExtraChargeStatus[] = [
+  RentalExtraChargeStatus.DRAFT,
+  RentalExtraChargeStatus.PENDING_APPROVAL
+];
+
+const EXTRA_CHARGE_ALREADY_PROCESSING_STATUSES: readonly RentalExtraChargeStatus[] = [
+  RentalExtraChargeStatus.PAYMENT_PROCESSING,
+  RentalExtraChargeStatus.PAID
+];
+
+const NON_CANCELABLE_EXTRA_STATUSES: readonly RentalExtraChargeStatus[] = [
+  RentalExtraChargeStatus.PAID,
+  RentalExtraChargeStatus.REFUNDED,
+  RentalExtraChargeStatus.DISPUTED
 ];
 
 const optionalString = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -647,7 +674,7 @@ export class RentalPaymentService {
     const stripe = this.requireStripeClient();
     const deposit = await this.getDepositOrThrow(input.tenantId, input.depositId);
     if (!deposit.stripePaymentIntentId) throw new AppError("PaymentIntent deposito mancante", 409, "RENTAL_DEPOSIT_PAYMENT_INTENT_MISSING");
-    if (![RentalDepositStatus.AUTHORIZED, RentalDepositStatus.PARTIALLY_CAPTURED].includes(deposit.status)) {
+    if (!CAPTURABLE_DEPOSIT_STATUSES.includes(deposit.status)) {
       throw new AppError("Deposito non catturabile nello stato corrente", 409, "RENTAL_DEPOSIT_NOT_CAPTURABLE");
     }
 
@@ -688,7 +715,7 @@ export class RentalPaymentService {
     const stripe = this.requireStripeClient();
     const deposit = await this.getDepositOrThrow(input.tenantId, input.depositId);
     if (!deposit.stripePaymentIntentId) throw new AppError("PaymentIntent deposito mancante", 409, "RENTAL_DEPOSIT_PAYMENT_INTENT_MISSING");
-    if (![RentalDepositStatus.AUTHORIZING, RentalDepositStatus.AUTHORIZED, RentalDepositStatus.PARTIALLY_CAPTURED].includes(deposit.status)) {
+    if (!RELEASABLE_DEPOSIT_STATUSES.includes(deposit.status)) {
       throw new AppError("Deposito non rilasciabile nello stato corrente", 409, "RENTAL_DEPOSIT_NOT_RELEASABLE");
     }
 
@@ -766,7 +793,7 @@ export class RentalPaymentService {
 
   async approveExtraCharge(input: { tenantId: string; extraChargeId: string; userId: string }) {
     const extraCharge = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
-    if (![RentalExtraChargeStatus.DRAFT, RentalExtraChargeStatus.PENDING_APPROVAL].includes(extraCharge.status)) {
+    if (!APPROVABLE_EXTRA_STATUSES.includes(extraCharge.status)) {
       throw new AppError("Extra charge non approvabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_APPROVABLE");
     }
     const updated = await this.deps.updateExtraCharge(input.tenantId, input.extraChargeId, {
@@ -828,7 +855,7 @@ export class RentalPaymentService {
     if (!CHARGEABLE_EXTRA_STATUSES.includes(extraCharge.status)) {
       throw new AppError("Extra charge non addebitabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_CHARGEABLE");
     }
-    if (extraCharge.stripePaymentIntentId && [RentalExtraChargeStatus.PAID, RentalExtraChargeStatus.PAYMENT_PROCESSING].includes(extraCharge.status)) {
+    if (extraCharge.stripePaymentIntentId && EXTRA_CHARGE_ALREADY_PROCESSING_STATUSES.includes(extraCharge.status)) {
       throw new AppError("Extra charge gia in pagamento o pagato", 409, "RENTAL_EXTRA_CHARGE_ALREADY_CHARGED");
     }
 
@@ -899,7 +926,7 @@ export class RentalPaymentService {
 
   async cancelExtraCharge(input: { tenantId: string; extraChargeId: string; userId: string }) {
     const extraCharge = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
-    if ([RentalExtraChargeStatus.PAID, RentalExtraChargeStatus.REFUNDED, RentalExtraChargeStatus.DISPUTED].includes(extraCharge.status)) {
+    if (NON_CANCELABLE_EXTRA_STATUSES.includes(extraCharge.status)) {
       throw new AppError("Extra charge non annullabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_CANCELABLE");
     }
     const updated = await this.deps.updateExtraCharge(input.tenantId, input.extraChargeId, {
