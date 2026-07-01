@@ -144,8 +144,8 @@ const methodExpiry = (method?: RentalPaymentMethodDto | null) => {
 
 const isActionBusy = (busy: ActionState, type: string, id?: string) => busy?.type === type && (!id || busy.id === id);
 
-const canCaptureDeposit = (deposit: RentalDepositDto) => ["AUTHORIZED", "PARTIALLY_CAPTURED"].includes(deposit.status);
-const canReleaseDeposit = (deposit: RentalDepositDto) => ["AUTHORIZED", "PARTIALLY_CAPTURED"].includes(deposit.status);
+const canCaptureDeposit = (deposit: RentalDepositDto) => deposit.status === "AUTHORIZED";
+const canReleaseDeposit = (deposit: RentalDepositDto) => deposit.status === "AUTHORIZED";
 const canApproveExtra = (charge: RentalExtraChargeDto) => ["DRAFT", "PENDING_APPROVAL"].includes(charge.status);
 const canNotifyExtra = (charge: RentalExtraChargeDto) => ["APPROVED"].includes(charge.status);
 const canChargeExtra = (charge: RentalExtraChargeDto) => ["APPROVED", "NOTIFIED", "FAILED", "REQUIRES_ACTION"].includes(charge.status);

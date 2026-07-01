@@ -76,19 +76,16 @@ const RENTAL_CANDIDATE_EVENTS = new Set([
 
 const ACTIVE_DEPOSIT_STATUSES: RentalDepositStatus[] = [
   RentalDepositStatus.AUTHORIZING,
-  RentalDepositStatus.AUTHORIZED,
-  RentalDepositStatus.PARTIALLY_CAPTURED
+  RentalDepositStatus.AUTHORIZED
 ];
 
 const CAPTURABLE_DEPOSIT_STATUSES: readonly RentalDepositStatus[] = [
-  RentalDepositStatus.AUTHORIZED,
-  RentalDepositStatus.PARTIALLY_CAPTURED
+  RentalDepositStatus.AUTHORIZED
 ];
 
 const RELEASABLE_DEPOSIT_STATUSES: readonly RentalDepositStatus[] = [
   RentalDepositStatus.AUTHORIZING,
-  RentalDepositStatus.AUTHORIZED,
-  RentalDepositStatus.PARTIALLY_CAPTURED
+  RentalDepositStatus.AUTHORIZED
 ];
 
 const CHARGEABLE_EXTRA_STATUSES: RentalExtraChargeStatus[] = [
@@ -695,7 +692,7 @@ export class RentalPaymentService {
     const updated = await this.deps.updateDeposit(input.tenantId, deposit.id, {
       status: nextStatus,
       capturedAmountCents: capturedTotal,
-      capturedAt: nextStatus === RentalDepositStatus.CAPTURED ? new Date() : undefined,
+      capturedAt: new Date(),
       stripePaymentIntentId: paymentIntent.id
     });
 
