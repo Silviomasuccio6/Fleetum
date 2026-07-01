@@ -21,6 +21,10 @@ const permissionKeys = [
   "stats:read",
   "billing:read",
   "billing:manage",
+  "rental-payments:read",
+  "rental-payments:write",
+  "rental-payments:charge",
+  "rental-payments:refund",
   "privacy:export",
   "privacy:manage",
   "reports:export",
@@ -30,7 +34,7 @@ const permissionKeys = [
 const rolePermissions: Record<RoleKey, string[]> = {
   ADMIN: permissionKeys,
   MANAGER: permissionKeys.filter(
-    (key) => !["users:write", "billing:read", "billing:manage", "privacy:export", "privacy:manage"].includes(key)
+    (key) => !["users:write", "billing:read", "billing:manage", "rental-payments:refund", "privacy:export", "privacy:manage"].includes(key)
   ),
   OPERATOR: [
     "dashboard:read",
@@ -41,9 +45,11 @@ const rolePermissions: Record<RoleKey, string[]> = {
     "stoppages:read",
     "stoppages:write",
     "stoppages:remind",
+    "rental-payments:read",
+    "rental-payments:write",
     "stats:read"
   ],
-  VIEWER: ["dashboard:read", "sites:read", "workshops:read", "vehicles:read", "stoppages:read", "stats:read"]
+  VIEWER: ["dashboard:read", "sites:read", "workshops:read", "vehicles:read", "stoppages:read", "rental-payments:read", "stats:read"]
 };
 
 async function main() {
