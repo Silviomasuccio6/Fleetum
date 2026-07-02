@@ -258,6 +258,10 @@ export const rentalBookingPricingUpdateSchema = z.object({
 
 const italianVatRegex = /^\d{11}$/;
 const sdiCodeRegex = /^[A-Za-z0-9]{7}$/;
+const countryCodeRegex = /^[A-Za-z]{2}$/;
+const optionalCountryCode = optionalString.refine((value) => !value || countryCodeRegex.test(value), {
+  message: "Codice nazione non valido"
+});
 
 const customerBaseSchema = z.object({
   customerType: rentalCustomerTypeSchema.optional().default("PERSONA_FISICA"),
@@ -274,8 +278,20 @@ const customerBaseSchema = z.object({
   phone: optionalString,
   dateOfBirth: z.coerce.date().optional(),
   placeOfBirth: optionalString,
+  birthCountry: optionalCountryCode,
+  birthProvince: optionalString,
+  birthMunicipalityCode: optionalString,
+  birthCity: optionalString,
   nationality: optionalString,
+  nationalityCountry: optionalCountryCode,
   residenceAddress: optionalString,
+  residenceCountry: optionalCountryCode,
+  residenceRegion: optionalString,
+  residenceProvince: optionalString,
+  residenceMunicipalityCode: optionalString,
+  residenceCity: optionalString,
+  residencePostalCode: optionalString,
+  residenceStreetAddress: optionalString,
   taxCode: optionalString,
   documentType: optionalString,
   documentNumber: optionalString,
@@ -287,6 +303,13 @@ const customerBaseSchema = z.object({
   companyVatNumber: optionalString,
   companyTaxCode: optionalString,
   companyLegalAddress: optionalString,
+  companyCountry: optionalCountryCode,
+  companyRegion: optionalString,
+  companyProvince: optionalString,
+  companyMunicipalityCode: optionalString,
+  companyCity: optionalString,
+  companyPostalCode: optionalString,
+  companyStreetAddress: optionalString,
   companyPec: optionalString.refine((value) => !value || z.string().email().safeParse(value).success, {
     message: "PEC non valida"
   }),

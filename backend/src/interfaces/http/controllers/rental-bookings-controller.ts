@@ -106,8 +106,20 @@ const customerSelect = {
   phone: true,
   dateOfBirth: true,
   placeOfBirth: true,
+  birthCountry: true,
+  birthProvince: true,
+  birthMunicipalityCode: true,
+  birthCity: true,
   nationality: true,
+  nationalityCountry: true,
   residenceAddress: true,
+  residenceCountry: true,
+  residenceRegion: true,
+  residenceProvince: true,
+  residenceMunicipalityCode: true,
+  residenceCity: true,
+  residencePostalCode: true,
+  residenceStreetAddress: true,
   taxCode: true,
   documentType: true,
   documentNumber: true,
@@ -119,6 +131,13 @@ const customerSelect = {
   companyVatNumber: true,
   companyTaxCode: true,
   companyLegalAddress: true,
+  companyCountry: true,
+  companyRegion: true,
+  companyProvince: true,
+  companyMunicipalityCode: true,
+  companyCity: true,
+  companyPostalCode: true,
+  companyStreetAddress: true,
   companyPec: true,
   companySdi: true,
   companyRea: true,
@@ -345,6 +364,40 @@ export class RentalBookingsController {
 
   private normalizeVatNumber(input?: string | null) {
     return normalizeText(input).replace(/\s+/g, "");
+  }
+
+  private normalizeCountryCode(input?: string | null) {
+    const value = normalizeText(input).toUpperCase();
+    return /^[A-Z]{2}$/.test(value) ? value : null;
+  }
+
+  private normalizeUpperText(input?: string | null) {
+    const value = normalizeText(input).toUpperCase();
+    return value || null;
+  }
+
+  private normalizeNullableText(input?: string | null) {
+    const value = normalizeText(input);
+    return value || null;
+  }
+
+  private composeStructuredAddress(input: {
+    streetAddress?: string | null;
+    postalCode?: string | null;
+    city?: string | null;
+    province?: string | null;
+    country?: string | null;
+    fallback?: string | null;
+  }) {
+    const streetAddress = normalizeText(input.streetAddress);
+    const postalCode = normalizeText(input.postalCode);
+    const city = normalizeText(input.city);
+    const province = normalizeText(input.province).toUpperCase();
+    const country = this.normalizeCountryCode(input.country);
+    const locality = [postalCode, city].filter(Boolean).join(" ");
+    const area = [locality, province, country].filter(Boolean).join(", ");
+    const composed = [streetAddress, area].filter(Boolean).join(" - ");
+    return composed || this.normalizeNullableText(input.fallback);
   }
 
   private normalizeCustomerType(input?: string | null) {
@@ -2999,6 +3052,23 @@ export class RentalBookingsController {
       companySdi: payload.companySdi
     });
 
+    const residenceAddress = this.composeStructuredAddress({
+      streetAddress: payload.residenceStreetAddress,
+      postalCode: payload.residencePostalCode,
+      city: payload.residenceCity,
+      province: payload.residenceProvince,
+      country: payload.residenceCountry,
+      fallback: payload.residenceAddress
+    });
+    const companyLegalAddress = this.composeStructuredAddress({
+      streetAddress: payload.companyStreetAddress,
+      postalCode: payload.companyPostalCode,
+      city: payload.companyCity,
+      province: payload.companyProvince,
+      country: payload.companyCountry,
+      fallback: payload.companyLegalAddress
+    });
+
     const created = await prisma.rentalCustomer.create({
       data: {
         tenantId,
@@ -3014,8 +3084,20 @@ export class RentalBookingsController {
         phone: payload.phone,
         dateOfBirth: payload.dateOfBirth,
         placeOfBirth: payload.placeOfBirth,
+        birthCountry: this.normalizeCountryCode(payload.birthCountry),
+        birthProvince: this.normalizeUpperText(payload.birthProvince),
+        birthMunicipalityCode: this.normalizeNullableText(payload.birthMunicipalityCode),
+        birthCity: this.normalizeNullableText(payload.birthCity),
         nationality: payload.nationality,
-        residenceAddress: payload.residenceAddress,
+        nationalityCountry: this.normalizeCountryCode(payload.nationalityCountry),
+        residenceAddress,
+        residenceCountry: this.normalizeCountryCode(payload.residenceCountry),
+        residenceRegion: this.normalizeNullableText(payload.residenceRegion),
+        residenceProvince: this.normalizeUpperText(payload.residenceProvince),
+        residenceMunicipalityCode: this.normalizeNullableText(payload.residenceMunicipalityCode),
+        residenceCity: this.normalizeNullableText(payload.residenceCity),
+        residencePostalCode: this.normalizeNullableText(payload.residencePostalCode),
+        residenceStreetAddress: this.normalizeNullableText(payload.residenceStreetAddress),
         taxCode: payload.taxCode,
         documentType: payload.documentType,
         documentNumber: payload.documentNumber,
@@ -3026,7 +3108,14 @@ export class RentalBookingsController {
         companyLegalForm: payload.companyLegalForm,
         companyVatNumber: this.normalizeVatNumber(payload.companyVatNumber) || null,
         companyTaxCode: payload.companyTaxCode,
-        companyLegalAddress: payload.companyLegalAddress,
+        companyLegalAddress,
+        companyCountry: this.normalizeCountryCode(payload.companyCountry),
+        companyRegion: this.normalizeNullableText(payload.companyRegion),
+        companyProvince: this.normalizeUpperText(payload.companyProvince),
+        companyMunicipalityCode: this.normalizeNullableText(payload.companyMunicipalityCode),
+        companyCity: this.normalizeNullableText(payload.companyCity),
+        companyPostalCode: this.normalizeNullableText(payload.companyPostalCode),
+        companyStreetAddress: this.normalizeNullableText(payload.companyStreetAddress),
         companyPec: payload.companyPec,
         companySdi: normalizeText(payload.companySdi).toUpperCase() || null,
         companyRea: payload.companyRea,
@@ -3062,6 +3151,48 @@ export class RentalBookingsController {
 
     this.assertCustomerBusinessRules(merged);
 
+    const hasAnyDefined = (...values: unknown[]) => values.some((value) => value !== undefined);
+    const residenceTouched = hasAnyDefined(
+      payload.residenceAddress,
+      payload.residenceCountry,
+      payload.residenceRegion,
+      payload.residenceProvince,
+      payload.residenceMunicipalityCode,
+      payload.residenceCity,
+      payload.residencePostalCode,
+      payload.residenceStreetAddress
+    );
+    const companyAddressTouched = hasAnyDefined(
+      payload.companyLegalAddress,
+      payload.companyCountry,
+      payload.companyRegion,
+      payload.companyProvince,
+      payload.companyMunicipalityCode,
+      payload.companyCity,
+      payload.companyPostalCode,
+      payload.companyStreetAddress
+    );
+    const residenceAddress = residenceTouched
+      ? this.composeStructuredAddress({
+          streetAddress: payload.residenceStreetAddress ?? customer.residenceStreetAddress,
+          postalCode: payload.residencePostalCode ?? customer.residencePostalCode,
+          city: payload.residenceCity ?? customer.residenceCity,
+          province: payload.residenceProvince ?? customer.residenceProvince,
+          country: payload.residenceCountry ?? customer.residenceCountry,
+          fallback: payload.residenceAddress ?? customer.residenceAddress
+        })
+      : undefined;
+    const companyLegalAddress = companyAddressTouched
+      ? this.composeStructuredAddress({
+          streetAddress: payload.companyStreetAddress ?? customer.companyStreetAddress,
+          postalCode: payload.companyPostalCode ?? customer.companyPostalCode,
+          city: payload.companyCity ?? customer.companyCity,
+          province: payload.companyProvince ?? customer.companyProvince,
+          country: payload.companyCountry ?? customer.companyCountry,
+          fallback: payload.companyLegalAddress ?? customer.companyLegalAddress
+        })
+      : undefined;
+
     const updated = await prisma.rentalCustomer.update({
       where: { id: customer.id },
       data: withDefined({
@@ -3071,8 +3202,37 @@ export class RentalBookingsController {
         lastName: payload.lastName !== undefined ? normalizeText(payload.lastName) : undefined,
         drivingLicenseNumber:
           payload.drivingLicenseNumber !== undefined ? normalizeText(payload.drivingLicenseNumber).toUpperCase() : undefined,
+        birthCountry: payload.birthCountry !== undefined ? this.normalizeCountryCode(payload.birthCountry) : undefined,
+        birthProvince: payload.birthProvince !== undefined ? this.normalizeUpperText(payload.birthProvince) : undefined,
+        birthMunicipalityCode:
+          payload.birthMunicipalityCode !== undefined ? this.normalizeNullableText(payload.birthMunicipalityCode) : undefined,
+        birthCity: payload.birthCity !== undefined ? this.normalizeNullableText(payload.birthCity) : undefined,
+        nationalityCountry:
+          payload.nationalityCountry !== undefined ? this.normalizeCountryCode(payload.nationalityCountry) : undefined,
+        residenceAddress,
+        residenceCountry: payload.residenceCountry !== undefined ? this.normalizeCountryCode(payload.residenceCountry) : undefined,
+        residenceRegion: payload.residenceRegion !== undefined ? this.normalizeNullableText(payload.residenceRegion) : undefined,
+        residenceProvince:
+          payload.residenceProvince !== undefined ? this.normalizeUpperText(payload.residenceProvince) : undefined,
+        residenceMunicipalityCode:
+          payload.residenceMunicipalityCode !== undefined ? this.normalizeNullableText(payload.residenceMunicipalityCode) : undefined,
+        residenceCity: payload.residenceCity !== undefined ? this.normalizeNullableText(payload.residenceCity) : undefined,
+        residencePostalCode:
+          payload.residencePostalCode !== undefined ? this.normalizeNullableText(payload.residencePostalCode) : undefined,
+        residenceStreetAddress:
+          payload.residenceStreetAddress !== undefined ? this.normalizeNullableText(payload.residenceStreetAddress) : undefined,
         companyVatNumber:
           payload.companyVatNumber !== undefined ? this.normalizeVatNumber(payload.companyVatNumber) || null : undefined,
+        companyLegalAddress,
+        companyCountry: payload.companyCountry !== undefined ? this.normalizeCountryCode(payload.companyCountry) : undefined,
+        companyRegion: payload.companyRegion !== undefined ? this.normalizeNullableText(payload.companyRegion) : undefined,
+        companyProvince: payload.companyProvince !== undefined ? this.normalizeUpperText(payload.companyProvince) : undefined,
+        companyMunicipalityCode:
+          payload.companyMunicipalityCode !== undefined ? this.normalizeNullableText(payload.companyMunicipalityCode) : undefined,
+        companyCity: payload.companyCity !== undefined ? this.normalizeNullableText(payload.companyCity) : undefined,
+        companyPostalCode: payload.companyPostalCode !== undefined ? this.normalizeNullableText(payload.companyPostalCode) : undefined,
+        companyStreetAddress:
+          payload.companyStreetAddress !== undefined ? this.normalizeNullableText(payload.companyStreetAddress) : undefined,
         companySdi: payload.companySdi !== undefined ? normalizeText(payload.companySdi).toUpperCase() || null : undefined
       })
     });

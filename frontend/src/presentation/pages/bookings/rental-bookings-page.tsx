@@ -27,6 +27,12 @@ import { useRentalMonthAvailability } from "../../hooks/use-rental-month-availab
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CalendarCheck2, CalendarDays, Car, ChevronLeft, ChevronRight, Clock3, Plus, RotateCcw, Search, UserPlus } from "lucide-react";
 import { RentalPaymentGuaranteePanel } from "../../components/rental-payments/RentalPaymentGuaranteePanel";
+import {
+  CountrySelect,
+  CustomerAddressFields,
+  StructuredAddressValue,
+  countryNameFromCode
+} from "../../components/customers/customer-geography-fields";
 
 type Site = {
   id: string;
@@ -133,8 +139,20 @@ type CustomerFormState = {
   phone: string;
   dateOfBirth: string;
   placeOfBirth: string;
+  birthCountry: string;
+  birthProvince: string;
+  birthMunicipalityCode: string;
+  birthCity: string;
   nationality: string;
+  nationalityCountry: string;
   residenceAddress: string;
+  residenceCountry: string;
+  residenceRegion: string;
+  residenceProvince: string;
+  residenceMunicipalityCode: string;
+  residenceCity: string;
+  residencePostalCode: string;
+  residenceStreetAddress: string;
   taxCode: string;
   documentType: string;
   documentNumber: string;
@@ -146,6 +164,13 @@ type CustomerFormState = {
   companyVatNumber: string;
   companyTaxCode: string;
   companyLegalAddress: string;
+  companyCountry: string;
+  companyRegion: string;
+  companyProvince: string;
+  companyMunicipalityCode: string;
+  companyCity: string;
+  companyPostalCode: string;
+  companyStreetAddress: string;
   companyPec: string;
   companySdi: string;
   companyRea: string;
@@ -328,8 +353,20 @@ const defaultCustomerForm = (): CustomerFormState => ({
   phone: "",
   dateOfBirth: "",
   placeOfBirth: "",
-  nationality: "",
+  birthCountry: "IT",
+  birthProvince: "",
+  birthMunicipalityCode: "",
+  birthCity: "",
+  nationality: countryNameFromCode("IT"),
+  nationalityCountry: "IT",
   residenceAddress: "",
+  residenceCountry: "IT",
+  residenceRegion: "",
+  residenceProvince: "",
+  residenceMunicipalityCode: "",
+  residenceCity: "",
+  residencePostalCode: "",
+  residenceStreetAddress: "",
   taxCode: "",
   documentType: "",
   documentNumber: "",
@@ -341,6 +378,13 @@ const defaultCustomerForm = (): CustomerFormState => ({
   companyVatNumber: "",
   companyTaxCode: "",
   companyLegalAddress: "",
+  companyCountry: "IT",
+  companyRegion: "",
+  companyProvince: "",
+  companyMunicipalityCode: "",
+  companyCity: "",
+  companyPostalCode: "",
+  companyStreetAddress: "",
   companyPec: "",
   companySdi: "",
   companyRea: "",
@@ -351,6 +395,26 @@ const defaultCustomerForm = (): CustomerFormState => ({
   legalRepEmail: "",
   legalRepPhone: "",
   notes: ""
+});
+
+const residenceAddressValueFromCustomerForm = (form: CustomerFormState): StructuredAddressValue => ({
+  country: form.residenceCountry,
+  region: form.residenceRegion,
+  province: form.residenceProvince,
+  municipalityCode: form.residenceMunicipalityCode,
+  city: form.residenceCity,
+  postalCode: form.residencePostalCode,
+  streetAddress: form.residenceStreetAddress
+});
+
+const companyAddressValueFromCustomerForm = (form: CustomerFormState): StructuredAddressValue => ({
+  country: form.companyCountry,
+  region: form.companyRegion,
+  province: form.companyProvince,
+  municipalityCode: form.companyMunicipalityCode,
+  city: form.companyCity,
+  postalCode: form.companyPostalCode,
+  streetAddress: form.companyStreetAddress
 });
 
 const buildBookingFormForCell = (input?: { vehicleId: string; date: Date }): BookingFormState => {
@@ -1376,8 +1440,20 @@ export const RentalBookingsPage = () => {
         phone: customerForm.phone.trim() || undefined,
         dateOfBirth: customerForm.dateOfBirth ? new Date(`${customerForm.dateOfBirth}T00:00:00`).toISOString() : undefined,
         placeOfBirth: customerForm.placeOfBirth.trim() || undefined,
+        birthCountry: customerForm.birthCountry || undefined,
+        birthProvince: customerForm.birthProvince.trim().toUpperCase() || undefined,
+        birthMunicipalityCode: customerForm.birthMunicipalityCode.trim() || undefined,
+        birthCity: customerForm.birthCity.trim() || undefined,
         nationality: customerForm.nationality.trim() || undefined,
+        nationalityCountry: customerForm.nationalityCountry || undefined,
         residenceAddress: customerForm.residenceAddress.trim() || undefined,
+        residenceCountry: customerForm.residenceCountry || undefined,
+        residenceRegion: customerForm.residenceRegion.trim() || undefined,
+        residenceProvince: customerForm.residenceProvince.trim().toUpperCase() || undefined,
+        residenceMunicipalityCode: customerForm.residenceMunicipalityCode.trim() || undefined,
+        residenceCity: customerForm.residenceCity.trim() || undefined,
+        residencePostalCode: customerForm.residencePostalCode.trim() || undefined,
+        residenceStreetAddress: customerForm.residenceStreetAddress.trim() || undefined,
         taxCode: customerForm.taxCode.trim() || undefined,
         documentType: customerForm.documentType.trim() || undefined,
         documentNumber: customerForm.documentNumber.trim() || undefined,
@@ -1389,6 +1465,13 @@ export const RentalBookingsPage = () => {
         companyVatNumber: customerForm.companyVatNumber.replace(/\s+/g, "") || undefined,
         companyTaxCode: customerForm.companyTaxCode.trim() || undefined,
         companyLegalAddress: customerForm.companyLegalAddress.trim() || undefined,
+        companyCountry: customerForm.companyCountry || undefined,
+        companyRegion: customerForm.companyRegion.trim() || undefined,
+        companyProvince: customerForm.companyProvince.trim().toUpperCase() || undefined,
+        companyMunicipalityCode: customerForm.companyMunicipalityCode.trim() || undefined,
+        companyCity: customerForm.companyCity.trim() || undefined,
+        companyPostalCode: customerForm.companyPostalCode.trim() || undefined,
+        companyStreetAddress: customerForm.companyStreetAddress.trim() || undefined,
         companyPec: customerForm.companyPec.trim() || undefined,
         companySdi: customerForm.companySdi.trim().toUpperCase() || undefined,
         companyRea: customerForm.companyRea.trim() || undefined,
@@ -2533,8 +2616,20 @@ export const RentalBookingsPage = () => {
                             phone: customer.phone || "",
                             dateOfBirth: customer.dateOfBirth ? toDateInputSafe(customer.dateOfBirth) : "",
                             placeOfBirth: customer.placeOfBirth || "",
-                            nationality: customer.nationality || "",
+                            birthCountry: customer.birthCountry || "IT",
+                            birthProvince: customer.birthProvince || "",
+                            birthMunicipalityCode: customer.birthMunicipalityCode || "",
+                            birthCity: customer.birthCity || "",
+                            nationality: customer.nationality || countryNameFromCode(customer.nationalityCountry),
+                            nationalityCountry: customer.nationalityCountry || "IT",
                             residenceAddress: customer.residenceAddress || "",
+                            residenceCountry: customer.residenceCountry || "IT",
+                            residenceRegion: customer.residenceRegion || "",
+                            residenceProvince: customer.residenceProvince || "",
+                            residenceMunicipalityCode: customer.residenceMunicipalityCode || "",
+                            residenceCity: customer.residenceCity || "",
+                            residencePostalCode: customer.residencePostalCode || "",
+                            residenceStreetAddress: customer.residenceStreetAddress || customer.residenceAddress || "",
                             taxCode: customer.taxCode || "",
                             documentType: customer.documentType || "",
                             documentNumber: customer.documentNumber || "",
@@ -2546,6 +2641,13 @@ export const RentalBookingsPage = () => {
                             companyVatNumber: customer.companyVatNumber || "",
                             companyTaxCode: customer.companyTaxCode || "",
                             companyLegalAddress: customer.companyLegalAddress || "",
+                            companyCountry: customer.companyCountry || "IT",
+                            companyRegion: customer.companyRegion || "",
+                            companyProvince: customer.companyProvince || "",
+                            companyMunicipalityCode: customer.companyMunicipalityCode || "",
+                            companyCity: customer.companyCity || "",
+                            companyPostalCode: customer.companyPostalCode || "",
+                            companyStreetAddress: customer.companyStreetAddress || customer.companyLegalAddress || "",
                             companyPec: customer.companyPec || "",
                             companySdi: customer.companySdi || "",
                             companyRea: customer.companyRea || "",
@@ -3144,13 +3246,24 @@ export const RentalBookingsPage = () => {
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyTaxCode: e.target.value }))}
                           />
                         </div>
-                        <div className="space-y-1 md:col-span-3">
-                          <Label>Sede legale (indirizzo completo)</Label>
-                          <Input
-                            value={customerForm.companyLegalAddress}
-                            onChange={(e) => setCustomerForm((s) => ({ ...s, companyLegalAddress: e.target.value }))}
-                          />
-                        </div>
+                        <CustomerAddressFields
+                          idPrefix="booking-customer-company-address"
+                          title="Sede legale"
+                          streetLabel="Via e numero civico"
+                          value={companyAddressValueFromCustomerForm(customerForm)}
+                          onChange={(address) =>
+                            setCustomerForm((state) => ({
+                              ...state,
+                              companyCountry: address.country,
+                              companyRegion: address.region,
+                              companyProvince: address.province,
+                              companyMunicipalityCode: address.municipalityCode,
+                              companyCity: address.city,
+                              companyPostalCode: address.postalCode,
+                              companyStreetAddress: address.streetAddress
+                            }))
+                          }
+                        />
                         <div className="space-y-1">
                           <Label>Email</Label>
                           <Input
@@ -3205,9 +3318,38 @@ export const RentalBookingsPage = () => {
                         <div className="space-y-1"><Label>Telefono</Label><Input value={customerForm.phone} onChange={(e) => setCustomerForm((s) => ({ ...s, phone: e.target.value }))} /></div>
                         <div className="space-y-1"><Label>Data nascita</Label><Input type="date" value={customerForm.dateOfBirth} onChange={(e) => setCustomerForm((s) => ({ ...s, dateOfBirth: e.target.value }))} /></div>
                         <div className="space-y-1"><Label>Luogo nascita</Label><Input value={customerForm.placeOfBirth} onChange={(e) => setCustomerForm((s) => ({ ...s, placeOfBirth: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Nazionalità</Label><Input value={customerForm.nationality} onChange={(e) => setCustomerForm((s) => ({ ...s, nationality: e.target.value }))} /></div>
+                        <div className="space-y-1">
+                          <Label>Nazionalità</Label>
+                          <CountrySelect
+                            value={customerForm.nationalityCountry}
+                            onChange={(countryCode) =>
+                              setCustomerForm((state) => ({
+                                ...state,
+                                nationalityCountry: countryCode,
+                                nationality: countryNameFromCode(countryCode)
+                              }))
+                            }
+                          />
+                        </div>
                         <div className="space-y-1"><Label>Codice fiscale</Label><Input value={customerForm.taxCode} onChange={(e) => setCustomerForm((s) => ({ ...s, taxCode: e.target.value }))} /></div>
-                        <div className="space-y-1 md:col-span-2"><Label>Residenza (indirizzo completo)</Label><Input value={customerForm.residenceAddress} onChange={(e) => setCustomerForm((s) => ({ ...s, residenceAddress: e.target.value }))} /></div>
+                        <CustomerAddressFields
+                          idPrefix="booking-customer-residence-address"
+                          title="Residenza"
+                          streetLabel="Via e numero civico"
+                          value={residenceAddressValueFromCustomerForm(customerForm)}
+                          onChange={(address) =>
+                            setCustomerForm((state) => ({
+                              ...state,
+                              residenceCountry: address.country,
+                              residenceRegion: address.region,
+                              residenceProvince: address.province,
+                              residenceMunicipalityCode: address.municipalityCode,
+                              residenceCity: address.city,
+                              residencePostalCode: address.postalCode,
+                              residenceStreetAddress: address.streetAddress
+                            }))
+                          }
+                        />
                         <div className="space-y-1"><Label>Documento tipo</Label><Input value={customerForm.documentType} onChange={(e) => setCustomerForm((s) => ({ ...s, documentType: e.target.value }))} /></div>
                         <div className="space-y-1"><Label>Documento numero</Label><Input value={customerForm.documentNumber} onChange={(e) => setCustomerForm((s) => ({ ...s, documentNumber: e.target.value }))} /></div>
                         <div className="space-y-1"><Label>Rilascio documento</Label><Input type="date" value={customerForm.documentIssuedAt} onChange={(e) => setCustomerForm((s) => ({ ...s, documentIssuedAt: e.target.value }))} /></div>
