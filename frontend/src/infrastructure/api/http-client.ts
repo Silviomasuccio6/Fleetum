@@ -12,6 +12,34 @@ const api = axios.create({
   timeout: 15000,
   withCredentials: true
 });
+
+export class HttpClientError extends Error {
+  status?: number;
+  code?: string;
+  details?: Record<string, unknown>;
+  isNetwork: boolean;
+  isTimeout: boolean;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      details?: Record<string, unknown>;
+      isNetwork?: boolean;
+      isTimeout?: boolean;
+    } = {}
+  ) {
+    super(message);
+    this.name = "HttpClientError";
+    this.status = options.status;
+    this.code = options.code;
+    this.details = options.details;
+    this.isNetwork = Boolean(options.isNetwork);
+    this.isTimeout = Boolean(options.isTimeout);
+  }
+}
+
 let lastToastAt = 0;
 const TOAST_COOLDOWN_MS = 5000;
 const AUTH_ROUTES = ["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password", "/auth/accept-invite", "/auth/refresh"];
@@ -179,7 +207,15 @@ api.interceptors.response.use(
       snackbar.error(message);
       lastToastAt = now;
     }
-    return Promise.reject(new Error(message));
+    return Promise.reject(
+      new HttpClientError(message, {
+        status,
+        code: apiErrorCode ?? error.code,
+        details: apiDetails,
+        isNetwork,
+        isTimeout
+      })
+    );
   }
 );
 

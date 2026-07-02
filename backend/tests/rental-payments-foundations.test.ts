@@ -5,6 +5,10 @@ import test from "node:test";
 
 const schema = readFileSync(resolve("prisma/schema.prisma"), "utf8");
 const seed = readFileSync(resolve("prisma/seed.ts"), "utf8");
+const rentalPaymentPermissionsMigration = readFileSync(
+  resolve("prisma/migrations/20260702143000_rental_payment_permissions/migration.sql"),
+  "utf8"
+);
 
 const modelBlock = (name: string) => {
   const match = schema.match(new RegExp(`model ${name} \\{([\\s\\S]*?)\\n\\}`));
@@ -77,4 +81,21 @@ test("seed defines dedicated rental payment permissions without reusing billing 
   assert.match(seed, /MANAGER:[\s\S]*"rental-payments:refund"/, "Manager rule must explicitly consider refund permission");
   assert.match(seed, /OPERATOR:[\s\S]*"rental-payments:read"[\s\S]*"rental-payments:write"/);
   assert.match(seed, /VIEWER:[\s\S]*"rental-payments:read"/);
+});
+
+test("migration grants rental payment permissions to existing production roles", () => {
+  for (const permission of [
+    "rental-payments:read",
+    "rental-payments:write",
+    "rental-payments:charge",
+    "rental-payments:refund"
+  ]) {
+    assert.ok(rentalPaymentPermissionsMigration.includes(permission), `Missing migration permission ${permission}`);
+  }
+
+  assert.match(rentalPaymentPermissionsMigration, /'ADMIN'::"RoleKey"[\s\S]*'rental-payments:refund'/);
+  assert.match(rentalPaymentPermissionsMigration, /'MANAGER'::"RoleKey"[\s\S]*'rental-payments:charge'/);
+  assert.match(rentalPaymentPermissionsMigration, /'OPERATOR'::"RoleKey"[\s\S]*'rental-payments:write'/);
+  assert.match(rentalPaymentPermissionsMigration, /'VIEWER'::"RoleKey"[\s\S]*'rental-payments:read'/);
+  assert.match(rentalPaymentPermissionsMigration, /ON CONFLICT \("roleId", "permissionId"\) DO NOTHING/);
 });
