@@ -23,12 +23,21 @@ test("customers smoke: persona giuridica valida", () => {
     customerType: "PERSONA_GIURIDICA",
     companyName: "Fleet Demo Srl",
     companyVatNumber: "12345678901",
-    email: "fleet@example.com"
+    email: "fleet@example.com",
+    companyCountry: "IT",
+    companyRegion: "Lazio",
+    companyProvince: "RM",
+    companyCity: "Roma",
+    companyPostalCode: "00100",
+    companyStreetAddress: "Via Demo 1"
   });
 
   assert.equal(parsed.customerType, "PERSONA_GIURIDICA");
   assert.equal(parsed.companyName, "Fleet Demo Srl");
   assert.equal(parsed.companyVatNumber, "12345678901");
+  assert.equal(parsed.companyCountry, "IT");
+  assert.equal(parsed.companyProvince, "RM");
+  assert.equal(parsed.companyCity, "Roma");
 });
 
 test("customers smoke: persona giuridica senza partita IVA -> errore", () => {
@@ -37,6 +46,38 @@ test("customers smoke: persona giuridica senza partita IVA -> errore", () => {
       customerType: "PERSONA_GIURIDICA",
       companyName: "Fleet Demo Srl",
       email: "fleet@example.com"
+    });
+  });
+});
+
+test("customers smoke: residenza strutturata italiana valida", () => {
+  const parsed = rentalCustomerCreateSchema.parse({
+    customerType: "PERSONA_FISICA",
+    firstName: "Mario",
+    lastName: "Rossi",
+    drivingLicenseNumber: "AB1234567",
+    nationalityCountry: "IT",
+    residenceCountry: "IT",
+    residenceRegion: "Lazio",
+    residenceProvince: "RM",
+    residenceCity: "Roma",
+    residencePostalCode: "00100",
+    residenceStreetAddress: "Via Demo 10"
+  });
+
+  assert.equal(parsed.residenceCountry, "IT");
+  assert.equal(parsed.residenceProvince, "RM");
+  assert.equal(parsed.residenceCity, "Roma");
+});
+
+test("customers smoke: codice nazione non ISO rifiutato", () => {
+  assert.throws(() => {
+    rentalCustomerCreateSchema.parse({
+      customerType: "PERSONA_FISICA",
+      firstName: "Mario",
+      lastName: "Rossi",
+      drivingLicenseNumber: "AB1234567",
+      residenceCountry: "ITALIA"
     });
   });
 });

@@ -855,10 +855,31 @@ model RentalCustomer {
   dateOfBirth             DateTime?
   /// @pii
   placeOfBirth            String?
+  birthCountry            String?
+  /// @pii
+  birthProvince           String?
+  /// @pii
+  birthMunicipalityCode   String?
+  /// @pii
+  birthCity               String?
   /// @pii
   nationality             String?
+  nationalityCountry      String?
   /// @pii
   residenceAddress        String?
+  residenceCountry        String?
+  /// @pii
+  residenceRegion         String?
+  /// @pii
+  residenceProvince       String?
+  /// @pii
+  residenceMunicipalityCode String?
+  /// @pii
+  residenceCity           String?
+  /// @pii
+  residencePostalCode     String?
+  /// @pii
+  residenceStreetAddress  String?
   /// @pii
   taxCode                 String?
   /// @pii
@@ -881,6 +902,19 @@ model RentalCustomer {
   companyTaxCode          String?
   /// @pii
   companyLegalAddress     String?
+  companyCountry          String?
+  /// @pii
+  companyRegion           String?
+  /// @pii
+  companyProvince         String?
+  /// @pii
+  companyMunicipalityCode String?
+  /// @pii
+  companyCity             String?
+  /// @pii
+  companyPostalCode       String?
+  /// @pii
+  companyStreetAddress    String?
   /// @pii
   companyPec              String?
   /// @pii
@@ -917,6 +951,8 @@ model RentalCustomer {
   @@index([tenantId, lastName, firstName])
   @@index([tenantId, companyName])
   @@index([tenantId, companyVatNumber])
+  @@index([tenantId, residenceProvince, residenceCity])
+  @@index([tenantId, companyProvince, companyCity])
   @@index([tenantId, drivingLicenseNumber])
   @@index([tenantId, email])
   @@index([tenantId, phone])
