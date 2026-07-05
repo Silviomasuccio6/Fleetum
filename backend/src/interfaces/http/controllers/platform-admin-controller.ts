@@ -9,6 +9,7 @@ import {
   platformLoginSchema,
   platformPasswordResetConfirmSchema,
   platformPasswordResetRequestSchema,
+  platformPasswordResetVerifySchema,
   platformRangeQuerySchema,
   quickLicenseActionSchema,
   recentEventsQuerySchema,
@@ -52,6 +53,12 @@ export class PlatformAdminController {
     const input = platformPasswordResetRequestSchema.parse(req.body);
     const result = await this.service.requestPasswordReset({ ...input, ip: getClientIp(req) });
     res.status(202).json(result);
+  };
+
+  verifyPasswordReset = async (req: Request, res: Response) => {
+    const input = platformPasswordResetVerifySchema.parse(req.body);
+    const result = await this.service.verifyPasswordReset({ ...input, ip: getClientIp(req) });
+    res.json(result);
   };
 
   confirmPasswordReset = async (req: Request, res: Response) => {

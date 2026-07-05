@@ -4,7 +4,7 @@ import { platformAdminUseCases } from "../../../application/usecases/platform/pl
 import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
 import "../../../features/auth/premium-login.css";
 
-type RecoveryStep = "request" | "confirm";
+type RecoveryStep = "request" | "otp" | "password" | "success";
 
 const MailIcon = () => (
   <svg className="premium-login-field-icon" viewBox="0 0 24 24" aria-hidden>
@@ -56,7 +56,7 @@ export const PlatformPasswordRecoveryPage = () => {
       const result = await platformAdminUseCases.requestPasswordReset(email.trim());
       setNotice(result.message);
       setOtp("");
-      setStep("confirm");
+      setStep("otp");
     } catch (requestError) {
       setError((requestError as Error).message);
     } finally {
@@ -73,12 +73,29 @@ export const PlatformPasswordRecoveryPage = () => {
     await requestCode();
   };
 
-  const onConfirm = async (event: FormEvent<HTMLFormElement>) => {
+  const onVerifyOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (otp.length !== 6) {
       setError("Inserisci il codice OTP di 6 cifre.");
       return;
     }
+
+    setError(null);
+    setNotice(null);
+    setLoading(true);
+    try {
+      const result = await platformAdminUseCases.verifyPasswordReset({ email: email.trim(), otp });
+      setNotice(result.message);
+      setStep("password");
+    } catch (verifyError) {
+      setError((verifyError as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onConfirmPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     if (newPassword.length < 16) {
       setError("La nuova password deve contenere almeno 16 caratteri.");
       return;
@@ -93,13 +110,11 @@ export const PlatformPasswordRecoveryPage = () => {
     setLoading(true);
     try {
       const result = await platformAdminUseCases.confirmPasswordReset({ email: email.trim(), otp, newPassword });
-      if (!result.token) {
-        throw new Error("Password aggiornata, ma la sessione Platform non e disponibile. Accedi con le nuove credenziali.");
-      }
       setNotice(result.message);
+      setOtp("");
       setNewPassword("");
       setConfirmPassword("");
-      navigate("/console", { replace: true });
+      setStep("success");
     } catch (confirmError) {
       setError((confirmError as Error).message);
     } finally {
@@ -108,9 +123,12 @@ export const PlatformPasswordRecoveryPage = () => {
   };
 
   const heading = "Recupera password Platform";
-  const description = step === "request"
-    ? "Inserisci l'email amministratore per ricevere il codice OTP."
-    : "Inserisci il codice ricevuto e scegli una nuova password sicura.";
+  const description = {
+    request: "Inserisci l'email amministratore per ricevere il codice OTP.",
+    otp: "Prima verifichiamo il codice ricevuto sulla mail founder.",
+    password: "Codice verificato. Ora scegli una nuova password sicura.",
+    success: "Password aggiornata. Accedi di nuovo e autorizza questo dispositivo con OTP."
+  }[step];
 
   return (
     <div className="premium-login-root premium-login-root--clean">
@@ -139,17 +157,35 @@ export const PlatformPasswordRecoveryPage = () => {
               </form>
             ) : null}
 
-            {step === "confirm" ? (
-              <form className="premium-login-form" onSubmit={onConfirm}>
+            {step === "otp" ? (
+              <form className="premium-login-form" onSubmit={onVerifyOtp}>
                 <div className="premium-login-otp-panel">
-                  <span className="premium-login-otp-kicker">Verifica identita</span>
+                  <span className="premium-login-otp-kicker">Step 2 · Verifica identita</span>
                   <strong>Codice inviato a {email}</strong>
-                  <p>Il codice e monouso e scade dopo 8 minuti.</p>
+                  <p>Inserisci il codice a 6 cifre. Solo dopo la verifica potrai impostare la nuova password.</p>
                 </div>
                 <label className="premium-login-field-label" htmlFor="platform-recovery-otp">Codice OTP</label>
                 <div className="premium-login-field premium-login-field--otp">
                   <span className="premium-login-field-icon-wrap"><OtpIcon /></span>
                   <input id="platform-recovery-otp" name="otp" type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" autoComplete="one-time-code" required autoFocus />
+                </div>
+                {notice ? <p className="premium-login-success premium-login-error--block" role="status">{notice}</p> : null}
+                {error ? <p className="premium-login-error premium-login-error--block" role="alert">{error}</p> : null}
+                <button className="premium-login-submit" type="submit" disabled={loading || otp.length !== 6}>
+                  <span className="premium-login-submit-shimmer" />
+                  {loading ? <span className="premium-login-loading"><FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />Verifica codice...</span> : "Verifica OTP"}
+                </button>
+                <button className="premium-login-secondary-action" type="button" onClick={requestCode} disabled={loading}>Invia un nuovo codice</button>
+                <button className="premium-login-secondary-action" type="button" onClick={() => setStep("request")} disabled={loading}>Cambia email</button>
+              </form>
+            ) : null}
+
+            {step === "password" ? (
+              <form className="premium-login-form" onSubmit={onConfirmPassword}>
+                <div className="premium-login-otp-panel">
+                  <span className="premium-login-otp-kicker">Step 3 · Nuova password</span>
+                  <strong>Codice OTP verificato</strong>
+                  <p>Imposta una nuova password. Dopo il cambio dovrai accedere normalmente con password e OTP.</p>
                 </div>
                 <label className="premium-login-field-label" htmlFor="platform-recovery-password">Nuova password</label>
                 <div className="premium-login-field">
@@ -167,9 +203,22 @@ export const PlatformPasswordRecoveryPage = () => {
                   <span className="premium-login-submit-shimmer" />
                   {loading ? <span className="premium-login-loading"><FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />Aggiornamento...</span> : "Aggiorna password"}
                 </button>
-                <button className="premium-login-secondary-action" type="button" onClick={requestCode} disabled={loading}>Invia un nuovo codice</button>
-                <button className="premium-login-secondary-action" type="button" onClick={() => setStep("request")} disabled={loading}>Cambia email</button>
+                <button className="premium-login-secondary-action" type="button" onClick={() => setStep("otp")} disabled={loading}>Torna al codice OTP</button>
               </form>
+            ) : null}
+
+            {step === "success" ? (
+              <div className="premium-login-form">
+                <div className="premium-login-otp-panel">
+                  <span className="premium-login-otp-kicker">Reset completato</span>
+                  <strong>Password aggiornata</strong>
+                  <p>Ora accedi con la nuova password. Nel login seleziona “Fidati di questo dispositivo” per autorizzare questo Mac dopo l'OTP.</p>
+                </div>
+                {notice ? <p className="premium-login-success premium-login-error--block" role="status">{notice}</p> : null}
+                <button className="premium-login-submit" type="button" onClick={() => navigate("/login", { replace: true })}>
+                  Vai al login Platform
+                </button>
+              </div>
             ) : null}
 
           </section>

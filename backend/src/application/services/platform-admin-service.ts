@@ -478,7 +478,7 @@ export class PlatformAdminService {
     return { message };
   }
 
-  async confirmPasswordReset(input: { email: string; otp: string; newPassword: string; ip: string }) {
+  private async assertValidPasswordResetOtp(input: { email: string; otp: string; ip: string }) {
     const normalizedEmail = input.email.trim().toLowerCase();
     await this.loginGuard.assertPasswordResetAllowed(input.ip, normalizedEmail);
 
@@ -512,6 +512,16 @@ export class PlatformAdminService {
       throw new AppError("Codice OTP non valido o scaduto", 401, "PLATFORM_PASSWORD_RESET_INVALID");
     }
 
+    return { normalizedEmail, challengeKey, now };
+  }
+
+  async verifyPasswordReset(input: { email: string; otp: string; ip: string }) {
+    await this.assertValidPasswordResetOtp(input);
+    return { message: "Codice OTP verificato. Ora puoi impostare la nuova password." };
+  }
+
+  async confirmPasswordReset(input: { email: string; otp: string; newPassword: string; ip: string }) {
+    const { normalizedEmail, challengeKey, now } = await this.assertValidPasswordResetOtp(input);
     const passwordHash = await bcrypt.hash(input.newPassword, 12);
     await this.authStore.updatePasswordAndConsumeOtp({
       email: normalizedEmail,
@@ -536,11 +546,8 @@ export class PlatformAdminService {
       details: { reason: "password-reset" }
     });
 
-    // The reset OTP proves control of the founder email from an allowlisted IP.
-    // Create the Platform session directly to avoid retyping the new password.
     return {
-      message: "Password aggiornata. Accesso Platform completato.",
-      ...this.createPlatformSession()
+      message: "Password aggiornata. Accedi con la nuova password e completa l'OTP per autorizzare questo dispositivo."
     };
   }
 
