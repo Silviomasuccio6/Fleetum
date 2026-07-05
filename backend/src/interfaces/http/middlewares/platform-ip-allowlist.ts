@@ -16,6 +16,7 @@ const publicPlatformPaths = new Set([
   "/platform-api/ready",
   "/platform-api/auth/login",
   "/platform-api/auth/password-reset/request",
+  "/platform-api/auth/password-reset/verify",
   "/platform-api/auth/password-reset/confirm"
 ]);
 

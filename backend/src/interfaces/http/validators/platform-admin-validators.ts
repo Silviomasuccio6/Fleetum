@@ -16,6 +16,11 @@ export const platformPasswordResetRequestSchema = z.object({
   email: z.string().email().max(320)
 });
 
+export const platformPasswordResetVerifySchema = z.object({
+  email: z.string().email().max(320),
+  otp: z.string().trim().regex(/^\d{6}$/)
+});
+
 export const platformPasswordResetConfirmSchema = z.object({
   email: z.string().email().max(320),
   otp: z.string().trim().regex(/^\d{6}$/),

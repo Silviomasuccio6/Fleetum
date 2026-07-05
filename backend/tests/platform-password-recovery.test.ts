@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import { PlatformAdminService } from "../src/application/services/platform-admin-service.js";
 import { env } from "../src/shared/config/env.js";
 
@@ -97,7 +96,7 @@ const makeService = () => {
   };
 };
 
-test("platform password recovery persists a bcrypt hash and creates a platform session", async () => {
+test("platform password recovery verifies OTP before password update and does not create a platform session", async () => {
   const fixture = makeService();
   const email = env.PLATFORM_ADMIN_EMAIL;
 
@@ -110,6 +109,15 @@ test("platform password recovery persists a bcrypt hash and creates a platform s
   assert.ok(code);
   assert.ok(fixture.otps.has(`password-reset:${email}`));
 
+  const verification = await fixture.service.verifyPasswordReset({
+    email,
+    otp: code,
+    ip: "127.0.0.1"
+  });
+
+  assert.match(verification.message, /Codice OTP verificato/i);
+  assert.ok(fixture.otps.has(`password-reset:${email}`));
+
   const result = await fixture.service.confirmPasswordReset({
     email,
     otp: code,
@@ -118,8 +126,7 @@ test("platform password recovery persists a bcrypt hash and creates a platform s
   });
 
   assert.match(result.message, /Password aggiornata/i);
-  assert.equal(typeof result.token, "string");
-  assert.equal(jwt.verify(result.token!, env.PLATFORM_JWT_SECRET).tokenType, "platform");
+  assert.equal("token" in result, false);
   assert.equal(fixture.otps.has(`password-reset:${email}`), false);
   assert.equal(fixture.getResetsCleared(), 1);
   assert.equal(fixture.getLoginSuccesses(), 1);

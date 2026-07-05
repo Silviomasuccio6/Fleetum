@@ -9,6 +9,7 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
 
   router.post("/auth/login", platformAuthRateLimit, asyncHandler(controller.login));
   router.post("/auth/password-reset/request", asyncHandler(controller.requestPasswordReset));
+  router.post("/auth/password-reset/verify", asyncHandler(controller.verifyPasswordReset));
   router.post("/auth/password-reset/confirm", asyncHandler(controller.confirmPasswordReset));
   router.get("/security/trusted-devices", requirePlatformAuth, asyncHandler(controller.trustedDevices));
   router.delete("/security/trusted-devices/:id", requirePlatformAuth, asyncHandler(controller.revokeTrustedDevice));
