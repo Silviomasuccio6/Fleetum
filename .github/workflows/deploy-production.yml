@@ -32,24 +32,32 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || 'main' }}
 
+      - name: Install Semgrep
+        run: |
+          python3 -m venv "$RUNNER_TEMP/semgrep-venv"
+          "$RUNNER_TEMP/semgrep-venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/semgrep-venv/bin/python" -m pip install semgrep
+
       - name: Run Semgrep
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/src" \
-            -w /src \
-            -e SEMGREP_APP_TOKEN \
-            semgrep/semgrep:latest \
-            semgrep scan \
-              --config p/owasp-top-ten \
-              --config p/nodejs \
-              --metrics=off \
-              --error \
-              --severity ERROR \
-              --sarif \
-              --output semgrep.sarif \
-              .
+          "$RUNNER_TEMP/semgrep-venv/bin/semgrep" scan \
+            --config p/owasp-top-ten \
+            --config p/nodejs \
+            --metrics=off \
+            --error \
+            --severity ERROR \
+            --sarif \
+            --output semgrep.sarif \
+            .
+
+      - name: Ensure SARIF exists
+        if: always()
+        run: |
+          if [ ! -s semgrep.sarif ]; then
+            printf '%s\n' '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Semgrep","informationUri":"https://semgrep.dev","rules":[]}},"results":[]}]}' > semgrep.sarif
+          fi
 
       - name: Upload SARIF
         if: always()
