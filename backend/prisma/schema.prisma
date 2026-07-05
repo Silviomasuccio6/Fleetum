@@ -1642,6 +1642,36 @@ model PlatformOtpChallenge {
   @@index([key, expiresAt])
 }
 
+model PlatformTrustedDevice {
+  id            String    @id @default(cuid())
+  deviceId      String    @unique
+  tokenHash     String
+  label         String?
+  userAgentHash String
+  lastIpHash    String?
+  createdAt     DateTime  @default(now())
+  lastUsedAt    DateTime?
+  expiresAt     DateTime
+  revokedAt     DateTime?
+
+  @@index([deviceId, revokedAt, expiresAt])
+  @@index([revokedAt, expiresAt])
+  @@index([lastUsedAt])
+}
+
+model PlatformSecurityEvent {
+  id            String   @id @default(cuid())
+  action        String
+  actor         String?
+  ipHash        String?
+  userAgentHash String?
+  details       Json?
+  createdAt     DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([actor, createdAt])
+}
+
 // Singleton credential override for the founder-only Platform Console.
 // The environment hash remains the bootstrap fallback until the first reset.
 model PlatformAdminCredential {

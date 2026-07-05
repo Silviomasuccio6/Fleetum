@@ -16,6 +16,7 @@ const TEST_PLATFORM_ADMIN_PASSWORD_HASH = "$2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/Io
 const TEST_DATABASE_URL = "postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public";
 const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
+const PLATFORM_IP_ALLOWLIST_MODE = (process.env.PLATFORM_IP_ALLOWLIST_MODE ?? "optional").toLowerCase();
 
 const toInt = (value: string, name: string) => {
   const n = Number(value);
@@ -72,6 +73,10 @@ if (EMAIL_PROVIDER !== "resend") {
 
 if (!["local", "s3"].includes(STORAGE_PROVIDER)) {
   throw new Error("STORAGE_PROVIDER must be local or s3");
+}
+
+if (!["strict", "optional", "disabled"].includes(PLATFORM_IP_ALLOWLIST_MODE)) {
+  throw new Error("PLATFORM_IP_ALLOWLIST_MODE must be strict, optional or disabled");
 }
 
 if (STORAGE_PROVIDER === "s3") {
@@ -140,6 +145,9 @@ export const env = {
   PLATFORM_ADMIN_PASSWORD_HASH,
   PLATFORM_ADMIN_OTP: process.env.PLATFORM_ADMIN_OTP,
   PLATFORM_ALLOWED_IPS_CSV: process.env.PLATFORM_ALLOWED_IPS ?? "",
+  PLATFORM_IP_ALLOWLIST_MODE: PLATFORM_IP_ALLOWLIST_MODE as "strict" | "optional" | "disabled",
+  PLATFORM_TRUSTED_DEVICE_ENABLED: toBool(process.env.PLATFORM_TRUSTED_DEVICE_ENABLED ?? "true"),
+  PLATFORM_TRUSTED_DEVICE_TTL_DAYS: toInt(process.env.PLATFORM_TRUSTED_DEVICE_TTL_DAYS ?? "90", "PLATFORM_TRUSTED_DEVICE_TTL_DAYS"),
   PLATFORM_ALERT_EMAILS: toCsvList(process.env.PLATFORM_ALERT_EMAILS),
   PLATFORM_LOGIN_MAX_ATTEMPTS: toInt(process.env.PLATFORM_LOGIN_MAX_ATTEMPTS ?? "5", "PLATFORM_LOGIN_MAX_ATTEMPTS"),
   PLATFORM_LOGIN_WINDOW_MS: toInt(process.env.PLATFORM_LOGIN_WINDOW_MS ?? String(15 * 60 * 1000), "PLATFORM_LOGIN_WINDOW_MS"),

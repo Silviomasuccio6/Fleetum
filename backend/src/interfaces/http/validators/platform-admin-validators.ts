@@ -6,8 +6,11 @@ export const invoiceIdSchema = z.string().trim().min(1).max(120).regex(/^[a-zA-Z
 export const platformLoginSchema = z.object({
   email: z.string().email().max(320),
   password: z.string().min(12).max(256),
-  otp: z.string().trim().regex(/^\d{6}$/).optional()
+  otp: z.string().trim().regex(/^\d{6}$/).optional(),
+  trustDevice: z.boolean().optional().default(false)
 });
+
+export const trustedDeviceIdSchema = z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9_-]+$/);
 
 export const platformPasswordResetRequestSchema = z.object({
   email: z.string().email().max(320)

@@ -38,6 +38,7 @@ export const PlatformAdminLoginPage = () => {
   const [otpRequested, setOtpRequested] = useState(false);
   const [loading, setLoading] = useState(false);
   const [shake, setShake] = useState(false);
+  const [trustDevice, setTrustDevice] = useState(true);
 
   useEffect(() => {
     const previousTheme = document.documentElement.getAttribute("data-theme");
@@ -75,7 +76,12 @@ export const PlatformAdminLoginPage = () => {
 
     try {
       const normalizedOtp = otp.trim();
-      const result = await platformAdminUseCases.login({ email, password, otp: normalizedOtp ? normalizedOtp : undefined });
+      const result = await platformAdminUseCases.login({
+        email,
+        password,
+        otp: normalizedOtp ? normalizedOtp : undefined,
+        trustDevice: Boolean(normalizedOtp) && trustDevice
+      });
       if (result?.requiresOtp) {
         setOtpRequested(true);
         setNotice(result.message ?? "Codice OTP inviato alla mail platform.");
@@ -139,6 +145,18 @@ export const PlatformAdminLoginPage = () => {
                       required
                     />
                   </div>
+
+                  <label className="premium-login-trust-device">
+                    <input
+                      type="checkbox"
+                      checked={trustDevice}
+                      onChange={(e) => setTrustDevice(e.target.checked)}
+                    />
+                    <span>
+                      <strong>Fidati di questo dispositivo</strong>
+                      <small>Consenti l'accesso da questo Mac anche se cambia IP, sempre dopo password e OTP iniziali.</small>
+                    </span>
+                  </label>
                 </>
               ) : (
                 <>

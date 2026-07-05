@@ -2353,3 +2353,40 @@
   font-size: 0.78rem;
   cursor: pointer;
 }
+
+.premium-login-trust-device {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-top: 0.85rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 1rem;
+  background: rgba(37, 99, 235, 0.06);
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.premium-login-trust-device input {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.15rem;
+  accent-color: #2563eb;
+  flex: 0 0 auto;
+}
+
+.premium-login-trust-device span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.premium-login-trust-device strong {
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.premium-login-trust-device small {
+  color: #64748b;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}

@@ -13,12 +13,17 @@ import {
   quickLicenseActionSchema,
   recentEventsQuerySchema,
   revenueReportQuerySchema,
+  trustedDeviceIdSchema,
   tenantIdSchema,
   updateDemoLeadSchema,
   updateInvoiceStatusSchema,
   updateLicenseSchema,
   updateTenantStatusSchema
 } from "../validators/platform-admin-validators.js";
+import {
+  clearPlatformTrustedDeviceCookie,
+  setPlatformTrustedDeviceCookie
+} from "../utils/platform-trusted-device-cookies.js";
 
 export class PlatformAdminController {
   constructor(
@@ -29,7 +34,17 @@ export class PlatformAdminController {
 
   login = async (req: Request, res: Response) => {
     const input = platformLoginSchema.parse(req.body);
-    const result = await this.service.login({ ...input, ip: getClientIp(req) });
+    const result = await this.service.login({
+      ...input,
+      ip: getClientIp(req),
+      userAgent: req.headers["user-agent"]
+    });
+    if ("trustedDevice" in result && result.trustedDevice) {
+      setPlatformTrustedDeviceCookie(res, result.trustedDevice.cookieValue, result.trustedDevice.expiresAt);
+      const { trustedDevice: _trustedDevice, ...safeResult } = result;
+      res.json({ ...safeResult, trustedDevice: { expiresAt: _trustedDevice.expiresAt.toISOString() } });
+      return;
+    }
     res.json(result);
   };
 
@@ -42,6 +57,23 @@ export class PlatformAdminController {
   confirmPasswordReset = async (req: Request, res: Response) => {
     const input = platformPasswordResetConfirmSchema.parse(req.body);
     const result = await this.service.confirmPasswordReset({ ...input, ip: getClientIp(req) });
+    clearPlatformTrustedDeviceCookie(res);
+    res.json(result);
+  };
+
+  trustedDevices = async (_req: Request, res: Response) => {
+    const result = await this.service.listTrustedDevices();
+    res.json(result);
+  };
+
+  revokeTrustedDevice = async (req: Request, res: Response) => {
+    const id = trustedDeviceIdSchema.parse(req.params.id);
+    const result = await this.service.revokeTrustedDevice({
+      id,
+      actorUserId: req.auth?.userId ?? "platform-admin",
+      sourceIp: getClientIp(req),
+      userAgent: req.headers["user-agent"]
+    });
     res.json(result);
   };
 
