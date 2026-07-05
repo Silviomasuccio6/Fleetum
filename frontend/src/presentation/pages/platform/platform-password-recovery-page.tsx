@@ -33,6 +33,7 @@ export const PlatformPasswordRecoveryPage = () => {
   const [step, setStep] = useState<RecoveryStep>("request");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -48,6 +49,12 @@ export const PlatformPasswordRecoveryPage = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (step !== "success") return undefined;
+    const timer = window.setTimeout(() => navigate("/login", { replace: true }), 2200);
+    return () => window.clearTimeout(timer);
+  }, [navigate, step]);
+
   const requestCode = async () => {
     setError(null);
     setNotice(null);
@@ -56,6 +63,9 @@ export const PlatformPasswordRecoveryPage = () => {
       const result = await platformAdminUseCases.requestPasswordReset(email.trim());
       setNotice(result.message);
       setOtp("");
+      setResetToken("");
+      setNewPassword("");
+      setConfirmPassword("");
       setStep("otp");
     } catch (requestError) {
       setError((requestError as Error).message);
@@ -86,6 +96,8 @@ export const PlatformPasswordRecoveryPage = () => {
     try {
       const result = await platformAdminUseCases.verifyPasswordReset({ email: email.trim(), otp });
       setNotice(result.message);
+      setResetToken(result.resetToken);
+      setOtp("");
       setStep("password");
     } catch (verifyError) {
       setError((verifyError as Error).message);
@@ -109,9 +121,16 @@ export const PlatformPasswordRecoveryPage = () => {
     setNotice(null);
     setLoading(true);
     try {
-      const result = await platformAdminUseCases.confirmPasswordReset({ email: email.trim(), otp, newPassword });
+      if (!resetToken) {
+        setError("Sessione recupero password scaduta. Richiedi un nuovo codice OTP.");
+        setStep("otp");
+        return;
+      }
+
+      const result = await platformAdminUseCases.confirmPasswordReset({ resetToken, newPassword, confirmPassword });
       setNotice(result.message);
       setOtp("");
+      setResetToken("");
       setNewPassword("");
       setConfirmPassword("");
       setStep("success");
@@ -127,7 +146,7 @@ export const PlatformPasswordRecoveryPage = () => {
     request: "Inserisci l'email amministratore per ricevere il codice OTP.",
     otp: "Prima verifichiamo il codice ricevuto sulla mail founder.",
     password: "Codice verificato. Ora scegli una nuova password sicura.",
-    success: "Password aggiornata. Accedi di nuovo e autorizza questo dispositivo con OTP."
+    success: "Password aggiornata. Tra pochi secondi tornerai al login Platform."
   }[step];
 
   return (
@@ -185,7 +204,7 @@ export const PlatformPasswordRecoveryPage = () => {
                 <div className="premium-login-otp-panel">
                   <span className="premium-login-otp-kicker">Step 3 · Nuova password</span>
                   <strong>Codice OTP verificato</strong>
-                  <p>Imposta una nuova password. Dopo il cambio dovrai accedere normalmente con password e OTP.</p>
+                  <p>Imposta una nuova password. Dopo il cambio tornerai al login e accederai normalmente con password e OTP.</p>
                 </div>
                 <label className="premium-login-field-label" htmlFor="platform-recovery-password">Nuova password</label>
                 <div className="premium-login-field">
@@ -199,7 +218,7 @@ export const PlatformPasswordRecoveryPage = () => {
                 </div>
                 {notice ? <p className="premium-login-success premium-login-error--block" role="status">{notice}</p> : null}
                 {error ? <p className="premium-login-error premium-login-error--block" role="alert">{error}</p> : null}
-                <button className="premium-login-submit" type="submit" disabled={loading || otp.length !== 6}>
+                <button className="premium-login-submit" type="submit" disabled={loading || !resetToken}>
                   <span className="premium-login-submit-shimmer" />
                   {loading ? <span className="premium-login-loading"><FleetumLogoLoader size="sm" variant="dark" decorative className="fleetum-loader--button" />Aggiornamento...</span> : "Aggiorna password"}
                 </button>
@@ -212,7 +231,7 @@ export const PlatformPasswordRecoveryPage = () => {
                 <div className="premium-login-otp-panel">
                   <span className="premium-login-otp-kicker">Reset completato</span>
                   <strong>Password aggiornata</strong>
-                  <p>Ora accedi con la nuova password. Nel login seleziona “Fidati di questo dispositivo” per autorizzare questo Mac dopo l'OTP.</p>
+                  <p>Ora torni al login. Inserisci la nuova password e completa l'OTP per autorizzare questo dispositivo, se richiesto.</p>
                 </div>
                 {notice ? <p className="premium-login-success premium-login-error--block" role="status">{notice}</p> : null}
                 <button className="premium-login-submit" type="button" onClick={() => navigate("/login", { replace: true })}>

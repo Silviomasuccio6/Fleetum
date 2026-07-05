@@ -104,14 +104,60 @@ const constantTimeEqual = (left: string, right: string) => {
 };
 
 const PLATFORM_OTP_TTL_MS = 8 * 60 * 1000;
+const PLATFORM_PASSWORD_RESET_TOKEN_TTL_MS = 8 * 60 * 1000;
 
 const maskEmail = (email: string) => email.replace(/^(.{2}).*(@.*)$/, "$1***$2");
 
 const createOtpCode = () => crypto.randomInt(100_000, 1_000_000).toString();
 
 type PlatformOtpPurpose = "login" | "password-reset";
+type PlatformPasswordResetTokenPayload = jwt.JwtPayload & {
+  tokenType: "platform-password-reset";
+  email: string;
+  jti: string;
+};
 
 const createOtpKey = (email: string, purpose: PlatformOtpPurpose) => `${purpose}:${email}`;
+const createPasswordResetTokenKey = (jti: string) => `password-reset-token:${jti}`;
+const hashPasswordResetToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
+
+const createPasswordResetToken = (email: string) => {
+  const jti = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + PLATFORM_PASSWORD_RESET_TOKEN_TTL_MS);
+  const token = jwt.sign(
+    {
+      tokenType: "platform-password-reset",
+      email,
+      jti
+    },
+    env.PLATFORM_JWT_SECRET,
+    { expiresIn: Math.floor(PLATFORM_PASSWORD_RESET_TOKEN_TTL_MS / 1000) }
+  );
+
+  return {
+    token,
+    tokenHash: hashPasswordResetToken(token),
+    key: createPasswordResetTokenKey(jti),
+    expiresAt
+  };
+};
+
+const verifyPasswordResetToken = (token: string): PlatformPasswordResetTokenPayload => {
+  try {
+    const payload = jwt.verify(token, env.PLATFORM_JWT_SECRET) as PlatformPasswordResetTokenPayload;
+    if (
+      !payload ||
+      payload.tokenType !== "platform-password-reset" ||
+      typeof payload.email !== "string" ||
+      typeof payload.jti !== "string"
+    ) {
+      throw new Error("Invalid password reset token payload");
+    }
+    return payload;
+  } catch {
+    throw new AppError("Sessione recupero password scaduta. Richiedi un nuovo codice OTP.", 401, "PLATFORM_PASSWORD_RESET_TOKEN_INVALID");
+  }
+};
 
 const platformOtpEmailHtml = (code: string, purpose: PlatformOtpPurpose) => {
   const copy = purpose === "password-reset"
@@ -516,18 +562,50 @@ export class PlatformAdminService {
   }
 
   async verifyPasswordReset(input: { email: string; otp: string; ip: string }) {
-    await this.assertValidPasswordResetOtp(input);
-    return { message: "Codice OTP verificato. Ora puoi impostare la nuova password." };
+    const { normalizedEmail, challengeKey } = await this.assertValidPasswordResetOtp(input);
+    const resetToken = createPasswordResetToken(normalizedEmail);
+
+    await this.authStore.deleteOtp(challengeKey);
+    await this.authStore.upsertOtp({
+      key: resetToken.key,
+      codeHash: resetToken.tokenHash,
+      expiresAt: resetToken.expiresAt
+    });
+
+    return {
+      message: "Codice OTP verificato. Ora puoi impostare la nuova password.",
+      resetToken: resetToken.token
+    };
   }
 
-  async confirmPasswordReset(input: { email: string; otp: string; newPassword: string; ip: string }) {
-    const { normalizedEmail, challengeKey, now } = await this.assertValidPasswordResetOtp(input);
+  async confirmPasswordReset(input: { resetToken: string; newPassword: string; ip: string }) {
+    const payload = verifyPasswordResetToken(input.resetToken);
+    const normalizedEmail = payload.email.trim().toLowerCase();
+    const now = new Date();
+
+    if (!this.isPlatformAdminEmail(normalizedEmail)) {
+      throw new AppError("Sessione recupero password scaduta. Richiedi un nuovo codice OTP.", 401, "PLATFORM_PASSWORD_RESET_TOKEN_INVALID");
+    }
+
+    const resetTokenKey = createPasswordResetTokenKey(payload.jti);
+    const challenge = await this.authStore.findActiveOtp(resetTokenKey, now);
+
+    if (!challenge) {
+      await this.authStore.deleteOtp(resetTokenKey);
+      throw new AppError("Sessione recupero password scaduta. Richiedi un nuovo codice OTP.", 401, "PLATFORM_PASSWORD_RESET_TOKEN_EXPIRED");
+    }
+
+    if (!constantTimeEqual(hashPasswordResetToken(input.resetToken), challenge.codeHash)) {
+      await this.authStore.incrementOtpAttempts(resetTokenKey);
+      throw new AppError("Sessione recupero password non valida. Richiedi un nuovo codice OTP.", 401, "PLATFORM_PASSWORD_RESET_TOKEN_INVALID");
+    }
+
     const passwordHash = await bcrypt.hash(input.newPassword, 12);
     await this.authStore.updatePasswordAndConsumeOtp({
       email: normalizedEmail,
       passwordHash,
       changedAt: now,
-      otpKey: challengeKey
+      otpKey: resetTokenKey
     });
     await this.authStore.revokeAllTrustedDevices(now);
     await this.loginGuard.clearPasswordReset(input.ip, normalizedEmail);
