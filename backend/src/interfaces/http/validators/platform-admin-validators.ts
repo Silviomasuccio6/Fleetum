@@ -22,9 +22,12 @@ export const platformPasswordResetVerifySchema = z.object({
 });
 
 export const platformPasswordResetConfirmSchema = z.object({
-  email: z.string().email().max(320),
-  otp: z.string().trim().regex(/^\d{6}$/),
-  newPassword: z.string().min(16).max(256)
+  resetToken: z.string().trim().min(32).max(4096),
+  newPassword: z.string().min(16).max(256),
+  confirmPassword: z.string().min(16).max(256)
+}).refine((value) => value.newPassword === value.confirmPassword, {
+  message: "Le password non coincidono",
+  path: ["confirmPassword"]
 });
 
 export const updateLicenseSchema = z.object({

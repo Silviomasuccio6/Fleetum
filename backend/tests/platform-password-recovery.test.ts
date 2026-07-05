@@ -116,11 +116,12 @@ test("platform password recovery verifies OTP before password update and does no
   });
 
   assert.match(verification.message, /Codice OTP verificato/i);
-  assert.ok(fixture.otps.has(`password-reset:${email}`));
+  assert.equal(typeof verification.resetToken, "string");
+  assert.equal(fixture.otps.has(`password-reset:${email}`), false);
+  assert.equal([...fixture.otps.keys()].filter((key) => key.startsWith("password-reset-token:")).length, 1);
 
   const result = await fixture.service.confirmPasswordReset({
-    email,
-    otp: code,
+    resetToken: verification.resetToken,
     newPassword: "a-new-platform-password-with-16-chars",
     ip: "127.0.0.1"
   });
@@ -131,6 +132,15 @@ test("platform password recovery verifies OTP before password update and does no
   assert.equal(fixture.getResetsCleared(), 1);
   assert.equal(fixture.getLoginSuccesses(), 1);
   assert.equal(await bcrypt.compare("a-new-platform-password-with-16-chars", fixture.getPasswordHash()!), true);
+
+  await assert.rejects(
+    fixture.service.confirmPasswordReset({
+      resetToken: verification.resetToken,
+      newPassword: "another-platform-password-with-16-chars",
+      ip: "127.0.0.1"
+    }),
+    (error: { code?: string }) => error.code === "PLATFORM_PASSWORD_RESET_TOKEN_EXPIRED"
+  );
 });
 
 test("platform password recovery returns a generic response for an unauthorized email without sending an OTP", async () => {
@@ -154,10 +164,9 @@ test("platform password recovery rejects an invalid OTP and records an attempt",
   });
 
   await assert.rejects(
-    fixture.service.confirmPasswordReset({
+    fixture.service.verifyPasswordReset({
       email,
       otp: "654321",
-      newPassword: "a-new-platform-password-with-16-chars",
       ip: "127.0.0.1"
     }),
     (error: { code?: string }) => error.code === "PLATFORM_PASSWORD_RESET_INVALID"
