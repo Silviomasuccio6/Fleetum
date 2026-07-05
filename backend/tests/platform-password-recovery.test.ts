@@ -16,6 +16,8 @@ type OtpRecord = {
 const makeService = () => {
   const otps = new Map<string, OtpRecord>();
   const sentMessages: Array<{ text: string }> = [];
+  const trustedDevices: Array<Record<string, unknown>> = [];
+  const securityEvents: Array<Record<string, unknown>> = [];
   let passwordHash: string | null = null;
   let resetRequests = 0;
   let resetsCleared = 0;
@@ -43,6 +45,17 @@ const makeService = () => {
     updatePasswordAndConsumeOtp: async (input: { passwordHash: string; otpKey: string }) => {
       passwordHash = input.passwordHash;
       otps.delete(input.otpKey);
+    },
+    revokeAllTrustedDevices: async () => {
+      trustedDevices.length = 0;
+    },
+    createTrustedDevice: async (input: Record<string, unknown>) => {
+      trustedDevices.push(input);
+    },
+    listTrustedDevices: async () => [],
+    revokeTrustedDevice: async () => {},
+    appendSecurityEvent: async (input: Record<string, unknown>) => {
+      securityEvents.push(input);
     }
   };
 
@@ -73,9 +86,14 @@ const makeService = () => {
     otps,
     sentMessages,
     getPasswordHash: () => passwordHash,
+    setPasswordHash: (value: string) => {
+      passwordHash = value;
+    },
     getResetRequests: () => resetRequests,
     getResetsCleared: () => resetsCleared,
-    getLoginSuccesses: () => loginSuccesses
+    getLoginSuccesses: () => loginSuccesses,
+    getTrustedDevices: () => trustedDevices,
+    getSecurityEvents: () => securityEvents
   };
 };
 
@@ -139,4 +157,35 @@ test("platform password recovery rejects an invalid OTP and records an attempt",
   );
 
   assert.equal(fixture.otps.get(key)?.attempts, 1);
+});
+
+test("platform login can create a trusted device only after a valid OTP", async () => {
+  const fixture = makeService();
+  const email = env.PLATFORM_ADMIN_EMAIL;
+  const password = "valid-platform-password-with-16-chars";
+  fixture.setPasswordHash(await bcrypt.hash(password, 12));
+
+  const firstStep = await fixture.service.login({
+    email,
+    password,
+    ip: "127.0.0.1"
+  });
+
+  assert.equal(firstStep.requiresOtp, true);
+  const code = fixture.sentMessages.at(-1)?.text.match(/: (\d{6})/)?.[1];
+  assert.ok(code);
+
+  const result = await fixture.service.login({
+    email,
+    password,
+    otp: code,
+    ip: "127.0.0.1",
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X)",
+    trustDevice: true
+  });
+
+  assert.equal(typeof result.token, "string");
+  assert.ok("trustedDevice" in result);
+  assert.equal(fixture.getTrustedDevices().length, 1);
+  assert.equal(fixture.getSecurityEvents().some((event) => event.action === "PLATFORM_TRUSTED_DEVICE_CREATED"), true);
 });

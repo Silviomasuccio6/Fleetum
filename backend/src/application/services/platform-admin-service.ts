@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { Prisma } from "@prisma/client";
 import {
   PLAN_MONTHLY_PRICING_EUR,
   SAAS_PLANS,
@@ -18,6 +19,10 @@ import { emailSender } from "../../infrastructure/email/email-sender.js";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import {
+  createPlatformTrustedDeviceToken,
+  hashPlatformFingerprint
+} from "../../interfaces/http/utils/platform-trusted-device-cookies.js";
 import { PlatformAlertService } from "./platform-alert-service.js";
 import { PlatformLoginGuardService } from "./platform-login-guard-service.js";
 
@@ -162,6 +167,31 @@ type PlatformAdminAuthStore = {
   deleteOtp: (key: string) => Promise<void>;
   incrementOtpAttempts: (key: string) => Promise<void>;
   updatePasswordAndConsumeOtp: (input: { email: string; passwordHash: string; changedAt: Date; otpKey: string }) => Promise<void>;
+  revokeAllTrustedDevices: (now: Date) => Promise<void>;
+  createTrustedDevice: (input: {
+    deviceId: string;
+    tokenHash: string;
+    label: string;
+    userAgentHash: string;
+    lastIpHash: string;
+    expiresAt: Date;
+  }) => Promise<void>;
+  listTrustedDevices: () => Promise<Array<{
+    id: string;
+    label: string | null;
+    createdAt: Date;
+    lastUsedAt: Date | null;
+    expiresAt: Date;
+    revokedAt: Date | null;
+  }>>;
+  revokeTrustedDevice: (id: string, now: Date) => Promise<void>;
+  appendSecurityEvent: (input: {
+    action: string;
+    actor?: string | null;
+    ipHash?: string | null;
+    userAgentHash?: string | null;
+    details?: Prisma.InputJsonObject;
+  }) => Promise<void>;
 };
 
 const platformAdminAuthStore: PlatformAdminAuthStore = {
@@ -202,7 +232,57 @@ const platformAdminAuthStore: PlatformAdminAuthStore = {
       }),
       prisma.platformOtpChallenge.deleteMany({ where: { key: otpKey } })
     ]);
+  },
+  revokeAllTrustedDevices: async (now) => {
+    await prisma.platformTrustedDevice.updateMany({
+      where: { revokedAt: null },
+      data: { revokedAt: now }
+    });
+  },
+  createTrustedDevice: async (input) => {
+    await prisma.platformTrustedDevice.create({
+      data: input
+    });
+  },
+  listTrustedDevices: () =>
+    prisma.platformTrustedDevice.findMany({
+      orderBy: [{ revokedAt: "asc" }, { lastUsedAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        label: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        revokedAt: true
+      }
+    }),
+  revokeTrustedDevice: async (id, now) => {
+    await prisma.platformTrustedDevice.updateMany({
+      where: { id },
+      data: { revokedAt: now }
+    });
+  },
+  appendSecurityEvent: async (input) => {
+    await prisma.platformSecurityEvent.create({
+      data: {
+        action: input.action,
+        actor: input.actor,
+        ipHash: input.ipHash,
+        userAgentHash: input.userAgentHash,
+        ...(input.details ? { details: input.details } : {})
+      }
+    });
   }
+};
+
+const trustedDeviceLabel = (userAgent?: string | string[] | null) => {
+  const value = Array.isArray(userAgent) ? userAgent.join(",") : userAgent ?? "";
+  if (/Macintosh|Mac OS X/i.test(value)) return "Mac autorizzato";
+  if (/Windows/i.test(value)) return "PC Windows autorizzato";
+  if (/iPhone/i.test(value)) return "iPhone autorizzato";
+  if (/iPad/i.test(value)) return "iPad autorizzato";
+  if (/Android/i.test(value)) return "Dispositivo Android autorizzato";
+  return "Dispositivo autorizzato";
 };
 
 export class PlatformAdminService {
@@ -271,7 +351,7 @@ export class PlatformAdminService {
     });
   }
 
-  async login(input: { email: string; password: string; ip: string; otp?: string }) {
+  async login(input: { email: string; password: string; ip: string; userAgent?: string | string[]; otp?: string; trustDevice?: boolean }) {
     const normalizedEmail = input.email.trim().toLowerCase();
     await this.loginGuard.assertAllowed(input.ip, normalizedEmail);
 
@@ -339,7 +419,42 @@ export class PlatformAdminService {
 
     await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
 
-    return this.createPlatformSession();
+    const session = this.createPlatformSession();
+    if (!env.PLATFORM_TRUSTED_DEVICE_ENABLED || !input.trustDevice) {
+      return session;
+    }
+
+    const expiresAt = new Date(Date.now() + env.PLATFORM_TRUSTED_DEVICE_TTL_DAYS * 24 * 60 * 60 * 1000);
+    const issued = createPlatformTrustedDeviceToken();
+    await this.authStore.createTrustedDevice({
+      deviceId: issued.deviceId,
+      tokenHash: issued.tokenHash,
+      label: trustedDeviceLabel(input.userAgent),
+      userAgentHash: hashPlatformFingerprint(input.userAgent),
+      lastIpHash: hashPlatformFingerprint(input.ip),
+      expiresAt
+    });
+    await this.authStore.appendSecurityEvent({
+      action: "PLATFORM_TRUSTED_DEVICE_CREATED",
+      actor: normalizedEmail,
+      ipHash: hashPlatformFingerprint(input.ip),
+      userAgentHash: hashPlatformFingerprint(input.userAgent),
+      details: { label: trustedDeviceLabel(input.userAgent), expiresAt: expiresAt.toISOString() }
+    });
+    await this.alerts.notify({
+      type: "PLATFORM_TRUSTED_DEVICE_CREATED",
+      actor: normalizedEmail,
+      sourceIp: input.ip,
+      details: `Trusted device created. expiresAt=${expiresAt.toISOString()}`
+    });
+
+    return {
+      ...session,
+      trustedDevice: {
+        cookieValue: issued.cookieValue,
+        expiresAt
+      }
+    };
   }
 
   async requestPasswordReset(input: { email: string; ip: string }) {
@@ -404,6 +519,7 @@ export class PlatformAdminService {
       changedAt: now,
       otpKey: challengeKey
     });
+    await this.authStore.revokeAllTrustedDevices(now);
     await this.loginGuard.clearPasswordReset(input.ip, normalizedEmail);
     await this.loginGuard.registerSuccess(input.ip, normalizedEmail);
     await this.alerts.notify({
@@ -412,6 +528,13 @@ export class PlatformAdminService {
       sourceIp: input.ip,
       details: "Platform password changed through OTP recovery"
     });
+    await this.authStore.appendSecurityEvent({
+      action: "PLATFORM_TRUSTED_DEVICES_REVOKED_AFTER_PASSWORD_RESET",
+      actor: normalizedEmail,
+      ipHash: hashPlatformFingerprint(input.ip),
+      userAgentHash: null,
+      details: { reason: "password-reset" }
+    });
 
     // The reset OTP proves control of the founder email from an allowlisted IP.
     // Create the Platform session directly to avoid retyping the new password.
@@ -419,6 +542,40 @@ export class PlatformAdminService {
       message: "Password aggiornata. Accesso Platform completato.",
       ...this.createPlatformSession()
     };
+  }
+
+  async listTrustedDevices() {
+    const data = await this.authStore.listTrustedDevices();
+    return {
+      data: data.map((device) => ({
+        id: device.id,
+        label: device.label,
+        createdAt: device.createdAt.toISOString(),
+        lastUsedAt: device.lastUsedAt?.toISOString() ?? null,
+        expiresAt: device.expiresAt.toISOString(),
+        revokedAt: device.revokedAt?.toISOString() ?? null,
+        status: device.revokedAt ? "REVOKED" : device.expiresAt < new Date() ? "EXPIRED" : "ACTIVE"
+      }))
+    };
+  }
+
+  async revokeTrustedDevice(input: { id: string; actorUserId: string; sourceIp: string; userAgent?: string | string[] }) {
+    const now = new Date();
+    await this.authStore.revokeTrustedDevice(input.id, now);
+    await this.authStore.appendSecurityEvent({
+      action: "PLATFORM_TRUSTED_DEVICE_REVOKED",
+      actor: input.actorUserId,
+      ipHash: hashPlatformFingerprint(input.sourceIp),
+      userAgentHash: hashPlatformFingerprint(input.userAgent),
+      details: { deviceId: input.id }
+    });
+    await this.alerts.notify({
+      type: "PLATFORM_TRUSTED_DEVICE_REVOKED",
+      actor: input.actorUserId,
+      sourceIp: input.sourceIp,
+      details: `Trusted device revoked: ${input.id}`
+    });
+    return { revoked: true };
   }
 
   async listTenantsWithLicenses() {

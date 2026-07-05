@@ -93,7 +93,7 @@ test("platform ip allowlist always allows localhost", async () => {
   assert.equal(alerts.length, 0);
 });
 
-test("platform ip allowlist blocks unauthorized ip and triggers alert", async () => {
+test("platform ip allowlist blocks protected routes from unknown ip without trusted device", async () => {
   const alerts: Array<Record<string, unknown>> = [];
   const middleware = createPlatformIpAllowlist({
     notify: async (input: Record<string, unknown>) => {
@@ -115,8 +115,61 @@ test("platform ip allowlist blocks unauthorized ip and triggers alert", async ()
   });
 
   assert.equal(nextErr?.statusCode, 403);
-  assert.equal(nextErr?.code, "PLATFORM_IP_FORBIDDEN");
+  assert.equal(nextErr?.code, "PLATFORM_DEVICE_REQUIRED");
   assert.equal(alerts.length, 1);
+});
+
+test("platform ip allowlist allows auth routes so OTP can authorize a device", async () => {
+  const alerts: Array<Record<string, unknown>> = [];
+  const middleware = createPlatformIpAllowlist({
+    notify: async (input: Record<string, unknown>) => {
+      alerts.push(input);
+    }
+  } as any);
+
+  const req = {
+    ip: "8.8.8.8",
+    headers: {},
+    method: "POST",
+    originalUrl: "/platform-api/auth/login",
+    socket: { remoteAddress: "8.8.8.8" }
+  } as any;
+
+  let nextErr: any = undefined;
+  await middleware(req, {} as any, (err?: unknown) => {
+    nextErr = err;
+  });
+
+  assert.equal(nextErr, undefined);
+  assert.equal(alerts.length, 0);
+});
+
+test("platform ip allowlist allows protected routes from a verified trusted device", async () => {
+  const alerts: Array<Record<string, unknown>> = [];
+  const middleware = createPlatformIpAllowlist(
+    {
+      notify: async (input: Record<string, unknown>) => {
+        alerts.push(input);
+      }
+    } as any,
+    async () => true
+  );
+
+  const req = {
+    ip: "8.8.8.8",
+    headers: { cookie: "fleetum_platform_device=device.secret" },
+    method: "GET",
+    originalUrl: "/platform-api/tenants",
+    socket: { remoteAddress: "8.8.8.8" }
+  } as any;
+
+  let nextErr: any = undefined;
+  await middleware(req, {} as any, (err?: unknown) => {
+    nextErr = err;
+  });
+
+  assert.equal(nextErr, undefined);
+  assert.equal(alerts.length, 0);
 });
 
 test("quick action renew updates license, writes audit and sends alert", async () => {

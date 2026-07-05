@@ -233,6 +233,32 @@ Il reset salva il nuovo hash bcrypt nel database (`PlatformAdminCredential`) e n
 richiede la modifica manuale del file env. Le richieste sono limitate per IP/email e
 gli OTP sono monouso. Dettagli: `docs/technical/platform-password-recovery.md`.
 
+### Dispositivo fidato Platform
+
+Per evitare blocchi quando l'IP del founder cambia, la Platform Console supporta
+un dispositivo fidato dopo password + OTP validi. Configurazione consigliata:
+
+```env
+PLATFORM_IP_ALLOWLIST_MODE=optional
+PLATFORM_TRUSTED_DEVICE_ENABLED=true
+PLATFORM_TRUSTED_DEVICE_TTL_DAYS=90
+```
+
+Modalita disponibili:
+
+- `strict`: accesso consentito solo dagli IP in `PLATFORM_ALLOWED_IPS`.
+- `optional`: accesso consentito dagli IP allowlistati oppure da un dispositivo
+  autorizzato dopo OTP. Le route di login e recupero password restano raggiungibili
+  per completare l'OTP.
+- `disabled`: disattiva il gate IP/dispositivo, mantenendo password + OTP + JWT.
+  Usarla solo per emergenze temporanee.
+
+Il cookie dispositivo è `HttpOnly`, `SameSite=Strict`, `Secure` in produzione e
+limitato a `/platform-api`. Nel database viene salvato solo l'hash del segreto,
+non il valore del cookie. Un reset password revoca tutti i dispositivi fidati.
+Se un dispositivo viene perso, revocarlo dalla Platform Console o tramite endpoint
+`DELETE /platform-api/security/trusted-devices/:id`.
+
 ### Bootstrap o recovery d'emergenza
 
 Per rigenerare l'hash:

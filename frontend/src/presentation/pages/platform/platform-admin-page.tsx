@@ -38,6 +38,7 @@ import {
   PlatformRevenueMetrics,
   PlatformSecurityOverview,
   PlatformSystemHealth,
+  PlatformTrustedDevice,
   PlatformWebsiteAnalytics,
   QuickAction
 } from "../../../application/usecases/platform/platform-admin-usecases";
@@ -312,6 +313,7 @@ export const PlatformAdminPage = () => {
   const [demoLeads, setDemoLeads] = useState<PlatformDemoLead[]>([]);
   const [systemHealth, setSystemHealth] = useState<PlatformSystemHealth | null>(null);
   const [securityOverview, setSecurityOverview] = useState<PlatformSecurityOverview | null>(null);
+  const [trustedDevices, setTrustedDevices] = useState<PlatformTrustedDevice[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<TenantRow | null>(null);
   const [search, setSearch] = useState("");
   const [licenseFilter, setLicenseFilter] = useState<"ALL" | LicenseStatus>("ALL");
@@ -362,7 +364,7 @@ export const PlatformAdminPage = () => {
     if (options?.silent) setRefreshing(true);
 
     try {
-      const [tenantData, invoiceData, userData, eventData, revenueData, overviewData, analyticsData, demoLeadData, healthData, securityData] = await Promise.all([
+      const [tenantData, invoiceData, userData, eventData, revenueData, overviewData, analyticsData, demoLeadData, healthData, securityData, trustedDeviceData] = await Promise.all([
         platformAdminUseCases.listTenants(),
         platformAdminUseCases.listInvoices(),
         platformAdminUseCases.listUsers(),
@@ -372,7 +374,8 @@ export const PlatformAdminPage = () => {
         platformAdminUseCases.websiteAnalytics(30),
         platformAdminUseCases.listDemoLeads(),
         platformAdminUseCases.systemHealth(),
-        platformAdminUseCases.securityOverview()
+        platformAdminUseCases.securityOverview(),
+        platformAdminUseCases.listTrustedDevices()
       ]);
       setTenants(tenantData.data);
       setInvoices(invoiceData.data);
@@ -384,6 +387,7 @@ export const PlatformAdminPage = () => {
       setDemoLeads(demoLeadData.data);
       setSystemHealth(healthData.data);
       setSecurityOverview(securityData.data);
+      setTrustedDevices(trustedDeviceData.data);
       void loadDashboardLive({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
@@ -621,6 +625,17 @@ export const PlatformAdminPage = () => {
       snackbar.error(message);
     } finally {
       setRowLoading((old) => ({ ...old, [tenantId]: false }));
+    }
+  };
+
+  const revokeTrustedDevice = async (device: PlatformTrustedDevice) => {
+    try {
+      await platformAdminUseCases.revokeTrustedDevice(device.id);
+      snackbar.success("Dispositivo fidato revocato");
+      await load({ silent: true });
+    } catch (err) {
+      if (handlePlatformAuthError(err)) return;
+      snackbar.error((err as Error).message);
     }
   };
 
@@ -2245,6 +2260,41 @@ export const PlatformAdminPage = () => {
           </Card>
 
           <Card className="platform-main-card">
+            <CardHeader>
+              <CardTitle className="text-base text-foreground">Dispositivi fidati</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {trustedDevices.length === 0 ? (
+                <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-card/50 py-10 text-center">
+                  <KeyRound className="h-6 w-6 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Nessun dispositivo fidato registrato.</p>
+                </div>
+              ) : null}
+              {trustedDevices.map((device) => (
+                <div key={device.id} className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground">{device.label ?? "Dispositivo autorizzato"}</p>
+                      <Badge variant={device.status === "ACTIVE" ? "success" : device.status === "REVOKED" ? "destructive" : "warning"}>{device.status}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Ultimo uso: {device.lastUsedAt ? timeAgo(device.lastUsedAt) : "mai"} · Scade: {formatDate(device.expiresAt)}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={device.status !== "ACTIVE"}
+                    onClick={() => revokeTrustedDevice(device)}
+                  >
+                    Revoca
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="platform-main-card xl:col-span-2">
             <CardHeader>
               <CardTitle className="text-base text-foreground">Eventi sicurezza recenti</CardTitle>
             </CardHeader>

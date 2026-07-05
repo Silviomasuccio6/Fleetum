@@ -16,6 +16,9 @@ const authHeaders = () => {
   return headers;
 };
 
+const platformFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+  fetch(input, { credentials: "include", ...init });
+
 export type LicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 export type QuickAction =
   | "ACTIVATE_LICENSE"
@@ -206,6 +209,16 @@ export type PlatformSecurityOverview = {
   recentEvents: Array<{ id: string; action: string; tenantName: string; createdAt: string; resource: string; resourceId?: string | null }>;
 };
 
+export type PlatformTrustedDevice = {
+  id: string;
+  label: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string;
+  revokedAt: string | null;
+  status: "ACTIVE" | "EXPIRED" | "REVOKED";
+};
+
 const toPlatformError = (response: Response, payload: any, fallback: string): PlatformApiError => {
   const error = new Error(payload?.message || fallback) as PlatformApiError;
   error.status = response.status;
@@ -220,8 +233,8 @@ const throwIfNotOk = async (response: Response, fallback: string) => {
 };
 
 export const platformAdminUseCases = {
-  login: async (input: { email: string; password: string; otp?: string }) => {
-    const response = await fetch(`${apiBase}/auth/login`, {
+  login: async (input: { email: string; password: string; otp?: string; trustDevice?: boolean }) => {
+    const response = await platformFetch(`${apiBase}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input)
@@ -232,7 +245,7 @@ export const platformAdminUseCases = {
     return data;
   },
   requestPasswordReset: async (email: string) => {
-    const response = await fetch(`${apiBase}/auth/password-reset/request`, {
+    const response = await platformFetch(`${apiBase}/auth/password-reset/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email })
@@ -242,7 +255,7 @@ export const platformAdminUseCases = {
     return data as { message: string };
   },
   confirmPasswordReset: async (input: { email: string; otp: string; newPassword: string }) => {
-    const response = await fetch(`${apiBase}/auth/password-reset/confirm`, {
+    const response = await platformFetch(`${apiBase}/auth/password-reset/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input)
@@ -253,32 +266,47 @@ export const platformAdminUseCases = {
     return data as { message: string; token?: string };
   },
   logout: () => platformAuthStorage.clear(),
+  listTrustedDevices: async () => {
+    const response = await platformFetch(`${apiBase}/security/trusted-devices`, { headers: { ...authHeaders() } });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare dispositivi fidati");
+    return data as { data: PlatformTrustedDevice[] };
+  },
+  revokeTrustedDevice: async (id: string) => {
+    const response = await platformFetch(`${apiBase}/security/trusted-devices/${id}`, {
+      method: "DELETE",
+      headers: { ...authHeaders() }
+    });
+    const data = await response.json();
+    if (!response.ok) throw toPlatformError(response, data, "Revoca dispositivo fidato fallita");
+    return data as { revoked: true };
+  },
   listTenants: async () => {
-    const response = await fetch(`${apiBase}/tenants`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/tenants`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare tenant");
     return data as { data: any[] };
   },
   overview: async (days = 30) => {
-    const response = await fetch(`${apiBase}/overview?days=${days}`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/overview?days=${days}`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare overview platform");
     return data as { data: PlatformOverview };
   },
   websiteAnalytics: async (days = 30) => {
-    const response = await fetch(`${apiBase}/analytics/website?days=${days}`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/analytics/website?days=${days}`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare analytics sito");
     return data as { data: PlatformWebsiteAnalytics };
   },
   listDemoLeads: async () => {
-    const response = await fetch(`${apiBase}/demo-leads`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/demo-leads`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare richieste demo");
     return data as { data: PlatformDemoLead[] };
   },
   updateDemoLead: async (id: string, status: PlatformDemoLead["status"]) => {
-    const response = await fetch(`${apiBase}/demo-leads/${id}`, {
+    const response = await platformFetch(`${apiBase}/demo-leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ status })
@@ -288,25 +316,25 @@ export const platformAdminUseCases = {
     return data as { data: PlatformDemoLead };
   },
   systemHealth: async () => {
-    const response = await fetch(`${apiBase}/system-health`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/system-health`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare system health");
     return data as { data: PlatformSystemHealth };
   },
   securityOverview: async () => {
-    const response = await fetch(`${apiBase}/security`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/security`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare security overview");
     return data as { data: PlatformSecurityOverview };
   },
   listUsers: async () => {
-    const response = await fetch(`${apiBase}/users`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/users`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare utenti");
     return data as { data: any[] };
   },
   listRecentEvents: async (limit = 20) => {
-    const response = await fetch(`${apiBase}/events/recent?limit=${limit}`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/events/recent?limit=${limit}`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare eventi recenti");
     return data as { data: any[] };
@@ -316,7 +344,7 @@ export const platformAdminUseCases = {
     if (input?.month) query.set("month", input.month);
     if (input?.months) query.set("months", String(input.months));
     if (input?.range) query.set("range", input.range);
-    const response = await fetch(`${apiBase}/metrics/revenue?${query.toString()}`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/metrics/revenue?${query.toString()}`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare report ricavi");
     return data as PlatformRevenueMetrics;
@@ -324,7 +352,7 @@ export const platformAdminUseCases = {
   dashboardLiveMetrics: async (input?: { windowMinutes?: number }) => {
     const query = new URLSearchParams();
     if (input?.windowMinutes) query.set("windowMinutes", String(input.windowMinutes));
-    const response = await fetch(`${apiBase}/metrics/dashboard-live?${query.toString()}`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/metrics/dashboard-live?${query.toString()}`, { headers: { ...authHeaders() } });
     if (response.status === 404) {
       const now = new Date();
       return {
@@ -350,7 +378,7 @@ export const platformAdminUseCases = {
     if (input?.month) query.set("month", input.month);
     if (input?.months) query.set("months", String(input.months));
     if (input?.range) query.set("range", input.range);
-    const response = await fetch(`${apiBase}/metrics/revenue/export.csv?${query.toString()}`, {
+    const response = await platformFetch(`${apiBase}/metrics/revenue/export.csv?${query.toString()}`, {
       headers: { ...authHeaders() }
     });
     await throwIfNotOk(response, "Export CSV ricavi fallito");
@@ -367,7 +395,7 @@ export const platformAdminUseCases = {
       billingCycle?: "monthly" | "yearly";
     }
   ) => {
-    const response = await fetch(`${apiBase}/tenants/${tenantId}/license`, {
+    const response = await platformFetch(`${apiBase}/tenants/${tenantId}/license`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload)
@@ -377,7 +405,7 @@ export const platformAdminUseCases = {
     return data;
   },
   updateTenantStatus: async (tenantId: string, isActive: boolean) => {
-    const response = await fetch(`${apiBase}/tenants/${tenantId}/status`, {
+    const response = await platformFetch(`${apiBase}/tenants/${tenantId}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ isActive })
@@ -387,7 +415,7 @@ export const platformAdminUseCases = {
     return data;
   },
   quickAction: async (tenantId: string, action: QuickAction) => {
-    const response = await fetch(`${apiBase}/tenants/${tenantId}/quick-action`, {
+    const response = await platformFetch(`${apiBase}/tenants/${tenantId}/quick-action`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ action })
@@ -397,13 +425,13 @@ export const platformAdminUseCases = {
     return data;
   },
   listInvoices: async () => {
-    const response = await fetch(`${apiBase}/invoices`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/invoices`, { headers: { ...authHeaders() } });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare fatture");
     return data as { data: PlatformInvoice[] };
   },
   generateInvoice: async (tenantId: string) => {
-    const response = await fetch(`${apiBase}/tenants/${tenantId}/invoices/generate`, {
+    const response = await platformFetch(`${apiBase}/tenants/${tenantId}/invoices/generate`, {
       method: "POST",
       headers: { ...authHeaders() }
     });
@@ -412,7 +440,7 @@ export const platformAdminUseCases = {
     return data as { data: PlatformInvoice };
   },
   sendInvoiceEmail: async (invoiceId: string) => {
-    const response = await fetch(`${apiBase}/invoices/${invoiceId}/send-email`, {
+    const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/send-email`, {
       method: "POST",
       headers: { ...authHeaders() }
     });
@@ -421,7 +449,7 @@ export const platformAdminUseCases = {
     return data as { data: PlatformInvoice };
   },
   updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
-    const response = await fetch(`${apiBase}/invoices/${invoiceId}/status`, {
+    const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ status })
@@ -432,7 +460,7 @@ export const platformAdminUseCases = {
   },
   invoicePdfUrl: (invoiceId: string) => `${apiBase}/invoices/${invoiceId}/pdf`,
   downloadInvoicePdf: async (invoiceId: string) => {
-    const response = await fetch(`${apiBase}/invoices/${invoiceId}/pdf`, { headers: { ...authHeaders() } });
+    const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/pdf`, { headers: { ...authHeaders() } });
     await throwIfNotOk(response, "Download PDF fattura fallito");
     return response.blob();
   }
