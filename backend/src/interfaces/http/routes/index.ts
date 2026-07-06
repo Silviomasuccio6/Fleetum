@@ -1,6 +1,7 @@
 import rateLimit from "express-rate-limit";
 import crypto from "node:crypto";
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { AcceptInviteUseCase } from "../../../application/usecases/auth/accept-invite-usecase.js";
 import { LoginUseCase } from "../../../application/usecases/auth/login-usecase.js";
 import { ManageProfileUseCase } from "../../../application/usecases/auth/manage-profile-usecase.js";
@@ -205,6 +206,11 @@ export const apiRouter = Router();
 apiRouter.get("/health", (_req, res) => res.json({ ok: true, service: "fleetum-backend", timestamp: new Date().toISOString() }));
 apiRouter.post("/public/analytics/event", publicAnalyticsRateLimit, asyncHandler(async (req, res) => {
   const input = publicAnalyticsEventSchema.parse(req.body);
+  if (!input.consentAnalytics) {
+    res.status(202).json({ ok: true, stored: false });
+    return;
+  }
+
   const userAgent = req.headers["user-agent"] ?? "";
   await prisma.websiteEvent.create({
     data: {
@@ -214,15 +220,19 @@ apiRouter.post("/public/analytics/event", publicAnalyticsRateLimit, asyncHandler
       utmSource: input.utmSource,
       utmMedium: input.utmMedium,
       utmCampaign: input.utmCampaign,
+      utmContent: input.utmContent,
+      utmTerm: input.utmTerm,
+      consentAnalytics: true,
+      visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
       sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined,
       ipHash: privacyHash(req.ip),
       userAgentHash: privacyHash(String(userAgent)),
       deviceType: detectDevice(String(userAgent)),
       browser: detectBrowser(String(userAgent)),
-      metadata: input.metadata ? (input.metadata as any) : undefined
+      metadata: input.metadata ? (input.metadata as Prisma.InputJsonObject) : undefined
     }
   });
-  res.status(202).json({ ok: true });
+  res.status(202).json({ ok: true, stored: true });
 }));
 
 apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (req, res) => {
@@ -240,7 +250,11 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
       referrer: input.referrer,
       utmSource: input.utmSource,
       utmMedium: input.utmMedium,
-      utmCampaign: input.utmCampaign
+      utmCampaign: input.utmCampaign,
+      utmContent: input.utmContent,
+      utmTerm: input.utmTerm,
+      visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
+      sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined
     }
   });
   await prisma.websiteEvent.create({
@@ -251,6 +265,11 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
       utmSource: input.utmSource,
       utmMedium: input.utmMedium,
       utmCampaign: input.utmCampaign,
+      utmContent: input.utmContent,
+      utmTerm: input.utmTerm,
+      consentAnalytics: true,
+      visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
+      sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined,
       ipHash: privacyHash(req.ip),
       userAgentHash: privacyHash(String(req.headers["user-agent"] ?? "")),
       deviceType: detectDevice(String(req.headers["user-agent"] ?? "")),

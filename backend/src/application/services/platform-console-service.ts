@@ -256,8 +256,11 @@ export class PlatformConsoleService {
         eventType: true,
         path: true,
         referrer: true,
+        utmSource: true,
+        utmCampaign: true,
         deviceType: true,
         browser: true,
+        visitorId: true,
         sessionId: true,
         ipHash: true,
         createdAt: true
@@ -268,6 +271,8 @@ export class PlatformConsoleService {
     const eventCounts = new Map<string, number>();
     const pathCounts = new Map<string, number>();
     const referrerCounts = new Map<string, number>();
+    const sourceCounts = new Map<string, number>();
+    const campaignCounts = new Map<string, number>();
     const deviceCounts = new Map<string, number>();
     const browserCounts = new Map<string, number>();
     const uniqueKeys = new Set<string>();
@@ -283,9 +288,11 @@ export class PlatformConsoleService {
       eventCounts.set(event.eventType, (eventCounts.get(event.eventType) ?? 0) + 1);
       if (event.eventType === "PAGE_VIEW") pathCounts.set(event.path, (pathCounts.get(event.path) ?? 0) + 1);
       if (event.referrer) referrerCounts.set(event.referrer, (referrerCounts.get(event.referrer) ?? 0) + 1);
+      if (event.utmSource) sourceCounts.set(event.utmSource, (sourceCounts.get(event.utmSource) ?? 0) + 1);
+      if (event.utmCampaign) campaignCounts.set(event.utmCampaign, (campaignCounts.get(event.utmCampaign) ?? 0) + 1);
       if (event.deviceType) deviceCounts.set(event.deviceType, (deviceCounts.get(event.deviceType) ?? 0) + 1);
       if (event.browser) browserCounts.set(event.browser, (browserCounts.get(event.browser) ?? 0) + 1);
-      uniqueKeys.add(event.sessionId ?? event.ipHash ?? `${event.path}:${event.createdAt.toISOString()}`);
+      uniqueKeys.add(event.visitorId ?? event.sessionId ?? event.ipHash ?? `${event.path}:${event.createdAt.toISOString()}`);
     });
 
     const top = (map: Map<string, number>, limit = 8) =>
@@ -316,6 +323,8 @@ export class PlatformConsoleService {
         trend: [...byDay.values()],
         topPages: top(pathCounts),
         topReferrers: top(referrerCounts),
+        topSources: top(sourceCounts),
+        topCampaigns: top(campaignCounts),
         deviceBreakdown: top(deviceCounts),
         browserBreakdown: top(browserCounts),
         eventCounts: Object.fromEntries(eventCounts)

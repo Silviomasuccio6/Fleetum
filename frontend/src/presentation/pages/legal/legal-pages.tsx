@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Mail, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
-import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { getPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { SeoHead } from "../../components/seo/seo-head";
 import "./legal-pages.css";
 
@@ -168,9 +168,12 @@ export const DemoRequestPage = () => {
     setStatus("loading");
     setError("");
     const form = new FormData(formElement);
-    const payload = Object.fromEntries(
-      Array.from(form.entries()).filter(([, value]) => typeof value !== "string" || value.trim() !== "")
-    );
+    const payload = {
+      ...Object.fromEntries(
+        Array.from(form.entries()).filter(([, value]) => typeof value !== "string" || value.trim() !== "")
+      ),
+      ...getPublicAnalyticsContext()
+    };
 
     try {
       const response = await fetch(`${apiBaseUrl}/public/demo-request`, {

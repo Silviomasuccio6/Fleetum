@@ -164,6 +164,8 @@ export type PlatformWebsiteAnalytics = {
   trend: Array<{ date: string; pageViews: number; ctaClicks: number; demoSubmits: number; signups: number }>;
   topPages: Array<{ label: string; value: number }>;
   topReferrers: Array<{ label: string; value: number }>;
+  topSources: Array<{ label: string; value: number }>;
+  topCampaigns: Array<{ label: string; value: number }>;
   deviceBreakdown: Array<{ label: string; value: number }>;
   browserBreakdown: Array<{ label: string; value: number }>;
   eventCounts: Record<string, number>;
