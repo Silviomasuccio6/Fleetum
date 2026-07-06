@@ -2053,6 +2053,30 @@ export const PlatformAdminPage = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Sorgenti UTM</p>
+                  <div className="mt-2 space-y-1.5">
+                    {(websiteAnalytics?.topSources.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">Nessuna sorgente UTM ancora disponibile.</p> : null}
+                    {websiteAnalytics?.topSources.slice(0, 5).map((row) => (
+                      <div key={`source-${row.label}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-sm">
+                        <span className="truncate text-foreground">{row.label}</span>
+                        <Badge variant="secondary">{row.value}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Campagne</p>
+                  <div className="mt-2 space-y-1.5">
+                    {(websiteAnalytics?.topCampaigns.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">Nessuna campagna UTM ancora disponibile.</p> : null}
+                    {websiteAnalytics?.topCampaigns.slice(0, 5).map((row) => (
+                      <div key={`campaign-${row.label}`} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-sm">
+                        <span className="truncate text-foreground">{row.label}</span>
+                        <Badge variant="secondary">{row.value}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">Top pagine</p>
                   <div className="mt-2 space-y-1.5">
                     {(websiteAnalytics?.topPages.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">Nessun dato disponibile.</p> : null}

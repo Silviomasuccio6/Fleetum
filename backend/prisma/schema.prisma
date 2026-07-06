@@ -70,6 +70,10 @@ enum WebsiteEventType {
   SIGNUP_VIEW
   SIGNUP_STARTED
   SIGNUP_COMPLETED
+  ONBOARDING_COMPANY_COMPLETED
+  STRIPE_CHECKOUT_STARTED
+  STRIPE_CHECKOUT_COMPLETED
+  STRIPE_CHECKOUT_FAILED
   LOGIN_CLICK
   PRICING_VIEW
 }
@@ -1823,13 +1827,18 @@ model WebsiteEvent {
   utmSource     String?
   utmMedium     String?
   utmCampaign   String?
+  utmContent    String?
+  utmTerm       String?
   deviceType    String?
   browser       String?
   country       String?
+  consentAnalytics Boolean          @default(true)
   /// @pii
   ipHash        String?
   /// @pii
   userAgentHash String?
+  /// @pii
+  visitorId     String?
   /// @pii
   sessionId     String?
   /// @pii
@@ -1838,6 +1847,8 @@ model WebsiteEvent {
 
   @@index([eventType, createdAt])
   @@index([path, createdAt])
+  @@index([visitorId, createdAt])
+  @@index([sessionId, createdAt])
   @@index([createdAt])
 }
 
@@ -1860,6 +1871,12 @@ model DemoLead {
   utmSource           String?
   utmMedium           String?
   utmCampaign         String?
+  utmContent          String?
+  utmTerm             String?
+  /// @pii
+  visitorId           String?
+  /// @pii
+  sessionId           String?
   emailQueueId        String?
   emailDeliveryStatus String?
   contactedAt         DateTime?

@@ -4,6 +4,7 @@ import { ArrowRight, Check, CreditCard, Crown, Download, ExternalLink, FileText,
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import {
   FeatureKey,
   getFeatureListForPlan,
@@ -449,6 +450,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                       setCheckoutError(null);
                       setBusyPlan(entry);
                       try {
+                        trackPublicEvent("STRIPE_CHECKOUT_STARTED", { plan: entry, billingCycle, mode });
                         const session = await billingUseCases.createCheckoutSession({ plan: entry, billingCycle });
                         window.location.href = session.checkoutUrl;
                       } catch (error) {

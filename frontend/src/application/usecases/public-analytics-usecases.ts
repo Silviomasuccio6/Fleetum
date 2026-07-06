@@ -9,16 +9,23 @@ export type PublicAnalyticsEventType =
   | "SIGNUP_VIEW"
   | "SIGNUP_STARTED"
   | "SIGNUP_COMPLETED"
+  | "ONBOARDING_COMPANY_COMPLETED"
+  | "STRIPE_CHECKOUT_STARTED"
+  | "STRIPE_CHECKOUT_COMPLETED"
+  | "STRIPE_CHECKOUT_FAILED"
   | "LOGIN_CLICK"
   | "PRICING_VIEW";
 
 const sessionKey = "fleetum_public_session";
+const visitorKey = "fleetum_public_visitor";
 const attributionKey = "fleetum_public_attribution";
 
 type Attribution = {
   utmSource?: string;
   utmMedium?: string;
   utmCampaign?: string;
+  utmContent?: string;
+  utmTerm?: string;
 };
 
 type PendingPageView = {
@@ -27,12 +34,25 @@ type PendingPageView = {
 
 let pendingPageView: PendingPageView | null = null;
 let consentListenerBound = false;
+let lastPageViewFingerprint = "";
+let lastPageViewAt = 0;
+
+const newTrackingId = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+export const getOrCreatePublicVisitorId = () => {
+  if (typeof window === "undefined") return undefined;
+  const existing = window.localStorage.getItem(visitorKey);
+  if (existing) return existing;
+  const next = newTrackingId();
+  window.localStorage.setItem(visitorKey, next);
+  return next;
+};
 
 const sessionId = () => {
   if (typeof window === "undefined") return undefined;
   const existing = window.sessionStorage.getItem(sessionKey);
   if (existing) return existing;
-  const next = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const next = newTrackingId();
   window.sessionStorage.setItem(sessionKey, next);
   return next;
 };
@@ -43,7 +63,9 @@ const currentAttribution = (): Attribution => {
   const current: Attribution = {
     utmSource: url.searchParams.get("utm_source") || undefined,
     utmMedium: url.searchParams.get("utm_medium") || undefined,
-    utmCampaign: url.searchParams.get("utm_campaign") || undefined
+    utmCampaign: url.searchParams.get("utm_campaign") || undefined,
+    utmContent: url.searchParams.get("utm_content") || undefined,
+    utmTerm: url.searchParams.get("utm_term") || undefined
   };
 
   const hasCurrentAttribution = Object.values(current).some(Boolean);
@@ -69,23 +91,46 @@ const safeReferrer = () => {
   }
 };
 
-const sendPublicEvent = (eventType: PublicAnalyticsEventType, metadata?: Record<string, unknown>) => {
+const isDoNotTrackEnabled = () =>
+  typeof navigator !== "undefined" && (navigator.doNotTrack === "1" || (window as Window & { doNotTrack?: string }).doNotTrack === "1");
+
+export const getPublicAnalyticsContext = () => {
   const attribution = currentAttribution();
-  const payload = {
-    eventType,
-    path: window.location.pathname,
+  return {
+    visitorId: getOrCreatePublicVisitorId(),
+    sessionId: sessionId(),
     referrer: safeReferrer(),
     utmSource: attribution.utmSource,
     utmMedium: attribution.utmMedium,
     utmCampaign: attribution.utmCampaign,
-    sessionId: sessionId(),
+    utmContent: attribution.utmContent,
+    utmTerm: attribution.utmTerm
+  };
+};
+
+const sendPublicEvent = (eventType: PublicAnalyticsEventType, metadata?: Record<string, unknown>) => {
+  if (isDoNotTrackEnabled()) return;
+  const context = getPublicAnalyticsContext();
+  const payload = {
+    eventType,
+    path: window.location.pathname,
+    ...context,
+    consentAnalytics: true,
     metadata
   };
 
-  fetch(`${getApiBaseUrl()}/public/analytics/event`, {
+  const url = `${getApiBaseUrl()}/public/analytics/event`;
+  const body = JSON.stringify(payload);
+
+  if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+    const sent = navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+    if (sent) return;
+  }
+
+  fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body,
     keepalive: true
   }).catch(() => {
     // Analytics non deve mai bloccare navigazione o form pubblici.
@@ -113,6 +158,14 @@ export const trackPublicEvent = (eventType: PublicAnalyticsEventType, metadata?:
       bindConsentListener();
     }
     return;
+  }
+
+  if (eventType === "PAGE_VIEW") {
+    const fingerprint = `${window.location.pathname}:${JSON.stringify(metadata ?? {})}`;
+    const now = Date.now();
+    if (fingerprint === lastPageViewFingerprint && now - lastPageViewAt < 1200) return;
+    lastPageViewFingerprint = fingerprint;
+    lastPageViewAt = now;
   }
 
   sendPublicEvent(eventType, metadata);
