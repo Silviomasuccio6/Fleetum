@@ -69,6 +69,7 @@ export const publicAnalyticsEventSchema = z.object({
     "STRIPE_CHECKOUT_STARTED",
     "STRIPE_CHECKOUT_COMPLETED",
     "STRIPE_CHECKOUT_FAILED",
+    "TRIAL_ACTIVATED",
     "LOGIN_CLICK",
     "PRICING_VIEW"
   ]),

@@ -19,6 +19,7 @@ import {
   BillingLifecycleStatus
 } from "./billing-lifecycle-notifier.js";
 import { logger } from "../../infrastructure/logging/logger.js";
+import { privacyHash } from "../../shared/utils/privacy-hash.js";
 
 type BillingLicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 type StripeClient = Stripe;
@@ -30,6 +31,17 @@ type BillingEventRecord = {
   tenantId: string | null;
   status: string;
   processedAt: Date | null;
+};
+
+type CheckoutAnalyticsInput = {
+  visitorId?: string;
+  sessionId?: string;
+  referrer?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmContent?: string;
+  utmTerm?: string;
 };
 
 export type RentalStripeWebhookHandler = {
@@ -57,6 +69,7 @@ type LicenseAuditPayload = {
 type BillingServiceDeps = {
   createBillingEvent(event: Stripe.Event, tenantId: string | null): Promise<BillingEventRecord>;
   updateBillingEvent(eventId: string, data: { tenantId?: string | null; status: BillingEventStatus; processedAt?: Date | null; errorMessage?: string | null }): Promise<void>;
+  recordWebsiteEvent(data: Prisma.WebsiteEventUncheckedCreateInput): Promise<void>;
   findSubscriptionByTenantId(tenantId: string): Promise<TenantSubscriptionSnapshot | null>;
   findSubscriptionByStripeSubscriptionId(subscriptionId: string): Promise<{ tenantId: string } | null>;
   findSubscriptionByStripeCustomerId(customerId: string): Promise<{ tenantId: string } | null>;
@@ -134,6 +147,15 @@ const metadataFromObject = (source: unknown): Record<string, string> => {
   );
 };
 
+const trimMetadataValue = (value?: string | null, max = 500) => {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  return normalized.slice(0, max);
+};
+
+const compactMetadata = (input: Record<string, string | undefined>) =>
+  Object.fromEntries(Object.entries(input).filter(([, value]) => typeof value === "string" && value.length > 0)) as Record<string, string>;
+
 const isRentalPaymentEvent = (event: Stripe.Event, dataObject?: Record<string, unknown>) => {
   const metadata = metadataFromObject(dataObject ?? event.data.object);
   if (metadata.domain === "rental_payments") return true;
@@ -208,6 +230,9 @@ const defaultDeps: BillingServiceDeps = {
       }
     });
   },
+  async recordWebsiteEvent(data) {
+    await prisma.websiteEvent.create({ data });
+  },
   async findSubscriptionByTenantId(tenantId) {
     return readTenantSubscription(tenantId);
   },
@@ -247,6 +272,7 @@ export class BillingService {
     plan: string;
     billingCycle?: string;
     customerEmail?: string | null;
+    analytics?: CheckoutAnalyticsInput;
   }) {
     const plan = ensureKnownPlan(input.plan);
     const billingCycle = normalizeBillingCycle(input.billingCycle);
@@ -295,6 +321,15 @@ export class BillingService {
       throw new AppError(`Price Stripe non configurato per ${plan} ${billingCycle}`, 500, "STRIPE_PRICE_MISSING");
     }
 
+    const checkoutAnalyticsMetadata = this.checkoutAnalyticsMetadata(input.analytics);
+    const baseMetadata = {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      plan,
+      billingCycle,
+      ...checkoutAnalyticsMetadata
+    };
+
     const session = await this.stripeClient.checkout.sessions.create({
       mode: "subscription",
       success_url: successUrl,
@@ -303,12 +338,7 @@ export class BillingService {
       customer_email: input.customerEmail ?? undefined,
       payment_method_collection: "always",
       line_items: [{ price: String(priceId), quantity: 1 }],
-      metadata: {
-        tenantId: input.tenantId,
-        userId: input.userId,
-        plan,
-        billingCycle
-      },
+      metadata: baseMetadata,
       subscription_data: {
         trial_period_days: env.BILLING_TRIAL_DAYS > 0 ? env.BILLING_TRIAL_DAYS : undefined,
         trial_settings: env.BILLING_TRIAL_DAYS > 0
@@ -317,7 +347,8 @@ export class BillingService {
         metadata: {
           tenantId: input.tenantId,
           plan,
-          billingCycle
+          billingCycle,
+          ...checkoutAnalyticsMetadata
         }
       }
     });
@@ -512,9 +543,13 @@ export class BillingService {
       const tenantId = await this.resolveTenantId(session);
       if (!tenantId) return { ignored: true, tenantId: null };
 
+      let nextStatus: BillingLicenseStatus = "ACTIVE";
+      let stripeSubscriptionId = subscriptionId;
       if (subscriptionId && this.stripeClient) {
         const subscription = await this.stripeClient.subscriptions.retrieve(subscriptionId);
-        await this.applyStripeObject(subscription as unknown as Record<string, unknown>, stripeStatusToLicense(subscription.status), {
+        nextStatus = stripeStatusToLicense(subscription.status);
+        stripeSubscriptionId = subscriptionId;
+        await this.applyStripeObject(subscription as unknown as Record<string, unknown>, nextStatus, {
           fallbackTenantId: tenantId,
           fallbackCustomerId: stripeId(session.customer),
           fallbackSubscriptionId: subscriptionId,
@@ -522,6 +557,21 @@ export class BillingService {
         });
       } else {
         await this.applyStripeObject(session, "ACTIVE", { fallbackTenantId: tenantId });
+      }
+
+      await this.recordCheckoutFunnelEvent("STRIPE_CHECKOUT_COMPLETED", session, {
+        stripeEventId: event.id,
+        stripeSessionId: session.id,
+        stripeSubscriptionId,
+        status: nextStatus
+      });
+      if (nextStatus === "TRIAL") {
+        await this.recordCheckoutFunnelEvent("TRIAL_ACTIVATED", session, {
+          stripeEventId: event.id,
+          stripeSessionId: session.id,
+          stripeSubscriptionId,
+          status: nextStatus
+        });
       }
       return { tenantId };
     }
@@ -628,6 +678,51 @@ export class BillingService {
     }
 
     return null;
+  }
+
+  private checkoutAnalyticsMetadata(input?: CheckoutAnalyticsInput) {
+    if (!input) return {};
+    return compactMetadata({
+      analyticsConsent: input.visitorId || input.sessionId ? "true" : undefined,
+      analyticsVisitorIdHash: input.visitorId ? privacyHash(input.visitorId) : undefined,
+      analyticsSessionIdHash: input.sessionId ? privacyHash(input.sessionId) : undefined,
+      analyticsReferrer: trimMetadataValue(input.referrer),
+      utmSource: trimMetadataValue(input.utmSource, 120),
+      utmMedium: trimMetadataValue(input.utmMedium, 120),
+      utmCampaign: trimMetadataValue(input.utmCampaign, 160),
+      utmContent: trimMetadataValue(input.utmContent, 160),
+      utmTerm: trimMetadataValue(input.utmTerm, 160)
+    });
+  }
+
+  private async recordCheckoutFunnelEvent(
+    eventType: "STRIPE_CHECKOUT_COMPLETED" | "TRIAL_ACTIVATED",
+    session: Stripe.Checkout.Session & Record<string, unknown>,
+    details: Record<string, unknown>
+  ) {
+    const metadata = metadataFromObject(session);
+    if (metadata.analyticsConsent !== "true") return;
+
+    await this.deps.recordWebsiteEvent({
+      eventType: eventType as Prisma.WebsiteEventUncheckedCreateInput["eventType"],
+      path: "/activate",
+      referrer: metadata.analyticsReferrer || "https://checkout.stripe.com",
+      utmSource: metadata.utmSource || undefined,
+      utmMedium: metadata.utmMedium || undefined,
+      utmCampaign: metadata.utmCampaign || undefined,
+      utmContent: metadata.utmContent || undefined,
+      utmTerm: metadata.utmTerm || undefined,
+      consentAnalytics: true,
+      visitorId: metadata.analyticsVisitorIdHash || undefined,
+      sessionId: metadata.analyticsSessionIdHash || undefined,
+      metadata: jsonPayload({
+        ...details,
+        tenantId: metadata.tenantId,
+        plan: metadata.plan,
+        billingCycle: metadata.billingCycle,
+        source: "stripe_webhook"
+      })
+    });
   }
 
   private async applyStripeObject(source: Record<string, unknown>, status: BillingLicenseStatus, fallback?: {

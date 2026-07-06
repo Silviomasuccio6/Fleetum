@@ -257,7 +257,10 @@ export class PlatformConsoleService {
         path: true,
         referrer: true,
         utmSource: true,
+        utmMedium: true,
         utmCampaign: true,
+        utmContent: true,
+        utmTerm: true,
         deviceType: true,
         browser: true,
         visitorId: true,
@@ -267,7 +270,18 @@ export class PlatformConsoleService {
       }
     });
 
-    const byDay = new Map<string, { date: string; pageViews: number; ctaClicks: number; demoSubmits: number; signups: number }>();
+    const byDay = new Map<string, {
+      date: string;
+      pageViews: number;
+      ctaClicks: number;
+      demoSubmits: number;
+      signups: number;
+      companyCompleted: number;
+      checkoutStarted: number;
+      checkoutCompleted: number;
+      checkoutFailed: number;
+      trialActivated: number;
+    }>();
     const eventCounts = new Map<string, number>();
     const pathCounts = new Map<string, number>();
     const referrerCounts = new Map<string, number>();
@@ -275,33 +289,133 @@ export class PlatformConsoleService {
     const campaignCounts = new Map<string, number>();
     const deviceCounts = new Map<string, number>();
     const browserCounts = new Map<string, number>();
+    const sourcePerformance = new Map<string, {
+      label: string;
+      visitors: Set<string>;
+      pageViews: number;
+      ctaClicks: number;
+      demoSubmits: number;
+      signupStarted: number;
+      signupCompleted: number;
+      onboardingCompanyCompleted: number;
+      checkoutStarted: number;
+      checkoutCompleted: number;
+      checkoutFailed: number;
+      trialActivated: number;
+    }>();
     const uniqueKeys = new Set<string>();
 
     events.forEach((event) => {
+      const eventType = String(event.eventType);
       const key = toDayKey(event.createdAt);
-      const day = byDay.get(key) ?? { date: key, pageViews: 0, ctaClicks: 0, demoSubmits: 0, signups: 0 };
-      if (event.eventType === "PAGE_VIEW") day.pageViews += 1;
-      if (event.eventType === "CTA_CLICK") day.ctaClicks += 1;
-      if (event.eventType === "DEMO_FORM_SUBMIT") day.demoSubmits += 1;
-      if (event.eventType === "SIGNUP_COMPLETED") day.signups += 1;
+      const day = byDay.get(key) ?? {
+        date: key,
+        pageViews: 0,
+        ctaClicks: 0,
+        demoSubmits: 0,
+        signups: 0,
+        companyCompleted: 0,
+        checkoutStarted: 0,
+        checkoutCompleted: 0,
+        checkoutFailed: 0,
+        trialActivated: 0
+      };
+      if (eventType === "PAGE_VIEW") day.pageViews += 1;
+      if (eventType === "CTA_CLICK") day.ctaClicks += 1;
+      if (eventType === "DEMO_FORM_SUBMIT") day.demoSubmits += 1;
+      if (eventType === "SIGNUP_COMPLETED") day.signups += 1;
+      if (eventType === "ONBOARDING_COMPANY_COMPLETED") day.companyCompleted += 1;
+      if (eventType === "STRIPE_CHECKOUT_STARTED") day.checkoutStarted += 1;
+      if (eventType === "STRIPE_CHECKOUT_COMPLETED") day.checkoutCompleted += 1;
+      if (eventType === "STRIPE_CHECKOUT_FAILED") day.checkoutFailed += 1;
+      if (eventType === "TRIAL_ACTIVATED") day.trialActivated += 1;
       byDay.set(key, day);
-      eventCounts.set(event.eventType, (eventCounts.get(event.eventType) ?? 0) + 1);
-      if (event.eventType === "PAGE_VIEW") pathCounts.set(event.path, (pathCounts.get(event.path) ?? 0) + 1);
+      eventCounts.set(eventType, (eventCounts.get(eventType) ?? 0) + 1);
+      if (eventType === "PAGE_VIEW") pathCounts.set(event.path, (pathCounts.get(event.path) ?? 0) + 1);
       if (event.referrer) referrerCounts.set(event.referrer, (referrerCounts.get(event.referrer) ?? 0) + 1);
       if (event.utmSource) sourceCounts.set(event.utmSource, (sourceCounts.get(event.utmSource) ?? 0) + 1);
       if (event.utmCampaign) campaignCounts.set(event.utmCampaign, (campaignCounts.get(event.utmCampaign) ?? 0) + 1);
       if (event.deviceType) deviceCounts.set(event.deviceType, (deviceCounts.get(event.deviceType) ?? 0) + 1);
       if (event.browser) browserCounts.set(event.browser, (browserCounts.get(event.browser) ?? 0) + 1);
-      uniqueKeys.add(event.visitorId ?? event.sessionId ?? event.ipHash ?? `${event.path}:${event.createdAt.toISOString()}`);
+      const uniqueKey = event.visitorId ?? event.sessionId ?? event.ipHash ?? `${event.path}:${event.createdAt.toISOString()}`;
+      uniqueKeys.add(uniqueKey);
+
+      const sourceLabel = event.utmSource || event.referrer || "direct / unknown";
+      const sourceRow = sourcePerformance.get(sourceLabel) ?? {
+        label: sourceLabel,
+        visitors: new Set<string>(),
+        pageViews: 0,
+        ctaClicks: 0,
+        demoSubmits: 0,
+        signupStarted: 0,
+        signupCompleted: 0,
+        onboardingCompanyCompleted: 0,
+        checkoutStarted: 0,
+        checkoutCompleted: 0,
+        checkoutFailed: 0,
+        trialActivated: 0
+      };
+      sourceRow.visitors.add(uniqueKey);
+      if (eventType === "PAGE_VIEW") sourceRow.pageViews += 1;
+      if (eventType === "CTA_CLICK") sourceRow.ctaClicks += 1;
+      if (eventType === "DEMO_FORM_SUBMIT") sourceRow.demoSubmits += 1;
+      if (eventType === "SIGNUP_STARTED") sourceRow.signupStarted += 1;
+      if (eventType === "SIGNUP_COMPLETED") sourceRow.signupCompleted += 1;
+      if (eventType === "ONBOARDING_COMPANY_COMPLETED") sourceRow.onboardingCompanyCompleted += 1;
+      if (eventType === "STRIPE_CHECKOUT_STARTED") sourceRow.checkoutStarted += 1;
+      if (eventType === "STRIPE_CHECKOUT_COMPLETED") sourceRow.checkoutCompleted += 1;
+      if (eventType === "STRIPE_CHECKOUT_FAILED") sourceRow.checkoutFailed += 1;
+      if (eventType === "TRIAL_ACTIVATED") sourceRow.trialActivated += 1;
+      sourcePerformance.set(sourceLabel, sourceRow);
     });
 
     const top = (map: Map<string, number>, limit = 8) =>
       [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([label, value]) => ({ label, value }));
 
     const pageViews = eventCounts.get("PAGE_VIEW") ?? 0;
+    const ctaClicks = eventCounts.get("CTA_CLICK") ?? 0;
     const demoSubmits = eventCounts.get("DEMO_FORM_SUBMIT") ?? 0;
     const signupStarted = eventCounts.get("SIGNUP_STARTED") ?? 0;
     const signupCompleted = eventCounts.get("SIGNUP_COMPLETED") ?? 0;
+    const onboardingCompanyCompleted = eventCounts.get("ONBOARDING_COMPANY_COMPLETED") ?? 0;
+    const checkoutStarted = eventCounts.get("STRIPE_CHECKOUT_STARTED") ?? 0;
+    const checkoutCompleted = eventCounts.get("STRIPE_CHECKOUT_COMPLETED") ?? 0;
+    const checkoutFailed = eventCounts.get("STRIPE_CHECKOUT_FAILED") ?? 0;
+    const trialActivated = eventCounts.get("TRIAL_ACTIVATED") ?? 0;
+    const companyToCheckoutBase = onboardingCompanyCompleted > 0 ? onboardingCompanyCompleted : signupCompleted;
+    const funnel = [
+      { key: "pageViews", label: "Visite sito", value: pageViews, rateFromPrevious: 100, rateFromVisits: 100 },
+      { key: "signupStarted", label: "Signup avviati", value: signupStarted, rateFromPrevious: pct(signupStarted, pageViews), rateFromVisits: pct(signupStarted, pageViews) },
+      { key: "signupCompleted", label: "Account creati", value: signupCompleted, rateFromPrevious: pct(signupCompleted, signupStarted), rateFromVisits: pct(signupCompleted, pageViews) },
+      {
+        key: "onboardingCompanyCompleted",
+        label: "Dati aziendali completati",
+        value: onboardingCompanyCompleted,
+        rateFromPrevious: pct(onboardingCompanyCompleted, signupCompleted),
+        rateFromVisits: pct(onboardingCompanyCompleted, pageViews)
+      },
+      {
+        key: "checkoutStarted",
+        label: "Checkout avviati",
+        value: checkoutStarted,
+        rateFromPrevious: pct(checkoutStarted, companyToCheckoutBase),
+        rateFromVisits: pct(checkoutStarted, pageViews)
+      },
+      {
+        key: "checkoutCompleted",
+        label: "Checkout completati",
+        value: checkoutCompleted,
+        rateFromPrevious: pct(checkoutCompleted, checkoutStarted),
+        rateFromVisits: pct(checkoutCompleted, pageViews)
+      },
+      {
+        key: "trialActivated",
+        label: "Trial attivati",
+        value: trialActivated,
+        rateFromPrevious: pct(trialActivated, checkoutCompleted),
+        rateFromVisits: pct(trialActivated, pageViews)
+      }
+    ];
 
     return {
       data: {
@@ -311,20 +425,53 @@ export class PlatformConsoleService {
           events: events.length,
           pageViews,
           uniqueVisitors: uniqueKeys.size,
-          ctaClicks: eventCounts.get("CTA_CLICK") ?? 0,
+          ctaClicks,
           demoSubmits,
           signupStarted,
           signupCompleted,
+          onboardingCompanyCompleted,
+          checkoutStarted,
+          checkoutCompleted,
+          checkoutFailed,
+          trialActivated,
           visitToDemoRate: pct(demoSubmits, pageViews),
           demoToSignupRate: pct(signupCompleted, demoSubmits),
           visitToSignupRate: pct(signupCompleted, pageViews),
-          signupStartToCompletionRate: pct(signupCompleted, signupStarted)
+          signupStartToCompletionRate: pct(signupCompleted, signupStarted),
+          signupToCompanyCompletionRate: pct(onboardingCompanyCompleted, signupCompleted),
+          companyToCheckoutRate: pct(checkoutStarted, companyToCheckoutBase),
+          checkoutCompletionRate: pct(checkoutCompleted, checkoutStarted),
+          checkoutFailureRate: pct(checkoutFailed, checkoutStarted),
+          signupToTrialRate: pct(trialActivated, signupCompleted),
+          visitToTrialRate: pct(trialActivated, pageViews)
         },
         trend: [...byDay.values()],
+        funnel,
         topPages: top(pathCounts),
         topReferrers: top(referrerCounts),
         topSources: top(sourceCounts),
         topCampaigns: top(campaignCounts),
+        sourcePerformance: [...sourcePerformance.values()]
+          .map((row) => ({
+            label: row.label,
+            visitors: row.visitors.size,
+            pageViews: row.pageViews,
+            ctaClicks: row.ctaClicks,
+            demoSubmits: row.demoSubmits,
+            signupStarted: row.signupStarted,
+            signupCompleted: row.signupCompleted,
+            onboardingCompanyCompleted: row.onboardingCompanyCompleted,
+            checkoutStarted: row.checkoutStarted,
+            checkoutCompleted: row.checkoutCompleted,
+            checkoutFailed: row.checkoutFailed,
+            trialActivated: row.trialActivated,
+            visitToSignupRate: pct(row.signupCompleted, row.pageViews),
+            signupToCheckoutRate: pct(row.checkoutStarted, row.signupCompleted),
+            checkoutCompletionRate: pct(row.checkoutCompleted, row.checkoutStarted),
+            visitToTrialRate: pct(row.trialActivated, row.pageViews)
+          }))
+          .sort((a, b) => b.trialActivated - a.trialActivated || b.checkoutCompleted - a.checkoutCompleted || b.pageViews - a.pageViews)
+          .slice(0, 10),
         deviceBreakdown: top(deviceCounts),
         browserBreakdown: top(browserCounts),
         eventCounts: Object.fromEntries(eventCounts)

@@ -1,10 +1,10 @@
 # Fleetum Platform Analytics
 
-Fleetum Platform Analytics e' il tracking first-party usato per capire traffico, CTA, campagne UTM e funnel iniziale del sito pubblico.
+Fleetum Platform Analytics e' il tracking first-party usato per capire traffico, CTA, campagne UTM e funnel completo sito -> onboarding -> checkout -> trial.
 
 ## Stato implementazione
 
-Step 1 implementato:
+Implementato:
 
 - `PAGE_VIEW`
 - `CTA_CLICK`
@@ -13,11 +13,14 @@ Step 1 implementato:
 - `SIGNUP_VIEW`
 - `SIGNUP_STARTED`
 - `SIGNUP_COMPLETED`
+- `ONBOARDING_COMPANY_COMPLETED`
 - `STRIPE_CHECKOUT_STARTED`
+- `STRIPE_CHECKOUT_COMPLETED`
 - visitor anonimo persistente
 - sessione anonima per tab/sessione browser
 - UTM `source`, `medium`, `campaign`, `content`, `term`
 - consenso analytics obbligatorio per salvare eventi raw
+- `TRIAL_ACTIVATED` confermato da webhook Stripe verificato
 
 ## Endpoint
 
@@ -28,6 +31,12 @@ POST /api/public/analytics/event
 ```
 
 Il client invia eventi solo dopo consenso analytics. Se `consentAnalytics` e' `false`, il backend risponde `202` ma non salva l'evento.
+
+Gli eventi finali di billing non vengono considerati affidabili dal redirect del browser:
+
+- `STRIPE_CHECKOUT_COMPLETED` viene scritto dal webhook Stripe `checkout.session.completed`;
+- `TRIAL_ACTIVATED` viene scritto solo quando Stripe conferma una subscription `trialing`;
+- l'idempotenza webhook evita doppi conteggi su retry Stripe.
 
 ## Dati salvati
 
@@ -98,13 +107,50 @@ KPI disponibili:
 - page view;
 - visitatori stimati;
 - CTA click;
-- visita -> demo;
+- account creati;
+- dati aziendali completati;
+- checkout avviati;
+- checkout completati;
+- checkout falliti/annullati;
+- trial attivati;
 - signup avviati;
 - visita -> signup;
+- visita -> trial;
+- checkout success rate;
+- funnel per step;
+- performance sorgenti con visitatori, signup, checkout e trial;
 - top pagine;
 - sorgenti UTM;
 - campagne UTM;
 - device.
+
+## Funnel operativo
+
+La Platform Console mostra il funnel:
+
+```txt
+Visite sito
+Signup avviati
+Account creati
+Dati aziendali completati
+Checkout avviati
+Checkout completati
+Trial attivati
+```
+
+Per ogni step sono calcolati:
+
+- conversione dallo step precedente;
+- conversione rispetto alle visite;
+- trend giornaliero;
+- performance per sorgente/referrer.
+
+Interpretazione consigliata:
+
+- molte visite e pochi signup: problema di promessa, fiducia, prezzo o CTA;
+- molti signup e pochi dati aziendali completati: onboarding troppo lungo o campi poco chiari;
+- molti dati aziendali completati e pochi checkout: pricing/copy prima di Stripe da migliorare;
+- molti checkout avviati e pochi trial: configurazione Stripe, carta richiesta, trust e copy pagamento da verificare.
 
 ## Note privacy
 
@@ -118,7 +164,7 @@ Questa implementazione e' tecnica e privacy-by-design, ma non sostituisce review
 
 ## Step successivi
 
-1. Aggiungere tabella funnel dettagliata in Platform.
-2. Collegare `STRIPE_CHECKOUT_COMPLETED` dai webhook Stripe.
-3. Aggiungere insight automatici sulle pagine e CTA migliori.
-4. Aggiungere export CSV aggregato.
+1. Aggiungere insight automatici sulle pagine e CTA migliori.
+2. Aggiungere export CSV aggregato.
+3. Aggiungere confronto periodo precedente.
+4. Aggiungere alert se il checkout success rate cala sotto una soglia configurata.
