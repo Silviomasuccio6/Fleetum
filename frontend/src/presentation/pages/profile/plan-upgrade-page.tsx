@@ -4,7 +4,7 @@ import { ArrowRight, Check, CreditCard, Crown, Download, ExternalLink, FileText,
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
-import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { getConsentedPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import {
   FeatureKey,
   getFeatureListForPlan,
@@ -178,6 +178,12 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       .then((result) => setInvoices(result.data))
       .catch(() => setInvoices([]));
   }, [canReadBilling]);
+
+  useEffect(() => {
+    if (checkoutStatus === "cancelled") {
+      trackPublicEvent("STRIPE_CHECKOUT_FAILED", { reason: "cancelled_return", mode });
+    }
+  }, [checkoutStatus, mode]);
 
   useEffect(() => {
     if (!isActivationMode || checkoutStatus !== "success") {
@@ -451,7 +457,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                       setBusyPlan(entry);
                       try {
                         trackPublicEvent("STRIPE_CHECKOUT_STARTED", { plan: entry, billingCycle, mode });
-                        const session = await billingUseCases.createCheckoutSession({ plan: entry, billingCycle });
+                        const session = await billingUseCases.createCheckoutSession({
+                          plan: entry,
+                          billingCycle,
+                          analytics: getConsentedPublicAnalyticsContext()
+                        });
                         window.location.href = session.checkoutUrl;
                       } catch (error) {
                         setCheckoutError((error as Error).message);

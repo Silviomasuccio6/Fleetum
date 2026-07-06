@@ -1,5 +1,4 @@
 import rateLimit from "express-rate-limit";
-import crypto from "node:crypto";
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { AcceptInviteUseCase } from "../../../application/usecases/auth/accept-invite-usecase.js";
@@ -31,6 +30,7 @@ import { SettingsService } from "../../../application/services/settings-service.
 import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { env } from "../../../shared/config/env.js";
+import { privacyHash } from "../../../shared/utils/privacy-hash.js";
 import { uploadCompanyVerificationDocument } from "../../../infrastructure/storage/multer.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
@@ -129,12 +129,6 @@ const publicAnalyticsRateLimit = rateLimit({
 const demoLeadRecipient = () =>
   env.DEMO_LEAD_RECIPIENT_EMAIL || process.env.PLATFORM_ALERT_EMAILS?.split(",").map((x) => x.trim()).find(Boolean) || env.PLATFORM_ADMIN_EMAIL;
 
-const privacyHash = (value?: string | null) => {
-  if (!value) return undefined;
-  const salt = env.JWT_SECRET.slice(0, 32);
-  return crypto.createHash("sha256").update(`${salt}:${value}`).digest("hex");
-};
-
 const detectDevice = (userAgent = "") => {
   const ua = userAgent.toLowerCase();
   if (/ipad|tablet/.test(ua)) return "tablet";
@@ -214,7 +208,7 @@ apiRouter.post("/public/analytics/event", publicAnalyticsRateLimit, asyncHandler
   const userAgent = req.headers["user-agent"] ?? "";
   await prisma.websiteEvent.create({
     data: {
-      eventType: input.eventType,
+      eventType: input.eventType as Prisma.WebsiteEventUncheckedCreateInput["eventType"],
       path: input.path,
       referrer: input.referrer,
       utmSource: input.utmSource,

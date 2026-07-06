@@ -290,6 +290,7 @@ export class AuthController {
       };
 
       let session;
+      let socialSignupCreated = false;
       if (statePayload.intent === "signup") {
         try {
           session = await this.loginUseCase.executeTrustedEmail(identity.email, context);
@@ -302,6 +303,7 @@ export class AuthController {
               lastName: identity.familyName,
               fullName: identity.fullName
             });
+            socialSignupCreated = true;
             session = await this.loginUseCase.executeTrustedEmail(identity.email, context);
           } else {
             throw error;
@@ -314,6 +316,7 @@ export class AuthController {
       const payload = new URLSearchParams();
       payload.set("refreshExpiresAt", session.refreshExpiresAt);
       payload.set("user", Buffer.from(JSON.stringify(session.user), "utf-8").toString("base64url"));
+      if (socialSignupCreated) payload.set("socialSignup", "1");
       if (statePayload.returnTo) payload.set("returnTo", statePayload.returnTo);
       const csrfToken = issueCsrfToken();
       setAccessCookie(res, session.token);

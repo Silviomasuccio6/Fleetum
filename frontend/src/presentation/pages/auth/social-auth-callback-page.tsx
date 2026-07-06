@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { User } from "../../../domain/entities/models";
 import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
@@ -48,7 +49,11 @@ export const SocialAuthCallbackPage = () => {
       try {
         const user = JSON.parse(decodeBase64Url(encodedUser)) as User;
         const returnTo = getSafeReturnTo(hashParams.get("returnTo"));
+        const socialSignupCreated = hashParams.get("socialSignup") === "1";
         setSession(user, true);
+        if (socialSignupCreated) {
+          trackPublicEvent("SIGNUP_COMPLETED", { source: "google", next: "company_onboarding" });
+        }
 
         let nextPath = returnTo;
         try {

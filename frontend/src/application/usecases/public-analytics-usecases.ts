@@ -13,6 +13,7 @@ export type PublicAnalyticsEventType =
   | "STRIPE_CHECKOUT_STARTED"
   | "STRIPE_CHECKOUT_COMPLETED"
   | "STRIPE_CHECKOUT_FAILED"
+  | "TRIAL_ACTIVATED"
   | "LOGIN_CLICK"
   | "PRICING_VIEW";
 
@@ -106,6 +107,11 @@ export const getPublicAnalyticsContext = () => {
     utmContent: attribution.utmContent,
     utmTerm: attribution.utmTerm
   };
+};
+
+export const getConsentedPublicAnalyticsContext = () => {
+  if (typeof window === "undefined" || isDoNotTrackEnabled() || !hasAnalyticsConsent()) return undefined;
+  return getPublicAnalyticsContext();
 };
 
 const sendPublicEvent = (eventType: PublicAnalyticsEventType, metadata?: Record<string, unknown>) => {

@@ -63,6 +63,7 @@ const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalS
   const stripe = new Stripe("sk_test_unit_billing");
   const audit = new FakeAuditRepo();
   const events = new Map<string, StoredBillingEvent>();
+  const websiteEvents: Array<Record<string, unknown>> = [];
   const subscriptions = new Map<string, TenantSubscriptionSnapshot>();
   const upserts: TenantSubscriptionUpsertInput[] = [];
   const notifications: Array<{ type: string; input: Record<string, unknown> }> = [];
@@ -104,6 +105,9 @@ const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalS
         errorMessage: data.errorMessage
       });
     },
+    async recordWebsiteEvent(data) {
+      websiteEvents.push(data as Record<string, unknown>);
+    },
     async findSubscriptionByTenantId(tenantId) {
       return subscriptions.get(tenantId) ?? null;
     },
@@ -129,7 +133,7 @@ const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalS
     return { signature, rawBody: Buffer.from(payload), body: event };
   };
 
-  return { audit, events, notifications, service, sign, subscriptions, upserts };
+  return { audit, events, notifications, service, sign, subscriptions, upserts, websiteEvents };
 };
 
 const baseEvent = (id: string, type: string, object: Record<string, unknown>) => ({
@@ -340,13 +344,23 @@ test("customer portal session rejects tenants without a Stripe customer", async 
 });
 
 test("billing webhook verifies Stripe signature and persists checkout.session.completed as license update", async () => {
-  const { audit, events, service, sign, subscriptions } = makeHarness();
+  const { audit, events, service, sign, subscriptions, websiteEvents } = makeHarness();
   const event = baseEvent("evt_checkout_completed", "checkout.session.completed", {
     id: "cs_test_1",
     object: "checkout.session",
     client_reference_id: "tenant-1",
     customer: "cus_1",
-    metadata: { tenantId: "tenant-1", plan: "PRO", billingCycle: "yearly" }
+    metadata: {
+      tenantId: "tenant-1",
+      plan: "PRO",
+      billingCycle: "yearly",
+      analyticsConsent: "true",
+      analyticsVisitorIdHash: "visitor_hash",
+      analyticsSessionIdHash: "session_hash",
+      analyticsReferrer: "https://fleetum.it",
+      utmSource: "google",
+      utmCampaign: "demo"
+    }
   });
 
   const result = await service.handleWebhook(sign(event));
@@ -357,6 +371,51 @@ test("billing webhook verifies Stripe signature and persists checkout.session.co
   assert.equal(subscriptions.get("tenant-1")?.plan, "PRO");
   assert.equal(subscriptions.get("tenant-1")?.billingCycle, "yearly");
   assert.equal(audit.rows.at(-1)?.action, "PLATFORM_LICENSE_UPDATED");
+  assert.equal(websiteEvents.length, 1);
+  assert.equal(websiteEvents[0]?.eventType, "STRIPE_CHECKOUT_COMPLETED");
+  assert.equal(websiteEvents[0]?.visitorId, "visitor_hash");
+  assert.equal(websiteEvents[0]?.utmSource, "google");
+});
+
+test("billing webhook records trial activation funnel event from verified Stripe subscription", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => ({
+        id: subscriptionId,
+        object: "subscription",
+        status: "trialing",
+        customer: "cus_trial",
+        current_period_end: 1_800_000_000,
+        metadata: { tenantId: "tenant-trial", plan: "STARTER", billingCycle: "monthly" }
+      })
+    }
+  } as unknown as Stripe;
+  const { service, sign, subscriptions, websiteEvents } = makeHarness(stripeClient);
+
+  const result = await service.handleWebhook(sign(baseEvent("evt_trial_completed", "checkout.session.completed", {
+    id: "cs_trial",
+    object: "checkout.session",
+    client_reference_id: "tenant-trial",
+    customer: "cus_trial",
+    subscription: "sub_trial",
+    metadata: {
+      tenantId: "tenant-trial",
+      plan: "STARTER",
+      billingCycle: "monthly",
+      analyticsConsent: "true",
+      analyticsVisitorIdHash: "visitor_hash_trial",
+      analyticsSessionIdHash: "session_hash_trial",
+      utmSource: "linkedin"
+    }
+  })));
+
+  assert.deepEqual(result, { received: true, ignored: false });
+  assert.equal(subscriptions.get("tenant-trial")?.status, "TRIAL");
+  assert.deepEqual(websiteEvents.map((event) => event.eventType), ["STRIPE_CHECKOUT_COMPLETED", "TRIAL_ACTIVATED"]);
+  assert.equal(websiteEvents[1]?.visitorId, "visitor_hash_trial");
+  assert.equal(websiteEvents[1]?.utmSource, "linkedin");
 });
 
 test("setup checkout completion stores the new card as default payment method", async () => {

@@ -2,9 +2,19 @@ import { httpClient } from "../../infrastructure/api/http-client";
 import type { SaasPlan } from "../../domain/constants/entitlements";
 
 type BillingCycle = "monthly" | "yearly";
+type BillingAnalyticsContext = {
+  visitorId?: string;
+  sessionId?: string;
+  referrer?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmContent?: string;
+  utmTerm?: string;
+};
 
 export const billingUseCases = {
-  createCheckoutSession: (input: { plan: SaasPlan; billingCycle: BillingCycle }) =>
+  createCheckoutSession: (input: { plan: SaasPlan; billingCycle: BillingCycle; analytics?: BillingAnalyticsContext }) =>
     httpClient.post<{ mode: "stripe" | "local"; checkoutUrl: string }>(
       "/billing/checkout-session",
       input,

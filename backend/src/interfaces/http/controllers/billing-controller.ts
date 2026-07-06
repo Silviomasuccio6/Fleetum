@@ -16,7 +16,8 @@ export class BillingController {
       tenantId: req.auth!.tenantId,
       userId: req.auth!.userId,
       plan: input.plan,
-      billingCycle: input.billingCycle
+      billingCycle: input.billingCycle,
+      analytics: input.analytics
     });
     res.json(result);
   };

@@ -56,6 +56,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { useNavigate } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PLAN_MONTHLY_PRICING_EUR } from "../../../domain/constants/entitlements";
+import { cn } from "../../../lib/utils";
 import {
   buildPlanUpdatePayload,
   clearPlanDraft,
@@ -130,6 +131,7 @@ type RowActionSelection = QuickAction | "";
 
 type PlatformSectionId = "overview" | "tenants" | "plans" | "billing" | "analytics" | "leads" | "users" | "audit" | "health" | "security" | "settings";
 type RevenueRange = "2W" | "1M" | "6M" | "1Y";
+type AnalyticsWindowDays = 7 | 30 | 90;
 
 const actionLabels: Record<QuickAction, string> = {
   ACTIVATE_LICENSE: "Attiva licenza",
@@ -222,6 +224,12 @@ const revenueRangeOptions: Array<{ value: RevenueRange; label: string }> = [
   { value: "1M", label: "Mensile" },
   { value: "6M", label: "6 mesi" },
   { value: "1Y", label: "1 anno" }
+];
+
+const analyticsWindowOptions: Array<{ value: AnalyticsWindowDays; label: string }> = [
+  { value: 7, label: "7 giorni" },
+  { value: 30, label: "30 giorni" },
+  { value: 90, label: "90 giorni" }
 ];
 
 const timeAgo = (iso: string) => {
@@ -332,6 +340,7 @@ export const PlatformAdminPage = () => {
   const [planDrafts, setPlanDrafts] = useState<Record<string, PlanTier>>({});
   const reportMonth = useMemo(() => toMonthKey(new Date()), []);
   const [revenueRange, setRevenueRange] = useState<RevenueRange>("1Y");
+  const [analyticsWindowDays, setAnalyticsWindowDays] = useState<AnalyticsWindowDays>(30);
   const [revenueReport, setRevenueReport] = useState<PlatformRevenueMetrics | null>(null);
   const [dashboardLive, setDashboardLive] = useState<PlatformDashboardLiveMetrics | null>(null);
   const [activeSection, setActiveSection] = useState<PlatformSectionId>("overview");
@@ -371,7 +380,7 @@ export const PlatformAdminPage = () => {
         platformAdminUseCases.listRecentEvents(20),
         platformAdminUseCases.revenueMetrics(revenueQuery),
         platformAdminUseCases.overview(30),
-        platformAdminUseCases.websiteAnalytics(30),
+        platformAdminUseCases.websiteAnalytics(analyticsWindowDays),
         platformAdminUseCases.listDemoLeads(),
         platformAdminUseCases.systemHealth(),
         platformAdminUseCases.securityOverview(),
@@ -407,7 +416,7 @@ export const PlatformAdminPage = () => {
 
   useEffect(() => {
     void load({ silent: true });
-  }, [revenueRange]);
+  }, [revenueRange, analyticsWindowDays]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -831,7 +840,7 @@ export const PlatformAdminPage = () => {
     tenants: "Gestione tenant, piani, licenze e quick action",
     plans: "MRR, breakdown piani, trend e export finanziario",
     billing: "Fatture SaaS, PDF, invio email e stato delivery",
-    analytics: "Visite sito, CTA, funnel demo/signup e device",
+    analytics: "Visite sito, CTA, funnel onboarding, checkout e trial",
     leads: "Richieste demo, qualificazione e follow-up commerciale",
     users: "Utenti SaaS aggregati e stato account",
     audit: "Audit operativo, eventi recenti e watchlist",
@@ -877,7 +886,7 @@ export const PlatformAdminPage = () => {
     {
       id: "analytics",
       label: "Website Analytics",
-      description: "Visite e funnel",
+      description: "Funnel e sorgenti",
       icon: Globe2,
       badge: String(websiteAnalytics?.totals.pageViews ?? 0)
     },
@@ -1966,10 +1975,39 @@ export const PlatformAdminPage = () => {
 
       {activeSection === "analytics" ? (
         <div className="space-y-4">
+          <Card className="platform-main-card">
+            <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Acquisizione Fleetum</p>
+                <h2 className="mt-1 text-xl font-semibold text-foreground">Funnel sito, onboarding e trial</h2>
+                <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                  Eventi first-party raccolti solo dopo consenso Analytics. Il checkout completato e il trial attivato vengono confermati dal webhook Stripe.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {analyticsWindowOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setAnalyticsWindowDays(option.value)}
+                    className={cn(
+                      "rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                      analyticsWindowDays === option.value
+                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                        : "border-border bg-background text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="grid gap-3 md:grid-cols-4">
             <Card className="platform-stat-card">
               <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Page view 30gg</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Page view {analyticsWindowDays}gg</p>
                 <p className="mt-2 text-2xl font-semibold text-foreground">{websiteAnalytics?.totals.pageViews ?? 0}</p>
               </CardContent>
             </Card>
@@ -1987,20 +2025,38 @@ export const PlatformAdminPage = () => {
             </Card>
             <Card className="platform-stat-card">
               <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Visita → demo</p>
-                <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">{websiteAnalytics?.totals.visitToDemoRate ?? 0}%</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Account creati</p>
+                <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">{websiteAnalytics?.totals.signupCompleted ?? 0}</p>
               </CardContent>
             </Card>
             <Card className="platform-stat-card">
               <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Signup avviati</p>
-                <p className="mt-2 text-2xl font-semibold text-amber-600 dark:text-amber-300">{websiteAnalytics?.totals.signupStarted ?? 0}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Checkout completati</p>
+                <p className="mt-2 text-2xl font-semibold text-amber-600 dark:text-amber-300">{websiteAnalytics?.totals.checkoutCompleted ?? 0}</p>
               </CardContent>
             </Card>
             <Card className="platform-stat-card">
               <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Visita → signup</p>
-                <p className="mt-2 text-2xl font-semibold text-violet-600 dark:text-violet-300">{websiteAnalytics?.totals.visitToSignupRate ?? 0}%</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Trial attivati</p>
+                <p className="mt-2 text-2xl font-semibold text-violet-600 dark:text-violet-300">{websiteAnalytics?.totals.trialActivated ?? 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Visita → trial</p>
+                <p className="mt-2 text-2xl font-semibold text-fuchsia-600 dark:text-fuchsia-300">{websiteAnalytics?.totals.visitToTrialRate ?? 0}%</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Checkout success rate</p>
+                <p className="mt-2 text-2xl font-semibold text-blue-600 dark:text-blue-300">{websiteAnalytics?.totals.checkoutCompletionRate ?? 0}%</p>
+              </CardContent>
+            </Card>
+            <Card className="platform-stat-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Checkout falliti</p>
+                <p className="mt-2 text-2xl font-semibold text-rose-600 dark:text-rose-300">{websiteAnalytics?.totals.checkoutFailed ?? 0}</p>
               </CardContent>
             </Card>
           </div>
@@ -2019,7 +2075,9 @@ export const PlatformAdminPage = () => {
                   <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-card/50 py-12 text-center">
                     <Globe2 className="h-7 w-7 text-muted-foreground" />
                     <p className="font-semibold text-foreground">Nessun evento sito ancora raccolto</p>
-                    <p className="max-w-md text-sm text-muted-foreground">Dopo il consenso Analytics, la platform riceve PAGE_VIEW, CTA_CLICK, DEMO_FORM_SUBMIT e signup events tramite endpoint pubblico.</p>
+                    <p className="max-w-md text-sm text-muted-foreground">
+                      Dopo il consenso Analytics, la platform riceve PAGE_VIEW, CTA_CLICK, signup, onboarding e checkout events.
+                    </p>
                   </div>
                 ) : (
                   <div className="h-72 rounded-2xl border border-border/70 bg-background/70 p-3">
@@ -2040,8 +2098,89 @@ export const PlatformAdminPage = () => {
                         <Line type="monotone" dataKey="pageViews" stroke="#2563ff" strokeWidth={2.5} dot={false} />
                         <Line type="monotone" dataKey="demoSubmits" stroke="#00b8a9" strokeWidth={2.3} dot={false} />
                         <Line type="monotone" dataKey="signups" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="checkoutStarted" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="trialActivated" stroke="#10b981" strokeWidth={2.3} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="platform-main-card">
+              <CardHeader>
+                <CardTitle className="text-base text-foreground">Funnel conversione</CardTitle>
+                <p className="text-xs text-muted-foreground">Dove si blocca il percorso: visita, signup, dati aziendali, checkout e trial.</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(websiteAnalytics?.funnel.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">Nessun funnel disponibile.</p> : null}
+                {websiteAnalytics?.funnel.map((step, index) => {
+                  const maxValue = Math.max(...(websiteAnalytics?.funnel ?? []).map((item) => item.value), 1);
+                  const width = Math.max(4, Math.round((step.value / maxValue) * 100));
+                  return (
+                    <div key={step.key} className="rounded-2xl border border-border/70 bg-card/70 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{index + 1}. {step.label}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {step.rateFromPrevious}% dallo step precedente · {step.rateFromVisits}% dalle visite
+                          </p>
+                        </div>
+                        <Badge variant="secondary">{step.value}</Badge>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-gradient-to-r from-blue-600 via-violet-600 to-emerald-500" style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                  Se "checkout avviati" cresce ma "trial attivati" resta basso, controlla prezzo, fiducia, carta richiesta e copy Stripe.
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.7fr)]">
+            <Card className="platform-main-card">
+              <CardHeader>
+                <CardTitle className="text-base text-foreground">Performance sorgenti</CardTitle>
+                <p className="text-xs text-muted-foreground">Classifica per trial, checkout e visite. Utile per capire quali canali portano clienti paganti, non solo traffico.</p>
+              </CardHeader>
+              <CardContent>
+                {(websiteAnalytics?.sourcePerformance.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nessuna sorgente attribuita ancora disponibile.</p>
+                ) : (
+                  <div className="overflow-auto rounded-2xl border border-border/70">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Sorgente</TableHead>
+                          <TableHead>Visite</TableHead>
+                          <TableHead>Signup</TableHead>
+                          <TableHead>Checkout</TableHead>
+                          <TableHead>Trial</TableHead>
+                          <TableHead>Visit → trial</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {websiteAnalytics?.sourcePerformance.map((row) => (
+                          <TableRow key={`source-performance-${row.label}`}>
+                            <TableCell className="max-w-[220px] truncate font-medium">{row.label}</TableCell>
+                            <TableCell>{row.pageViews}</TableCell>
+                            <TableCell>{row.signupCompleted}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <span>{row.checkoutCompleted}</span>
+                                {row.checkoutFailed > 0 ? <Badge variant="warning">{row.checkoutFailed} falliti</Badge> : null}
+                              </div>
+                            </TableCell>
+                            <TableCell>{row.trialActivated}</TableCell>
+                            <TableCell>{row.visitToTrialRate}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
                 )}
               </CardContent>

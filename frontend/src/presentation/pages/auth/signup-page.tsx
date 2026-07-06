@@ -322,6 +322,7 @@ export const SignupPage = () => {
       }
       setTenantId(result.tenantId);
       trackPublicEvent("SIGNUP_COMPLETED", { source: "email" });
+      trackPublicEvent("ONBOARDING_COMPANY_COMPLETED", { source: "email_signup", country });
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);

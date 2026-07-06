@@ -7,6 +7,7 @@ import {
   TenantCompanyProfileResponse
 } from "../../../application/usecases/tenant-profile-usecases";
 import { useAuthStore } from "../../../application/stores/auth-store";
+import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
 import { Alert } from "../../components/ui/alert";
@@ -320,6 +321,12 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
           ? "Dati aziendali salvati. Ora puoi scegliere il piano e attivare il trial con carta."
           : "Profilo azienda salvato. I prossimi contratti useranno questi dati."
       );
+      if (onboarding) {
+        trackPublicEvent("ONBOARDING_COMPANY_COMPLETED", {
+          source: "company_onboarding",
+          country: form.country ?? "IT"
+        });
+      }
       if (onboarding && nextPath) {
         navigate(nextPath, { replace: true });
       }
