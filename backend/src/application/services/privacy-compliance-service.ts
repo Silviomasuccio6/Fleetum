@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { PrismaAuditLogRepository } from "../../infrastructure/repositories/prisma-audit-log-repository.js";
+import { metrics } from "../../infrastructure/observability/metrics.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
@@ -474,6 +475,12 @@ export class PrivacyComplianceService {
     for (const file of deletedStoredFiles) {
       await unlinkStoredFile(file.storageKey);
     }
+
+    metrics.observeRetentionRun({
+      status: "success",
+      tenants: 1,
+      deletedStoredFileObjects: result.deletedStoredFileObjects
+    });
 
     return {
       executed: true,

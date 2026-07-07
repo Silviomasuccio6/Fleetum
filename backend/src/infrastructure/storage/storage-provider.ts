@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { metrics } from "../observability/metrics.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 
@@ -66,25 +67,56 @@ class LocalStorageProvider implements StorageProvider {
   }
 
   async read(key: string) {
-    return fs.readFile(this.resolveLocalPath(key));
+    const payload = await fs.readFile(this.resolveLocalPath(key));
+    metrics.observeStorageOperation({
+      operation: "read",
+      provider: this.name,
+      bytes: payload.byteLength
+    });
+    return payload;
   }
 
   async write(key: string, data: Buffer) {
     const fullPath = this.resolveLocalPath(key);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, data);
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      bytes: data.byteLength
+    });
   }
 
-  async writeFromFile(key: string, filePath: string) {
+  async writeFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
     const fullPath = this.resolveLocalPath(key);
     const sourcePath = path.resolve(filePath);
-    if (sourcePath === fullPath) return;
+    if (sourcePath === fullPath) {
+      const stat = await fs.stat(fullPath);
+      metrics.observeStorageOperation({
+        operation: "write",
+        provider: this.name,
+        resourceType: metadata?.resourceType,
+        bytes: stat.size
+      });
+      return;
+    }
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.copyFile(sourcePath, fullPath);
+    const stat = await fs.stat(fullPath);
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: stat.size
+    });
   }
 
   async delete(key: string) {
     await fs.unlink(this.resolveLocalPath(key)).catch(() => undefined);
+    metrics.observeStorageOperation({
+      operation: "delete",
+      provider: this.name
+    });
   }
 
   async getSignedReadUrl(key: string) {
@@ -224,11 +256,23 @@ export class S3StorageProvider implements StorageProvider {
 
   async read(key: string) {
     const response = await this.request("GET", key);
-    return Buffer.from(await response.arrayBuffer());
+    const payload = Buffer.from(await response.arrayBuffer());
+    metrics.observeStorageOperation({
+      operation: "read",
+      provider: this.name,
+      bytes: payload.byteLength
+    });
+    return payload;
   }
 
   async write(key: string, data: Buffer, metadata?: StoredFileMetadata) {
     await this.request("PUT", key, data, metadata);
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: data.byteLength
+    });
   }
 
   async writeFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
@@ -238,6 +282,10 @@ export class S3StorageProvider implements StorageProvider {
 
   async delete(key: string) {
     await this.request("DELETE", key);
+    metrics.observeStorageOperation({
+      operation: "delete",
+      provider: this.name
+    });
   }
 
   async getSignedReadUrl(key: string, expiresInSeconds = 300) {

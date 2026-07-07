@@ -98,3 +98,38 @@ Manual dry-run and execution:
 npm run privacy:retention:dry-run -w backend -- --tenant=<tenantId> --deleted-file-grace-days=30
 npm run privacy:retention:run -w backend -- --tenant=<tenantId> --deleted-file-grace-days=30
 ```
+
+## Observability
+
+Storage is visible from Platform Console > System Health.
+
+The panel shows:
+
+- active tracked files;
+- active tracked bytes;
+- soft-deleted files waiting for retention cleanup;
+- soft-deleted bytes waiting for retention cleanup;
+- provider and bucket/root directory;
+- retention grace period;
+- last retention cleanup;
+- top resource types by size;
+- recent storage-related audit events.
+
+Prometheus-style metrics are exposed through `/api/metrics` and `/platform-api/metrics` when `METRICS_ENABLED=true` and the configured bearer token is provided.
+
+Relevant metrics:
+
+```txt
+fleetum_storage_operations_total
+fleetum_storage_operation_bytes_total
+fleetum_storage_active_files
+fleetum_storage_active_bytes
+fleetum_storage_deleted_files_pending_retention
+fleetum_storage_deleted_bytes_pending_retention
+fleetum_storage_retention_grace_days
+fleetum_privacy_retention_runs_total
+fleetum_privacy_retention_last_tenants
+fleetum_privacy_retention_last_deleted_stored_files
+```
+
+The metrics intentionally avoid file names, storage keys, signed URLs and customer identifiers. Use audit logs for investigation, and keep document access behind authenticated application routes.

@@ -16,10 +16,10 @@ Tutti gli endpoint sono sotto `/api/privacy`, richiedono autenticazione tenant, 
 
 | Endpoint | Metodo | Scopo | Permesso |
 |---|---:|---|---|
-| `/api/privacy/data-subjects/customers/:customerId/export` | GET | esporta mappa dati cliente noleggio | `vehicles:read` |
-| `/api/privacy/data-subjects/customers/:customerId/anonymize` | POST | anonimizza cliente e allegati collegati | `users:write` |
-| `/api/privacy/retention/preview` | GET | dry-run retention dati tecnici/documentali | `users:read` |
-| `/api/privacy/retention/run` | POST | esegue retention con conferma esplicita | `users:write` |
+| `/api/privacy/data-subjects/customers/:customerId/export` | GET | esporta mappa dati cliente noleggio | `privacy:export` |
+| `/api/privacy/data-subjects/customers/:customerId/anonymize` | POST | anonimizza cliente e allegati collegati | `privacy:manage` |
+| `/api/privacy/retention/preview` | GET | dry-run retention dati tecnici/documentali | `privacy:manage` |
+| `/api/privacy/retention/run` | POST | esegue retention con conferma esplicita | `privacy:manage` |
 
 ## 3. Conferme obbligatorie
 
@@ -98,6 +98,20 @@ Eventi tecnici introdotti o rafforzati:
 - `DATA_RETENTION_EXECUTED`
 - `PUBLIC_CONTRACT_DOWNLOAD`
 - `PUBLIC_CONTRACT_LINKS_REVOKED`
+
+## 6.1 Osservabilità storage e retention
+
+La Platform Console mostra un riepilogo operativo dei documenti tracciati in `StoredFileObject`:
+
+- file attivi e dimensione totale;
+- file soft-deleted in attesa del periodo di grazia;
+- dimensione recuperabile dalla prossima retention;
+- ultimo cleanup privacy;
+- principali tipologie documento per spazio occupato;
+- eventi storage recenti senza nomi file o URL firmati.
+
+Le metriche Prometheus dedicate sono esposte solo quando le metriche sono abilitate e protette da token.
+Non vengono esportati nomi file, storage key, URL firmati o contenuti dei documenti.
 
 ## 7. Link pubblici contratti
 

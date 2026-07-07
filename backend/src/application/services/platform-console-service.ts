@@ -2,6 +2,7 @@ import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { estimateLicenseMonthlyRevenue, getPlanMonthlyPrice, SAAS_PLANS } from "./feature-entitlements-service.js";
+import { StorageObservabilityService } from "./storage-observability-service.js";
 
 type LicenseSnapshot = {
   plan: string;
@@ -53,6 +54,8 @@ const compactEmail = (value?: string | null) => {
   if (!domain) return value;
   return `${name.slice(0, 2)}***@${domain}`;
 };
+
+const storageObservabilityService = new StorageObservabilityService();
 
 export class PlatformConsoleService {
   private async latestLicenses() {
@@ -517,10 +520,11 @@ export class PlatformConsoleService {
       dbStatus = "DOWN";
     }
 
-    const [pendingEmail, failedEmail, invoiceErrors] = await Promise.all([
+    const [pendingEmail, failedEmail, invoiceErrors, storageSummary] = await Promise.all([
       prisma.emailQueue.count({ where: { status: "PENDING" } }),
       prisma.emailQueue.count({ where: { status: "FAILED" } }),
-      prisma.invoice.count({ where: { status: "ERROR" } })
+      prisma.invoice.count({ where: { status: "ERROR" } }),
+      storageObservabilityService.platformSummary()
     ]);
 
     return {
@@ -537,10 +541,7 @@ export class PlatformConsoleService {
         stripe: {
           status: env.STRIPE_SECRET_KEY ? "CONFIGURED" : "NOT_CONFIGURED"
         },
-        storage: {
-          status: "LOCAL",
-          uploadDir: env.UPLOAD_DIR
-        },
+        storage: storageSummary,
         invoices: {
           errors: invoiceErrors
         }

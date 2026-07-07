@@ -241,7 +241,35 @@ export type PlatformSystemHealth = {
   db: { status: string };
   email: { status: string; provider: string; pending: number; failed: number };
   stripe: { status: string };
-  storage: { status: string; uploadDir: string };
+  storage: {
+    status: string;
+    provider: string;
+    bucket?: string | null;
+    uploadDir: string;
+    activeFiles: number;
+    activeBytes: number;
+    deletedFilesPendingRetention: number;
+    deletedBytesPendingRetention: number;
+    retentionGraceDays: number;
+    lastRetentionRun?: {
+      at: string;
+      tenantId: string;
+      deletedStoredFileObjects: number;
+    } | null;
+    resourceTypes: Array<{
+      resourceType: string;
+      files: number;
+      bytes: number;
+    }>;
+    recentEvents: Array<{
+      id: string;
+      action: string;
+      resource: string;
+      resourceId?: string | null;
+      tenantId: string;
+      createdAt: string;
+    }>;
+  };
   invoices: { errors: number };
 };
 

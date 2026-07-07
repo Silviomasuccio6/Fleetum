@@ -3,6 +3,7 @@ import { PrivacyComplianceService } from "../../application/services/privacy-com
 import { prisma } from "../database/prisma/client.js";
 import { logger } from "../logging/logger.js";
 import { env } from "../../shared/config/env.js";
+import { metrics } from "../observability/metrics.js";
 
 export const startPrivacyRetentionCron = (service: PrivacyComplianceService): ScheduledTask => {
   return cron.schedule(env.PRIVACY_RETENTION_CRON_SCHEDULE, async () => {
@@ -27,6 +28,7 @@ export const startPrivacyRetentionCron = (service: PrivacyComplianceService): Sc
 
       logger.info({ tenants: results.length, results }, "Privacy retention cron completed");
     } catch (error) {
+      metrics.observeRetentionRun({ status: "failure", tenants: 0 });
       logger.error({ error }, "Privacy retention cron failed");
     }
   });
