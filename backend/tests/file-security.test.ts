@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import sharp from "sharp";
 import { sanitizeImageMetadata, validateUploadedFile } from "../src/infrastructure/storage/file-security.js";
+import { env } from "../src/shared/config/env.js";
 
 const withTempFile = async (content: Buffer | string, fn: (filePath: string) => Promise<void>, filename = "sample.bin") => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fleetum-file-security-"));
@@ -83,5 +84,32 @@ test("image metadata sanitizer strips EXIF metadata from JPEG files", async () =
       assert.equal((await sharp(filePath).metadata()).exif, undefined);
     },
     "sample.jpg"
+  );
+});
+
+test("image metadata sanitizer resizes oversized operational photos", async () => {
+  const image = await sharp({
+    create: {
+      width: 2200,
+      height: 900,
+      channels: 3,
+      background: { r: 245, g: 248, b: 252 }
+    }
+  })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+
+  await withTempFile(
+    image,
+    async (filePath) => {
+      const result = await validateUploadedFile(filePath, "image/jpeg");
+      const metadata = await sharp(filePath).metadata();
+
+      assert.equal(metadata.width, env.IMAGE_MAX_WIDTH_PX);
+      assert.equal(metadata.exif, undefined);
+      assert.equal(result.sizeBytes, (await fs.stat(filePath)).size);
+      assert.equal(result.optimized, true);
+    },
+    "oversized.jpg"
   );
 });

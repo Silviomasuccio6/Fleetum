@@ -4,6 +4,7 @@ import { Prisma, RentalBookingStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import { storageProvider } from "../../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { env } from "../../../shared/config/env.js";
@@ -304,6 +305,10 @@ export class RentalBookingsController {
     return storageProvider.resolveLocalPath(filePath);
   }
 
+  private storageBucket() {
+    return storageProvider.name === "s3" ? env.S3_BUCKET ?? "s3" : "local";
+  }
+
   private extractContractSignatureDetails(details: Prisma.JsonValue | null | undefined): {
     signatureFilePath?: string;
     signatureMimeType?: string;
@@ -347,7 +352,48 @@ export class RentalBookingsController {
     const safeTenant = input.tenantId.replace(/[^a-zA-Z0-9_-]/g, "_");
     const fileName = `${input.contractId}-${Date.now()}.${decoded.extension}`;
     const relativePath = storageProvider.buildKey("contract-signatures", safeTenant, fileName);
-    await storageProvider.write(relativePath, decoded.buffer);
+    await storageProvider.write(relativePath, decoded.buffer, {
+      tenantId: input.tenantId,
+      resourceType: "BookingContractSignature",
+      resourceId: input.contractId,
+      originalName: fileName,
+      mimeType: decoded.mimeType
+    });
+    const checksumSha256 = crypto.createHash("sha256").update(decoded.buffer).digest("hex");
+
+    await prisma.storedFileObject.upsert({
+      where: {
+        provider_bucket_storageKey: {
+          provider: storageProvider.name,
+          bucket: this.storageBucket(),
+          storageKey: relativePath
+        }
+      },
+      create: {
+        tenantId: input.tenantId,
+        provider: storageProvider.name,
+        bucket: this.storageBucket(),
+        storageKey: relativePath,
+        originalName: fileName,
+        mimeType: decoded.mimeType,
+        sizeBytes: decoded.buffer.length,
+        checksumSha256,
+        resourceType: "BookingContractSignature",
+        resourceId: input.contractId,
+        visibility: "private"
+      },
+      update: {
+        tenantId: input.tenantId,
+        originalName: fileName,
+        mimeType: decoded.mimeType,
+        sizeBytes: decoded.buffer.length,
+        checksumSha256,
+        resourceType: "BookingContractSignature",
+        resourceId: input.contractId,
+        visibility: "private",
+        deletedAt: null
+      }
+    });
 
     return {
       filePath: relativePath,
@@ -2468,9 +2514,13 @@ export class RentalBookingsController {
     const actorUserId = req.auth?.userId;
     const file = req.file as Express.Multer.File | undefined;
     if (!file) throw new AppError("Logo mancante", 400, "MISSING_FILE");
+    const validation = await validateUploadedFile(file.path, file.mimetype);
+    file.size = validation.sizeBytes;
 
     const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
     const nextLogoPath = storageProvider.buildKey(file.filename);
+    const fileBuffer = await fs.readFile(file.path);
+    const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
     await storageProvider.writeFromFile(nextLogoPath, file.path, { tenantId, resourceType: "ContractTemplateLogo", resourceId: template.id, originalName: file.originalname || file.filename, mimeType: file.mimetype });
     if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
 
@@ -2486,7 +2536,45 @@ export class RentalBookingsController {
 
     if (template.logoFilePath && template.logoFilePath !== nextLogoPath) {
       await storageProvider.delete(template.logoFilePath);
+      await prisma.storedFileObject.updateMany({
+        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: template.logoFilePath, deletedAt: null },
+        data: { deletedAt: new Date() }
+      });
     }
+
+    await prisma.storedFileObject.upsert({
+      where: {
+        provider_bucket_storageKey: {
+          provider: storageProvider.name,
+          bucket: this.storageBucket(),
+          storageKey: nextLogoPath
+        }
+      },
+      create: {
+        tenantId,
+        provider: storageProvider.name,
+        bucket: this.storageBucket(),
+        storageKey: nextLogoPath,
+        originalName: file.originalname || file.filename,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        checksumSha256,
+        resourceType: "ContractTemplateLogo",
+        resourceId: template.id,
+        visibility: "private"
+      },
+      update: {
+        tenantId,
+        originalName: file.originalname || file.filename,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        checksumSha256,
+        resourceType: "ContractTemplateLogo",
+        resourceId: template.id,
+        visibility: "private",
+        deletedAt: null
+      }
+    });
 
     const refreshed = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
     res.status(201).json(refreshed);
@@ -2499,6 +2587,10 @@ export class RentalBookingsController {
 
     if (template.logoFilePath) {
       await storageProvider.delete(template.logoFilePath);
+      await prisma.storedFileObject.updateMany({
+        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: template.logoFilePath, deletedAt: null },
+        data: { deletedAt: new Date() }
+      });
     }
 
     const updated = await prisma.contractTemplate.update({

@@ -40,6 +40,10 @@ const profileRequiredKeys = [
 ] as const;
 
 export class TenantProfileService {
+  private storageBucket() {
+    return storageProvider.name === "s3" ? env.S3_BUCKET ?? "s3" : "local";
+  }
+
   private validateBusinessRules(input: Partial<TenantCompanyProfileInput | SignupCompanyInput>) {
     const errors = validateCompanyRegistrationDraft({
       country: input.country,
@@ -300,6 +304,8 @@ export class TenantProfileService {
 
   async setLogo(tenantId: string, actorUserId: string, file: Express.Multer.File) {
     const relativePath = storageProvider.buildKey(file.filename);
+    const fileBuffer = await fs.readFile(file.path);
+    const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
     await storageProvider.writeFromFile(relativePath, file.path, { tenantId, resourceType: "TenantBranding", resourceId: tenantId, originalName: file.originalname, mimeType: file.mimetype });
     if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
     const current = await prisma.tenantBranding.findUnique({ where: { tenantId } });
@@ -323,7 +329,45 @@ export class TenantProfileService {
 
     if (current?.logoFilePath && current.logoFilePath !== relativePath) {
       await storageProvider.delete(current.logoFilePath);
+      await prisma.storedFileObject.updateMany({
+        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: current.logoFilePath, deletedAt: null },
+        data: { deletedAt: new Date() }
+      });
     }
+
+    await prisma.storedFileObject.upsert({
+      where: {
+        provider_bucket_storageKey: {
+          provider: storageProvider.name,
+          bucket: this.storageBucket(),
+          storageKey: relativePath
+        }
+      },
+      create: {
+        tenantId,
+        provider: storageProvider.name,
+        bucket: this.storageBucket(),
+        storageKey: relativePath,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        checksumSha256,
+        resourceType: "TenantBranding",
+        resourceId: tenantId,
+        visibility: "private"
+      },
+      update: {
+        tenantId,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        checksumSha256,
+        resourceType: "TenantBranding",
+        resourceId: tenantId,
+        visibility: "private",
+        deletedAt: null
+      }
+    });
 
     await prisma.auditLog.create({
       data: {
@@ -367,7 +411,7 @@ export class TenantProfileService {
       data: {
         tenantId,
         provider: storageProvider.name,
-        bucket: storageProvider.name === "s3" ? env.S3_BUCKET ?? null : null,
+        bucket: this.storageBucket(),
         storageKey,
         originalName: file.originalname,
         mimeType: file.mimetype,
@@ -412,6 +456,10 @@ export class TenantProfileService {
     if (!current) return this.getProfile(tenantId);
     if (current.logoFilePath) {
       await storageProvider.delete(current.logoFilePath);
+      await prisma.storedFileObject.updateMany({
+        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: current.logoFilePath, deletedAt: null },
+        data: { deletedAt: new Date() }
+      });
     }
     const branding = await prisma.tenantBranding.update({
       where: { tenantId },
