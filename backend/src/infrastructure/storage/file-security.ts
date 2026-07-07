@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 
 const jpeg = [0xff, 0xd8, 0xff];
@@ -71,11 +72,17 @@ export const scanFileForThreats = async (filePath: string) => {
   return true;
 };
 
-export const validateUploadedFile = async (filePath: string, mimeType: string) => {
+export type UploadedFileSecurityResult = {
+  sizeBytes: number;
+  optimized: boolean;
+};
+
+export const validateUploadedFile = async (filePath: string, mimeType: string): Promise<UploadedFileSecurityResult> => {
   await validateFileMagic(filePath, mimeType);
   await scanFileForThreats(filePath);
-  if (imageMimeSet.has(mimeType)) await sanitizeImageMetadata(filePath);
-  return true;
+  if (imageMimeSet.has(mimeType)) return sanitizeImageMetadata(filePath);
+  const stat = await fs.stat(filePath);
+  return { sizeBytes: stat.size, optimized: false };
 };
 
 const toSharpFormat = (ext: string) => {
@@ -85,16 +92,35 @@ const toSharpFormat = (ext: string) => {
   return undefined;
 };
 
-export const sanitizeImageMetadata = async (filePath: string): Promise<void> => {
+export const sanitizeImageMetadata = async (filePath: string): Promise<UploadedFileSecurityResult> => {
   const ext = path.extname(filePath).toLowerCase();
   const tmpPath = `${filePath}.sanitized`;
   const format = toSharpFormat(ext);
 
   try {
-    const pipeline = sharp(filePath).rotate();
-    if (format) pipeline.toFormat(format);
+    const original = await fs.stat(filePath);
+    const metadata = await sharp(filePath).metadata();
+    let pipeline = sharp(filePath).rotate();
+
+    if (metadata.width && metadata.width > env.IMAGE_MAX_WIDTH_PX) {
+      pipeline = pipeline.resize({ width: env.IMAGE_MAX_WIDTH_PX, withoutEnlargement: true });
+    }
+
+    if (format === "jpeg") {
+      pipeline = pipeline.jpeg({ quality: env.IMAGE_COMPRESSION_QUALITY, mozjpeg: true });
+    } else if (format === "webp") {
+      pipeline = pipeline.webp({ quality: env.IMAGE_COMPRESSION_QUALITY });
+    } else if (format === "png") {
+      pipeline = pipeline.png({ compressionLevel: env.IMAGE_PNG_COMPRESSION_LEVEL });
+    }
+
     await pipeline.toFile(tmpPath);
     await fs.rename(tmpPath, filePath);
+    const next = await fs.stat(filePath);
+    return {
+      sizeBytes: next.size,
+      optimized: next.size !== original.size || Boolean(metadata.exif) || Boolean(metadata.width && metadata.width > env.IMAGE_MAX_WIDTH_PX)
+    };
   } catch (error) {
     await fs.unlink(tmpPath).catch(() => undefined);
     throw new AppError("Sanitizzazione immagine fallita", 500, "IMAGE_SANITIZE_ERROR");

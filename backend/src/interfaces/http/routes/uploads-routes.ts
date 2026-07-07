@@ -50,7 +50,8 @@ export const uploadsRoutes = () => {
   const secureFiles = async (files: Express.Multer.File[]) => {
     for (const file of files) {
       try {
-        await validateUploadedFile(file.path, file.mimetype);
+        const result = await validateUploadedFile(file.path, file.mimetype);
+        file.size = result.sizeBytes;
       } catch (error) {
         await fs.unlink(file.path).catch(() => undefined);
         throw error;

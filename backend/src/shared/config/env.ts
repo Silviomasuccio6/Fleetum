@@ -24,6 +24,14 @@ const toInt = (value: string, name: string) => {
   return n;
 };
 
+const toIntInRange = (value: string, name: string, min: number, max: number) => {
+  const n = toInt(value, name);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`Invalid value for ${name}: expected integer between ${min} and ${max}`);
+  }
+  return n;
+};
+
 const toBool = (value: string) => ["1", "true", "yes", "on"].includes(value.toLowerCase());
 
 const toCsvList = (value?: string) =>
@@ -116,6 +124,12 @@ export const env = {
   APPLE_REDIRECT_URI: process.env.APPLE_REDIRECT_URI ?? `${BACKEND_PUBLIC_URL}/api/auth/apple/callback`,
 
   UPLOAD_DIR: process.env.UPLOAD_DIR ?? "uploads",
+  FILE_MAX_IMAGE_MB: toIntInRange(process.env.FILE_MAX_IMAGE_MB ?? "5", "FILE_MAX_IMAGE_MB", 1, 50),
+  FILE_MAX_DOCUMENT_MB: toIntInRange(process.env.FILE_MAX_DOCUMENT_MB ?? "12", "FILE_MAX_DOCUMENT_MB", 1, 100),
+  FILE_MAX_LOGO_MB: toIntInRange(process.env.FILE_MAX_LOGO_MB ?? "4", "FILE_MAX_LOGO_MB", 1, 20),
+  IMAGE_MAX_WIDTH_PX: toIntInRange(process.env.IMAGE_MAX_WIDTH_PX ?? "1920", "IMAGE_MAX_WIDTH_PX", 320, 8000),
+  IMAGE_COMPRESSION_QUALITY: toIntInRange(process.env.IMAGE_COMPRESSION_QUALITY ?? "82", "IMAGE_COMPRESSION_QUALITY", 40, 100),
+  IMAGE_PNG_COMPRESSION_LEVEL: toIntInRange(process.env.IMAGE_PNG_COMPRESSION_LEVEL ?? "9", "IMAGE_PNG_COMPRESSION_LEVEL", 0, 9),
   STORAGE_PROVIDER: STORAGE_PROVIDER as "local" | "s3",
   S3_ENDPOINT: process.env.S3_ENDPOINT,
   S3_BUCKET: process.env.S3_BUCKET,
