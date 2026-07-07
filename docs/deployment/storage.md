@@ -80,3 +80,21 @@ Do not set `STORAGE_PROVIDER=s3` in production until S3/R2 upload, download, del
 - Keep backups enabled for local uploads while `STORAGE_PROVIDER=local`.
 - Run restore tests for both database and uploaded documents before considering storage production-ready.
 - When migrating to S3/R2, test upload, download, delete, backup/export and tenant isolation in staging first.
+
+## Retention and cleanup
+
+Fleetum keeps file metadata in `StoredFileObject`. When a file is replaced or removed, the row is marked with `deletedAt`.
+The privacy retention job purges old soft-deleted rows and removes the corresponding physical/private object after the grace window.
+
+```txt
+PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS=30
+```
+
+The purge is tenant-scoped and provider-scoped. It does not delete active documents, contracts, logos or customer attachments that are still referenced.
+
+Manual dry-run and execution:
+
+```bash
+npm run privacy:retention:dry-run -w backend -- --tenant=<tenantId> --deleted-file-grace-days=30
+npm run privacy:retention:run -w backend -- --tenant=<tenantId> --deleted-file-grace-days=30
+```

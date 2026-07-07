@@ -42,6 +42,23 @@ npm run privacy:retention:dry-run -w backend
 npm run privacy:retention:run -w backend
 ```
 
+La retention include anche i `StoredFileObject` gia' marcati con `deletedAt`.
+La finestra di grazia e' configurabile con:
+
+```txt
+PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS=30
+```
+
+Esecuzione manuale con finestra dedicata:
+
+```bash
+npm run privacy:retention:dry-run -w backend -- --tenant=<tenantId> --deleted-file-grace-days=30
+npm run privacy:retention:run -w backend -- --tenant=<tenantId> --deleted-file-grace-days=30
+```
+
+Il job rimuove solo file gia' cancellati logicamente, appartenenti al tenant e al provider storage corrente.
+Non elimina contratti, loghi o allegati ancora attivi.
+
 Variabili:
 
 ```env

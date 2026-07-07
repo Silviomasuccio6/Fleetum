@@ -3,12 +3,14 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { PrismaAuditLogRepository } from "../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
+import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 
 const retentionDefaults = {
   expiredTokenRetentionDays: 30,
   expiredSessionRetentionDays: 90,
-  deletedCustomerAttachmentGraceDays: 30
+  deletedCustomerAttachmentGraceDays: 30,
+  deletedStoredFileObjectGraceDays: env.PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS
 };
 
 const subDays = (date: Date, days: number) => new Date(date.getTime() - days * 86400000);
@@ -44,6 +46,21 @@ const scrubJson = (value: unknown): unknown => {
 
 export class PrivacyComplianceService {
   private readonly auditRepository = new PrismaAuditLogRepository();
+  private readonly currentStorageBucket = storageProvider.name === "s3" ? env.S3_BUCKET ?? "s3" : "local";
+
+  private deletedStoredFileWhere(tenantId: string, cutoff: Date): Prisma.StoredFileObjectWhereInput {
+    const bucketFilter =
+      storageProvider.name === "local"
+        ? { OR: [{ bucket: this.currentStorageBucket }, { bucket: null }] }
+        : { bucket: this.currentStorageBucket };
+
+    return {
+      tenantId,
+      provider: storageProvider.name,
+      deletedAt: { lt: cutoff },
+      ...bucketFilter
+    };
+  }
 
   async createErasureRequest(input: {
     tenantId: string;
@@ -301,13 +318,15 @@ export class PrivacyComplianceService {
     expiredTokenRetentionDays?: number;
     expiredSessionRetentionDays?: number;
     deletedCustomerAttachmentGraceDays?: number;
+    deletedStoredFileObjectGraceDays?: number;
   }) {
     const now = new Date();
     const tokenCutoff = subDays(now, input.expiredTokenRetentionDays ?? retentionDefaults.expiredTokenRetentionDays);
     const sessionCutoff = subDays(now, input.expiredSessionRetentionDays ?? retentionDefaults.expiredSessionRetentionDays);
     const deletedCustomerCutoff = subDays(now, input.deletedCustomerAttachmentGraceDays ?? retentionDefaults.deletedCustomerAttachmentGraceDays);
+    const deletedStoredFileCutoff = subDays(now, input.deletedStoredFileObjectGraceDays ?? retentionDefaults.deletedStoredFileObjectGraceDays);
 
-    const [passwordResetTokens, invitationTokens, refreshSessions, deletedCustomerAttachments] = await Promise.all([
+    const [passwordResetTokens, invitationTokens, refreshSessions, deletedCustomerAttachments, deletedStoredFileObjects] = await Promise.all([
       prisma.passwordResetToken.count({
         where: { expiresAt: { lt: tokenCutoff }, user: { tenantId: input.tenantId } }
       }),
@@ -328,6 +347,9 @@ export class PrivacyComplianceService {
           tenantId: input.tenantId,
           customer: { deletedAt: { lt: deletedCustomerCutoff } }
         }
+      }),
+      prisma.storedFileObject.count({
+        where: this.deletedStoredFileWhere(input.tenantId, deletedStoredFileCutoff)
       })
     ]);
 
@@ -337,13 +359,15 @@ export class PrivacyComplianceService {
       cutoffs: {
         tokenCutoff: tokenCutoff.toISOString(),
         sessionCutoff: sessionCutoff.toISOString(),
-        deletedCustomerCutoff: deletedCustomerCutoff.toISOString()
+        deletedCustomerCutoff: deletedCustomerCutoff.toISOString(),
+        deletedStoredFileCutoff: deletedStoredFileCutoff.toISOString()
       },
       candidates: {
         passwordResetTokens,
         invitationTokens,
         refreshSessions,
-        deletedCustomerAttachments
+        deletedCustomerAttachments,
+        deletedStoredFileObjects
       }
     };
   }
@@ -355,6 +379,7 @@ export class PrivacyComplianceService {
     expiredTokenRetentionDays?: number;
     expiredSessionRetentionDays?: number;
     deletedCustomerAttachmentGraceDays?: number;
+    deletedStoredFileObjectGraceDays?: number;
   }) {
     if (input.confirmation !== "RUN_RETENTION") {
       throw new AppError("Conferma richiesta per eseguire la retention", 400, "RETENTION_CONFIRMATION_REQUIRED");
@@ -364,14 +389,21 @@ export class PrivacyComplianceService {
     const deletedCustomerCutoff = new Date(preview.cutoffs.deletedCustomerCutoff);
     const sessionCutoff = new Date(preview.cutoffs.sessionCutoff);
     const tokenCutoff = new Date(preview.cutoffs.tokenCutoff);
+    const deletedStoredFileCutoff = new Date(preview.cutoffs.deletedStoredFileCutoff);
 
-    const attachments = await prisma.rentalCustomerAttachment.findMany({
-      where: {
-        tenantId: input.tenantId,
-        customer: { deletedAt: { lt: deletedCustomerCutoff } }
-      },
-      select: { id: true, filePath: true }
-    });
+    const [attachments, deletedStoredFiles] = await Promise.all([
+      prisma.rentalCustomerAttachment.findMany({
+        where: {
+          tenantId: input.tenantId,
+          customer: { deletedAt: { lt: deletedCustomerCutoff } }
+        },
+        select: { id: true, filePath: true }
+      }),
+      prisma.storedFileObject.findMany({
+        where: this.deletedStoredFileWhere(input.tenantId, deletedStoredFileCutoff),
+        select: { id: true, storageKey: true }
+      })
+    ]);
 
     const result = await prisma.$transaction(async (tx) => {
       const passwordResetTokens = await tx.passwordResetToken.deleteMany({
@@ -395,6 +427,14 @@ export class PrivacyComplianceService {
           customer: { deletedAt: { lt: deletedCustomerCutoff } }
         }
       });
+      const deletedStoredFileObjects = deletedStoredFiles.length
+        ? await tx.storedFileObject.deleteMany({
+            where: {
+              tenantId: input.tenantId,
+              id: { in: deletedStoredFiles.map((file) => file.id) }
+            }
+          })
+        : { count: 0 };
 
       await tx.auditLog.create({
         data: {
@@ -409,8 +449,11 @@ export class PrivacyComplianceService {
               passwordResetTokens: passwordResetTokens.count,
               invitationTokens: invitationTokens.count,
               refreshSessions: refreshSessions.count,
-              deletedCustomerAttachments: deletedCustomerAttachments.count
+              deletedCustomerAttachments: deletedCustomerAttachments.count,
+              deletedStoredFileObjects: deletedStoredFileObjects.count
             },
+            storageProvider: storageProvider.name,
+            storageBucket: this.currentStorageBucket,
             executedAt: new Date().toISOString()
           } as Prisma.InputJsonValue
         }
@@ -420,12 +463,16 @@ export class PrivacyComplianceService {
         passwordResetTokens: passwordResetTokens.count,
         invitationTokens: invitationTokens.count,
         refreshSessions: refreshSessions.count,
-        deletedCustomerAttachments: deletedCustomerAttachments.count
+        deletedCustomerAttachments: deletedCustomerAttachments.count,
+        deletedStoredFileObjects: deletedStoredFileObjects.count
       };
     });
 
     for (const attachment of attachments) {
       await unlinkStoredFile(attachment.filePath);
+    }
+    for (const file of deletedStoredFiles) {
+      await unlinkStoredFile(file.storageKey);
     }
 
     return {
