@@ -61,7 +61,7 @@ npm run privacy:pii-report -w backend
 
 ## Retention
 
-- [x] Job/script retention esistenti per token/sessioni/allegati clienti cancellati.
+- [x] Job/script retention esistenti per token/sessioni/allegati clienti cancellati e file storage gia' soft-deleted.
 - [x] Preview retention disponibile prima dell'esecuzione.
 - [ ] Definire tempi retention finali con consulente privacy/legal/commercialista.
 - [ ] Documentare retention per contratti, documenti identità, patenti, foto danni, pagamenti e audit log.

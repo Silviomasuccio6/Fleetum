@@ -145,6 +145,12 @@ export const env = {
   METRICS_TOKEN: process.env.METRICS_TOKEN,
   PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
+  PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS: toIntInRange(
+    process.env.PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS ?? "30",
+    "PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS",
+    1,
+    365
+  ),
 
   EMAIL_PROVIDER: "resend" as const,
   RESEND_API_KEY: required("RESEND_API_KEY", isCiOrTest ? "re_ci_placeholder" : undefined),
