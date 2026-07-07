@@ -5,7 +5,8 @@ import { PrivacyComplianceService } from "../../../application/services/privacy-
 const retentionQuerySchema = z.object({
   expiredTokenRetentionDays: z.coerce.number().int().min(1).max(365).optional(),
   expiredSessionRetentionDays: z.coerce.number().int().min(1).max(730).optional(),
-  deletedCustomerAttachmentGraceDays: z.coerce.number().int().min(0).max(365).optional()
+  deletedCustomerAttachmentGraceDays: z.coerce.number().int().min(0).max(365).optional(),
+  deletedStoredFileObjectGraceDays: z.coerce.number().int().min(0).max(365).optional()
 });
 
 const retentionRunSchema = retentionQuerySchema.extend({

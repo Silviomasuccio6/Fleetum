@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  Archive,
   BarChart3,
   Building2,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   Download,
   FileText,
   Globe2,
+  HardDrive,
   KeyRound,
   LayoutDashboard,
   Mail,
@@ -189,6 +191,18 @@ const formatCurrency = (value: number) =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(value);
 const formatCurrencyCompact = (value: number) =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", notation: "compact", maximumFractionDigits: 1 }).format(value);
+const formatBytes = (value?: number | null) => {
+  const bytes = value ?? 0;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat("it-IT", { maximumFractionDigits: size >= 10 ? 1 : 2 }).format(size)} ${units[unitIndex]}`;
+};
 const formatInvoicePeriod = (start?: string, end?: string) => {
   if (!start || !end) return "-";
   return `${formatDate(start)} - ${formatDate(end)}`;
@@ -279,7 +293,7 @@ const leadStatusVariant = (status: PlatformDemoLead["status"]) => {
 
 const operationalStatusVariant = (status?: string) => {
   if (!status) return "secondary" as const;
-  if (["UP", "CONFIGURED", "SMTP", "LOCAL"].includes(status)) return "success" as const;
+  if (["UP", "CONFIGURED", "SMTP", "LOCAL", "S3"].includes(status)) return "success" as const;
   if (["NOT_CONFIGURED", "MISSING_KEY"].includes(status)) return "warning" as const;
   return "destructive" as const;
 };
@@ -2372,7 +2386,12 @@ export const PlatformAdminPage = () => {
             { label: "Database", status: systemHealth?.db.status, detail: "Query SELECT 1", icon: Database },
             { label: "Email", status: systemHealth?.email.status, detail: `${systemHealth?.email.provider ?? "-"} · ${systemHealth?.email.failed ?? 0} failed`, icon: Mail },
             { label: "Stripe", status: systemHealth?.stripe.status, detail: "Billing provider", icon: BarChart3 },
-            { label: "Storage", status: systemHealth?.storage.status, detail: systemHealth?.storage.uploadDir ?? "-", icon: FileText },
+            {
+              label: "Storage",
+              status: systemHealth?.storage.status,
+              detail: `${systemHealth?.storage.provider ?? "-"} · ${formatBytes(systemHealth?.storage.activeBytes)}`,
+              icon: HardDrive
+            },
             { label: "Fatture", status: (systemHealth?.invoices.errors ?? 0) > 0 ? "ERROR" : "UP", detail: `${systemHealth?.invoices.errors ?? 0} errori`, icon: FileText }
           ].map((item) => {
             const Icon = item.icon;
@@ -2391,6 +2410,104 @@ export const PlatformAdminPage = () => {
               </Card>
             );
           })}
+          <Card className="lg:col-span-2 xl:col-span-3">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <HardDrive className="h-5 w-5 text-primary" />
+                Storage, documenti e retention
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    label: "File attivi",
+                    value: String(systemHealth?.storage.activeFiles ?? 0),
+                    detail: formatBytes(systemHealth?.storage.activeBytes),
+                    icon: FileText
+                  },
+                  {
+                    label: "In attesa retention",
+                    value: String(systemHealth?.storage.deletedFilesPendingRetention ?? 0),
+                    detail: formatBytes(systemHealth?.storage.deletedBytesPendingRetention),
+                    icon: Archive
+                  },
+                  {
+                    label: "Provider",
+                    value: systemHealth?.storage.provider ?? "-",
+                    detail: systemHealth?.storage.bucket ? `Bucket ${systemHealth.storage.bucket}` : systemHealth?.storage.uploadDir ?? "-",
+                    icon: HardDrive
+                  },
+                  {
+                    label: "Ultimo cleanup",
+                    value: systemHealth?.storage.lastRetentionRun ? timeAgo(systemHealth.storage.lastRetentionRun.at) : "Mai",
+                    detail: `${systemHealth?.storage.lastRetentionRun?.deletedStoredFileObjects ?? 0} file purgati · grace ${systemHealth?.storage.retentionGraceDays ?? 0}g`,
+                    icon: Clock3
+                  }
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.label} className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{item.label}</p>
+                          <p className="mt-2 text-2xl font-semibold text-foreground">{item.value}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
+                        </div>
+                        <Icon className="h-5 w-5 text-muted-foreground" />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-border/70">
+                  <div className="border-b border-border/70 px-4 py-3">
+                    <p className="text-sm font-semibold text-foreground">Top tipologie file</p>
+                    <p className="text-xs text-muted-foreground">Aggregato da StoredFileObject, senza nomi file o URL.</p>
+                  </div>
+                  <div className="divide-y divide-border/70">
+                    {(systemHealth?.storage.resourceTypes ?? []).length > 0 ? (
+                      systemHealth!.storage.resourceTypes.map((item) => (
+                        <div key={item.resourceType} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                          <div>
+                            <p className="font-medium text-foreground">{item.resourceType}</p>
+                            <p className="text-xs text-muted-foreground">{item.files} file</p>
+                          </div>
+                          <span className="font-semibold text-foreground">{formatBytes(item.bytes)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="px-4 py-6 text-sm text-muted-foreground">Nessun file tracciato al momento.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border/70">
+                  <div className="border-b border-border/70 px-4 py-3">
+                    <p className="text-sm font-semibold text-foreground">Eventi storage recenti</p>
+                    <p className="text-xs text-muted-foreground">Upload, download e retention senza dati sensibili.</p>
+                  </div>
+                  <div className="divide-y divide-border/70">
+                    {(systemHealth?.storage.recentEvents ?? []).length > 0 ? (
+                      systemHealth!.storage.recentEvents.map((event) => (
+                        <div key={event.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                          <div>
+                            <p className="font-medium text-foreground">{event.action}</p>
+                            <p className="text-xs text-muted-foreground">{event.resource} · {timeAgo(event.createdAt)}</p>
+                          </div>
+                          <Badge variant="secondary">{event.tenantId.slice(0, 8)}</Badge>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="px-4 py-6 text-sm text-muted-foreground">Nessun evento storage recente.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       ) : null}
 
