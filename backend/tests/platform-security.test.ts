@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import jwt from "jsonwebtoken";
 import { PlatformAdminService } from "../src/application/services/platform-admin-service.js";
 import { PlatformLoginGuardService } from "../src/application/services/platform-login-guard-service.js";
 import { createPlatformIpAllowlist } from "../src/interfaces/http/middlewares/platform-ip-allowlist.js";
+import { requirePlatformAuth } from "../src/interfaces/http/middlewares/platform-auth.js";
+import { env } from "../src/shared/config/env.js";
 import {
   PlatformAdminRepository,
   PlatformAuditEvent,
@@ -67,6 +70,59 @@ class FakePlatformRepository implements PlatformAdminRepository {
     return [];
   }
 }
+
+test("platform auth forwards missing token to Express error handler without rejecting", async () => {
+  const req = { headers: {} } as any;
+  let nextErr: any = undefined;
+
+  await assert.doesNotReject(
+    requirePlatformAuth(req, {} as any, (err?: unknown) => {
+      nextErr = err;
+    })
+  );
+
+  assert.equal(nextErr?.statusCode, 401);
+  assert.equal(nextErr?.code, "UNAUTHORIZED");
+});
+
+test("platform auth forwards malformed token to Express error handler without rejecting", async () => {
+  const req = { headers: { authorization: "Bearer definitely-not-a-jwt" } } as any;
+  let nextErr: any = undefined;
+
+  await assert.doesNotReject(
+    requirePlatformAuth(req, {} as any, (err?: unknown) => {
+      nextErr = err;
+    })
+  );
+
+  assert.equal(nextErr?.statusCode, 401);
+  assert.equal(nextErr?.code, "UNAUTHORIZED");
+});
+
+test("platform auth rejects non-platform JWT without crashing the process", async () => {
+  const token = jwt.sign(
+    {
+      userId: "user-test",
+      tenantId: "tenant-test",
+      roles: ["admin"],
+      permissions: [],
+      tokenType: "access"
+    },
+    env.PLATFORM_JWT_SECRET,
+    { expiresIn: "5m" }
+  );
+  const req = { headers: { authorization: `Bearer ${token}` } } as any;
+  let nextErr: any = undefined;
+
+  await assert.doesNotReject(
+    requirePlatformAuth(req, {} as any, (err?: unknown) => {
+      nextErr = err;
+    })
+  );
+
+  assert.equal(nextErr?.statusCode, 403);
+  assert.equal(nextErr?.code, "FORBIDDEN");
+});
 
 test("platform ip allowlist always allows localhost", async () => {
   const alerts: Array<Record<string, unknown>> = [];
