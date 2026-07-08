@@ -87,6 +87,30 @@ jobs:
             set -euo pipefail
             cd "$FLEETUM_APP_DIR"
             chmod +x deploy/backup/*.sh
+
+            # If production uploads are still empty, add a temporary non-PII sentinel
+            # so the restore drill verifies a real file path without exposing customer files.
+            UPLOADS_DIR="${UPLOADS_DIR:-/opt/fleetum/uploads}"
+            RESTORE_SENTINEL_FILE=""
+            cleanup_restore_sentinel() {
+              if [ -n "$RESTORE_SENTINEL_FILE" ] && [ -f "$RESTORE_SENTINEL_FILE" ]; then
+                rm -f "$RESTORE_SENTINEL_FILE"
+              fi
+            }
+            trap cleanup_restore_sentinel EXIT
+
+            mkdir -p "$UPLOADS_DIR"
+            if ! find "$UPLOADS_DIR" -type f ! -name '.fleetum-restore-drill-sentinel.txt' -print -quit | grep -q .; then
+              RESTORE_SENTINEL_FILE="$UPLOADS_DIR/.fleetum-restore-drill-sentinel.txt"
+              {
+                echo "Fleetum restore drill upload sentinel"
+                echo "Purpose: non-sensitive monthly backup restore verification"
+                echo "Created at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              } > "$RESTORE_SENTINEL_FILE"
+              chmod 600 "$RESTORE_SENTINEL_FILE"
+              echo "Created temporary non-PII uploads restore sentinel."
+            fi
+
             ./deploy/backup/backup-postgres.sh
             ./deploy/backup/backup-uploads.sh
             RESTORE_DRILL_SOURCE=offsite ./deploy/backup/restore-postgres-test.sh
