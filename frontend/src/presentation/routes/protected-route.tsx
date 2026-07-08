@@ -5,6 +5,7 @@ import { authUseCases } from "../../application/usecases/auth-usecases";
 import { HttpClientError } from "../../infrastructure/api/http-client";
 import { FleetumFullScreenLoader } from "../components/brand/fleetum-logo-loader";
 import { Button } from "../components/ui/button";
+import { isBillingSelfServiceRoute } from "./billing-self-service-routes";
 
 export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const location = useLocation();
@@ -57,12 +58,9 @@ export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   if (!isAuthenticated) return <Navigate to={`/login?next=${encodeURIComponent(returnTo)}`} replace />;
 
-  const isBillingSelfServiceRoute =
-    location.pathname.startsWith("/activate") ||
-    location.pathname.startsWith("/upgrade") ||
-    location.pathname.startsWith("/onboarding/azienda");
+  const isBillingSelfService = isBillingSelfServiceRoute(location.pathname);
 
-  if (billingGate === "error" && !isBillingSelfServiceRoute) {
+  if (billingGate === "error" && !isBillingSelfService) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
         <div className="w-full max-w-md rounded-3xl border bg-card p-6 text-center shadow-xl">
@@ -85,7 +83,7 @@ export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
     );
   }
 
-  if (billingGate === "required" && !isBillingSelfServiceRoute) {
+  if (billingGate === "required" && !isBillingSelfService) {
     return <Navigate to="/activate?billing=required" replace />;
   }
 

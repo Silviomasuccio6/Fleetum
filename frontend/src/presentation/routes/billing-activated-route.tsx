@@ -71,10 +71,6 @@ export const BillingActivatedRoute = ({ children }: { children: JSX.Element }) =
   }
 
   if (!status || !OPERATIVE_STATUSES.includes(status)) {
-    if (location.pathname.startsWith("/upgrade")) {
-      return children;
-    }
-
     const returnTo = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to={`/activate?billing=required&returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
