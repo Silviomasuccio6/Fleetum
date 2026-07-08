@@ -121,6 +121,12 @@ GitHub Actions workflow `.github/workflows/backup-restore-test.yml` runs monthly
 RESTORE_DRILL_SOURCE=offsite /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
 
+Implementation note: because this workflow executes the remote script through an
+SSH heredoc, backup commands must not allocate stdin unless they intentionally
+consume streamed input. For example, `pg_dump` via `docker exec` must not use
+`-i`, otherwise Docker can consume the following heredoc commands and make the
+workflow look green after only the PostgreSQL backup.
+
 The restore drill:
 
 - downloads the latest offsite PostgreSQL and uploads backups when `RESTORE_DRILL_SOURCE=offsite`;
