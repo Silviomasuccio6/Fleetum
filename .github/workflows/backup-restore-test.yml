@@ -112,4 +112,20 @@ jobs:
               '- Check offsite backup configuration and credentials.',
               '- Do not run destructive migrations until restore is green.'
             ].join('\n');
-            await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ['sre', 'backup', 'incident'] });
+            try {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['sre', 'backup', 'incident']
+              });
+            } catch (error) {
+              core.warning(`Could not create restore-test failure issue with labels: ${error.message}`);
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body
+              });
+            }
