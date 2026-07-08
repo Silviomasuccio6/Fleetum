@@ -257,6 +257,19 @@ const timeAgo = (iso: string) => {
   return `${d}g fa`;
 };
 
+const formatDuration = (seconds?: number | null) => {
+  if (seconds === null || seconds === undefined || seconds < 0) return "n/d";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}g ${remainingHours}h` : `${days}g`;
+};
+
 const invoiceStatusLabel = (status: PlatformInvoice["status"]) => {
   if (status === "GENERATED") return "Generata";
   if (status === "SENT") return "Inviata";
@@ -293,8 +306,8 @@ const leadStatusVariant = (status: PlatformDemoLead["status"]) => {
 
 const operationalStatusVariant = (status?: string) => {
   if (!status) return "secondary" as const;
-  if (["UP", "CONFIGURED", "SMTP", "LOCAL", "S3"].includes(status)) return "success" as const;
-  if (["NOT_CONFIGURED", "MISSING_KEY"].includes(status)) return "warning" as const;
+  if (["UP", "CONFIGURED", "SMTP", "LOCAL", "S3", "PASS"].includes(status)) return "success" as const;
+  if (["NOT_CONFIGURED", "MISSING_KEY", "MISSING", "STALE"].includes(status)) return "warning" as const;
   return "destructive" as const;
 };
 
@@ -2392,6 +2405,14 @@ export const PlatformAdminPage = () => {
               detail: `${systemHealth?.storage.provider ?? "-"} · ${formatBytes(systemHealth?.storage.activeBytes)}`,
               icon: HardDrive
             },
+            {
+              label: "Restore drill",
+              status: systemHealth?.restoreDrill.status,
+              detail: systemHealth?.restoreDrill.generatedAt
+                ? `${timeAgo(systemHealth.restoreDrill.generatedAt)} · RTO ${formatDuration(systemHealth.restoreDrill.rtoSeconds)}`
+                : "Nessun drill registrato",
+              icon: RefreshCcw
+            },
             { label: "Fatture", status: (systemHealth?.invoices.errors ?? 0) > 0 ? "ERROR" : "UP", detail: `${systemHealth?.invoices.errors ?? 0} errori`, icon: FileText }
           ].map((item) => {
             const Icon = item.icon;
@@ -2459,6 +2480,82 @@ export const PlatformAdminPage = () => {
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="rounded-2xl border border-border/70 bg-card">
+                <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Backup & restore drill</p>
+                    <p className="text-xs text-muted-foreground">
+                      Ultimo ripristino isolato di database e uploads. Nessun file viene pubblicato durante il test.
+                    </p>
+                  </div>
+                  <Badge variant={operationalStatusVariant(systemHealth?.restoreDrill.status)}>
+                    {systemHealth?.restoreDrill.status ?? "n/a"}
+                  </Badge>
+                </div>
+                <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    {
+                      label: "Ultimo drill",
+                      value: systemHealth?.restoreDrill.generatedAt ? timeAgo(systemHealth.restoreDrill.generatedAt) : "Mai",
+                      detail: `stale dopo ${systemHealth?.restoreDrill.staleAfterDays ?? 35}g`
+                    },
+                    {
+                      label: "RPO osservato",
+                      value: formatDuration(systemHealth?.restoreDrill.rpoSeconds),
+                      detail: systemHealth?.restoreDrill.source ? `fonte ${systemHealth.restoreDrill.source}` : "fonte non disponibile"
+                    },
+                    {
+                      label: "RTO tecnico",
+                      value: formatDuration(systemHealth?.restoreDrill.rtoSeconds),
+                      detail: `${systemHealth?.restoreDrill.publicTablesRestored ?? 0} tabelle restore`
+                    },
+                    {
+                      label: "Upload verificato",
+                      value: systemHealth?.restoreDrill.uploads.status ?? "n/a",
+                      detail: systemHealth?.restoreDrill.uploads.recoveredFileSizeBytes
+                        ? `${formatBytes(systemHealth.restoreDrill.uploads.recoveredFileSizeBytes)} · sha ${systemHealth.restoreDrill.uploads.recoveredFileSha256Prefix ?? "n/d"}`
+                        : "nessun file esposto"
+                    }
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl border border-border/70 bg-muted/30 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{item.label}</p>
+                      <p className="mt-2 text-lg font-semibold text-foreground">{item.value}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid gap-4 border-t border-border/70 p-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div className="space-y-2 text-xs text-muted-foreground">
+                    <p><span className="font-semibold text-foreground">DB:</span> {systemHealth?.restoreDrill.postgresBackupFile ?? "n/d"}</p>
+                    <p><span className="font-semibold text-foreground">Uploads:</span> {systemHealth?.restoreDrill.uploadsBackupFile ?? "n/d"}</p>
+                    <p><span className="font-semibold text-foreground">Migrazioni:</span> {systemHealth?.restoreDrill.migrationsRestored ?? 0}</p>
+                    <p><span className="font-semibold text-foreground">Mismatch:</span> {systemHealth?.restoreDrill.tableMismatches ?? 0}</p>
+                  </div>
+                  <div className="overflow-hidden rounded-xl border border-border/70">
+                    <div className="grid grid-cols-[1fr_0.8fr_0.8fr_0.8fr] gap-2 border-b border-border/70 bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      <span>Tabella</span>
+                      <span>Sorgente</span>
+                      <span>Restore</span>
+                      <span>Esito</span>
+                    </div>
+                    <div className="divide-y divide-border/70">
+                      {(systemHealth?.restoreDrill.tableCounts ?? []).length > 0 ? (
+                        systemHealth!.restoreDrill.tableCounts.map((row) => (
+                          <div key={row.table} className="grid grid-cols-[1fr_0.8fr_0.8fr_0.8fr] gap-2 px-3 py-2 text-xs">
+                            <span className="font-medium text-foreground">{row.table}</span>
+                            <span className="text-muted-foreground">{row.sourceCount >= 0 ? row.sourceCount : "n/d"}</span>
+                            <span className="text-muted-foreground">{row.restoredCount}</span>
+                            <Badge variant={operationalStatusVariant(row.status)}>{row.status}</Badge>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-5 text-sm text-muted-foreground">Nessun conteggio restore disponibile.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">

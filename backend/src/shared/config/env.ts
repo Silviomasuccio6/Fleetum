@@ -143,6 +143,13 @@ export const env = {
     : undefined,
   METRICS_ENABLED: toBool(process.env.METRICS_ENABLED ?? "true"),
   METRICS_TOKEN: process.env.METRICS_TOKEN,
+  RESTORE_DRILL_SUMMARY_FILE: process.env.RESTORE_DRILL_SUMMARY_FILE ?? "logs/restore-drills/latest.json",
+  RESTORE_DRILL_STALE_DAYS: toIntInRange(
+    process.env.RESTORE_DRILL_STALE_DAYS ?? "35",
+    "RESTORE_DRILL_STALE_DAYS",
+    1,
+    366
+  ),
   PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
   PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS: toIntInRange(
