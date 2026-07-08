@@ -245,12 +245,13 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Attiva Fleetum con prova Stripe e carta obbligatoria"}
+              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Gestisci piano, fatture e metodo di pagamento"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
-              Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial,
-              ma il metodo di pagamento resta necessario per mantenere attivo il gestionale.
+              {isActivationMode
+                ? "Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial, ma il metodo di pagamento resta necessario per mantenere attivo il gestionale."
+                : "Aggiorna la carta, apri il portale Stripe o cambia piano senza accedere alla shell operativa quando la licenza non e' attiva."}
             </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">

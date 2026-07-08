@@ -36,8 +36,8 @@ const UsersPage = lazy(() => import("../pages/users/users-page").then((m) => ({ 
 const StatsPage = lazy(() => import("../pages/stats/stats-page").then((m) => ({ default: m.StatsPage })));
 const ProfileSettingsPage = lazy(() => import("../pages/profile/profile-settings-page").then((m) => ({ default: m.ProfileSettingsPage })));
 const CompanyProfilePage = lazy(() => import("../pages/profile/company-profile-page").then((m) => ({ default: m.CompanyProfilePage })));
-const PlanUpgradePage = lazy(() => import("../pages/profile/plan-upgrade-page").then((m) => ({ default: m.PlanUpgradePage })));
 const BillingActivationPage = lazy(() => import("../pages/billing/billing-activation-page").then((m) => ({ default: m.BillingActivationPage })));
+const BillingSelfServicePage = lazy(() => import("../pages/billing/billing-self-service-page").then((m) => ({ default: m.BillingSelfServicePage })));
 const CompanyOnboardingPage = lazy(() => import("../pages/onboarding/company-onboarding-page").then((m) => ({ default: m.CompanyOnboardingPage })));
 
 const withPageLoader = (element: JSX.Element) => <Suspense fallback={<PageLoader />}>{element}</Suspense>;
@@ -63,6 +63,14 @@ export const AppRoutes = () => (
         element={
           <ProtectedRoute>
             {withPageLoader(<BillingActivationPage />)}
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/upgrade"
+        element={
+          <ProtectedRoute>
+            {withPageLoader(<BillingSelfServicePage />)}
           </ProtectedRoute>
         }
       />
@@ -111,7 +119,6 @@ export const AppRoutes = () => (
         <Route path="utenti" element={withPageLoader(<UsersPage />)} />
         <Route path="profilo" element={withPageLoader(<ProfileSettingsPage />)} />
         <Route path="profilo/azienda" element={withPageLoader(<CompanyProfilePage />)} />
-        <Route path="upgrade" element={withPageLoader(<PlanUpgradePage />)} />
         <Route path="statistiche" element={withPageLoader(<StatsPage />)} />
       </Route>
 
