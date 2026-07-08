@@ -41,7 +41,9 @@ else
   docker inspect "$POSTGRES_CONTAINER_NAME" >/dev/null 2>&1 || \
     fail "PostgreSQL container not found: $POSTGRES_CONTAINER_NAME"
 
-  docker exec -i "$POSTGRES_CONTAINER_NAME" \
+  # Do not allocate stdin here: when this script is executed through an SSH
+  # heredoc, `docker exec -i` can consume the remaining remote commands.
+  docker exec "$POSTGRES_CONTAINER_NAME" \
     pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges \
     | gzip -9 > "$TMP_FILE" || fail "container pg_dump failed"
 fi
