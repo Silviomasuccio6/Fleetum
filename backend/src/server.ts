@@ -1,12 +1,15 @@
 import { Server } from "node:http";
 import { createApp, createPlatformApp } from "./app.js";
 import { startEmailQueueCron } from "./infrastructure/cron/email-queue-cron.js";
+import { startBillingDunningCron } from "./infrastructure/cron/billing-dunning-cron.js";
 import { startPrivacyRetentionCron } from "./infrastructure/cron/privacy-retention-cron.js";
 import { startReminderCron } from "./infrastructure/cron/reminder-cron.js";
 import { startReportsCron } from "./infrastructure/cron/reports-cron.js";
+import { BillingDunningService } from "./application/services/billing-dunning-service.js";
 import { PrivacyComplianceService } from "./application/services/privacy-compliance-service.js";
 import { prisma } from "./infrastructure/database/prisma/client.js";
 import { logger } from "./infrastructure/logging/logger.js";
+import { PrismaAuditLogRepository } from "./infrastructure/repositories/prisma-audit-log-repository.js";
 import { emailQueueCronService, reminderCronUseCase } from "./interfaces/http/routes/index.js";
 import { env } from "./shared/config/env.js";
 
@@ -28,6 +31,7 @@ const reminderTask = startReminderCron(reminderCronUseCase);
 const emailQueueTask = startEmailQueueCron(emailQueueCronService);
 const reportsTask = startReportsCron(emailQueueCronService);
 const privacyRetentionTask = startPrivacyRetentionCron(new PrivacyComplianceService());
+const billingDunningTask = startBillingDunningCron(new BillingDunningService(new PrismaAuditLogRepository()));
 
 let shuttingDown = false;
 
@@ -46,6 +50,7 @@ const shutdown = async (signal: string) => {
   emailQueueTask.stop();
   reportsTask.stop();
   privacyRetentionTask.stop();
+  billingDunningTask.stop();
 
   const closeAll = Promise.allSettled([closeServer(apiServer), closeServer(platformServer)]).then(() => "closed" as const);
   const closeTimeout = new Promise<"timeout">((resolve) =>

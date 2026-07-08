@@ -9,7 +9,7 @@ Documento operativo tecnico. Non inserire chiavi Stripe, webhook secret, email r
 | `TRIAL` | `customer.subscription.*` con `status=trialing` | Consentito | Nessuna, carta gia' raccolta da Checkout |
 | `ACTIVE` | `status=active`, `invoice.paid`, `invoice.payment_succeeded` | Consentito | Nessuna |
 | `PAST_DUE` | `invoice.payment_failed`, `status=past_due` | Bloccato | Sostituire carta o completare pagamento |
-| `SUSPENDED` | `customer.subscription.updated` con `status=unpaid` | Bloccato | Regolarizzare abbonamento |
+| `SUSPENDED` | `customer.subscription.updated` con `status=unpaid` oppure cron Fleetum dopo grace PAST_DUE | Bloccato | Regolarizzare abbonamento |
 | `CANCELED` | `customer.subscription.deleted`, `status=canceled` | Bloccato | Riattivare piano |
 | `PENDING` | Tenant creato senza webhook Checkout confermato | Bloccato | Completare Stripe Checkout |
 
@@ -18,6 +18,16 @@ Documento operativo tecnico. Non inserire chiavi Stripe, webhook secret, email r
 `BILLING_PAST_DUE_GRACE_DAYS` indica la finestra usata per comunicazioni e dunning operativo.
 
 Non e' un bypass del license guard: in Fleetum `PAST_DUE`, `SUSPENDED`, `CANCELED`, `EXPIRED` e `PENDING` restano bloccati sulle API operative. Le route self-service `/activate` e `/upgrade` restano raggiungibili per permettere recupero pagamento o riattivazione.
+
+Fleetum esegue anche un cron tecnico di dunning:
+
+```text
+BILLING_DUNNING_CRON_ENABLED=true
+BILLING_DUNNING_CRON_SCHEDULE="15 * * * *"
+BILLING_DUNNING_BATCH_SIZE=100
+```
+
+Il cron cerca subscription Stripe in `PAST_DUE` da piu' di `BILLING_PAST_DUE_GRACE_DAYS` e le porta a `SUSPENDED`, scrivendo audit log e accodando email. Questo rende prevedibile la sospensione anche se Stripe resta in `past_due` piu' a lungo o se la configurazione dunning Stripe non manda subito `status=unpaid`.
 
 ## Email automatiche
 
@@ -70,8 +80,8 @@ Le azioni manuali dalla Platform Console devono continuare a essere tracciate co
 2. Verificare `TenantSubscription.status=PAST_DUE`.
 3. Verificare blocco accesso dashboard e accesso a `/upgrade`.
 4. Verificare email `BILLING_PAYMENT_FAILED` in `EmailQueue`.
-5. Simulare `customer.subscription.updated` con `status=unpaid`.
-6. Verificare `TenantSubscription.status=SUSPENDED`.
+5. Simulare `customer.subscription.updated` con `status=unpaid` oppure forzare un record `PAST_DUE` oltre `BILLING_PAST_DUE_GRACE_DAYS` in staging e lanciare il cron.
+6. Verificare `TenantSubscription.status=SUSPENDED` e audit `source=billing_dunning_cron` se la sospensione arriva dal cron.
 7. Simulare `invoice.paid`.
 8. Verificare `TenantSubscription.status=ACTIVE` ed email di riattivazione.
 
