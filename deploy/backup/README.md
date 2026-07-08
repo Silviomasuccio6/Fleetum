@@ -116,30 +116,45 @@ BACKUP_NOTIFY_SUCCESS=true
 GitHub Actions workflow `.github/workflows/backup-restore-test.yml` runs monthly and manually. It SSHes into the VPS and runs:
 
 ```bash
-/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+/opt/fleetum/app/deploy/backup/backup-postgres.sh
+/opt/fleetum/app/deploy/backup/backup-uploads.sh
+RESTORE_DRILL_SOURCE=offsite /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
 
-The restore test:
+The restore drill:
 
-- finds the latest PostgreSQL dump by default;
+- downloads the latest offsite PostgreSQL and uploads backups when `RESTORE_DRILL_SOURCE=offsite`;
 - validates gzip and minimum size;
 - starts an isolated PostgreSQL 16 container;
 - restores the dump;
-- verifies Prisma migrations and public tables;
+- verifies Prisma migrations, public tables and critical table row counts;
+- extracts uploads into a private temporary directory and verifies at least one recovered file;
+- writes markdown and JSON reports to `/opt/fleetum/logs/restore-drills`;
+- exposes a safe summary in Platform Console through the backend health endpoint;
 - removes the temporary container unless `KEEP_CONTAINER=true`.
 
 Run manually:
 
 ```bash
-/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+RESTORE_DRILL_SOURCE=offsite /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
 
 Use a specific dump:
 
 ```bash
 BACKUP_FILE=/opt/fleetum/backups/postgres/fleetum-postgres-YYYYMMDDTHHMMSSZ.sql.gz \
+UPLOADS_BACKUP_FILE=/opt/fleetum/backups/uploads/fleetum-uploads-YYYYMMDDTHHMMSSZ.tar.gz \
   /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
+
+Latest reports:
+
+```bash
+cat /opt/fleetum/logs/restore-drills/latest.md
+cat /opt/fleetum/logs/restore-drills/latest.json
+```
+
+Expected Platform status is `PASS`. `MISSING`, `STALE` or `FAIL` means the restore evidence is not production-ready and risky migrations should wait.
 
 ## Security
 

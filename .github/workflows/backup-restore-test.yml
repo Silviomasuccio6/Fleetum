@@ -87,7 +87,9 @@ jobs:
             set -euo pipefail
             cd "$FLEETUM_APP_DIR"
             chmod +x deploy/backup/*.sh
-            ./deploy/backup/restore-postgres-test.sh
+            ./deploy/backup/backup-postgres.sh
+            ./deploy/backup/backup-uploads.sh
+            RESTORE_DRILL_SOURCE=offsite ./deploy/backup/restore-postgres-test.sh
           REMOTE_SCRIPT
 
       - name: Create failure issue

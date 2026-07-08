@@ -270,6 +270,32 @@ export type PlatformSystemHealth = {
       createdAt: string;
     }>;
   };
+  restoreDrill: {
+    status: "PASS" | "FAIL" | "MISSING" | "STALE";
+    summaryFile: string;
+    generatedAt: string | null;
+    ageSeconds: number | null;
+    staleAfterDays: number;
+    source: string | null;
+    postgresBackupFile: string | null;
+    uploadsBackupFile: string | null;
+    rpoSeconds: number | null;
+    rtoSeconds: number | null;
+    migrationsRestored: number;
+    publicTablesRestored: number;
+    tableCounts: Array<{
+      table: string;
+      sourceCount: number;
+      restoredCount: number;
+      status: string;
+    }>;
+    tableMismatches: number;
+    uploads: {
+      status: string;
+      recoveredFileSizeBytes: number | null;
+      recoveredFileSha256Prefix: string | null;
+    };
+  };
   invoices: { errors: number };
 };
 

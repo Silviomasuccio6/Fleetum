@@ -417,12 +417,35 @@ Schedulazione:
 Restore test mensile:
 
 ```bash
-/opt/fleetum/app/deploy/backup/restore-postgres-test.sh
+RESTORE_DRILL_SOURCE=offsite /opt/fleetum/app/deploy/backup/restore-postgres-test.sh
 ```
 
 Il workflow GitHub Actions `Backup Restore Test` lo esegue automaticamente il primo giorno
-del mese e puo' essere lanciato manualmente. In caso di fallimento crea issue GitHub e gli
+del mese e puo' essere lanciato manualmente. Il workflow esegue prima un backup PostgreSQL
+e un backup uploads, poi scarica la copia offsite piu' recente e ripristina tutto in un
+container PostgreSQL temporaneo isolato. In caso di fallimento crea issue GitHub e gli
 script inviano alert via Resend/webhook se configurati.
+
+Report restore drill:
+
+```txt
+/opt/fleetum/logs/restore-drills/latest.md
+/opt/fleetum/logs/restore-drills/latest.json
+```
+
+Il backend legge `logs/restore-drills/latest.json` e mostra lo stato nella Platform Console
+in `Health -> Backup & restore drill`. Stato atteso: `PASS`. Stato `STALE`, `MISSING` o
+`FAIL` deve bloccare migration rischiose finche' non viene eseguito un drill verde.
+
+Metriche esposte su `/api/metrics`:
+
+```txt
+fleetum_restore_drill_status
+fleetum_restore_drill_last_run_timestamp_seconds
+fleetum_restore_drill_rpo_seconds
+fleetum_restore_drill_rto_seconds
+fleetum_restore_drill_table_mismatches
+```
 
 Regole operative:
 

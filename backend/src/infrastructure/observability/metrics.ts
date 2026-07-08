@@ -37,6 +37,14 @@ type RetentionObservation = {
   deletedStoredFileObjects?: number;
 };
 
+type RestoreDrillSummaryObservation = {
+  status: "PASS" | "FAIL" | "MISSING" | "STALE";
+  generatedAt: string | null;
+  rpoSeconds: number | null;
+  rtoSeconds: number | null;
+  tableMismatches: number;
+};
+
 const HTTP_DURATION_BUCKETS_SECONDS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const DB_DURATION_BUCKETS_SECONDS = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5];
 
@@ -142,6 +150,20 @@ export const metrics = {
     setGauge("fleetum_privacy_retention_last_deleted_stored_files", {}, input.deletedStoredFileObjects ?? 0);
   },
 
+  setRestoreDrillSummary(input: RestoreDrillSummaryObservation) {
+    for (const status of ["PASS", "FAIL", "MISSING", "STALE"]) {
+      setGauge("fleetum_restore_drill_status", { status }, input.status === status ? 1 : 0);
+    }
+    setGauge(
+      "fleetum_restore_drill_last_run_timestamp_seconds",
+      {},
+      input.generatedAt ? Math.floor(new Date(input.generatedAt).getTime() / 1000) : 0
+    );
+    setGauge("fleetum_restore_drill_rpo_seconds", {}, input.rpoSeconds ?? -1);
+    setGauge("fleetum_restore_drill_rto_seconds", {}, input.rtoSeconds ?? -1);
+    setGauge("fleetum_restore_drill_table_mismatches", {}, input.tableMismatches);
+  },
+
   setDbAvailable(available: boolean) {
     setGauge("fleetum_db_available", {}, available ? 1 : 0);
   },
@@ -180,6 +202,16 @@ export const metrics = {
       "# TYPE fleetum_privacy_retention_last_tenants gauge",
       "# HELP fleetum_privacy_retention_last_deleted_stored_files Stored file objects deleted by the last retention run.",
       "# TYPE fleetum_privacy_retention_last_deleted_stored_files gauge",
+      "# HELP fleetum_restore_drill_status Latest restore drill status, labelled by status with one active value.",
+      "# TYPE fleetum_restore_drill_status gauge",
+      "# HELP fleetum_restore_drill_last_run_timestamp_seconds Unix timestamp of the latest restore drill report.",
+      "# TYPE fleetum_restore_drill_last_run_timestamp_seconds gauge",
+      "# HELP fleetum_restore_drill_rpo_seconds Observed Recovery Point Objective from latest restore drill.",
+      "# TYPE fleetum_restore_drill_rpo_seconds gauge",
+      "# HELP fleetum_restore_drill_rto_seconds Observed technical Recovery Time Objective from latest restore drill.",
+      "# TYPE fleetum_restore_drill_rto_seconds gauge",
+      "# HELP fleetum_restore_drill_table_mismatches Critical table count mismatches in latest restore drill.",
+      "# TYPE fleetum_restore_drill_table_mismatches gauge",
       "# HELP fleetum_db_available Database readiness gauge, 1 means available.",
       "# TYPE fleetum_db_available gauge"
     ];

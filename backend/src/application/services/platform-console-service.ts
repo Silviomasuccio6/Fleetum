@@ -2,6 +2,7 @@ import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { estimateLicenseMonthlyRevenue, getPlanMonthlyPrice, SAAS_PLANS } from "./feature-entitlements-service.js";
+import { RestoreDrillObservabilityService } from "./restore-drill-observability-service.js";
 import { StorageObservabilityService } from "./storage-observability-service.js";
 
 type LicenseSnapshot = {
@@ -56,6 +57,7 @@ const compactEmail = (value?: string | null) => {
 };
 
 const storageObservabilityService = new StorageObservabilityService();
+const restoreDrillObservabilityService = new RestoreDrillObservabilityService();
 
 export class PlatformConsoleService {
   private async latestLicenses() {
@@ -520,11 +522,12 @@ export class PlatformConsoleService {
       dbStatus = "DOWN";
     }
 
-    const [pendingEmail, failedEmail, invoiceErrors, storageSummary] = await Promise.all([
+    const [pendingEmail, failedEmail, invoiceErrors, storageSummary, restoreDrillSummary] = await Promise.all([
       prisma.emailQueue.count({ where: { status: "PENDING" } }),
       prisma.emailQueue.count({ where: { status: "FAILED" } }),
       prisma.invoice.count({ where: { status: "ERROR" } }),
-      storageObservabilityService.platformSummary()
+      storageObservabilityService.platformSummary(),
+      restoreDrillObservabilityService.platformSummary()
     ]);
 
     return {
@@ -542,6 +545,7 @@ export class PlatformConsoleService {
           status: env.STRIPE_SECRET_KEY ? "CONFIGURED" : "NOT_CONFIGURED"
         },
         storage: storageSummary,
+        restoreDrill: restoreDrillSummary,
         invoices: {
           errors: invoiceErrors
         }
