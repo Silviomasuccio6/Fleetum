@@ -7,11 +7,11 @@ import { AppError } from "../../../shared/errors/app-error.js";
 import { JwtPayload } from "../../../shared/types/auth.js";
 
 export const requirePlatformAuth = async (req: Request, _res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
-  if (!token) throw new AppError("Token platform mancante", 401, "UNAUTHORIZED");
-
   try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+    if (!token) throw new AppError("Token platform mancante", 401, "UNAUTHORIZED");
+
     const payload = jwt.verify(token, env.PLATFORM_JWT_SECRET) as JwtPayload & { iat?: number };
     if (!payload?.platformAdmin || payload.tokenType !== "platform") {
       throw new AppError("Accesso platform negato", 403, "FORBIDDEN");
@@ -30,7 +30,7 @@ export const requirePlatformAuth = async (req: Request, _res: Response, next: Ne
     appendLogContext({ tenantId: payload.tenantId, userId: payload.userId });
     next();
   } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError("Token platform non valido", 401, "UNAUTHORIZED");
+    if (error instanceof AppError) return next(error);
+    return next(new AppError("Token platform non valido", 401, "UNAUTHORIZED"));
   }
 };
