@@ -81,7 +81,7 @@ download_latest_rclone() {
     fail "no offsite $category backup found in $target"
   fi
 
-  log "downloading latest offsite $category backup: $target/$latest_name"
+  log "downloading latest offsite $category backup: $target/$latest_name" >&2
   "$rclone_bin" copyto "$target/$latest_name" "$output_dir/$latest_name" --transfers 1 || \
     fail "offsite rclone download failed for $target/$latest_name"
   printf '%s\n' "$output_dir/$latest_name"
@@ -105,7 +105,7 @@ download_latest_s3() {
     fail "no offsite $category backup found in $prefix"
   fi
 
-  log "downloading latest offsite $category backup: $prefix$latest_name"
+  log "downloading latest offsite $category backup: $prefix$latest_name" >&2
   aws "${endpoint_args[@]}" s3 cp "$prefix$latest_name" "$output_dir/$latest_name" --only-show-errors || \
     fail "offsite S3 download failed for $prefix$latest_name"
   printf '%s\n' "$output_dir/$latest_name"
