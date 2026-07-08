@@ -139,6 +139,11 @@ The restore drill:
 - exposes a safe summary in Platform Console through the backend health endpoint;
 - removes the temporary container unless `KEEP_CONTAINER=true`.
 
+When the production uploads directory contains no files yet, the GitHub Actions
+restore workflow creates a temporary hidden sentinel file with no customer data,
+backs it up, verifies it during restore, and removes it from production at exit.
+This keeps the monthly drill meaningful before the first real uploaded document.
+
 Run manually:
 
 ```bash
