@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { BillingService } from "../../../application/services/billing-service.js";
 import { InvoiceService } from "../../../application/services/invoice-service.js";
-import { checkoutSessionSchema, localCompleteSchema } from "../validators/billing-validators.js";
+import { checkoutSessionSchema, customerPortalSessionSchema, localCompleteSchema } from "../validators/billing-validators.js";
 import { invoiceIdSchema } from "../validators/platform-admin-validators.js";
 
 export class BillingController {
@@ -31,9 +31,12 @@ export class BillingController {
   };
 
   createCustomerPortalSession = async (req: Request, res: Response) => {
+    const input = customerPortalSessionSchema.parse(req.body);
     const result = await this.billingService.createCustomerPortalSession({
       tenantId: req.auth!.tenantId,
-      userId: req.auth!.userId
+      userId: req.auth!.userId,
+      plan: input.plan,
+      billingCycle: input.billingCycle
     });
     res.json(result);
   };

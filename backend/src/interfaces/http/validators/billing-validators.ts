@@ -30,6 +30,17 @@ export const checkoutSessionSchema = z.object({
   analytics: checkoutAnalyticsSchema.optional()
 });
 
+export const customerPortalSessionSchema = z.object({
+  plan: z.enum(["STARTER", "PRO", "ENTERPRISE"]).optional(),
+  billingCycle: z.enum(["monthly", "yearly"]).optional()
+}).refine(
+  (value) => (!value.plan && !value.billingCycle) || (Boolean(value.plan) && Boolean(value.billingCycle)),
+  {
+    message: "Plan and billingCycle must be provided together",
+    path: ["plan"]
+  }
+);
+
 export const localCompleteSchema = z.object({
   plan: z.enum(["STARTER", "PRO", "ENTERPRISE"]),
   billingCycle: z.enum(["monthly", "yearly"]).optional().default("monthly")
