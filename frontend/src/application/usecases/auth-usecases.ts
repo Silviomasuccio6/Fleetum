@@ -40,6 +40,7 @@ export const authUseCases = {
         expiresAt: string | null;
         daysRemaining: number | null;
         expiringSoon: boolean;
+        billingCycle: "monthly" | "yearly";
         provider: "stripe" | "local";
       };
     }>("/auth/me/entitlements"),
@@ -51,6 +52,7 @@ export const authUseCases = {
       expiresAt: string | null;
       daysRemaining: number | null;
       expiringSoon: boolean;
+      billingCycle: "monthly" | "yearly";
       provider: "stripe" | "local";
     }>("/auth/license-status"),
   privacyCurrent: () =>

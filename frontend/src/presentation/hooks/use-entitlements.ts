@@ -13,7 +13,23 @@ import {
 
 export const useEntitlements = () => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const { plan, licenseStatus, provider, priceMonthly, features, loading, loaded, error, setLoading, setEntitlements, setError, reset } = useEntitlementsStore();
+  const {
+    plan,
+    licenseStatus,
+    provider,
+    billingCycle,
+    expiresAt,
+    daysRemaining,
+    priceMonthly,
+    features,
+    loading,
+    loaded,
+    error,
+    setLoading,
+    setEntitlements,
+    setError,
+    reset
+  } = useEntitlementsStore();
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -36,7 +52,10 @@ export const useEntitlements = () => {
           priceMonthly: data.priceMonthly,
           features: (data.features?.length ? data.features : getFeatureListForPlan(normalizedPlan)) ?? [],
           licenseStatus: data.license?.status ?? null,
-          provider: data.license?.provider ?? null
+          provider: data.license?.provider ?? null,
+          billingCycle: data.license?.billingCycle ?? null,
+          expiresAt: data.license?.expiresAt ?? null,
+          daysRemaining: data.license?.daysRemaining ?? null
         });
       })
       .catch(async (err) => {
@@ -50,7 +69,10 @@ export const useEntitlements = () => {
             priceMonthly: PLAN_MONTHLY_PRICING_EUR[normalizedPlan],
             features: getFeatureListForPlan(normalizedPlan),
             licenseStatus: license.status,
-            provider: license.provider
+            provider: license.provider,
+            billingCycle: license.billingCycle ?? null,
+            expiresAt: license.expiresAt ?? null,
+            daysRemaining: license.daysRemaining ?? null
           });
           return;
         } catch {
@@ -71,6 +93,9 @@ export const useEntitlements = () => {
     plan,
     licenseStatus,
     provider,
+    billingCycle,
+    expiresAt,
+    daysRemaining,
     priceMonthly,
     features,
     can,
