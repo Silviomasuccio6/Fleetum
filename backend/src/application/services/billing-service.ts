@@ -482,8 +482,8 @@ export class BillingService {
       }
 
       sessionParams.flow_data = {
-        type: "subscription_update",
-        subscription_update: {
+        type: "subscription_update_confirm",
+        subscription_update_confirm: {
           subscription: subscription.stripeSubscriptionId,
           items: [
             {
@@ -513,7 +513,7 @@ export class BillingService {
       details: {
         stripeCustomerId: subscription.stripeCustomerId,
         stripeSubscriptionId: subscription.stripeSubscriptionId ?? null,
-        flow: isPlanUpdateFlow ? "subscription_update" : "portal_home",
+        flow: isPlanUpdateFlow ? "subscription_update_confirm" : "portal_home",
         currentPlan,
         targetPlan,
         targetBillingCycle,
