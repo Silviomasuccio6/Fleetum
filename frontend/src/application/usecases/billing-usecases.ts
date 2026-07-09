@@ -26,10 +26,10 @@ export const billingUseCases = {
       {},
       { suppressSuccessToast: true }
     ),
-  createCustomerPortalSession: () =>
+  createCustomerPortalSession: (input?: { plan?: SaasPlan; billingCycle?: BillingCycle }) =>
     httpClient.post<{ portalUrl: string }>(
       "/billing/customer-portal-session",
-      {},
+      input ?? {},
       { suppressSuccessToast: true }
     ),
   listInvoices: () =>

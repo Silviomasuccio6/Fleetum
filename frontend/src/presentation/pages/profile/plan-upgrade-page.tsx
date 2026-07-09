@@ -536,7 +536,10 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                       setBusyPlan(entry);
                       try {
                         if (canUsePortalForUpgrade) {
-                          const session = await billingUseCases.createCustomerPortalSession();
+                          const session = await billingUseCases.createCustomerPortalSession({
+                            plan: entry,
+                            billingCycle
+                          });
                           window.location.href = session.portalUrl;
                           return;
                         }
@@ -626,10 +629,12 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </Card>
       ) : null}
 
-      {portalStatus === "returned" ? (
+      {portalStatus === "returned" || portalStatus === "plan-updated" ? (
         <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
           <CardContent className="py-4 text-sm font-semibold">
-            Gestione Stripe completata. Le modifiche a piano e abbonamento vengono applicate quando arriva il webhook verificato.
+            {portalStatus === "plan-updated"
+              ? "Richiesta cambio piano completata. Fleetum aggiorna il piano appena riceve il webhook Stripe verificato."
+              : "Gestione Stripe completata. Le modifiche a piano e abbonamento vengono applicate quando arriva il webhook verificato."}
           </CardContent>
         </Card>
       ) : null}

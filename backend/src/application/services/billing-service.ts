@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
 import {
   BillingCycle,
+  PLAN_LEVELS,
   SaasPlan,
   ensureKnownPlan,
   getPlanMonthlyPrice,
@@ -423,7 +424,7 @@ export class BillingService {
     return { mode: "stripe", checkoutUrl: session.url };
   }
 
-  async createCustomerPortalSession(input: { tenantId: string; userId: string }) {
+  async createCustomerPortalSession(input: { tenantId: string; userId: string; plan?: string; billingCycle?: string }) {
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
       throw new AppError("Stripe non configurato", 500, "STRIPE_NOT_CONFIGURED");
     }
@@ -437,11 +438,71 @@ export class BillingService {
       );
     }
 
-    const session = await this.stripeClient.billingPortal.sessions.create({
+    const targetPlan = input.plan ? ensureKnownPlan(input.plan) : null;
+    const targetBillingCycle = input.billingCycle ? normalizeBillingCycle(input.billingCycle) : null;
+    const isPlanUpdateFlow = Boolean(targetPlan && targetBillingCycle);
+    const currentPlan = ensureKnownPlan(subscription.plan);
+    const returnUrl = env.STRIPE_PORTAL_RETURN_URL || `${env.APP_URL}/upgrade?portal=returned`;
+    const sessionParams: Stripe.BillingPortal.SessionCreateParams = {
       customer: subscription.stripeCustomerId,
-      return_url: env.STRIPE_PORTAL_RETURN_URL || `${env.APP_URL}/upgrade?portal=returned`,
+      return_url: returnUrl,
       configuration: env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID || undefined
-    });
+    };
+
+    if (isPlanUpdateFlow) {
+      if (!subscription.stripeSubscriptionId) {
+        throw new AppError(
+          "Subscription Stripe mancante. Apri il portale clienti per verificare l'abbonamento.",
+          409,
+          "STRIPE_SUBSCRIPTION_MISSING"
+        );
+      }
+
+      if (PLAN_LEVELS[targetPlan!] <= PLAN_LEVELS[currentPlan]) {
+        throw new AppError(
+          "Da questa schermata puoi solo effettuare upgrade. Downgrade e cambi sullo stesso piano vanno gestiti dalla Platform.",
+          409,
+          "BILLING_PLAN_CHANGE_NOT_ALLOWED"
+        );
+      }
+
+      const priceId = env[PLAN_PRICE_ENV_KEYS[targetPlan!][targetBillingCycle!]];
+      if (!priceId) {
+        throw new AppError(`Price Stripe non configurato per ${targetPlan} ${targetBillingCycle}`, 500, "STRIPE_PRICE_MISSING");
+      }
+
+      const stripeSubscription = await this.stripeClient.subscriptions.retrieve(subscription.stripeSubscriptionId);
+      const subscriptionItem = stripeSubscription.items.data[0];
+      if (!subscriptionItem?.id) {
+        throw new AppError(
+          "Subscription Stripe senza item aggiornabile. Verifica la configurazione del prodotto su Stripe.",
+          409,
+          "STRIPE_SUBSCRIPTION_ITEM_MISSING"
+        );
+      }
+
+      sessionParams.flow_data = {
+        type: "subscription_update_confirm",
+        subscription_update_confirm: {
+          subscription: subscription.stripeSubscriptionId,
+          items: [
+            {
+              id: subscriptionItem.id,
+              price: String(priceId),
+              quantity: subscriptionItem.quantity ?? 1
+            }
+          ]
+        },
+        after_completion: {
+          type: "redirect",
+          redirect: {
+            return_url: `${env.APP_URL}/upgrade?portal=plan-updated`
+          }
+        }
+      };
+    }
+
+    const session = await this.stripeClient.billingPortal.sessions.create(sessionParams);
 
     await this.auditRepository.create({
       tenantId: input.tenantId,
@@ -451,6 +512,11 @@ export class BillingService {
       resourceId: session.id,
       details: {
         stripeCustomerId: subscription.stripeCustomerId,
+        stripeSubscriptionId: subscription.stripeSubscriptionId ?? null,
+        flow: isPlanUpdateFlow ? "subscription_update_confirm" : "portal_home",
+        currentPlan,
+        targetPlan,
+        targetBillingCycle,
         hasConfigurationOverride: Boolean(env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID)
       }
     });
