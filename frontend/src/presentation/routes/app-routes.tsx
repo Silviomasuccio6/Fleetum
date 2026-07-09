@@ -38,6 +38,7 @@ const ProfileSettingsPage = lazy(() => import("../pages/profile/profile-settings
 const CompanyProfilePage = lazy(() => import("../pages/profile/company-profile-page").then((m) => ({ default: m.CompanyProfilePage })));
 const BillingActivationPage = lazy(() => import("../pages/billing/billing-activation-page").then((m) => ({ default: m.BillingActivationPage })));
 const BillingSelfServicePage = lazy(() => import("../pages/billing/billing-self-service-page").then((m) => ({ default: m.BillingSelfServicePage })));
+const BillingRecoveryPage = lazy(() => import("../pages/billing/billing-recovery-page").then((m) => ({ default: m.BillingRecoveryPage })));
 const CompanyOnboardingPage = lazy(() => import("../pages/onboarding/company-onboarding-page").then((m) => ({ default: m.CompanyOnboardingPage })));
 
 const withPageLoader = (element: JSX.Element) => <Suspense fallback={<PageLoader />}>{element}</Suspense>;
@@ -71,6 +72,14 @@ export const AppRoutes = () => (
         element={
           <ProtectedRoute>
             {withPageLoader(<BillingSelfServicePage />)}
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing/recovery"
+        element={
+          <ProtectedRoute>
+            {withPageLoader(<BillingRecoveryPage />)}
           </ProtectedRoute>
         }
       />

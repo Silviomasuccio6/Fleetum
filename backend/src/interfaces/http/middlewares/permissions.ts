@@ -10,7 +10,7 @@ export const requirePermissions = (...required: string[]) => {
     if (!req.auth) {
       throw new AppError("Utente non autenticato", 401, "UNAUTHORIZED");
     }
-    policy.assertPermissions({ permissions }, required);
+    policy.assertPermissions({ permissions, roles: req.auth.roles }, required);
     next();
   };
 };

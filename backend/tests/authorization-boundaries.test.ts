@@ -10,6 +10,7 @@ import { statsRoutes } from "../src/interfaces/http/routes/stats-routes.js";
 const controller = {
   createCheckoutSession: async (_req: Request, res: Response) => res.status(201).json({ action: "checkout" }),
   createPaymentMethodSession: async (_req: Request, res: Response) => res.status(201).json({ action: "payment-method" }),
+  createCustomerPortalSession: async (_req: Request, res: Response) => res.status(201).json({ action: "customer-portal" }),
   localComplete: async (_req: Request, res: Response) => res.json({ action: "local-complete" }),
   invoices: async (_req: Request, res: Response) => res.json({ action: "invoices" }),
   invoice: async (_req: Request, res: Response) => res.json({ action: "invoice" }),
@@ -39,7 +40,11 @@ const createApp = () => {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
-    req.auth = { userId: "user-1", tenantId: "tenant-1", roles: ["TEST"], permissions, tokenType: "access" };
+    const roles = String(req.header("x-roles") ?? "TEST")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    req.auth = { userId: "user-1", tenantId: "tenant-1", roles, permissions, tokenType: "access" };
     next();
   });
 
@@ -53,7 +58,13 @@ const createApp = () => {
   return app;
 };
 
-const request = async (app: Express, method: string, path: string, permissions: string[]) => {
+const request = async (
+  app: Express,
+  method: string,
+  path: string,
+  permissions: string[],
+  roles: string[] = ["TEST"]
+) => {
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -61,7 +72,7 @@ const request = async (app: Express, method: string, path: string, permissions: 
   try {
     return await fetch(`http://127.0.0.1:${address.port}${path}`, {
       method,
-      headers: { "x-permissions": permissions.join(",") }
+      headers: { "x-permissions": permissions.join(","), "x-roles": roles.join(",") }
     });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -75,6 +86,14 @@ test("billing management requires billing:manage and invoices require billing:re
   assert.equal((await request(app, "GET", "/billing/invoices", ["vehicles:read"])).status, 403);
   assert.equal((await request(app, "POST", "/billing/checkout-session", ["billing:manage"])).status, 201);
   assert.equal((await request(app, "GET", "/billing/invoices", ["billing:read"])).status, 200);
+});
+
+test("tenant ADMIN keeps billing self-service access when an older session lacks a newly granted permission", async () => {
+  const app = createApp();
+
+  assert.equal((await request(app, "POST", "/billing/payment-method-session", [], ["ADMIN"])).status, 201);
+  assert.equal((await request(app, "POST", "/billing/customer-portal-session", [], ["ADMIN"])).status, 201);
+  assert.equal((await request(app, "POST", "/billing/payment-method-session", [], ["MANAGER"])).status, 403);
 });
 
 test("privacy exports and destructive privacy actions require dedicated permissions", async () => {

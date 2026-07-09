@@ -1,30 +1,40 @@
-import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+import { Link, Navigate } from "react-router-dom";
 import { useEntitlements } from "../../hooks/use-entitlements";
+import { FleetumFullScreenLoader } from "../../components/brand/fleetum-logo-loader";
 import { PlanUpgradePage } from "../profile/plan-upgrade-page";
 
 export const BillingSelfServicePage = () => {
-  const { licenseStatus } = useEntitlements();
-  const canOpenDashboard = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
+  const { licenseStatus, loaded, loading } = useEntitlements();
+  const hasActiveSubscription = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
+
+  if (loading || !loaded) {
+    return <FleetumFullScreenLoader label="Verifica abbonamento" />;
+  }
+
+  if (licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED") {
+    return <Navigate to="/billing/recovery" replace />;
+  }
+
+  if (!hasActiveSubscription) {
+    return <Navigate to="/activate?billing=required" replace />;
+  }
 
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(79,70,229,0.14),transparent_34%),linear-gradient(135deg,#f8fbff_0%,#eef4ff_45%,#f8fafc_100%)] px-4 py-6 text-slate-950 dark:bg-slate-950 dark:text-white md:px-8">
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 pb-6">
-        <Link to={canOpenDashboard ? "/dashboard" : "/activate"} className="inline-flex items-center gap-3 rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-bold shadow-[0_20px_45px_-32px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-950/70">
-          <img className="h-8 w-8" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
-          {canOpenDashboard ? "Torna al gestionale" : "Attiva Fleetum"}
+        <Link
+          to="/dashboard"
+          aria-label="Torna alla dashboard del gestionale"
+          className="inline-flex h-11 items-center gap-2 rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-bold shadow-[0_20px_45px_-32px_rgba(15,23,42,0.45)] backdrop-blur transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:border-white/10 dark:bg-slate-950/70 dark:hover:bg-slate-950"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Torna al gestionale
         </Link>
         <div className="flex items-center gap-2">
           <span className="hidden rounded-full border border-indigo-200 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700 shadow-sm md:inline-flex dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
             Billing sicuro Stripe
           </span>
-          {canOpenDashboard ? (
-            <Link
-              to="/dashboard"
-              className="inline-flex h-10 items-center justify-center rounded-full border border-input bg-white/80 px-4 py-2 text-sm font-semibold text-foreground shadow-[0_10px_24px_-20px_rgba(15,23,42,0.45)] transition hover:bg-white dark:bg-slate-950/55"
-            >
-              Torna alla dashboard
-            </Link>
-          ) : null}
         </div>
       </div>
 

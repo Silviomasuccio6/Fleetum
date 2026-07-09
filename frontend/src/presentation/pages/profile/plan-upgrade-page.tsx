@@ -21,7 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { getBillingStatusNotice } from "./billing-status-copy";
 
 type BillingCycle = "monthly" | "yearly";
-type PlanUpgradeMode = "activation" | "upgrade";
+type PlanUpgradeMode = "activation" | "upgrade" | "recovery";
 type ActivationCheckStatus = "idle" | "checking" | "ready" | "timeout";
 
 const orderedFeatures = getFeatureListForPlan("ENTERPRISE");
@@ -93,6 +93,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const user = useAuthStore((state) => state.user);
   const { plan, licenseStatus, provider, billingCycle: activeBillingCycle, expiresAt, daysRemaining, loading } = useEntitlements();
   const isActivationMode = mode === "activation";
+  const isRecoveryMode = mode === "recovery";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
   const [busyPaymentMethod, setBusyPaymentMethod] = useState(false);
@@ -123,8 +124,14 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const canUpdatePaymentMethod =
     licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED";
   const hasManagedStripeSubscription = provider === "stripe" && canUpdatePaymentMethod;
-  const canReadBilling = user?.permissions.includes("billing:read") ?? false;
-  const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
+  const isTenantAdmin = user?.roles.includes("ADMIN") ?? false;
+  const canReadBilling = isTenantAdmin || (user?.permissions.includes("billing:read") ?? false);
+  const canManageBilling = isTenantAdmin || (user?.permissions.includes("billing:manage") ?? false);
+  const billingActionsUnavailableReason = !canManageBilling
+    ? "Solo l'amministratore dell'azienda puo gestire abbonamento e metodo di pagamento."
+    : !hasManagedStripeSubscription
+      ? "Il piano non risulta ancora collegato a una subscription Stripe gestibile."
+      : null;
   const billingStatusNotice = getBillingStatusNotice(licenseStatus);
 
   const openPaymentMethodSession = async () => {
@@ -264,13 +271,19 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Piano e fatturazione"}
+              {isActivationMode
+                ? "Scegli il piano e attiva Fleetum"
+                : isRecoveryMode
+                  ? "Aggiorna il metodo di pagamento"
+                  : "Piano e fatturazione"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
               {isActivationMode
                 ? "Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial, ma il metodo di pagamento resta necessario per mantenere attivo il gestionale."
-                : "Consulta il piano attuale, aggiorna la carta, scarica fatture e passa a un piano superiore senza perdere accesso ai dati."}
+                : isRecoveryMode
+                  ? "Aggiorna la carta su Stripe per regolarizzare il servizio. Il gestionale resta protetto fino alla conferma del pagamento."
+                  : "Consulta il piano attuale, aggiorna la carta, scarica fatture e passa a un piano superiore senza perdere accesso ai dati."}
             </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -350,6 +363,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
               </Button>
             </div>
+            {billingActionsUnavailableReason ? (
+              <p className="lg:col-span-3 text-xs font-medium text-muted-foreground" role="status">
+                {billingActionsUnavailableReason}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -397,39 +415,42 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </Card>
       ) : null}
 
-      <div
-        className="flex justify-center"
-        style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .1s both" }}
-      >
-        <div className="flex items-center gap-1 rounded-full border border-indigo-200/80 bg-white/90 p-1 shadow-[0_12px_28px_-22px_rgba(79,70,229,0.7)] dark:border-indigo-500/30 dark:bg-slate-900/60">
-          <Button
-            type="button"
-            size="sm"
-            variant={billingCycle === "monthly" ? "default" : "ghost"}
-            className={cn(
-              "h-8 rounded-full px-5 text-xs font-semibold uppercase tracking-[0.08em]",
-              billingCycle === "monthly" && "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-16px_rgba(79,70,229,0.75)]"
-            )}
-            onClick={() => setBillingCycle("monthly")}
-          >
-            Mensile
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={billingCycle === "yearly" ? "default" : "ghost"}
-            className={cn(
-              "h-8 rounded-full px-5 text-xs font-semibold uppercase tracking-[0.08em]",
-              billingCycle === "yearly" && "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-16px_rgba(79,70,229,0.75)]"
-            )}
-            onClick={() => setBillingCycle("yearly")}
-          >
-            Annuale
-          </Button>
+      {!isRecoveryMode ? (
+        <div
+          className="flex justify-center"
+          style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .1s both" }}
+        >
+          <div className="flex items-center gap-1 rounded-full border border-indigo-200/80 bg-white/90 p-1 shadow-[0_12px_28px_-22px_rgba(79,70,229,0.7)] dark:border-indigo-500/30 dark:bg-slate-900/60">
+            <Button
+              type="button"
+              size="sm"
+              variant={billingCycle === "monthly" ? "default" : "ghost"}
+              className={cn(
+                "h-8 rounded-full px-5 text-xs font-semibold uppercase tracking-[0.08em]",
+                billingCycle === "monthly" && "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-16px_rgba(79,70,229,0.75)]"
+              )}
+              onClick={() => setBillingCycle("monthly")}
+            >
+              Mensile
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={billingCycle === "yearly" ? "default" : "ghost"}
+              className={cn(
+                "h-8 rounded-full px-5 text-xs font-semibold uppercase tracking-[0.08em]",
+                billingCycle === "yearly" && "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-16px_rgba(79,70,229,0.75)]"
+              )}
+              onClick={() => setBillingCycle("yearly")}
+            >
+              Annuale
+            </Button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div id="billing-plans" className="grid scroll-mt-24 gap-4 lg:grid-cols-3">
+      {!isRecoveryMode ? (
+        <div id="billing-plans" className="grid scroll-mt-24 gap-4 lg:grid-cols-3">
         {planCards.map(({ entry, features, monthlyPrice, yearlyPrice, isCurrent, isUpgrade, isDowngrade, accent, highlights }, index) => {
           const priceValue = billingCycle === "monthly" ? monthlyPrice : yearlyPrice;
           const priceSuffix = billingCycle === "monthly" ? "/mese" : "/anno";
@@ -573,7 +594,8 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </Card>
           );
         })}
-      </div>
+        </div>
+      ) : null}
 
       {checkoutStatus === "success" ? (
         <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
