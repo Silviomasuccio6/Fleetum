@@ -45,7 +45,7 @@ const initialState = {
 export const useEntitlementsStore = create<EntitlementsState>((set) => ({
   ...initialState,
   setLoading: (loading) => set({ loading }),
-  setEntitlements: ({ plan, priceMonthly, features, licenseStatus, provider }) =>
+  setEntitlements: ({ plan, priceMonthly, features, licenseStatus, provider, billingCycle, expiresAt, daysRemaining }) =>
     set({
       plan: ensureKnownPlan(plan),
       licenseStatus: licenseStatus ?? null,
