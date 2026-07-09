@@ -42,6 +42,18 @@ const formatPrice = (value: number) =>
 const formatMoney = (value: number, currency = "EUR") =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency, minimumFractionDigits: 2 }).format(value);
 const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString("it-IT") : "-");
+const planLabel = (plan?: SaasPlan | null) => (plan ? plan.charAt(0) + plan.slice(1).toLowerCase() : "-");
+const billingCycleLabel = (cycle?: BillingCycle | null) => (cycle === "yearly" ? "Annuale" : cycle === "monthly" ? "Mensile" : "-");
+const licenseStatusLabel = (status?: string | null) => {
+  if (status === "ACTIVE") return "Attivo";
+  if (status === "TRIAL") return "Trial attivo";
+  if (status === "PAST_DUE") return "Pagamento da regolarizzare";
+  if (status === "SUSPENDED") return "Sospeso";
+  if (status === "CANCELED") return "Cancellato";
+  if (status === "EXPIRED") return "Scaduto";
+  if (status === "PENDING") return "In attesa";
+  return "Da verificare";
+};
 
 const getPlanAccent = (plan: SaasPlan) => {
   if (plan === "STARTER") {
@@ -79,7 +91,7 @@ const getPlanHighlights = (plan: SaasPlan) => {
 export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const { plan, licenseStatus, provider, loading } = useEntitlements();
+  const { plan, licenseStatus, provider, billingCycle: activeBillingCycle, expiresAt, daysRemaining, loading } = useEntitlements();
   const isActivationMode = mode === "activation";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [busyPlan, setBusyPlan] = useState<SaasPlan | null>(null);
@@ -98,7 +110,12 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
     total: number;
     currency: string;
   }>>([]);
-  const currentPlan = loading || (licenseStatus !== "ACTIVE" && licenseStatus !== "TRIAL") ? null : plan;
+  const hasKnownPlan =
+    !loading &&
+    Boolean(licenseStatus) &&
+    licenseStatus !== "PENDING" &&
+    licenseStatus !== "EXPIRED";
+  const currentPlan = hasKnownPlan ? plan : null;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
   const paymentMethodStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("payment_method") : null;
   const portalStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("portal") : null;
@@ -154,6 +171,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         const yearlyPrice = Math.round(monthlyPrice * 12 * (1 - annualDiscountRate));
         const isCurrent = entry === currentPlan;
         const isUpgrade = currentPlan ? planRank[entry] > planRank[currentPlan] : false;
+        const isDowngrade = currentPlan ? planRank[entry] < planRank[currentPlan] : false;
 
         return {
           entry,
@@ -162,6 +180,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
           yearlyPrice,
           isCurrent,
           isUpgrade,
+          isDowngrade,
           accent: getPlanAccent(entry),
           highlights: getPlanHighlights(entry)
         };
@@ -245,31 +264,95 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
 
             <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Gestisci piano, fatture e metodo di pagamento"}
+              {isActivationMode ? "Scegli il piano e attiva Fleetum" : "Piano e fatturazione"}
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
               {isActivationMode
                 ? "Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial, ma il metodo di pagamento resta necessario per mantenere attivo il gestionale."
-                : "Aggiorna la carta, apri il portale Stripe o cambia piano senza accedere alla shell operativa quando la licenza non e' attiva."}
+                : "Consulta il piano attuale, aggiorna la carta, scarica fatture e passa a un piano superiore senza perdere accesso ai dati."}
             </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
-                <ShieldCheck className="h-3.5 w-3.5" /> Carta richiesta prima del trial
-              </span>
+              {isActivationMode ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Carta richiesta prima del trial
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/70 bg-sky-50 px-3 py-1 font-semibold text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-200">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Gestione sicura con Stripe
+                </span>
+              )}
               <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
                 Sconto annuale {Math.round(annualDiscountRate * 100)}%
               </span>
               {currentPlan ? (
                 <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
-                  Piano attivo: {currentPlan}
+                  Piano attuale: {planLabel(currentPlan)}
                 </span>
               ) : null}
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {!isActivationMode ? (
+        <Card className="overflow-hidden border-indigo-200/80 bg-white/90 shadow-[0_24px_70px_-48px_rgba(30,64,175,0.55)] dark:border-indigo-500/25 dark:bg-slate-950/60">
+          <CardContent className="grid gap-4 p-5 lg:grid-cols-[1.3fr_0.9fr_0.9fr] lg:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Piano corrente</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <h3 className="text-2xl font-semibold text-foreground">{currentPlan ? planLabel(currentPlan) : "Piano non attivo"}</h3>
+                <span className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-semibold",
+                  licenseStatus === "ACTIVE" || licenseStatus === "TRIAL"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"
+                    : "bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-100"
+                )}>
+                  {licenseStatusLabel(licenseStatus)}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {hasManagedStripeSubscription
+                  ? "La subscription e' gestita da Stripe. Upgrade, fatture e carta passano dal portale sicuro."
+                  : "Se il piano non e' collegato a Stripe, la modifica va completata con checkout o assistenza Fleetum."}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-muted/25 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Fatturazione</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{billingCycleLabel(activeBillingCycle)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {expiresAt
+                  ? `${licenseStatus === "TRIAL" ? "Fine trial" : "Prossimo rinnovo"}: ${formatDate(expiresAt)}${daysRemaining !== null ? ` (${daysRemaining} giorni)` : ""}`
+                  : "Scadenza non disponibile"}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                className="w-full"
+                disabled={!canManageBilling || !hasManagedStripeSubscription || busyPortal}
+                onClick={() => void openCustomerPortalSession()}
+              >
+                <ExternalLink className="h-4 w-4" />
+                {busyPortal ? "Apertura Stripe..." : "Apri portale Stripe"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={!canManageBilling || !canUpdatePaymentMethod || busyPaymentMethod}
+                onClick={() => void openPaymentMethodSession()}
+              >
+                <CreditCard className="h-4 w-4" />
+                {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {welcomeStatus === "billing" ? (
         <Card className="border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
@@ -314,40 +397,6 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </Card>
       ) : null}
 
-      {hasManagedStripeSubscription && canManageBilling ? (
-        <Card className="border-sky-200/80 bg-sky-50/80 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
-          <CardContent className="flex flex-col gap-3 py-4 text-sm md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="font-semibold">Abbonamento e metodo di pagamento</p>
-              <p className="text-sky-800/80 dark:text-sky-100/75">
-                Gestisci su Stripe fatture, piano e cancellazione. Per sostituire la carta usa l'azione dedicata: Fleetum non offre la rimozione del metodo di pagamento.
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <Button
-                type="button"
-                className="bg-sky-700 text-white hover:bg-sky-800 dark:bg-sky-500 dark:hover:bg-sky-400"
-                disabled={busyPortal}
-                onClick={() => void openCustomerPortalSession()}
-              >
-                <ExternalLink className="h-4 w-4" />
-                {busyPortal ? "Apertura Stripe..." : "Gestisci abbonamento"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="border-sky-300 bg-white/80 text-sky-900 hover:bg-white dark:border-sky-500/40 dark:bg-slate-950/40 dark:text-sky-100"
-                disabled={busyPaymentMethod}
-                onClick={() => void openPaymentMethodSession()}
-              >
-                <CreditCard className="h-4 w-4" />
-                {busyPaymentMethod ? "Apertura Stripe..." : "Sostituisci carta"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <div
         className="flex justify-center"
         style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .1s both" }}
@@ -381,17 +430,34 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       </div>
 
       <div id="billing-plans" className="grid scroll-mt-24 gap-4 lg:grid-cols-3">
-        {planCards.map(({ entry, features, monthlyPrice, yearlyPrice, isCurrent, isUpgrade, accent, highlights }, index) => {
+        {planCards.map(({ entry, features, monthlyPrice, yearlyPrice, isCurrent, isUpgrade, isDowngrade, accent, highlights }, index) => {
           const priceValue = billingCycle === "monthly" ? monthlyPrice : yearlyPrice;
           const priceSuffix = billingCycle === "monthly" ? "/mese" : "/anno";
-          const buttonLabel = !canManageBilling
-            ? "Solo amministratore"
-            : isCurrent
-              ? "Piano attivo"
-              : hasManagedStripeSubscription
-                ? "Gestisci su Stripe"
-                : "Prova 14 giorni con carta";
-          const planCheckoutDisabled = !canManageBilling || busyPlan !== null || (hasManagedStripeSubscription && !isCurrent);
+          const isLockedLowerPlan = !isActivationMode && isDowngrade;
+          const canUsePortalForUpgrade = !isActivationMode && hasManagedStripeSubscription && isUpgrade;
+          const canUseCheckoutForPlan = isActivationMode;
+          const buttonLabel = loading
+            ? "Verifico piano..."
+            : !canManageBilling
+              ? "Solo amministratore"
+              : isCurrent
+                ? licenseStatus === "TRIAL"
+                  ? "Trial attivo"
+                  : "Piano attivo"
+                : isLockedLowerPlan
+                  ? "Piano inferiore bloccato"
+                  : canUsePortalForUpgrade
+                    ? `Passa a ${planLabel(entry)}`
+                    : isActivationMode
+                      ? "Prova 14 giorni con carta"
+                      : "Gestione da Platform";
+          const planActionDisabled =
+            loading ||
+            !canManageBilling ||
+            busyPlan !== null ||
+            isCurrent ||
+            isLockedLowerPlan ||
+            (!canUsePortalForUpgrade && !canUseCheckoutForPlan);
 
           return (
             <Card
@@ -419,9 +485,21 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 <div>
                   <p className="text-3xl font-semibold tracking-tight text-foreground">{formatPrice(priceValue)}</p>
                   <p className="text-xs text-muted-foreground">{priceSuffix}</p>
-                  {!hasManagedStripeSubscription ? (
+                  {isActivationMode ? (
                     <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
                       14 giorni di prova, carta richiesta ora, primo addebito dopo il trial.
+                    </p>
+                  ) : isCurrent ? (
+                    <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
+                      Questo e' il piano attualmente assegnato al tuo tenant.
+                    </p>
+                  ) : isLockedLowerPlan ? (
+                    <p className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                      Downgrade bloccato da questa schermata per evitare perdita di funzionalita.
+                    </p>
+                  ) : isUpgrade ? (
+                    <p className="mt-1 text-xs font-semibold text-indigo-600 dark:text-indigo-300">
+                      Upgrade disponibile tramite gestione sicura Stripe.
                     </p>
                   ) : null}
                 </div>
@@ -446,17 +524,23 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
 
                 {isCurrent ? (
                   <Button className="w-full" disabled>
-                    Piano attivo
+                    {buttonLabel}
                   </Button>
                 ) : (
                   <button
                     type="button"
-                    disabled={planCheckoutDisabled}
+                    disabled={planActionDisabled}
                     onClick={async () => {
-                      if (planCheckoutDisabled) return;
+                      if (planActionDisabled) return;
                       setCheckoutError(null);
                       setBusyPlan(entry);
                       try {
+                        if (canUsePortalForUpgrade) {
+                          const session = await billingUseCases.createCustomerPortalSession();
+                          window.location.href = session.portalUrl;
+                          return;
+                        }
+
                         trackPublicEvent("STRIPE_CHECKOUT_STARTED", { plan: entry, billingCycle, mode });
                         const session = await billingUseCases.createCheckoutSession({
                           plan: entry,
@@ -471,7 +555,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                     }}
                     className={cn(
                       "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition",
-                      planCheckoutDisabled
+                      planActionDisabled
                         ? "cursor-not-allowed border border-input bg-muted text-muted-foreground opacity-70"
                         : !currentPlan || isUpgrade
                           ? "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-14px_rgba(79,70,229,0.65)] hover:brightness-110"
@@ -657,7 +741,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .5s both" }}>
         <CardContent className="flex flex-col items-center gap-3 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-muted-foreground">
-            Upgrade o downgrade vengono applicati dalla Platform Console per evitare abbonamenti Stripe duplicati. Nessuna perdita dati, nessun blocco operativo.
+            Gli upgrade vengono gestiti dal Customer Portal Stripe per evitare abbonamenti duplicati. I downgrade restano bloccati da questa schermata e vanno valutati con il supporto Fleetum.
           </p>
           <button
             type="button"
