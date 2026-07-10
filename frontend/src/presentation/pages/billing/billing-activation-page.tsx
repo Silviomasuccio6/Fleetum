@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { FleetumFullScreenLoader } from "../../components/brand/fleetum-logo-loader";
+import { useEntitlements } from "../../hooks/use-entitlements";
 import { PlanUpgradePage } from "../profile/plan-upgrade-page";
 
 export const BillingActivationPage = () => {
   const [profileGate, setProfileGate] = useState<"checking" | "ready" | "required">("checking");
+  const { licenseStatus, loaded, loading } = useEntitlements();
+  const hasActiveSubscription = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
 
   useEffect(() => {
     let cancelled = false;
@@ -23,6 +26,20 @@ export const BillingActivationPage = () => {
       cancelled = true;
     };
   }, []);
+
+  if (loading || !loaded) {
+    return <FleetumFullScreenLoader label="Verifica abbonamento" />;
+  }
+
+  // The activation URL can be kept in an old tab or bookmark. Never show
+  // activation checkout again to a tenant that already has a valid license.
+  if (hasActiveSubscription) {
+    return <Navigate to="/upgrade" replace />;
+  }
+
+  if (licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED") {
+    return <Navigate to="/billing/recovery" replace />;
+  }
 
   if (profileGate === "checking") {
     return <FleetumFullScreenLoader label="Verifica dati aziendali" />;
