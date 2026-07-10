@@ -72,6 +72,9 @@ export const BillingActivatedRoute = ({ children }: { children: JSX.Element }) =
 
   if (!status || !OPERATIVE_STATUSES.includes(status)) {
     const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    if (status === "PAST_DUE" || status === "SUSPENDED") {
+      return <Navigate to={`/billing/recovery?returnTo=${encodeURIComponent(returnTo)}`} replace />;
+    }
     return <Navigate to={`/activate?billing=required&returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
 

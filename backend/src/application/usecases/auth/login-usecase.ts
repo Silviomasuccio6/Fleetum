@@ -74,6 +74,7 @@ export class LoginUseCase {
       access.reason === "LICENSE_PENDING" ||
       access.reason === "LICENSE_EXPIRED" ||
       access.reason === "LICENSE_PAST_DUE" ||
+      access.reason === "LICENSE_SUSPENDED" ||
       access.reason === "LICENSE_CANCELED";
     if (access.blocked && !canAuthenticateForBilling) {
       if (access.reason === "TENANT_INACTIVE") throw new AppError("Tenant disattivato. Contatta l'amministratore.", 403, "TENANT_INACTIVE");
