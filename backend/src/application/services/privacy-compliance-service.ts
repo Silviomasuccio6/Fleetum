@@ -6,6 +6,10 @@ import { metrics } from "../../infrastructure/observability/metrics.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import {
+  RENTAL_CUSTOMER_DATA_EXPORT_SCHEMA_VERSION,
+  RENTAL_CUSTOMER_EXPORT_RELATION_INVENTORY
+} from "./rental-customer-data-export-inventory.js";
 import { buildRentalCustomerAnonymizationData } from "./rental-customer-pii.js";
 
 const retentionDefaults = {
@@ -44,6 +48,36 @@ const scrubJson = (value: unknown): unknown => {
   return Object.fromEntries(
     Object.entries(source).map(([key, nested]) => [key, blocked.has(key) ? "[redacted]" : scrubJson(nested)])
   );
+};
+
+const exportBlockedInternalKeys = new Set([
+  "password",
+  "passwordhash",
+  "token",
+  "accesstoken",
+  "refreshtoken",
+  "clientsecret",
+  "secret",
+  "stripecustomerid",
+  "stripepaymentmethodid",
+  "stripesetupintentid",
+  "stripepaymentintentid",
+  "stripesessionid",
+  "storagekey",
+  "bucket",
+  "signedurl",
+  "contentbase64"
+]);
+
+const scrubExportInternalValues = (value: unknown): unknown => {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map(scrubExportInternalValues);
+  if (typeof value !== "object") return value;
+
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, nested]) => {
+    const normalizedKey = key.replace(/[_-]/g, "").toLowerCase();
+    return [key, exportBlockedInternalKeys.has(normalizedKey) ? "[excluded]" : scrubExportInternalValues(nested)];
+  }));
 };
 
 export class PrivacyComplianceService {
@@ -119,7 +153,6 @@ export class PrivacyComplianceService {
           orderBy: { createdAt: "desc" }
         },
         bookings: {
-          where: { deletedAt: null },
           orderBy: { pickupAt: "desc" },
           select: {
             id: true,
@@ -127,39 +160,317 @@ export class PrivacyComplianceService {
             status: true,
             contractStatus: true,
             cargosStatus: true,
+            customerName: true,
+            customerEmail: true,
+            customerPhone: true,
+            customerDocument: true,
             pickupAt: true,
             returnAt: true,
+            pickupLocation: true,
+            returnLocation: true,
             pickupKm: true,
             returnKm: true,
             expectedTotal: true,
             finalTotal: true,
-            vehicle: { select: { plate: true, brand: true, model: true } },
+            reason: true,
+            internalNotes: true,
+            contractSignedAt: true,
+            cargosSentAt: true,
+            cargosOutcomeMessage: true,
+            cargosTransmissionId: true,
+            createdAt: true,
+            updatedAt: true,
+            deletedAt: true,
+            vehicle: { select: { id: true, plate: true, brand: true, model: true } },
+            notes: {
+              select: { id: true, type: true, message: true, createdAt: true },
+              orderBy: { createdAt: "asc" }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                sizeBytes: true,
+                category: true,
+                createdAt: true
+              },
+              orderBy: { createdAt: "asc" }
+            },
+            pricingSnapshot: {
+              select: {
+                id: true,
+                priceListName: true,
+                pricePackageName: true,
+                extraKmPolicyName: true,
+                baseRateUnit: true,
+                baseRateAmount: true,
+                vatRate: true,
+                discountPercent: true,
+                hourOverflowRule: true,
+                estimatedKm: true,
+                actualKm: true,
+                includedKmTotal: true,
+                extraKmEstimated: true,
+                extraKmActual: true,
+                extraKmEstimatedCost: true,
+                extraKmActualCost: true,
+                daysCharged: true,
+                expectedSubtotal: true,
+                expectedTaxAmount: true,
+                expectedTotal: true,
+                finalSubtotal: true,
+                finalTaxAmount: true,
+                finalTotal: true,
+                notes: true,
+                metadata: true,
+                createdAt: true,
+                updatedAt: true,
+                deletedAt: true
+              }
+            },
             contract: {
               select: {
                 id: true,
                 status: true,
                 templateVersion: true,
+                title: true,
+                content: true,
+                emailTo: true,
+                emailSubject: true,
+                emailBody: true,
+                pdfFileName: true,
                 pdfGeneratedAt: true,
                 lastSentAt: true,
                 signedAt: true,
+                errorMessage: true,
+                createdAt: true,
+                updatedAt: true,
+                deletedAt: true,
+                events: {
+                  select: { id: true, type: true, message: true, details: true, createdAt: true },
+                  orderBy: { createdAt: "asc" }
+                },
                 deliveries: {
                   select: {
                     id: true,
                     channel: true,
+                    recipient: true,
+                    subject: true,
+                    body: true,
                     status: true,
                     sentAt: true,
+                    details: true,
+                    errorMessage: true,
                     createdAt: true
                   },
-                  orderBy: { createdAt: "desc" }
+                  orderBy: { createdAt: "asc" }
                 }
               }
             }
           }
+        },
+        paymentProfiles: {
+          select: { id: true, status: true, createdAt: true, updatedAt: true, deletedAt: true },
+          orderBy: { createdAt: "asc" }
+        },
+        paymentMethods: {
+          select: {
+            id: true,
+            bookingId: true,
+            cardBrand: true,
+            cardLast4: true,
+            cardExpMonth: true,
+            cardExpYear: true,
+            cardholderName: true,
+            status: true,
+            mandateAccepted: true,
+            mandateAcceptedAt: true,
+            mandateIp: true,
+            mandateUserAgent: true,
+            termsVersion: true,
+            isDefault: true,
+            createdAt: true,
+            updatedAt: true,
+            deletedAt: true
+          },
+          orderBy: { createdAt: "asc" }
+        },
+        rentalDeposits: {
+          select: {
+            id: true,
+            bookingId: true,
+            vehicleId: true,
+            paymentMethodId: true,
+            amountCents: true,
+            capturedAmountCents: true,
+            currency: true,
+            status: true,
+            failureReason: true,
+            authorizedAt: true,
+            capturedAt: true,
+            releasedAt: true,
+            createdAt: true,
+            updatedAt: true,
+            deletedAt: true
+          },
+          orderBy: { createdAt: "asc" }
+        },
+        rentalExtraCharges: {
+          select: {
+            id: true,
+            bookingId: true,
+            vehicleId: true,
+            paymentMethodId: true,
+            type: true,
+            description: true,
+            amountCents: true,
+            adminFeeCents: true,
+            totalAmountCents: true,
+            currency: true,
+            status: true,
+            evidenceFileUrl: true,
+            notifiedAt: true,
+            chargedAt: true,
+            failureReason: true,
+            createdAt: true,
+            updatedAt: true,
+            deletedAt: true
+          },
+          orderBy: { createdAt: "asc" }
+        },
+        rentalPaymentEvents: {
+          select: {
+            id: true,
+            provider: true,
+            eventId: true,
+            type: true,
+            paymentProfileId: true,
+            paymentMethodId: true,
+            depositId: true,
+            extraChargeId: true,
+            bookingId: true,
+            processedAt: true,
+            status: true,
+            errorMessage: true,
+            createdAt: true,
+            updatedAt: true,
+            deletedAt: true
+          },
+          orderBy: { createdAt: "asc" }
         }
       }
     });
 
     if (!customer) throw new AppError("Cliente non trovato", 404, "CUSTOMER_NOT_FOUND");
+
+    const {
+      attachments,
+      bookings,
+      paymentProfiles,
+      paymentMethods,
+      rentalDeposits,
+      rentalExtraCharges,
+      rentalPaymentEvents,
+      ...profile
+    } = customer;
+    const bookingIds = bookings.map((booking) => booking.id);
+    const contractIds = bookings.flatMap((booking) => booking.contract ? [booking.contract.id] : []);
+    const attachmentIds = attachments.map((attachment) => attachment.id);
+    const relatedResourceIds = Array.from(new Set([
+      input.customerId,
+      ...bookingIds,
+      ...contractIds,
+      ...attachmentIds,
+      ...rentalDeposits.map((deposit) => deposit.id),
+      ...rentalExtraCharges.map((charge) => charge.id)
+    ]));
+    const contractDeliveries = bookings.flatMap((booking) => booking.contract?.deliveries ?? []);
+    const communicationRecipients = Array.from(new Set([
+      profile.email,
+      ...bookings.map((booking) => booking.customerEmail),
+      ...contractDeliveries.map((delivery) => delivery.recipient)
+    ].filter((value): value is string => Boolean(value))));
+    const emailFilter = communicationRecipients.length
+      ? { tenantId: input.tenantId, recipient: { in: communicationRecipients } }
+      : null;
+
+    const [consents, emailQueue, auditTrail, storedFiles] = await Promise.all([
+      prisma.consentLog.findMany({
+        where: {
+          tenantId: input.tenantId,
+          OR: [
+            { customerId: input.customerId },
+            { subjectType: "rental_customer", subjectId: input.customerId }
+          ]
+        },
+        select: {
+          id: true,
+          subjectType: true,
+          subjectId: true,
+          consentType: true,
+          granted: true,
+          channel: true,
+          source: true,
+          ipAddress: true,
+          userAgent: true,
+          documentCode: true,
+          documentVersion: true,
+          metadata: true,
+          createdAt: true
+        },
+        orderBy: { createdAt: "asc" }
+      }),
+      emailFilter
+        ? prisma.emailQueue.findMany({
+            where: emailFilter,
+            select: {
+              id: true,
+              type: true,
+              recipient: true,
+              subject: true,
+              body: true,
+              status: true,
+              attempts: true,
+              maxAttempts: true,
+              nextAttemptAt: true,
+              lastError: true,
+              createdAt: true,
+              updatedAt: true
+            },
+            orderBy: { createdAt: "asc" }
+          })
+        : Promise.resolve([]),
+      prisma.auditLog.findMany({
+        where: { tenantId: input.tenantId, resourceId: { in: relatedResourceIds } },
+        select: { id: true, action: true, resource: true, resourceId: true, details: true, createdAt: true },
+        orderBy: { createdAt: "asc" }
+      }),
+      prisma.storedFileObject.findMany({
+        where: { tenantId: input.tenantId, resourceId: { in: relatedResourceIds } },
+        select: {
+          id: true,
+          originalName: true,
+          mimeType: true,
+          sizeBytes: true,
+          checksumSha256: true,
+          resourceType: true,
+          resourceId: true,
+          visibility: true,
+          createdAt: true,
+          deletedAt: true
+        },
+        orderBy: { createdAt: "asc" }
+      })
+    ]);
+    const exportedConsents = consents.map((consent) => ({
+      ...consent,
+      metadata: scrubExportInternalValues(consent.metadata)
+    }));
+    const exportedAuditTrail = auditTrail.map((event) => ({
+      ...event,
+      details: scrubExportInternalValues(event.details)
+    }));
 
     await this.auditRepository.create({
       tenantId: input.tenantId,
@@ -168,15 +479,47 @@ export class PrivacyComplianceService {
       resource: "RentalCustomer",
       resourceId: input.customerId,
       details: {
-        bookings: customer.bookings.length,
-        attachments: customer.attachments.length
+        schemaVersion: RENTAL_CUSTOMER_DATA_EXPORT_SCHEMA_VERSION,
+        bookings: bookings.length,
+        attachments: attachments.length,
+        paymentRecords:
+          paymentProfiles.length + paymentMethods.length + rentalDeposits.length +
+          rentalExtraCharges.length + rentalPaymentEvents.length,
+        consents: exportedConsents.length,
+        communications: contractDeliveries.length + emailQueue.length,
+        auditEvents: exportedAuditTrail.length,
+        storedFiles: storedFiles.length
       }
     });
 
     return {
+      schemaVersion: RENTAL_CUSTOMER_DATA_EXPORT_SCHEMA_VERSION,
       generatedAt: new Date().toISOString(),
       scope: "rental_customer",
-      customer
+      subject: { type: "rental_customer", id: input.customerId },
+      data: {
+        profile,
+        attachments,
+        bookings,
+        payments: {
+          profiles: paymentProfiles,
+          methods: paymentMethods,
+          deposits: rentalDeposits,
+          extraCharges: rentalExtraCharges,
+          events: rentalPaymentEvents
+        },
+        consents: exportedConsents,
+        communications: { contractDeliveries, emailQueue },
+        auditTrail: exportedAuditTrail,
+        storedFiles
+      },
+      inventory: RENTAL_CUSTOMER_EXPORT_RELATION_INVENTORY,
+      securityExclusions: {
+        rawProviderPayloads: "Excluded to prevent disclosure of provider secrets and unrelated payload data.",
+        reusableProviderIdentifiers: "Stripe customer, payment method, setup intent and payment intent identifiers are excluded.",
+        storageLocations: "Provider buckets, storage keys and newly generated signed URLs are excluded; file metadata remains included.",
+        embeddedAttachments: "Binary and Base64 attachments are not embedded in this JSON export."
+      }
     };
   }
 
