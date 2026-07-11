@@ -6,9 +6,11 @@ import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import { getConsentedPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import {
+  ANNUAL_DISCOUNT_PERCENT,
   FeatureKey,
   getFeatureListForPlan,
   PLAN_MONTHLY_PRICING_EUR,
+  PLAN_YEARLY_PRICING_EUR,
   SAAS_PLANS,
   SaasPlan
 } from "../../../domain/constants/entitlements";
@@ -25,8 +27,6 @@ type PlanUpgradeMode = "activation" | "upgrade" | "recovery";
 type ActivationCheckStatus = "idle" | "checking" | "ready" | "timeout";
 
 const orderedFeatures = getFeatureListForPlan("ENTERPRISE");
-const annualDiscountRate = 0.15;
-
 const planRank: Record<SaasPlan, number> = {
   STARTER: 0,
   PRO: 1,
@@ -37,7 +37,8 @@ const formatPrice = (value: number) =>
   new Intl.NumberFormat("it-IT", {
     style: "currency",
     currency: "EUR",
-    maximumFractionDigits: 0
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2
   }).format(value);
 const formatMoney = (value: number, currency = "EUR") =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency, minimumFractionDigits: 2 }).format(value);
@@ -175,7 +176,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
     () =>
       SAAS_PLANS.map((entry) => {
         const monthlyPrice = PLAN_MONTHLY_PRICING_EUR[entry];
-        const yearlyPrice = Math.round(monthlyPrice * 12 * (1 - annualDiscountRate));
+        const yearlyPrice = PLAN_YEARLY_PRICING_EUR[entry];
         const isCurrent = entry === currentPlan;
         const isUpgrade = currentPlan ? planRank[entry] > planRank[currentPlan] : false;
         const isDowngrade = currentPlan ? planRank[entry] < planRank[currentPlan] : false;
@@ -297,7 +298,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 </span>
               )}
               <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
-                Sconto annuale {Math.round(annualDiscountRate * 100)}%
+                Sconto annuale {ANNUAL_DISCOUNT_PERCENT}%
               </span>
               {currentPlan ? (
                 <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">

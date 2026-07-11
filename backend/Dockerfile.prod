@@ -4,11 +4,13 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
+COPY packages/commercial-plan-catalog/package.json packages/commercial-plan-catalog/package.json
 
 RUN npm ci --workspace backend
 RUN mkdir -p backend/node_modules
 
 COPY backend backend
+COPY packages/commercial-plan-catalog packages/commercial-plan-catalog
 
 RUN npm run prisma:generate -w backend
 RUN npm run build -w backend
@@ -26,6 +28,7 @@ COPY --from=build /app/backend/package.json ./package.json
 COPY --from=build /app/backend/node_modules ./node_modules
 COPY --from=build /app/backend/dist ./dist
 COPY --from=build /app/backend/prisma ./prisma
+COPY --from=build /app/packages/commercial-plan-catalog /app/packages/commercial-plan-catalog
 
 # Fail the image build if the transactional email runtime dependency is missing.
 RUN node -e "require.resolve('resend')"

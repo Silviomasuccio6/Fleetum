@@ -4,11 +4,13 @@
 
 Il gestionale usa un modello SaaS con piani:
 
-| Piano | Prezzo mensile |
-| --- | ---: |
-| STARTER | 149 EUR |
-| PRO | 199 EUR |
-| ENTERPRISE | 249 EUR |
+| Piano | Mensile IVA inclusa | Annuale IVA inclusa (-15%) |
+| --- | ---: | ---: |
+| STARTER | 149 EUR | 1.519,80 EUR |
+| PRO | 199 EUR | 2.029,80 EUR |
+| ENTERPRISE | 249 EUR | 2.539,80 EUR |
+
+La sorgente applicativa unica e `@fleetum/commercial-plan-catalog`. Landing, attivazione, backend e Platform Console non devono dichiarare importi commerciali propri.
 
 Ogni nuovo tenant parte in `PENDING`. L'accesso operativo al gestionale si abilita solo quando Stripe conferma una subscription `trialing` o `active` tramite webhook verificato. Prima dell'accesso l'utente passa dalla pagina dedicata `/activate`.
 
@@ -79,6 +81,14 @@ Poi usa Stripe CLI:
 ```bash
 stripe listen --forward-to http://127.0.0.1:4000/api/billing/webhook
 ```
+
+Verifica inoltre che i sei Price Stripe abbiano importo, valuta, periodicita e IVA inclusa coerenti con il catalogo:
+
+```bash
+npm run billing:verify-plan-catalog -w backend
+```
+
+Il comando non stampa chiavi o Price ID e deve essere eseguito separatamente in Test e Live dopo ogni modifica al catalogo Stripe.
 
 Carta test:
 

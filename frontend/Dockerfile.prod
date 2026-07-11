@@ -14,10 +14,12 @@ ENV VITE_GOOGLE_AUTH_URL=$VITE_GOOGLE_AUTH_URL
 
 COPY package.json package-lock.json ./
 COPY frontend/package.json frontend/package.json
+COPY packages/commercial-plan-catalog/package.json packages/commercial-plan-catalog/package.json
 
 RUN npm ci --workspace frontend
 
 COPY frontend frontend
+COPY packages/commercial-plan-catalog packages/commercial-plan-catalog
 
 RUN npm run build -w frontend
 

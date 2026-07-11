@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "workspaces": [
     "backend",
-    "frontend"
+    "frontend",
+    "packages/*"
   ],
   "scripts": {
     "dev": "concurrently --kill-others --kill-others-on-fail --kill-timeout 3000 --names backend,frontend --prefix-colors blue,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",

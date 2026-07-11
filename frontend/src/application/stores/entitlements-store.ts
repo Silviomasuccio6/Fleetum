@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { FeatureKey, SaasPlan, ensureKnownPlan } from "../../domain/constants/entitlements";
+import { FeatureKey, PLAN_MONTHLY_PRICING_EUR, SaasPlan, ensureKnownPlan } from "../../domain/constants/entitlements";
 
 type EntitlementsState = {
   plan: SaasPlan;
@@ -35,7 +35,7 @@ const initialState = {
   billingCycle: null,
   expiresAt: null,
   daysRemaining: null,
-  priceMonthly: 49,
+  priceMonthly: PLAN_MONTHLY_PRICING_EUR.STARTER,
   features: [] as FeatureKey[],
   loading: false,
   loaded: false,
@@ -53,7 +53,7 @@ export const useEntitlementsStore = create<EntitlementsState>((set) => ({
       billingCycle: billingCycle ?? null,
       expiresAt: expiresAt ?? null,
       daysRemaining: typeof daysRemaining === "number" ? daysRemaining : null,
-      priceMonthly: Number.isFinite(priceMonthly) && priceMonthly > 0 ? priceMonthly : 49,
+      priceMonthly: Number.isFinite(priceMonthly) && priceMonthly > 0 ? priceMonthly : PLAN_MONTHLY_PRICING_EUR.STARTER,
       features: features.filter(Boolean) as FeatureKey[],
       loading: false,
       loaded: true,

@@ -27,6 +27,12 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import {
+  COMMERCIAL_PLAN_CATALOG,
+  PLAN_MONTHLY_PRICING_EUR,
+  SAAS_PLANS,
+  type SaasPlan
+} from "../../../domain/constants/entitlements";
 import { SeoHead } from "../../components/seo/seo-head";
 import "./landing.css";
 
@@ -219,27 +225,36 @@ const securityItems = [
   { icon: WalletCards, title: "SaaS monetizzabile", text: "Piani, upgrade e processi commerciali pensati per una piattaforma B2B." },
 ];
 
-const plans = [
-  {
-    name: "Starter",
-    price: "129€",
+const landingPlanCopy: Record<SaasPlan, {
+  target: string;
+  features: string[];
+  highlight?: boolean;
+}> = {
+  STARTER: {
     target: "Per piccoli autonoleggi che vogliono uscire da Excel.",
     features: ["Booking mensile per veicolo", "Clienti e contratti base", "Dashboard operativa", "Scadenze principali"],
   },
-  {
-    name: "Pro",
-    price: "199€",
+  PRO: {
     target: "Per team che gestiscono flotta e contratti ogni giorno.",
     features: ["Contratti evoluti e invii", "Scadenze e manutenzioni", "Statistiche, alert e listini", "Priorita operative giornaliere"],
     highlight: true,
   },
-  {
-    name: "Enterprise",
-    price: "249€",
+  ENTERPRISE: {
     target: "Per aziende con piu sedi, processi e governance.",
     features: ["Multi-sede e governance", "Workflow completi", "Supporto scalabilita", "Controllo avanzato contratti"],
   },
-];
+};
+
+const plans = SAAS_PLANS.map((code) => ({
+  code,
+  name: COMMERCIAL_PLAN_CATALOG[code].label,
+  price: new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: COMMERCIAL_PLAN_CATALOG[code].currency,
+    maximumFractionDigits: 0
+  }).format(PLAN_MONTHLY_PRICING_EUR[code]),
+  ...landingPlanCopy[code]
+}));
 
 const LandingHeader = () => {
   const [open, setOpen] = useState(false);
@@ -696,17 +711,17 @@ const PricingSection = () => {
           <article className={`fleetum-price-card ${plan.highlight ? "is-highlight" : ""}`}>
             {plan.highlight ? <span className="fleetum-price-badge">Consigliato</span> : null}
             <h3>{plan.name}</h3>
-            <p className="fleetum-price"><strong>{plan.price}</strong><span>/mese</span></p>
+            <p className="fleetum-price"><strong>{plan.price}</strong><span>/mese, IVA inclusa</span></p>
             <p className="fleetum-price-target">{plan.target}</p>
             <ul>
               {plan.features.map((feature) => <li key={feature}><Check className="h-4 w-4" />{feature}</li>)}
             </ul>
             <Link
-              to={plan.name === "Enterprise" ? "/demo" : "/signup"}
+              to={plan.code === "ENTERPRISE" ? "/demo" : "/signup"}
               className={plan.highlight ? "fleetum-btn fleetum-btn--primary" : "fleetum-btn fleetum-btn--dark"}
-              onClick={() => trackCtaClick("pricing_card", plan.name === "Enterprise" ? "demo" : "signup", { plan: plan.name.toLowerCase() })}
+              onClick={() => trackCtaClick("pricing_card", plan.code === "ENTERPRISE" ? "demo" : "signup", { plan: plan.code.toLowerCase() })}
             >
-              {plan.name === "Enterprise" ? "Parla con noi" : "Inizia ora"}
+              {plan.code === "ENTERPRISE" ? "Parla con noi" : "Inizia ora"}
             </Link>
           </article>
         </Reveal>

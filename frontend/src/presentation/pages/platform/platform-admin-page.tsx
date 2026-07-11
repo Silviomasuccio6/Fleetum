@@ -1625,7 +1625,9 @@ export const PlatformAdminPage = () => {
                       min={0}
                       step="0.01"
                       defaultValue={editingTenant.license?.priceMonthly ?? ""}
-                      placeholder="es. 149"
+                      placeholder={`Standard ${formatCurrency(
+                        PLAN_MONTHLY_PRICING_EUR[normalizePlanTier(editingTenant.license?.plan)]
+                      )}`}
                     />
                   </div>
                   <div className="grid gap-1.5">
