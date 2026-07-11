@@ -6,6 +6,7 @@ import { metrics } from "../../infrastructure/observability/metrics.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { buildRentalCustomerAnonymizationData } from "./rental-customer-pii.js";
 
 const retentionDefaults = {
   expiredTokenRetentionDays: 30,
@@ -238,43 +239,7 @@ export class PrivacyComplianceService {
 
       await tx.rentalCustomer.update({
         where: { id: input.customerId },
-        data: {
-          firstName: "Cliente",
-          lastName: label.replace("Cliente ", ""),
-          drivingLicenseNumber: "",
-          drivingLicenseIssuedAt: null,
-          drivingLicenseExpiresAt: null,
-          drivingLicenseAuthority: null,
-          drivingLicenseCategory: null,
-          email: null,
-          phone: null,
-          dateOfBirth: null,
-          placeOfBirth: null,
-          nationality: null,
-          residenceAddress: null,
-          taxCode: null,
-          documentType: null,
-          documentNumber: null,
-          documentIssuedAt: null,
-          documentExpiresAt: null,
-          documentAuthority: null,
-          companyName: null,
-          companyLegalForm: null,
-          companyVatNumber: null,
-          companyTaxCode: null,
-          companyLegalAddress: null,
-          companyPec: null,
-          companySdi: null,
-          companyRea: null,
-          legalRepFirstName: null,
-          legalRepLastName: null,
-          legalRepTaxCode: null,
-          legalRepRole: null,
-          legalRepEmail: null,
-          legalRepPhone: null,
-          notes: null,
-          deletedAt: now
-        }
+        data: buildRentalCustomerAnonymizationData({ label, deletedAt: now })
       });
 
       await tx.auditLog.create({

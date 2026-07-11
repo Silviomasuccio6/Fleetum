@@ -860,6 +860,7 @@ model RentalCustomer {
   dateOfBirth             DateTime?
   /// @pii
   placeOfBirth            String?
+  /// @pii
   birthCountry            String?
   /// @pii
   birthProvince           String?
@@ -869,9 +870,11 @@ model RentalCustomer {
   birthCity               String?
   /// @pii
   nationality             String?
+  /// @pii
   nationalityCountry      String?
   /// @pii
   residenceAddress        String?
+  /// @pii
   residenceCountry        String?
   /// @pii
   residenceRegion         String?
@@ -907,6 +910,7 @@ model RentalCustomer {
   companyTaxCode          String?
   /// @pii
   companyLegalAddress     String?
+  /// @pii
   companyCountry          String?
   /// @pii
   companyRegion           String?
