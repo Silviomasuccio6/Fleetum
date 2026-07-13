@@ -293,6 +293,7 @@ model TenantSubscription {
   status               String    @default("ACTIVE")
   seats                Int       @default(3)
   priceMonthly         Float?
+  priceMonthlyExact    Decimal?  @ignore @db.Decimal(19, 2)
   stripeCustomerId     String?
   stripeSubscriptionId String?
   currentPeriodEnd     DateTime?
@@ -631,9 +632,12 @@ model Vehicle {
   lastRevisionAt        DateTime?
   revisionDueAt         DateTime?
   purchasePrice         Float?
+  purchasePriceExact    Decimal?             @ignore @db.Decimal(19, 2)
   purchaseDate          DateTime?
   residualValue         Float?
+  residualValueExact    Decimal?             @ignore @db.Decimal(19, 2)
   monthlyFixedCost      Float?
+  monthlyFixedCostExact Decimal?             @ignore @db.Decimal(19, 2)
   /// @pii
   notes                 String?
   isActive              Boolean              @default(true)
@@ -663,6 +667,7 @@ model VehicleCost {
   type        VehicleCostType @default(OTHER)
   description String?
   amount      Float
+  amountExact Decimal         @ignore @db.Decimal(19, 2)
   date        DateTime
   recurring   Boolean         @default(false)
   createdAt   DateTime        @default(now())
@@ -688,6 +693,7 @@ model VehicleMaintenance {
   workshopName    String?
   kmAtService     Int?
   cost            Float?
+  costExact       Decimal?                       @ignore @db.Decimal(19, 2)
   /// @pii
   notes           String?
   createdAt       DateTime                       @default(now())
@@ -712,6 +718,7 @@ model VehicleMaintenanceAttachment {
   mimeType           String
   sizeBytes          Int
   invoiceTotalAmount Float?
+  invoiceTotalAmountExact Decimal?           @ignore @db.Decimal(19, 2)
   createdAt          DateTime           @default(now())
   tenant             Tenant             @relation(fields: [tenantId], references: [id])
   maintenance        VehicleMaintenance @relation(fields: [maintenanceId], references: [id])
@@ -782,7 +789,9 @@ model RentalBooking {
   pickupKm             Int?
   returnKm             Int?
   expectedTotal        Float?
+  expectedTotalExact   Decimal?                      @ignore @db.Decimal(19, 2)
   finalTotal           Float?
+  finalTotalExact      Decimal?                      @ignore @db.Decimal(19, 2)
   /// @pii
   reason               String?
   /// @pii
@@ -1183,8 +1192,11 @@ model RentalPriceList {
   vehicleCategory  String?
   baseRateUnit     RentalBaseRateUnit             @default(DAILY)
   baseRateAmount   Float
+  baseRateAmountExact  Decimal                        @ignore @db.Decimal(19, 4)
   vatRate          Float                          @default(22)
+  vatRateExact         Decimal                        @ignore @db.Decimal(9, 4)
   discountPercent  Float                          @default(0)
+  discountPercentExact Decimal                        @ignore @db.Decimal(9, 4)
   hourOverflowRule RentalHourOverflowRule         @default(FULL_DAY)
   priority         Int                            @default(100)
   createdAt        DateTime                       @default(now())
@@ -1236,6 +1248,7 @@ model RentalExtraKmPolicy {
   name             String
   type             RentalExtraKmPolicyType        @default(FLAT)
   flatRatePerKm    Float?
+  flatRatePerKmExact Decimal?                       @ignore @db.Decimal(19, 4)
   currency         String                         @default("EUR")
   isDefault        Boolean                        @default(false)
   isActive         Boolean                        @default(true)
@@ -1261,6 +1274,7 @@ model RentalExtraKmTier {
   fromKm    Int                 @default(1)
   toKm      Int?
   ratePerKm Float
+  ratePerKmExact Decimal             @ignore @db.Decimal(19, 4)
   sortOrder Int                 @default(0)
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
@@ -1283,8 +1297,11 @@ model RentalBookingPricingSnapshot {
   extraKmPolicyName    String?
   baseRateUnit         RentalBaseRateUnit?
   baseRateAmount       Float?
+  baseRateAmountExact       Decimal?                @ignore @db.Decimal(19, 4)
   vatRate              Float?
+  vatRateExact              Decimal?                @ignore @db.Decimal(9, 4)
   discountPercent      Float?
+  discountPercentExact      Decimal?                @ignore @db.Decimal(9, 4)
   hourOverflowRule     RentalHourOverflowRule?
   estimatedKm          Int?
   actualKm             Int?
@@ -1292,14 +1309,22 @@ model RentalBookingPricingSnapshot {
   extraKmEstimated     Int?
   extraKmActual        Int?
   extraKmEstimatedCost Float?
+  extraKmEstimatedCostExact Decimal?                @ignore @db.Decimal(19, 2)
   extraKmActualCost    Float?
+  extraKmActualCostExact    Decimal?                @ignore @db.Decimal(19, 2)
   daysCharged          Float?
   expectedSubtotal     Float?
+  expectedSubtotalExact     Decimal?                @ignore @db.Decimal(19, 2)
   expectedTaxAmount    Float?
+  expectedTaxAmountExact    Decimal?                @ignore @db.Decimal(19, 2)
   expectedTotal        Float?
+  expectedTotalExact        Decimal?                @ignore @db.Decimal(19, 2)
   finalSubtotal        Float?
+  finalSubtotalExact        Decimal?                @ignore @db.Decimal(19, 2)
   finalTaxAmount       Float?
+  finalTaxAmountExact       Decimal?                @ignore @db.Decimal(19, 2)
   finalTotal           Float?
+  finalTotalExact           Decimal?                @ignore @db.Decimal(19, 2)
   /// @pii
   notes                String?
   /// @pii
@@ -1462,6 +1487,7 @@ model Stoppage {
   priority                 StoppagePriority @default(MEDIUM)
   assignedToUserId         String?
   estimatedCostPerDay      Float?
+  estimatedCostPerDayExact Decimal?         @ignore @db.Decimal(19, 2)
   openedAt                 DateTime
   closedAt                 DateTime?
   reminderAfterDays        Int?
@@ -1752,9 +1778,13 @@ model Invoice {
   status           InvoiceStatus      @default(GENERATED)
   currency         String             @default("EUR")
   subtotal         Float
+  subtotalExact    Decimal           @ignore @db.Decimal(19, 2)
   taxRate          Float
+  taxRateExact     Decimal           @ignore @db.Decimal(9, 4)
   taxAmount        Float
+  taxAmountExact   Decimal           @ignore @db.Decimal(19, 2)
   total            Float
+  totalExact       Decimal           @ignore @db.Decimal(19, 2)
   /// @pii
   billingName      String
   /// @pii
@@ -1795,10 +1825,15 @@ model InvoiceItem {
   description String
   quantity    Float
   unitPrice   Float
+  unitPriceExact Decimal @ignore @db.Decimal(19, 2)
   subtotal    Float
+  subtotalExact  Decimal @ignore @db.Decimal(19, 2)
   taxRate     Float
+  taxRateExact   Decimal @ignore @db.Decimal(9, 4)
   taxAmount   Float
+  taxAmountExact Decimal @ignore @db.Decimal(19, 2)
   total       Float
+  totalExact     Decimal @ignore @db.Decimal(19, 2)
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
