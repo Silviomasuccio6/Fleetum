@@ -1,6 +1,16 @@
-export const SAAS_PLANS = ["STARTER", "PRO", "ENTERPRISE"] as const;
+import {
+  COMMERCIAL_PLAN_CATALOG,
+  PLAN_MONTHLY_PRICING_EUR as SHARED_PLAN_MONTHLY_PRICING_EUR,
+  PLAN_YEARLY_PRICING_EUR as SHARED_PLAN_YEARLY_PRICING_EUR,
+  SAAS_PLAN_CODES
+} from "@fleetum/commercial-plan-catalog";
+import type { SaasPlanCode } from "@fleetum/commercial-plan-catalog";
 
-export type SaasPlan = (typeof SAAS_PLANS)[number];
+export { COMMERCIAL_PLAN_CATALOG };
+
+export const SAAS_PLANS = [...SAAS_PLAN_CODES] as const;
+
+export type SaasPlan = SaasPlanCode;
 
 export const PLAN_LEVELS: Record<SaasPlan, number> = {
   STARTER: 1,
@@ -9,9 +19,11 @@ export const PLAN_LEVELS: Record<SaasPlan, number> = {
 };
 
 export const PLAN_MONTHLY_PRICING_EUR: Record<SaasPlan, number> = {
-  STARTER: 149,
-  PRO: 199,
-  ENTERPRISE: 249
+  ...SHARED_PLAN_MONTHLY_PRICING_EUR
+};
+
+export const PLAN_YEARLY_PRICING_EUR: Record<SaasPlan, number> = {
+  ...SHARED_PLAN_YEARLY_PRICING_EUR
 };
 
 const STARTER_FEATURES = [
@@ -92,6 +104,10 @@ export const getAllowedPlansForFeature = (feature: string): SaasPlan[] => {
 
 export const getPlanMonthlyPrice = (plan: string | null | undefined): number => {
   return PLAN_MONTHLY_PRICING_EUR[ensureKnownPlan(plan)];
+};
+
+export const getPlanYearlyPrice = (plan: string | null | undefined): number => {
+  return PLAN_YEARLY_PRICING_EUR[ensureKnownPlan(plan)];
 };
 
 export type BillingCycle = "monthly" | "yearly";

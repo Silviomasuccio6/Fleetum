@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
 import {
   BillingCycle,
+  COMMERCIAL_PLAN_CATALOG,
   PLAN_LEVELS,
   SaasPlan,
   ensureKnownPlan,
@@ -80,18 +81,9 @@ type BillingServiceDeps = {
 const MANAGED_STRIPE_SUBSCRIPTION_STATUSES = new Set<BillingLicenseStatus>(["ACTIVE", "TRIAL", "PAST_DUE"]);
 
 const PLAN_PRICE_ENV_KEYS: Record<SaasPlan, Record<BillingCycle, keyof typeof env>> = {
-  STARTER: {
-    monthly: "STRIPE_PRICE_STARTER_MONTHLY",
-    yearly: "STRIPE_PRICE_STARTER_YEARLY"
-  },
-  PRO: {
-    monthly: "STRIPE_PRICE_PRO_MONTHLY",
-    yearly: "STRIPE_PRICE_PRO_YEARLY"
-  },
-  ENTERPRISE: {
-    monthly: "STRIPE_PRICE_ENTERPRISE_MONTHLY",
-    yearly: "STRIPE_PRICE_ENTERPRISE_YEARLY"
-  }
+  STARTER: { ...COMMERCIAL_PLAN_CATALOG.STARTER.stripePriceEnv },
+  PRO: { ...COMMERCIAL_PLAN_CATALOG.PRO.stripePriceEnv },
+  ENTERPRISE: { ...COMMERCIAL_PLAN_CATALOG.ENTERPRISE.stripePriceEnv }
 };
 
 const resolvePlanAndCycleFromStripePrice = (source: Record<string, unknown>): { plan: SaasPlan; billingCycle: BillingCycle } | null => {

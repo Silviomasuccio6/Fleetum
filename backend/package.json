@@ -12,6 +12,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
     "seed:demo-tenant": "tsx prisma/seed-demo-tenant.ts",
+    "billing:verify-plan-catalog": "tsx src/scripts/verify-stripe-plan-catalog.ts",
     "privacy:pii-report": "tsx src/scripts/pii-report.ts",
     "privacy:retention:dry-run": "tsx src/scripts/privacy-retention.ts",
     "privacy:retention:run": "tsx src/scripts/privacy-retention.ts --run",
@@ -21,6 +22,7 @@
     "storage:migration-plan": "tsx src/scripts/storage-migration-plan.ts"
   },
   "dependencies": {
+    "@fleetum/commercial-plan-catalog": "1.0.0",
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
