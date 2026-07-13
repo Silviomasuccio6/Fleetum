@@ -324,6 +324,10 @@ main() {
   run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm backend \
     sh -lc 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; fi; npx prisma migrate deploy --schema prisma/schema.prisma'
 
+  log "reconciling exact monetary shadow columns"
+  run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm backend \
+    sh -lc 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; fi; npm run money:reconcile:prod'
+
   log "restarting production containers"
   run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build
 

@@ -75,6 +75,11 @@ The current 72 GB VPS should be expanded to **120-160 GB** before file volume or
 
 ## Migration command
 
+Exact-money migrations include a mandatory reconciliation gate. The safe deploy script
+runs `npm run money:reconcile:prod` after Prisma migrations and before restarting the app.
+Any mismatch stops the release while the previous application remains active. See
+[`docs/database/exact-money-migration.md`](../database/exact-money-migration.md).
+
 ```bash
 cd /opt/fleetum/app
 FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
