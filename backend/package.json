@@ -20,8 +20,8 @@
     "privacy:retention:dry-run": "tsx src/scripts/privacy-retention.ts",
     "privacy:retention:run": "tsx src/scripts/privacy-retention.ts --run",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
-    "test:tenant-isolation": "NODE_ENV=test tsx --test tests/security/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:tenant-isolation": "NODE_ENV=test node --import tsx --test tests/security/*.test.ts",
     "storage:migration-plan": "tsx src/scripts/storage-migration-plan.ts"
   },
   "dependencies": {
