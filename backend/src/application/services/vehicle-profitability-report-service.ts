@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import ExcelJS from "exceljs";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { AppError } from "../../shared/errors/app-error.js";
 
 const DAY_MS = 86_400_000;
@@ -70,11 +71,16 @@ export class VehicleProfitabilityReportService {
       ...(params.siteId ? { siteId: params.siteId } : {})
     };
 
-    const vehicles = await prisma.vehicle.findMany({
+    const vehicleRows = await prisma.vehicle.findMany({
       where: vehicleWhere,
       orderBy: [{ plate: "asc" }],
       include: { site: { select: { id: true, name: true, city: true } } }
     });
+    const vehicles = await exactMoneyReader.hydrate(
+      "Vehicle",
+      vehicleRows,
+      { tenantId }
+    );
 
     if (params.vehicleId && vehicles.length === 0) {
       throw new AppError("Veicolo non trovato", 404, "NOT_FOUND");
@@ -85,7 +91,7 @@ export class VehicleProfitabilityReportService {
       return this.empty(params);
     }
 
-    const [bookings, maintenances, vehicleCosts, stoppages] = await Promise.all([
+    const [bookingRows, maintenanceRows, vehicleCostRows, stoppages] = await Promise.all([
       prisma.rentalBooking.findMany({
         where: {
           tenantId,
@@ -109,7 +115,7 @@ export class VehicleProfitabilityReportService {
           vehicleId: { in: vehicleIds },
           performedAt: { gte: params.dateFrom, lte: params.dateTo }
         },
-        select: { vehicleId: true, cost: true, performedAt: true, maintenanceType: true, description: true }
+        select: { id: true, vehicleId: true, cost: true, performedAt: true, maintenanceType: true, description: true }
       }),
       prisma.vehicleCost.findMany({
         where: {
@@ -118,7 +124,7 @@ export class VehicleProfitabilityReportService {
           vehicleId: { in: vehicleIds },
           date: { gte: params.dateFrom, lte: params.dateTo }
         },
-        select: { vehicleId: true, amount: true, type: true, description: true, date: true, recurring: true }
+        select: { id: true, vehicleId: true, amount: true, type: true, description: true, date: true, recurring: true }
       }),
       prisma.stoppage.findMany({
         where: {
@@ -132,6 +138,27 @@ export class VehicleProfitabilityReportService {
         select: { vehicleId: true, openedAt: true, closedAt: true }
       })
     ]);
+    const [exactBookingRows, maintenances, vehicleCosts, pricingSnapshots] = await Promise.all([
+      exactMoneyReader.hydrate("RentalBooking", bookingRows, { tenantId }),
+      exactMoneyReader.hydrate("VehicleMaintenance", maintenanceRows, { tenantId }),
+      exactMoneyReader.hydrate("VehicleCost", vehicleCostRows, { tenantId }),
+      exactMoneyReader.hydrate(
+        "RentalBookingPricingSnapshot",
+        bookingRows.flatMap((booking) =>
+          booking.pricingSnapshot ? [booking.pricingSnapshot] : []
+        ),
+        { tenantId }
+      )
+    ]);
+    const pricingSnapshotById = new Map(
+      pricingSnapshots.map((snapshot) => [snapshot.id, snapshot])
+    );
+    const bookings = exactBookingRows.map((booking) => ({
+      ...booking,
+      pricingSnapshot: booking.pricingSnapshot
+        ? (pricingSnapshotById.get(booking.pricingSnapshot.id) ?? booking.pricingSnapshot)
+        : null
+    }));
 
     const periodDays = diffInclusiveDays(params.dateFrom, params.dateTo);
     const byVehicle = new Map<string, any>();

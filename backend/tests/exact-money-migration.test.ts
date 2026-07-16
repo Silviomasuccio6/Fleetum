@@ -18,6 +18,15 @@ const deployScript = readFileSync(
   resolve(backendRoot, "../deploy/scripts/safe-production-deploy.sh"),
   "utf8"
 );
+const backendEnvExample = readFileSync(resolve(backendRoot, ".env.example"), "utf8");
+const productionEnvExample = readFileSync(
+  resolve(backendRoot, "../deploy/env/backend.env.production.example"),
+  "utf8"
+);
+const migrationGuide = readFileSync(
+  resolve(backendRoot, "../docs/database/exact-money-migration.md"),
+  "utf8"
+);
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const fieldKey = (model: string, field: string) => `${model}.${field}`;
@@ -88,4 +97,13 @@ test("production deploy reconciles exact values before restarting the applicatio
   assert.ok(migrationIndex >= 0);
   assert.ok(reconciliationIndex > migrationIndex);
   assert.ok(restartIndex > reconciliationIndex);
+});
+
+test("controlled reads remain opt-in and document compare, exact and rollback", () => {
+  assert.match(backendEnvExample, /^EXACT_MONEY_READ_MODE=legacy$/m);
+  assert.match(productionEnvExample, /^EXACT_MONEY_READ_MODE=legacy$/m);
+  assert.match(migrationGuide, /`legacy` is the safe default/);
+  assert.match(migrationGuide, /`compare` reads exact shadows in parallel/);
+  assert.match(migrationGuide, /`exact` replaces audited legacy fields/);
+  assert.match(migrationGuide, /set `EXACT_MONEY_READ_MODE=legacy`/);
 });

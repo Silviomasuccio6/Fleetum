@@ -1,4 +1,5 @@
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { logger } from "../../infrastructure/logging/logger.js";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
 import { env } from "../../shared/config/env.js";
@@ -11,6 +12,7 @@ import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput, upsertTenant
 import { BillingCycle, SaasPlan, ensureKnownPlan, normalizeBillingCycle } from "./feature-entitlements-service.js";
 
 type DunningSubscriptionRow = {
+  id: string;
   tenantId: string;
   plan: string;
   seats: number;
@@ -29,7 +31,7 @@ type BillingDunningDeps = {
 
 const defaultDeps: BillingDunningDeps = {
   async findOverduePastDueSubscriptions(cutoff, take) {
-    return prisma.tenantSubscription.findMany({
+    const rows = await prisma.tenantSubscription.findMany({
       where: {
         provider: "stripe",
         status: "PAST_DUE",
@@ -38,6 +40,7 @@ const defaultDeps: BillingDunningDeps = {
       orderBy: { updatedAt: "asc" },
       take,
       select: {
+        id: true,
         tenantId: true,
         plan: true,
         seats: true,
@@ -49,6 +52,7 @@ const defaultDeps: BillingDunningDeps = {
         updatedAt: true
       }
     });
+    return exactMoneyReader.hydrate("TenantSubscription", rows);
   },
   async upsertSubscription(input) {
     return upsertTenantSubscription(input);

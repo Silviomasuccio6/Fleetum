@@ -4,6 +4,7 @@ import { Prisma, RentalBookingStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
 import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import { storageProvider } from "../../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../../shared/errors/app-error.js";
@@ -300,6 +301,98 @@ export class RentalBookingsController {
     private readonly emailQueueService: EmailQueueService = new EmailQueueService(),
     private readonly tenantProfileService: TenantProfileService = new TenantProfileService()
   ) {}
+
+  private async hydrateBookingMoney<
+    T extends {
+      id: string;
+      pricingSnapshot?: ({
+        id: string;
+        priceList?: ({ id: string } & Record<string, unknown>) | null;
+        extraKmPolicy?: ({ id: string } & Record<string, unknown>) | null;
+      } & Record<string, unknown>) | null;
+    }
+  >(tenantId: string, booking: T): Promise<T> {
+    const exactBooking = await exactMoneyReader.hydrateOne("RentalBooking", booking, {
+      tenantId
+    });
+    if (!booking.pricingSnapshot) return exactBooking;
+
+    const exactSnapshot = await this.hydratePricingSnapshot(
+      tenantId,
+      booking.pricingSnapshot
+    );
+    return {
+      ...exactBooking,
+      pricingSnapshot: exactSnapshot
+    };
+  }
+
+  private async hydratePricingList<
+    Tier extends { id: string },
+    Policy extends { id: string; tiers: Tier[] },
+    List extends { id: string; extraKmPolicies: Policy[] }
+  >(tenantId: string, list: List): Promise<List> {
+    const [exactList, exactPolicies, exactTiers] = await Promise.all([
+      exactMoneyReader.hydrateOne("RentalPriceList", list, { tenantId }),
+      exactMoneyReader.hydrate("RentalExtraKmPolicy", list.extraKmPolicies, {
+        tenantId
+      }),
+      exactMoneyReader.hydrate(
+        "RentalExtraKmTier",
+        list.extraKmPolicies.flatMap((policy) => policy.tiers),
+        { tenantId }
+      )
+    ]);
+    const tierById = new Map(exactTiers.map((tier) => [tier.id, tier]));
+    const policyById = new Map(
+      exactPolicies.map((policy) => [
+        policy.id,
+        {
+          ...policy,
+          tiers: policy.tiers.map((tier) => tierById.get(tier.id) ?? tier)
+        }
+      ])
+    );
+
+    return {
+      ...exactList,
+      extraKmPolicies: list.extraKmPolicies.map(
+        (policy) => policyById.get(policy.id) ?? policy
+      )
+    };
+  }
+
+  private async hydratePricingSnapshot<
+    T extends {
+      id: string;
+      priceList?: ({ id: string } & Record<string, unknown>) | null;
+      extraKmPolicy?: ({ id: string } & Record<string, unknown>) | null;
+    }
+  >(tenantId: string, snapshot: T): Promise<T> {
+    const [exactSnapshot, exactPriceList, exactPolicy] = await Promise.all([
+      exactMoneyReader.hydrateOne("RentalBookingPricingSnapshot", snapshot, {
+        tenantId
+      }),
+      snapshot.priceList
+        ? exactMoneyReader.hydrateOne("RentalPriceList", snapshot.priceList, {
+            tenantId
+          })
+        : null,
+      snapshot.extraKmPolicy
+        ? exactMoneyReader.hydrateOne(
+            "RentalExtraKmPolicy",
+            snapshot.extraKmPolicy,
+            { tenantId }
+          )
+        : null
+    ]);
+
+    return {
+      ...exactSnapshot,
+      ...(exactPriceList ? { priceList: exactPriceList } : {}),
+      ...(exactPolicy ? { extraKmPolicy: exactPolicy } : {})
+    };
+  }
 
   private resolveUploadPath(filePath: string) {
     return storageProvider.resolveLocalPath(filePath);
@@ -1080,7 +1173,7 @@ export class RentalBookingsController {
       }
     });
     if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
-    return booking;
+    return this.hydrateBookingMoney(tenantId, booking);
   }
 
   private async getCustomerOrThrow(tenantId: string, customerId: string) {
@@ -1119,16 +1212,17 @@ export class RentalBookingsController {
     });
 
     if (!list) throw new AppError("Listino noleggio non trovato.", 404, "RENTAL_PRICE_LIST_NOT_FOUND");
+    const hydratedList = await this.hydratePricingList(input.tenantId, list);
 
     const selectedPackage = input.pricePackageId
-      ? list.packages.find((pkg) => pkg.id === input.pricePackageId) ?? null
-      : (list.packages.find((pkg) => pkg.isDefault) ?? list.packages[0] ?? null);
+      ? hydratedList.packages.find((pkg) => pkg.id === input.pricePackageId) ?? null
+      : (hydratedList.packages.find((pkg) => pkg.isDefault) ?? hydratedList.packages[0] ?? null);
 
     if (input.pricePackageId && !selectedPackage) {
       throw new AppError("Pacchetto km non trovato per il listino selezionato.", 404, "RENTAL_PRICE_PACKAGE_NOT_FOUND");
     }
 
-    const matchingPolicies = list.extraKmPolicies.filter((policy) => {
+    const matchingPolicies = hydratedList.extraKmPolicies.filter((policy) => {
       if (!selectedPackage) return policy.packageId == null;
       return policy.packageId == null || policy.packageId === selectedPackage.id;
     });
@@ -1145,7 +1239,7 @@ export class RentalBookingsController {
       );
     }
 
-    return { list, selectedPackage, selectedPolicy };
+    return { list: hydratedList, selectedPackage, selectedPolicy };
   }
 
   private async logNote(input: {
@@ -1688,7 +1782,7 @@ export class RentalBookingsController {
       }
     });
     if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
-    res.json(booking);
+    res.json(await this.hydrateBookingMoney(tenantId, booking));
   };
 
   quickDetail = async (req: Request, res: Response) => {
@@ -1742,10 +1836,14 @@ export class RentalBookingsController {
       }
     });
 
+    const exactSnapshot = snapshot
+      ? await this.hydratePricingSnapshot(tenantId, snapshot)
+      : null;
+
     res.json({
       bookingId: booking.id,
       bookingCode: booking.code,
-      snapshot
+      snapshot: exactSnapshot
     });
   };
 
@@ -1840,11 +1938,12 @@ export class RentalBookingsController {
       })
     ]);
 
+    const exactSnapshot = await this.hydratePricingSnapshot(tenantId, snapshot);
     res.json({
       bookingId: booking.id,
       bookingCode: booking.code,
       quote,
-      snapshot
+      snapshot: exactSnapshot
     });
   };
 

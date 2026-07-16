@@ -76,11 +76,61 @@ data corruption. A code rollback does not require database rollback during the e
 
 After the expand release has reconciled successfully in production:
 
-1. Convert service boundaries to decimal-safe strings or integer minor units.
-2. Make invoice, rental pricing, ROI and reporting calculations read exact columns.
-3. Write both representations explicitly while keeping database constraints enabled.
-4. Add reconciliation tests for generated invoices, exports and Stripe amounts.
-5. Monitor at least one complete billing and rental-reporting cycle.
+1. Deploy the controlled read layer with `EXACT_MONEY_READ_MODE=legacy`.
+2. Enable `compare` in staging and verify zero mismatches and zero fallbacks.
+3. Repeat `compare` in production for an agreed observation window.
+4. Enable `exact` only after reconciliation and shadow-read metrics remain clean.
+5. Convert service boundaries to decimal-safe strings or integer minor units in a later release.
+6. Write both representations explicitly while keeping database constraints enabled.
+7. Add reconciliation tests for generated invoices, exports and Stripe amounts.
+8. Monitor at least one complete billing and rental-reporting cycle.
+
+## Controlled read modes
+
+`EXACT_MONEY_READ_MODE` controls the read path without changing existing HTTP response
+shapes:
+
+- `legacy` is the safe default. It returns Prisma legacy fields and performs no raw exact-column query.
+- `compare` reads exact shadows in parallel, records aggregate mismatches and still returns legacy values.
+- `exact` replaces audited legacy fields with exact shadow values converted to the existing number shape.
+  If an exact row or value is unexpectedly missing while the legacy value exists, Fleetum records a
+  fallback and returns the legacy value instead of failing the business request.
+
+If the exact-column query itself fails in `compare` or `exact`, the request keeps the legacy
+payload and emits an aggregate fallback metric. The read rollout must not turn an observability
+or migration issue into an outage.
+
+The reader uses a static audited table/column registry. IDs and tenant scope are parameterized.
+Logs and metrics contain model names and aggregate counts only; they never contain monetary
+values, SQL parameters, PII or tenant names.
+
+The first controlled-read scope covers:
+
+- tenant subscriptions and billing dunning;
+- invoices and invoice items, including PDF/email reads;
+- rental list prices, extra-kilometre policies and booking pricing snapshots;
+- dashboard statistics and stoppage costs;
+- vehicle profitability, maintenance costs and vehicle costs;
+- Platform Console subscription summaries.
+
+## Controlled read observability
+
+Monitor these Prometheus metrics by `model` and `mode`:
+
+- `fleetum_exact_money_read_batches_total`;
+- `fleetum_exact_money_records_checked_total`;
+- `fleetum_exact_money_mismatches_total`;
+- `fleetum_exact_money_fallbacks_total`.
+
+Promotion gates:
+
+1. `compare` must show no unexplained mismatches.
+2. `exact` must show zero fallbacks.
+3. Readiness, invoice generation, rental quote, dashboard and profitability smoke tests must pass.
+4. Production reconciliation must still report zero mismatches before every deploy.
+
+Rollback is configuration-only: set `EXACT_MONEY_READ_MODE=legacy`, restart the backend and
+confirm `/api/ready`. Do not remove exact columns, triggers or constraints during rollback.
 
 ## Contract release
 

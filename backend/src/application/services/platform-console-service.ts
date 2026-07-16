@@ -1,4 +1,5 @@
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { estimateLicenseMonthlyRevenue, getPlanMonthlyPrice, SAAS_PLANS } from "./feature-entitlements-service.js";
@@ -61,8 +62,9 @@ const restoreDrillObservabilityService = new RestoreDrillObservabilityService();
 
 export class PlatformConsoleService {
   private async latestLicenses() {
-    const subscriptions = await prisma.tenantSubscription.findMany({
+    const subscriptionRows = await prisma.tenantSubscription.findMany({
       select: {
+        id: true,
         tenantId: true,
         plan: true,
         seats: true,
@@ -73,6 +75,10 @@ export class PlatformConsoleService {
         billingCycle: true
       }
     });
+    const subscriptions = await exactMoneyReader.hydrate(
+      "TenantSubscription",
+      subscriptionRows
+    );
 
     const map = new Map<string, LicenseSnapshot>();
     subscriptions.forEach((subscription) => {

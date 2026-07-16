@@ -47,6 +47,8 @@ export const EXACT_NUMERIC_FIELDS = [
   { model: "InvoiceItem", table: "InvoiceItem", legacyField: "total", exactField: "totalExact", legacyColumn: "total", exactColumn: "totalExact", scale: 2, nullable: false }
 ] as const satisfies readonly ExactNumericField[];
 
+export type ExactNumericModel = (typeof EXACT_NUMERIC_FIELDS)[number]["model"];
+
 export const NON_MONETARY_FLOAT_FIELDS = [
   { model: "RentalBookingPricingSnapshot", field: "daysCharged", reason: "Fractional rental duration" },
   { model: "InvoiceItem", field: "quantity", reason: "Fractional invoice quantity" }

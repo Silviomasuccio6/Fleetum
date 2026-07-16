@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
 import { computeRentalQuote } from "../../../application/services/rental-pricing-service.js";
 import {
   rentalPricingCreateExtraPolicySchema,
@@ -18,6 +19,25 @@ const withDefined = <T extends Record<string, unknown>>(input: T): Partial<T> =>
   Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
 
 export class RentalPricingController {
+  private async hydrateExtraPolicies<
+    T extends { id: string; tiers: Array<{ id: string }> }
+  >(tenantId: string, policies: readonly T[]): Promise<T[]> {
+    const [exactPolicies, exactTiers] = await Promise.all([
+      exactMoneyReader.hydrate("RentalExtraKmPolicy", policies, { tenantId }),
+      exactMoneyReader.hydrate(
+        "RentalExtraKmTier",
+        policies.flatMap((policy) => policy.tiers),
+        { tenantId }
+      )
+    ]);
+    const tierById = new Map(exactTiers.map((tier) => [tier.id, tier]));
+
+    return exactPolicies.map((policy) => ({
+      ...policy,
+      tiers: policy.tiers.map((tier) => tierById.get(tier.id) ?? tier)
+    }));
+  }
+
   private async validateScopeRefs(input: {
     tenantId: string;
     scope: "GLOBAL" | "SITE" | "VEHICLE_CATEGORY" | "VEHICLE";
@@ -57,7 +77,7 @@ export class RentalPricingController {
       where: { tenantId, id, deletedAt: null }
     });
     if (!list) throw new AppError("Listino non trovato.", 404, "RENTAL_PRICE_LIST_NOT_FOUND");
-    return list;
+    return exactMoneyReader.hydrateOne("RentalPriceList", list, { tenantId });
   }
 
   private async getQuoteSetupOrThrow(input: {
@@ -87,16 +107,23 @@ export class RentalPricingController {
     });
 
     if (!list) throw new AppError("Listino non trovato.", 404, "RENTAL_PRICE_LIST_NOT_FOUND");
+    const [exactList, exactPolicies] = await Promise.all([
+      exactMoneyReader.hydrateOne("RentalPriceList", list, {
+        tenantId: input.tenantId
+      }),
+      this.hydrateExtraPolicies(input.tenantId, list.extraKmPolicies)
+    ]);
+    const hydratedList = { ...exactList, extraKmPolicies: exactPolicies };
 
     const selectedPackage = input.pricePackageId
-      ? list.packages.find((pkg) => pkg.id === input.pricePackageId) ?? null
-      : (list.packages.find((pkg) => pkg.isDefault) ?? list.packages[0] ?? null);
+      ? hydratedList.packages.find((pkg) => pkg.id === input.pricePackageId) ?? null
+      : (hydratedList.packages.find((pkg) => pkg.isDefault) ?? hydratedList.packages[0] ?? null);
 
     if (input.pricePackageId && !selectedPackage) {
       throw new AppError("Pacchetto km non trovato per il listino selezionato.", 404, "RENTAL_PRICE_PACKAGE_NOT_FOUND");
     }
 
-    const matchingPolicies = list.extraKmPolicies.filter((policy) => {
+    const matchingPolicies = hydratedList.extraKmPolicies.filter((policy) => {
       if (!selectedPackage) return policy.packageId == null;
       return policy.packageId == null || policy.packageId === selectedPackage.id;
     });
@@ -109,7 +136,7 @@ export class RentalPricingController {
       throw new AppError("Tariffario km extra non trovato per il listino/pacchetto selezionato.", 404, "RENTAL_EXTRA_POLICY_NOT_FOUND");
     }
 
-    return { list, selectedPackage, selectedPolicy, matchingPolicies };
+    return { list: hydratedList, selectedPackage, selectedPolicy, matchingPolicies };
   }
 
   listLists = async (req: Request, res: Response) => {
@@ -148,7 +175,12 @@ export class RentalPricingController {
       })
     ]);
 
-    res.json({ data, total, page: query.page, pageSize: query.pageSize });
+    const exactData = await exactMoneyReader.hydrate(
+      "RentalPriceList",
+      data,
+      { tenantId }
+    );
+    res.json({ data: exactData, total, page: query.page, pageSize: query.pageSize });
   };
 
   createList = async (req: Request, res: Response) => {
@@ -184,7 +216,12 @@ export class RentalPricingController {
       }
     });
 
-    res.status(201).json(created);
+    const exactCreated = await exactMoneyReader.hydrateOne(
+      "RentalPriceList",
+      created,
+      { tenantId }
+    );
+    res.status(201).json(exactCreated);
   };
 
   updateList = async (req: Request, res: Response) => {
@@ -232,7 +269,12 @@ export class RentalPricingController {
       }
     });
 
-    res.json(updated);
+    const exactUpdated = await exactMoneyReader.hydrateOne(
+      "RentalPriceList",
+      updated,
+      { tenantId }
+    );
+    res.json(exactUpdated);
   };
 
   removeList = async (req: Request, res: Response) => {
@@ -366,7 +408,8 @@ export class RentalPricingController {
       }
     });
 
-    res.json({ data });
+    const exactData = await this.hydrateExtraPolicies(tenantId, data);
+    res.json({ data: exactData });
   };
 
   createExtraPolicy = async (req: Request, res: Response) => {
@@ -434,7 +477,11 @@ export class RentalPricingController {
       });
     });
 
-    res.status(201).json(created);
+    if (!created) {
+      throw new AppError("Tariffario extra km non trovato.", 404, "RENTAL_EXTRA_POLICY_NOT_FOUND");
+    }
+    const exactCreated = (await this.hydrateExtraPolicies(tenantId, [created]))[0];
+    res.status(201).json(exactCreated);
   };
 
   updateExtraPolicy = async (req: Request, res: Response) => {
@@ -511,7 +558,11 @@ export class RentalPricingController {
       });
     });
 
-    res.json(updated);
+    if (!updated) {
+      throw new AppError("Tariffario extra km non trovato.", 404, "RENTAL_EXTRA_POLICY_NOT_FOUND");
+    }
+    const exactUpdated = (await this.hydrateExtraPolicies(tenantId, [updated]))[0];
+    res.json(exactUpdated);
   };
 
   removeExtraPolicy = async (req: Request, res: Response) => {

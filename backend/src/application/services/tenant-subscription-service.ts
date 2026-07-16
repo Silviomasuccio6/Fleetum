@@ -1,4 +1,5 @@
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { BillingCycle, SaasPlan, ensureKnownPlan, normalizeBillingCycle } from "./feature-entitlements-service.js";
 
 export type TenantSubscriptionStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
@@ -65,18 +66,23 @@ const toIsoOrNull = (value: Date | null | undefined) => value?.toISOString() ?? 
 export const readTenantSubscription = async (tenantId: string): Promise<TenantSubscriptionSnapshot | null> => {
   const row = await prisma.tenantSubscription.findUnique({ where: { tenantId } });
   if (!row) return null;
+  const exactRow = await exactMoneyReader.hydrateOne(
+    "TenantSubscription",
+    row,
+    { tenantId }
+  );
 
   return {
-    plan: ensureKnownPlan(row.plan),
-    seats: toPositiveSeats(row.seats),
-    status: toValidStatus(row.status),
-    expiresAt: toIsoOrNull(row.currentPeriodEnd ?? row.trialEndsAt),
-    updatedAt: row.updatedAt.toISOString(),
-    priceMonthly: toPositivePriceOrNull(row.priceMonthly),
-    billingCycle: normalizeBillingCycle(row.billingCycle),
-    provider: row.provider === "stripe" ? "stripe" : "local",
-    stripeCustomerId: row.stripeCustomerId,
-    stripeSubscriptionId: row.stripeSubscriptionId
+    plan: ensureKnownPlan(exactRow.plan),
+    seats: toPositiveSeats(exactRow.seats),
+    status: toValidStatus(exactRow.status),
+    expiresAt: toIsoOrNull(exactRow.currentPeriodEnd ?? exactRow.trialEndsAt),
+    updatedAt: exactRow.updatedAt.toISOString(),
+    priceMonthly: toPositivePriceOrNull(exactRow.priceMonthly),
+    billingCycle: normalizeBillingCycle(exactRow.billingCycle),
+    provider: exactRow.provider === "stripe" ? "stripe" : "local",
+    stripeCustomerId: exactRow.stripeCustomerId,
+    stripeSubscriptionId: exactRow.stripeSubscriptionId
   };
 };
 
@@ -119,17 +125,22 @@ export const upsertTenantSubscription = async (input: TenantSubscriptionUpsertIn
       canceledAt: status === "CANCELED" ? new Date() : null
     }
   });
+  const exactRow = await exactMoneyReader.hydrateOne(
+    "TenantSubscription",
+    row,
+    { tenantId: input.tenantId }
+  );
 
   return {
-    plan: ensureKnownPlan(row.plan),
-    seats: row.seats,
-    status: toValidStatus(row.status),
-    expiresAt: toIsoOrNull(row.currentPeriodEnd ?? row.trialEndsAt),
-    updatedAt: row.updatedAt.toISOString(),
-    priceMonthly: toPositivePriceOrNull(row.priceMonthly),
-    billingCycle: normalizeBillingCycle(row.billingCycle),
-    provider: row.provider === "stripe" ? "stripe" : "local",
-    stripeCustomerId: row.stripeCustomerId,
-    stripeSubscriptionId: row.stripeSubscriptionId
+    plan: ensureKnownPlan(exactRow.plan),
+    seats: exactRow.seats,
+    status: toValidStatus(exactRow.status),
+    expiresAt: toIsoOrNull(exactRow.currentPeriodEnd ?? exactRow.trialEndsAt),
+    updatedAt: exactRow.updatedAt.toISOString(),
+    priceMonthly: toPositivePriceOrNull(exactRow.priceMonthly),
+    billingCycle: normalizeBillingCycle(exactRow.billingCycle),
+    provider: exactRow.provider === "stripe" ? "stripe" : "local",
+    stripeCustomerId: exactRow.stripeCustomerId,
+    stripeSubscriptionId: exactRow.stripeSubscriptionId
   };
 };

@@ -1,5 +1,6 @@
 import { BookingContractStatus, RentalBookingStatus, StoppageStatus } from "@prisma/client";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
 
 type AnalyticsFilters = {
   dateFrom?: Date;
@@ -55,11 +56,11 @@ export class GetDashboardStatsUseCase {
     const monthEnd = endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
 
     const [
-      stoppages,
+      stoppageRows,
       users,
       reminders,
       rentalVehicles,
-      rentalBookings,
+      rentalBookingRows,
       bookingContracts,
       contractDeliveries
     ] = await Promise.all([
@@ -134,6 +135,7 @@ export class GetDashboardStatsUseCase {
           },
           pricingSnapshot: {
             select: {
+              id: true,
               expectedTotal: true,
               finalTotal: true,
               extraKmEstimated: true,
@@ -169,6 +171,26 @@ export class GetDashboardStatsUseCase {
         select: { id: true, channel: true, status: true, sentAt: true, errorMessage: true, createdAt: true, bookingId: true }
       })
     ]);
+    const [stoppages, exactRentalBookingRows, pricingSnapshots] = await Promise.all([
+      exactMoneyReader.hydrate("Stoppage", stoppageRows, { tenantId }),
+      exactMoneyReader.hydrate("RentalBooking", rentalBookingRows, { tenantId }),
+      exactMoneyReader.hydrate(
+        "RentalBookingPricingSnapshot",
+        rentalBookingRows.flatMap((booking) =>
+          booking.pricingSnapshot ? [booking.pricingSnapshot] : []
+        ),
+        { tenantId }
+      )
+    ]);
+    const pricingSnapshotById = new Map(
+      pricingSnapshots.map((snapshot) => [snapshot.id, snapshot])
+    );
+    const rentalBookings = exactRentalBookingRows.map((booking) => ({
+      ...booking,
+      pricingSnapshot: booking.pricingSnapshot
+        ? (pricingSnapshotById.get(booking.pricingSnapshot.id) ?? booking.pricingSnapshot)
+        : null
+    }));
 
     const activeStatuses = new Set<StoppageStatus>(["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"]);
     const openStoppages = stoppages.filter((x) => activeStatuses.has(x.status));
@@ -510,7 +532,7 @@ export class GetDashboardStatsUseCase {
       }
     };
 
-    const [stoppages, closedTrendRows, reminders] = await Promise.all([
+    const [stoppageRows, closedTrendRows, reminders] = await Promise.all([
       prisma.stoppage.findMany({
         where: { ...whereBase, openedAt: { gte: start, lte: end } },
         include: {
@@ -534,6 +556,11 @@ export class GetDashboardStatsUseCase {
         orderBy: { sentAt: "asc" }
       })
     ]);
+    const stoppages = await exactMoneyReader.hydrate(
+      "Stoppage",
+      stoppageRows,
+      { tenantId }
+    );
 
     const activeStatuses = new Set<StoppageStatus>(["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"]);
     const closed = stoppages.filter((x) => x.status === "CLOSED" && x.closedAt);

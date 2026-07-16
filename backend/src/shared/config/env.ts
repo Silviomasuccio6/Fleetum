@@ -17,6 +17,7 @@ const TEST_DATABASE_URL = "postgresql://fleetum:fleetum_dev@localhost:5433/fleet
 const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
 const PLATFORM_IP_ALLOWLIST_MODE = (process.env.PLATFORM_IP_ALLOWLIST_MODE ?? "optional").toLowerCase();
+const EXACT_MONEY_READ_MODE = (process.env.EXACT_MONEY_READ_MODE ?? "legacy").toLowerCase();
 
 const toInt = (value: string, name: string) => {
   const n = Number(value);
@@ -87,6 +88,10 @@ if (!["strict", "optional", "disabled"].includes(PLATFORM_IP_ALLOWLIST_MODE)) {
   throw new Error("PLATFORM_IP_ALLOWLIST_MODE must be strict, optional or disabled");
 }
 
+if (!["legacy", "compare", "exact"].includes(EXACT_MONEY_READ_MODE)) {
+  throw new Error("EXACT_MONEY_READ_MODE must be legacy, compare or exact");
+}
+
 if (STORAGE_PROVIDER === "s3") {
   for (const name of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]) {
     if (!process.env[name]) throw new Error(`Missing required env var for S3 storage: ${name}`);
@@ -141,6 +146,7 @@ export const env = {
   PRISMA_SLOW_QUERY_MS: process.env.PRISMA_SLOW_QUERY_MS
     ? toInt(process.env.PRISMA_SLOW_QUERY_MS, "PRISMA_SLOW_QUERY_MS")
     : undefined,
+  EXACT_MONEY_READ_MODE: EXACT_MONEY_READ_MODE as "legacy" | "compare" | "exact",
   METRICS_ENABLED: toBool(process.env.METRICS_ENABLED ?? "true"),
   METRICS_TOKEN: process.env.METRICS_TOKEN,
   RESTORE_DRILL_SUMMARY_FILE: process.env.RESTORE_DRILL_SUMMARY_FILE ?? "logs/restore-drills/latest.json",
