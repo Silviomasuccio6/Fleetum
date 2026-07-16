@@ -4,7 +4,7 @@
 Preparare un ambiente staging il piu possibile uguale alla produzione per validare login social, calendario, manutenzioni, scadenziario ed export.
 
 ## 1) Infrastruttura minima
-- 1 istanza backend (Node 20+)
+- 1 istanza backend (Node 22 LTS)
 - 1 frontend statico (build Vite)
 - 1 PostgreSQL separato da produzione
 - Reverse proxy HTTPS (Nginx/Caddy)

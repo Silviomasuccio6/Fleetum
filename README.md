@@ -26,7 +26,7 @@ Fleetum is a multi-tenant SaaS platform for car rental companies, fleet operatio
 
 ## Local Prerequisites
 
-- Node.js 20.20.x (vedi .nvmrc).
+- Node.js 22.23.x LTS (vedi `.nvmrc` e `.node-version`).
 - npm 10+.
 - Docker and Docker Compose.
 
