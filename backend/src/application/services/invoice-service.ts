@@ -3,6 +3,7 @@ import path from "node:path";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { EmailQueueService } from "../../infrastructure/email/email-queue-service.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
@@ -34,6 +35,27 @@ type LicenseSnapshot = {
   expiresAt?: string | null;
   priceMonthly?: number | null;
   billingCycle?: "monthly" | "yearly";
+};
+
+const hydrateInvoiceRows = async (
+  rows: readonly InvoiceWithRelations[],
+  tenantId?: string
+): Promise<InvoiceWithRelations[]> => {
+  const exactInvoices = await exactMoneyReader.hydrate(
+    "Invoice",
+    rows,
+    tenantId ? { tenantId } : {}
+  );
+  const exactItems = await exactMoneyReader.hydrate(
+    "InvoiceItem",
+    rows.flatMap((invoice) => invoice.items)
+  );
+  const itemById = new Map(exactItems.map((item) => [item.id, item]));
+
+  return exactInvoices.map((invoice) => ({
+    ...invoice,
+    items: invoice.items.map((item) => itemById.get(item.id) ?? item)
+  }));
 };
 
 const issuer = {
@@ -205,7 +227,8 @@ export class InvoiceService {
         deliveries: { orderBy: { createdAt: "desc" } }
       }
     });
-    return { data: rows.map(toPublicInvoice) };
+    const exactRows = await hydrateInvoiceRows(rows);
+    return { data: exactRows.map(toPublicInvoice) };
   }
 
   async listTenantInvoices(tenantId: string) {
@@ -218,7 +241,8 @@ export class InvoiceService {
         deliveries: { orderBy: { createdAt: "desc" } }
       }
     });
-    return { data: rows.map(toPublicInvoice) };
+    const exactRows = await hydrateInvoiceRows(rows, tenantId);
+    return { data: exactRows.map(toPublicInvoice) };
   }
 
   async getPlatformInvoice(invoiceId: string) {
@@ -330,7 +354,8 @@ export class InvoiceService {
       return created;
     });
 
-    return { data: toPublicInvoice(invoice) };
+    const exactInvoice = (await hydrateInvoiceRows([invoice], invoice.tenantId))[0];
+    return { data: toPublicInvoice(exactInvoice) };
   }
 
   async updateStatus(input: { invoiceId: string; status: string; actorUserId: string; sourceIp: string }) {
@@ -356,7 +381,8 @@ export class InvoiceService {
         details: { actor: input.actorUserId, sourceIp: input.sourceIp, before: current.status, after: updated.status } as Prisma.InputJsonValue
       }
     });
-    return { data: toPublicInvoice(updated) };
+    const exactUpdated = (await hydrateInvoiceRows([updated], updated.tenantId))[0];
+    return { data: toPublicInvoice(exactUpdated) };
   }
 
   async pdfBufferForPlatform(invoiceId: string) {
@@ -470,7 +496,8 @@ export class InvoiceService {
       throw new AppError(updatedDelivery.errorMessage ?? "Invio email fattura fallito", 502, "INVOICE_EMAIL_FAILED");
     }
 
-    return { data: toPublicInvoice(updatedInvoice) };
+    const exactUpdated = (await hydrateInvoiceRows([updatedInvoice], updatedInvoice.tenantId))[0];
+    return { data: toPublicInvoice(exactUpdated) };
   }
 
   private async findInvoice(invoiceId: string, tenantId?: string): Promise<InvoiceWithRelations> {
@@ -483,7 +510,7 @@ export class InvoiceService {
       }
     });
     if (!invoice) throw new AppError("Fattura non trovata", 404, "INVOICE_NOT_FOUND");
-    return invoice;
+    return (await hydrateInvoiceRows([invoice], tenantId))[0];
   }
 
   private invoiceEmailHtml(invoice: InvoiceWithRelations) {

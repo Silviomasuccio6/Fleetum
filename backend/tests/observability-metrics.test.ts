@@ -16,12 +16,21 @@ describe("observability metrics", () => {
       durationMs: 123
     });
     metrics.observePrismaOperation({ model: "RentalBooking", action: "findMany", durationMs: 620, slow: true });
+    metrics.observeExactMoneyRead({
+      model: "Invoice",
+      mode: "compare",
+      recordsChecked: 3,
+      mismatchCount: 1,
+      fallbackCount: 0
+    });
     metrics.setDbAvailable(true);
 
     const rendered = metrics.renderPrometheus();
     assert.match(rendered, /fleetum_http_requests_total/);
     assert.match(rendered, /path="\/api\/customers\/:id"/);
     assert.match(rendered, /fleetum_prisma_slow_operations_total/);
+    assert.match(rendered, /fleetum_exact_money_records_checked_total\{mode="compare",model="Invoice"\} 3/);
+    assert.match(rendered, /fleetum_exact_money_mismatches_total\{mode="compare",model="Invoice"\} 1/);
     assert.match(rendered, /fleetum_db_available 1/);
     assert.doesNotMatch(rendered, /test@example\.com/);
   });

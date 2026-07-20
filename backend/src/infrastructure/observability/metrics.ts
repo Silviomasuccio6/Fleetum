@@ -45,6 +45,14 @@ type RestoreDrillSummaryObservation = {
   tableMismatches: number;
 };
 
+type ExactMoneyReadObservation = {
+  model: string;
+  mode: "legacy" | "compare" | "exact";
+  recordsChecked: number;
+  mismatchCount: number;
+  fallbackCount: number;
+};
+
 const HTTP_DURATION_BUCKETS_SECONDS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const DB_DURATION_BUCKETS_SECONDS = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5];
 
@@ -164,6 +172,18 @@ export const metrics = {
     setGauge("fleetum_restore_drill_table_mismatches", {}, input.tableMismatches);
   },
 
+  observeExactMoneyRead(input: ExactMoneyReadObservation) {
+    const labels = { model: input.model, mode: input.mode };
+    incCounter("fleetum_exact_money_read_batches_total", labels);
+    incCounter("fleetum_exact_money_records_checked_total", labels, input.recordsChecked);
+    if (input.mismatchCount > 0) {
+      incCounter("fleetum_exact_money_mismatches_total", labels, input.mismatchCount);
+    }
+    if (input.fallbackCount > 0) {
+      incCounter("fleetum_exact_money_fallbacks_total", labels, input.fallbackCount);
+    }
+  },
+
   setDbAvailable(available: boolean) {
     setGauge("fleetum_db_available", {}, available ? 1 : 0);
   },
@@ -212,6 +232,14 @@ export const metrics = {
       "# TYPE fleetum_restore_drill_rto_seconds gauge",
       "# HELP fleetum_restore_drill_table_mismatches Critical table count mismatches in latest restore drill.",
       "# TYPE fleetum_restore_drill_table_mismatches gauge",
+      "# HELP fleetum_exact_money_read_batches_total Exact money shadow read batches by model and mode.",
+      "# TYPE fleetum_exact_money_read_batches_total counter",
+      "# HELP fleetum_exact_money_records_checked_total Records checked by exact money shadow reads.",
+      "# TYPE fleetum_exact_money_records_checked_total counter",
+      "# HELP fleetum_exact_money_mismatches_total Legacy versus exact monetary field mismatches.",
+      "# TYPE fleetum_exact_money_mismatches_total counter",
+      "# HELP fleetum_exact_money_fallbacks_total Exact reads that safely fell back to legacy values.",
+      "# TYPE fleetum_exact_money_fallbacks_total counter",
       "# HELP fleetum_db_available Database readiness gauge, 1 means available.",
       "# TYPE fleetum_db_available gauge"
     ];
