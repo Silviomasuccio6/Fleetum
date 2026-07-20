@@ -193,7 +193,7 @@ test("checkout sessions always collect a card before starting the Stripe trial",
 
 test("checkout sessions reject duplicate Stripe subscriptions for managed statuses", async () => {
   (env as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_unit_billing";
-  const managedStatuses: TenantSubscriptionSnapshot["status"][] = ["ACTIVE", "TRIAL", "PAST_DUE"];
+  const managedStatuses: TenantSubscriptionSnapshot["status"][] = ["ACTIVE", "TRIAL", "PAST_DUE", "SUSPENDED"];
 
   for (const status of managedStatuses) {
     const audit = new FakeAuditRepo();

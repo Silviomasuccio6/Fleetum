@@ -5,10 +5,10 @@ import { FleetumFullScreenLoader } from "../../components/brand/fleetum-logo-loa
 import { PlanUpgradePage } from "../profile/plan-upgrade-page";
 
 export const BillingSelfServicePage = () => {
-  const { licenseStatus, loaded, loading } = useEntitlements();
+  const { licenseStatus, loaded } = useEntitlements();
   const hasActiveSubscription = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
 
-  if (loading || !loaded) {
+  if (!loaded) {
     return <FleetumFullScreenLoader label="Verifica abbonamento" />;
   }
 

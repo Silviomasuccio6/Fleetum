@@ -78,7 +78,12 @@ type BillingServiceDeps = {
   upsertSubscription(input: TenantSubscriptionUpsertInput): Promise<TenantSubscriptionSnapshot>;
 };
 
-const MANAGED_STRIPE_SUBSCRIPTION_STATUSES = new Set<BillingLicenseStatus>(["ACTIVE", "TRIAL", "PAST_DUE"]);
+const MANAGED_STRIPE_SUBSCRIPTION_STATUSES = new Set<BillingLicenseStatus>([
+  "ACTIVE",
+  "TRIAL",
+  "PAST_DUE",
+  "SUSPENDED"
+]);
 
 const PLAN_PRICE_ENV_KEYS: Record<SaasPlan, Record<BillingCycle, keyof typeof env>> = {
   STARTER: { ...COMMERCIAL_PLAN_CATALOG.STARTER.stripePriceEnv },

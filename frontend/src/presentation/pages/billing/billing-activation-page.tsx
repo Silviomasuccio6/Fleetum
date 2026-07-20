@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { FleetumFullScreenLoader } from "../../components/brand/fleetum-logo-loader";
 import { useEntitlements } from "../../hooks/use-entitlements";
 import { PlanUpgradePage } from "../profile/plan-upgrade-page";
 
 export const BillingActivationPage = () => {
+  const location = useLocation();
   const [profileGate, setProfileGate] = useState<"checking" | "ready" | "required">("checking");
-  const { licenseStatus, loaded, loading } = useEntitlements();
+  const { licenseStatus, loaded } = useEntitlements();
   const hasActiveSubscription = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
+  const checkoutCompleted = new URLSearchParams(location.search).get("checkout") === "success";
 
   useEffect(() => {
     let cancelled = false;
@@ -27,14 +29,14 @@ export const BillingActivationPage = () => {
     };
   }, []);
 
-  if (loading || !loaded) {
+  if (!loaded) {
     return <FleetumFullScreenLoader label="Verifica abbonamento" />;
   }
 
   // The activation URL can be kept in an old tab or bookmark. Never show
   // activation checkout again to a tenant that already has a valid license.
   if (hasActiveSubscription) {
-    return <Navigate to="/upgrade" replace />;
+    return <Navigate to={checkoutCompleted ? "/dashboard" : "/upgrade"} replace />;
   }
 
   if (licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED") {

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Check, CreditCard, Crown, Download, ExternalLink, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
 import { useAuthStore } from "../../../application/stores/auth-store";
-import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import { getConsentedPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import {
@@ -15,6 +14,13 @@ import {
   SaasPlan
 } from "../../../domain/constants/entitlements";
 import { FEATURE_LABELS } from "../../../domain/constants/feature-labels";
+import {
+  canManageTenantBilling,
+  canReadTenantBilling,
+  canUseStripeSelfService,
+  isOperativeLicenseStatus
+} from "../../../domain/policies/billing-access";
+import type { BillingCycle } from "../../../domain/policies/billing-access";
 import { cn } from "../../../lib/utils";
 import { useEntitlements } from "../../hooks/use-entitlements";
 import { Button } from "../../components/ui/button";
@@ -22,7 +28,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { getBillingStatusNotice } from "./billing-status-copy";
 
-type BillingCycle = "monthly" | "yearly";
 type PlanUpgradeMode = "activation" | "upgrade" | "recovery";
 type ActivationCheckStatus = "idle" | "checking" | "ready" | "timeout";
 
@@ -92,7 +97,16 @@ const getPlanHighlights = (plan: SaasPlan) => {
 export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }) => {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const { plan, licenseStatus, provider, billingCycle: activeBillingCycle, expiresAt, daysRemaining, loading } = useEntitlements();
+  const {
+    plan,
+    licenseStatus,
+    provider,
+    billingCycle: activeBillingCycle,
+    expiresAt,
+    daysRemaining,
+    loading,
+    refresh
+  } = useEntitlements();
   const isActivationMode = mode === "activation";
   const isRecoveryMode = mode === "recovery";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
@@ -114,20 +128,15 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   }>>([]);
   const hasKnownPlan =
     !loading &&
-    Boolean(licenseStatus) &&
-    licenseStatus !== "PENDING" &&
-    licenseStatus !== "EXPIRED";
+    (isOperativeLicenseStatus(licenseStatus) || licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED");
   const currentPlan = hasKnownPlan ? plan : null;
   const checkoutStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("checkout") : null;
   const paymentMethodStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("payment_method") : null;
   const portalStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("portal") : null;
   const welcomeStatus = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("welcome") : null;
-  const canUpdatePaymentMethod =
-    licenseStatus === "ACTIVE" || licenseStatus === "TRIAL" || licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED";
-  const hasManagedStripeSubscription = provider === "stripe" && canUpdatePaymentMethod;
-  const isTenantAdmin = user?.roles.includes("ADMIN") ?? false;
-  const canReadBilling = isTenantAdmin || (user?.permissions.includes("billing:read") ?? false);
-  const canManageBilling = isTenantAdmin || (user?.permissions.includes("billing:manage") ?? false);
+  const hasManagedStripeSubscription = canUseStripeSelfService(provider, licenseStatus);
+  const canReadBilling = canReadTenantBilling(user);
+  const canManageBilling = canManageTenantBilling(user);
   const billingActionsUnavailableReason = !canManageBilling
     ? "Solo l'amministratore dell'azienda puo gestire abbonamento e metodo di pagamento."
     : !hasManagedStripeSubscription
@@ -197,6 +206,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   );
 
   useEffect(() => {
+    if (isActivationMode || !activeBillingCycle) return;
+    setBillingCycle(activeBillingCycle);
+  }, [activeBillingCycle, isActivationMode]);
+
+  useEffect(() => {
     if (!canReadBilling) {
       setInvoices([]);
       return;
@@ -228,8 +242,8 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       setActivationCheckStatus("checking");
 
       try {
-        const license = await authUseCases.licenseStatus();
-        if (license.status === "ACTIVE" || license.status === "TRIAL") {
+        const snapshot = await refresh({ force: true });
+        if (isOperativeLicenseStatus(snapshot.licenseStatus)) {
           setActivationCheckStatus("ready");
           timeoutId = setTimeout(() => {
             if (!cancelled) navigate("/dashboard", { replace: true });
@@ -256,7 +270,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [checkoutStatus, isActivationMode, navigate]);
+  }, [checkoutStatus, isActivationMode, navigate, refresh]);
 
   return (
     <section className="space-y-5">
@@ -357,7 +371,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 type="button"
                 variant="outline"
                 className="w-full"
-                disabled={!canManageBilling || !canUpdatePaymentMethod || busyPaymentMethod}
+                disabled={!canManageBilling || !hasManagedStripeSubscription || busyPaymentMethod}
                 onClick={() => void openPaymentMethodSession()}
               >
                 <CreditCard className="h-4 w-4" />
@@ -766,7 +780,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </CardContent>
       </Card>
 
-      <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .5s both" }}>
+      {!isRecoveryMode ? <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .5s both" }}>
         <CardContent className="flex flex-col items-center gap-3 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-muted-foreground">
             Gli upgrade vengono gestiti dal Customer Portal Stripe per evitare abbonamenti duplicati. I downgrade restano bloccati da questa schermata e vanno valutati con il supporto Fleetum.
@@ -780,7 +794,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             <ArrowRight className="h-4 w-4" />
           </button>
         </CardContent>
-      </Card>
+      </Card> : null}
     </section>
   );
 };

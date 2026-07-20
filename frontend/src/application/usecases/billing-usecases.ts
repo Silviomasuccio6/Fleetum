@@ -2,6 +2,7 @@ import { httpClient } from "../../infrastructure/api/http-client";
 import type { SaasPlan } from "../../domain/constants/entitlements";
 
 type BillingCycle = "monthly" | "yearly";
+type CustomerPortalInput = { plan: SaasPlan; billingCycle: BillingCycle };
 type BillingAnalyticsContext = {
   visitorId?: string;
   sessionId?: string;
@@ -26,7 +27,7 @@ export const billingUseCases = {
       {},
       { suppressSuccessToast: true }
     ),
-  createCustomerPortalSession: (input?: { plan?: SaasPlan; billingCycle?: BillingCycle }) =>
+  createCustomerPortalSession: (input?: CustomerPortalInput) =>
     httpClient.post<{ portalUrl: string }>(
       "/billing/customer-portal-session",
       input ?? {},

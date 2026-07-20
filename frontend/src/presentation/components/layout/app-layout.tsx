@@ -28,16 +28,11 @@ import {
   X
 } from "lucide-react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEntitlementsStore } from "../../../application/stores/entitlements-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { notificationsUseCases } from "../../../application/usecases/notifications-usecases";
 import { useAuthStore } from "../../../application/stores/auth-store";
-import {
-  FeatureKey,
-  PLAN_MONTHLY_PRICING_EUR,
-  ensureKnownPlan,
-  getFeatureListForPlan
-} from "../../../domain/constants/entitlements";
+import { FeatureKey } from "../../../domain/constants/entitlements";
+import { canManageTenantBilling } from "../../../domain/policies/billing-access";
 import { ThemeMode, getStoredTheme, setTheme } from "../../../infrastructure/theme/theme-manager";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { cn } from "../../../lib/utils";
@@ -180,7 +175,7 @@ export const AppLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, user, setUser, logout } = useAuthStore();
-  const canManageBilling = user?.permissions.includes("billing:manage") ?? false;
+  const canManageBilling = canManageTenantBilling(user);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -188,14 +183,21 @@ export const AppLayout = () => {
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
   const [backendReachable, setBackendReachable] = useState(true);
   const [healthFailures, setHealthFailures] = useState(0);
-  const [licenseInfo, setLicenseInfo] = useState<null | { plan: string; expiringSoon: boolean; daysRemaining: number | null; expiresAt: string | null }>(null);
   const [sidebarHidden, setSidebarHidden] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(sidebarStorageKey) === "1";
   });
   const [theme, setThemeState] = useState<ThemeMode>(() => getStoredTheme());
-  const { can, plan, requiredPlan, loading: entitlementsLoading, error: entitlementsError } = useEntitlements();
-  const setEntitlements = useEntitlementsStore((state) => state.setEntitlements);
+  const {
+    can,
+    plan,
+    requiredPlan,
+    expiresAt,
+    daysRemaining,
+    expiringSoon,
+    loading: entitlementsLoading,
+    error: entitlementsError
+  } = useEntitlements();
   const notificationsMenuRef = useRef<HTMLDivElement | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const dismissedStorageKey = useMemo(
@@ -273,44 +275,6 @@ export const AppLayout = () => {
       return changed ? next : old;
     });
   }, [getAutoOpenGroups, location.pathname]);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    let mounted = true;
-    const loadLicense = async () => {
-      try {
-        const info = await authUseCases.licenseStatus();
-        if (!mounted) return;
-        setLicenseInfo({
-          plan: info.plan,
-          expiringSoon: info.expiringSoon,
-          daysRemaining: info.daysRemaining,
-          expiresAt: info.expiresAt
-        });
-      } catch {
-        if (mounted) setLicenseInfo(null);
-      }
-    };
-    loadLicense();
-    const interval = setInterval(loadLicense, 15 * 60 * 1000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
-  }, [isAuthenticated]);
-
-  useEffect(() => {
-    if (!licenseInfo?.plan) return;
-    const normalizedLicensePlan = ensureKnownPlan(licenseInfo.plan);
-    const normalizedEntitlementsPlan = ensureKnownPlan(plan);
-    if (normalizedLicensePlan === normalizedEntitlementsPlan) return;
-
-    setEntitlements({
-      plan: normalizedLicensePlan,
-      priceMonthly: PLAN_MONTHLY_PRICING_EUR[normalizedLicensePlan],
-      features: getFeatureListForPlan(normalizedLicensePlan)
-    });
-  }, [licenseInfo?.plan, plan, setEntitlements]);
 
   useEffect(() => {
     if (!dismissedStorageKey) {
@@ -522,7 +486,7 @@ export const AppLayout = () => {
     return counts;
   }, [visibleNotifications]);
 
-  const displayedPlan = useMemo(() => ensureKnownPlan(licenseInfo?.plan ?? plan), [licenseInfo?.plan, plan]);
+  const displayedPlan = plan;
 
   const formatRelativeTime = (value?: string) => {
     if (!value) return "Ora";
@@ -1044,11 +1008,11 @@ export const AppLayout = () => {
               Backend non raggiungibile. Verifica che API e database siano attivi. (tentativi falliti: {healthFailures})
             </div>
           ) : null}
-          {licenseInfo?.expiringSoon ? (
+          {expiringSoon ? (
             <div className="mb-4 rounded-xl border border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
               Licenza in scadenza
-              {licenseInfo.daysRemaining !== null ? ` tra ${licenseInfo.daysRemaining} giorni` : ""}.
-              {licenseInfo.expiresAt ? ` Scadenza: ${new Date(licenseInfo.expiresAt).toLocaleDateString("it-IT")}.` : ""}
+              {daysRemaining !== null ? ` tra ${daysRemaining} giorni` : ""}.
+              {expiresAt ? ` Scadenza: ${new Date(expiresAt).toLocaleDateString("it-IT")}.` : ""}
             </div>
           ) : null}
           <Outlet />

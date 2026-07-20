@@ -14,7 +14,6 @@ import { DemoRequestPage, LegalDocumentPage } from "../pages/legal/legal-pages";
 import { LandingPage } from "../pages/landing/landing-page";
 import { PublicSeoPage } from "../pages/landing/seo-pages";
 import { ProtectedRoute } from "./protected-route";
-import { BillingActivatedRoute } from "./billing-activated-route";
 import { GlobalTextTranslator } from "../components/i18n/global-text-translator";
 
 const DashboardPage = lazy(() => import("../pages/dashboard/dashboard-page").then((m) => ({ default: m.DashboardPage })));
@@ -102,9 +101,7 @@ export const AppRoutes = () => (
       <Route
         element={
           <ProtectedRoute>
-            <BillingActivatedRoute>
-              <AppLayout />
-            </BillingActivatedRoute>
+            <AppLayout />
           </ProtectedRoute>
         }
       >
