@@ -1,4 +1,5 @@
 import { PlatformAdminRepository, PlatformAuditEvent, PlatformLicense, PlatformTenantRow } from "../../domain/repositories/platform-admin-repository.js";
+import { preservePlatformLicenseBillingLink } from "../../application/services/platform-license-billing-link.js";
 import { readTenantSubscription, upsertTenantSubscription } from "../../application/services/tenant-subscription-service.js";
 import { prisma } from "../database/prisma/client.js";
 
@@ -110,6 +111,8 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
   }
 
   async setLicense(tenantId: string, userId: string, details: PlatformLicense): Promise<void> {
+    const currentSubscription = await readTenantSubscription(tenantId);
+    const billingLink = preservePlatformLicenseBillingLink(currentSubscription);
     const subscription = await upsertTenantSubscription({
       tenantId,
       plan: details.plan,
@@ -118,7 +121,7 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
       expiresAt: details.expiresAt,
       priceMonthly: details.priceMonthly,
       billingCycle: details.billingCycle,
-      provider: "local"
+      ...billingLink
     });
 
     await prisma.auditLog.create({
