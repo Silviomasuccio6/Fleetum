@@ -1,64 +1,117 @@
 import { create } from "zustand";
-import { FeatureKey, PLAN_MONTHLY_PRICING_EUR, SaasPlan, ensureKnownPlan } from "../../domain/constants/entitlements";
+import { FeatureKey, PLAN_MONTHLY_PRICING_EUR, SaasPlan } from "../../domain/constants/entitlements";
+import type { BillingCycle, BillingProvider, LicenseStatus } from "../../domain/policies/billing-access";
 
-type EntitlementsState = {
+export type EntitlementsSnapshot = {
+  tenantId: string;
   plan: SaasPlan;
-  licenseStatus: "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED" | null;
-  provider: "stripe" | "local" | null;
-  billingCycle: "monthly" | "yearly" | null;
+  licenseStatus: LicenseStatus;
+  provider: BillingProvider;
+  billingCycle: BillingCycle;
   expiresAt: string | null;
   daysRemaining: number | null;
+  expiringSoon: boolean;
   priceMonthly: number;
   features: FeatureKey[];
+};
+
+type RefreshOptions = {
+  force?: boolean;
+  tenantId: string;
+  load: () => Promise<EntitlementsSnapshot>;
+};
+
+type EntitlementsState = Omit<EntitlementsSnapshot, "licenseStatus" | "provider" | "billingCycle"> & {
+  licenseStatus: LicenseStatus | null;
+  provider: BillingProvider | null;
+  billingCycle: BillingCycle | null;
   loading: boolean;
   loaded: boolean;
   error: string | null;
-  setLoading: (loading: boolean) => void;
-  setEntitlements: (input: {
-    plan: string;
-    priceMonthly: number;
-    features: string[];
-    licenseStatus?: EntitlementsState["licenseStatus"];
-    provider?: EntitlementsState["provider"];
-    billingCycle?: EntitlementsState["billingCycle"];
-    expiresAt?: string | null;
-    daysRemaining?: number | null;
-  }) => void;
+  lastUpdatedAt: number | null;
+  setEntitlements: (snapshot: EntitlementsSnapshot) => void;
   setError: (message: string | null) => void;
+  refreshEntitlements: (options: RefreshOptions) => Promise<EntitlementsSnapshot>;
   reset: () => void;
 };
 
 const initialState = {
+  tenantId: "",
   plan: "STARTER" as SaasPlan,
   licenseStatus: null,
   provider: null,
   billingCycle: null,
   expiresAt: null,
   daysRemaining: null,
+  expiringSoon: false,
   priceMonthly: PLAN_MONTHLY_PRICING_EUR.STARTER,
   features: [] as FeatureKey[],
   loading: false,
   loaded: false,
-  error: null as string | null
+  error: null as string | null,
+  lastUpdatedAt: null as number | null
 };
 
-export const useEntitlementsStore = create<EntitlementsState>((set) => ({
+let requestSequence = 0;
+let inFlightRequest: Promise<EntitlementsSnapshot> | null = null;
+
+export const useEntitlementsStore = create<EntitlementsState>((set, get) => ({
   ...initialState,
-  setLoading: (loading) => set({ loading }),
-  setEntitlements: ({ plan, priceMonthly, features, licenseStatus, provider, billingCycle, expiresAt, daysRemaining }) =>
+  setEntitlements: (snapshot) =>
     set({
-      plan: ensureKnownPlan(plan),
-      licenseStatus: licenseStatus ?? null,
-      provider: provider ?? null,
-      billingCycle: billingCycle ?? null,
-      expiresAt: expiresAt ?? null,
-      daysRemaining: typeof daysRemaining === "number" ? daysRemaining : null,
-      priceMonthly: Number.isFinite(priceMonthly) && priceMonthly > 0 ? priceMonthly : PLAN_MONTHLY_PRICING_EUR.STARTER,
-      features: features.filter(Boolean) as FeatureKey[],
+      ...snapshot,
       loading: false,
       loaded: true,
-      error: null
+      error: null,
+      lastUpdatedAt: Date.now()
     }),
-  setError: (message) => set({ error: message, loading: false, loaded: true }),
-  reset: () => set({ ...initialState })
+  setError: (message) => set({ error: message, loading: false }),
+  refreshEntitlements: async ({ force = false, tenantId, load }) => {
+    const current = get();
+    const tenantChanged = Boolean(current.tenantId && current.tenantId !== tenantId);
+
+    if (tenantChanged) {
+      requestSequence += 1;
+      inFlightRequest = null;
+      set({ ...initialState, tenantId });
+    } else if (current.loaded && !force) {
+      return {
+        tenantId,
+        plan: current.plan,
+        licenseStatus: current.licenseStatus!,
+        provider: current.provider!,
+        billingCycle: current.billingCycle!,
+        expiresAt: current.expiresAt,
+        daysRemaining: current.daysRemaining,
+        expiringSoon: current.expiringSoon,
+        priceMonthly: current.priceMonthly,
+        features: current.features
+      };
+    }
+
+    if (inFlightRequest) return inFlightRequest;
+
+    const requestId = ++requestSequence;
+    set({ loading: true, error: null, tenantId });
+    const request = Promise.resolve().then(load);
+    inFlightRequest = request;
+
+    try {
+      const snapshot = await request;
+      if (requestId === requestSequence) get().setEntitlements(snapshot);
+      return snapshot;
+    } catch (error) {
+      if (requestId === requestSequence) {
+        get().setError(error instanceof Error ? error.message : "Impossibile verificare lo stato del piano.");
+      }
+      throw error;
+    } finally {
+      if (inFlightRequest === request) inFlightRequest = null;
+    }
+  },
+  reset: () => {
+    requestSequence += 1;
+    inFlightRequest = null;
+    set({ ...initialState });
+  }
 }));
