@@ -25,6 +25,7 @@
     "test:e2e:headed": "playwright test --project=chromium --headed"
   },
   "overrides": {
+    "body-parser": "^1.20.6",
     "follow-redirects": "^1.16.0",
     "uuid": "^14.0.0"
   },
