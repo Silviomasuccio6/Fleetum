@@ -1,8 +1,8 @@
+import { StrictMode } from "react";
 import { renderToString } from "react-dom/server";
 import { HelmetProvider, type HelmetServerState } from "react-helmet-async";
 import { StaticRouter } from "react-router-dom/server";
-import { SnackbarViewport } from "../presentation/components/ui/snackbar-viewport";
-import { AppRoutes } from "../presentation/routes/app-routes";
+import { PublicRoutes } from "../presentation/routes/public-routes";
 
 export type PrerenderedPage = {
   appHtml: string;
@@ -19,12 +19,13 @@ const renderHead = (helmet: HelmetServerState) =>
 export const renderPublicPage = (location: string): PrerenderedPage => {
   const helmetContext: HelmetContext = {};
   const appHtml = renderToString(
-    <HelmetProvider context={helmetContext}>
-      <StaticRouter location={location}>
-        <AppRoutes />
-        <SnackbarViewport />
-      </StaticRouter>
-    </HelmetProvider>
+    <StrictMode>
+      <HelmetProvider context={helmetContext}>
+        <StaticRouter location={location}>
+          <PublicRoutes />
+        </StaticRouter>
+      </HelmetProvider>
+    </StrictMode>
   );
 
   if (!helmetContext.helmet) throw new Error(`Helmet did not render SEO metadata for ${location}.`);

@@ -16,6 +16,11 @@
   },
   "dependencies": {
     "@fleetum/commercial-plan-catalog": "1.0.0",
+    "@fontsource-variable/instrument-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
     "@hookform/resolvers": "^3.9.0",
     "axios": "^1.18.1",
     "class-variance-authority": "^0.7.1",

@@ -2,12 +2,33 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 import { visualizer } from "rollup-plugin-visualizer";
+import { publicPrerenderRoutes } from "./src/seo/public-prerender-routes";
+import { lucideDirectImports } from "./vite-plugins/lucide-direct-imports";
+
+const publicPreviewRoutes = new Set(publicPrerenderRoutes.filter((route) => route !== "/"));
+
+const prerenderPreviewFallback = {
+  name: "fleetum-prerender-preview-fallback",
+  configurePreviewServer(server: { middlewares: { use: (handler: (request: { url?: string }, response: unknown, next: () => void) => void) => void } }) {
+    server.middlewares.use((request, _response, next) => {
+      const requestUrl = request.url ?? "";
+      const queryIndex = requestUrl.indexOf("?");
+      const pathname = queryIndex === -1 ? requestUrl : requestUrl.slice(0, queryIndex);
+
+      // Vite preview does not resolve /route to /route/index.html like Caddy does.
+      if (publicPreviewRoutes.has(pathname)) {
+        const search = queryIndex === -1 ? "" : requestUrl.slice(queryIndex);
+        request.url = `${pathname}/${search}`;
+      }
+
+      next();
+    });
+  }
+};
 
 const manualChunkGroups: Record<string, string[]> = {
   "vendor-react": ["react", "react-dom", "react-router-dom"],
-  "vendor-charts": ["recharts"],
   "vendor-forms": ["react-hook-form", "@hookform/resolvers", "zod"],
-  "vendor-ui": ["lucide-react"],
   "vendor-http": ["axios"]
 };
 
@@ -28,7 +49,9 @@ const manualChunks = (id: string) => {
 
 export default defineConfig(({ mode }) => ({
   plugins: [
+    lucideDirectImports(),
     react(),
+    prerenderPreviewFallback,
     ...(process.env.ANALYZE === "true"
       ? [
           visualizer({

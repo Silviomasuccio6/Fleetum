@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "../components/layout/app-layout";
 import { PageLoader } from "../components/ui/page-loader";
 import { AcceptInvitePage } from "../pages/auth/accept-invite-page";
@@ -8,13 +8,10 @@ import { LoginPage } from "../../features/auth";
 import { ResetPasswordPage } from "../pages/auth/reset-password-page";
 import { SocialAuthCallbackPage } from "../pages/auth/social-auth-callback-page";
 import { SignupPage } from "../pages/auth/signup-page";
-import { PrivacyPolicyPage } from "../pages/privacy/privacy-policy-page";
 import { CookieConsentBanner } from "../components/privacy/cookie-consent-banner";
-import { DemoRequestPage, LegalDocumentPage } from "../pages/legal/legal-pages";
-import { LandingPage } from "../pages/landing/landing-page";
-import { PublicSeoPage } from "../pages/landing/seo-pages";
 import { ProtectedRoute } from "./protected-route";
 import { GlobalTextTranslator } from "../components/i18n/global-text-translator";
+import { publicPrerenderRoutes } from "../../seo/public-prerender-routes";
 
 const DashboardPage = lazy(() => import("../pages/dashboard/dashboard-page").then((m) => ({ default: m.DashboardPage })));
 const StoppagesListPage = lazy(() => import("../pages/stoppages/stoppages-list-page").then((m) => ({ default: m.StoppagesListPage })));
@@ -42,6 +39,17 @@ const CompanyOnboardingPage = lazy(() => import("../pages/onboarding/company-onb
 
 const withPageLoader = (element: JSX.Element) => <Suspense fallback={<PageLoader />}>{element}</Suspense>;
 
+const ContinueOnPublicSite = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Public pages have a dedicated prerendered entry and must leave the app shell.
+    window.location.replace(`${location.pathname}${location.search}${location.hash}`);
+  }, [location.hash, location.pathname, location.search]);
+
+  return <PageLoader />;
+};
+
 export const AppRoutes = () => (
   <>
     <GlobalTextTranslator />
@@ -53,11 +61,9 @@ export const AppRoutes = () => (
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />
       <Route path="/auth/social-callback" element={<SocialAuthCallbackPage />} />
-      <Route path="/privacy" element={<PrivacyPolicyPage />} />
-      <Route path="/cookie" element={<LegalDocumentPage type="cookie" />} />
-      <Route path="/termini" element={<LegalDocumentPage type="terms" />} />
-      <Route path="/dpa" element={<LegalDocumentPage type="dpa" />} />
-      <Route path="/demo" element={<DemoRequestPage />} />
+      {publicPrerenderRoutes.map((path) => (
+        <Route key={path} path={path} element={<ContinueOnPublicSite />} />
+      ))}
       <Route
         path="/activate"
         element={
@@ -90,14 +96,6 @@ export const AppRoutes = () => (
           </ProtectedRoute>
         }
       />
-      <Route path="/software-autonoleggio" element={<PublicSeoPage slug="software-autonoleggio" />} />
-      <Route path="/software-rent-a-car" element={<PublicSeoPage slug="software-rent-a-car" />} />
-      <Route path="/gestionale-flotta" element={<PublicSeoPage slug="gestionale-flotta" />} />
-      <Route path="/booking-noleggi" element={<PublicSeoPage slug="booking-noleggi" />} />
-      <Route path="/contratti-noleggio-digitali" element={<PublicSeoPage slug="contratti-noleggio-digitali" />} />
-      <Route path="/report-redditivita-veicolo" element={<PublicSeoPage slug="report-redditivita-veicolo" />} />
-      <Route path="/prezzi" element={<PublicSeoPage slug="prezzi" />} />
-      <Route path="/" element={<LandingPage />} />
       <Route
         element={
           <ProtectedRoute>

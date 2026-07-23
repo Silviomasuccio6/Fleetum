@@ -6,7 +6,6 @@ import {
   type CookieConsent,
   readCookieConsent
 } from "../../../infrastructure/privacy/cookie-consent";
-import "./cookie-consent-banner.css";
 
 const VERSION = "2026-05-17";
 
@@ -47,9 +46,9 @@ export const CookieConsentBanner = () => {
     <section className="fleetum-cookie-banner" role="dialog" aria-live="polite" aria-label="Preferenze cookie Fleetum">
       <div>
         <span>Cookie e privacy</span>
-        <h2>Usiamo solo cio che serve, e ti lasciamo il controllo.</h2>
+        <h2>Usiamo solo ciò che serve, e ti lasciamo il controllo.</h2>
         <p>
-          I cookie tecnici mantengono sicura la navigazione. Analytics e marketing restano spenti finche non li autorizzi.
+          I cookie tecnici mantengono sicura la navigazione. Analytics e marketing restano spenti finché non li autorizzi.
           Leggi la <Link to="/cookie">Cookie Policy</Link>.
         </p>
         {expanded ? (
