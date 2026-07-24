@@ -1,6 +1,6 @@
 .fleetum-legal-page {
-  --fleetum-demo-font-sans: "Inter", "Manrope", "Segoe UI", sans-serif;
-  --fleetum-demo-font-display: "Manrope", "Inter", "Segoe UI", sans-serif;
+  --fleetum-demo-font-sans: "Instrument Sans Variable", "Segoe UI", sans-serif;
+  --fleetum-demo-font-display: "Instrument Sans Variable", "Segoe UI", sans-serif;
   min-height: 100vh;
   background:
     radial-gradient(circle at 12% 8%, rgba(37, 99, 255, .16), transparent 32%),
@@ -14,24 +14,7 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-.fleetum-legal-shell { width: min(1080px, 100%); margin: 0 auto; }
-.fleetum-legal-topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.fleetum-legal-topbar a,
-.fleetum-legal-topbar button {
-  border: 1px solid rgba(226, 232, 240, .96);
-  border-radius: 999px;
-  background: rgba(255,255,255,.76);
-  color: #0f172a;
-  text-decoration: none;
-  font-family: var(--fleetum-demo-font-sans);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  padding: 11px 16px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 16px 36px -30px rgba(15,23,42,.72);
-}
+.fleetum-legal-shell { width: min(1080px, 100%); margin: 30px auto 0; }
 
 .fleetum-legal-card,
 .fleetum-demo-card {
@@ -44,10 +27,8 @@
 }
 
 .fleetum-legal-hero { padding: clamp(30px, 5vw, 58px); border-bottom: 1px solid rgba(226,232,240,.88); }
-.fleetum-legal-hero span,
-.fleetum-demo-copy span { color: #2563ff; text-transform: uppercase; letter-spacing: .16em; font-size: .74rem; font-weight: 800; }
-.fleetum-legal-hero h1,
-.fleetum-demo-copy h1 {
+.fleetum-legal-hero span { color: #2563ff; text-transform: uppercase; letter-spacing: .16em; font-size: .74rem; font-weight: 800; }
+.fleetum-legal-hero h1 {
   margin: 14px 0;
   max-width: 820px;
   font-family: var(--fleetum-demo-font-display);
@@ -57,8 +38,7 @@
   letter-spacing: -.056em;
   text-wrap: balance;
 }
-.fleetum-legal-hero p,
-.fleetum-demo-copy p { max-width: 760px; color: #475569; line-height: 1.68; font-weight: 520; letter-spacing: -0.01em; }
+.fleetum-legal-hero p { max-width: 760px; color: #475569; line-height: 1.68; font-weight: 520; letter-spacing: -0.01em; }
 .fleetum-legal-hero strong { display: inline-flex; margin-top: 20px; padding: 10px 14px; border-radius: 999px; background: #eef6ff; color: #1d4ed8; }
 
 .fleetum-legal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: clamp(20px, 4vw, 38px); }
@@ -70,191 +50,751 @@
 .fleetum-legal-note { margin: 0 clamp(20px, 4vw, 38px) clamp(20px, 4vw, 38px); padding: 20px; border-radius: 24px; background: #fff8e6; border: 1px solid rgba(245, 158, 11, .28); color: #713f12; }
 .fleetum-legal-note strong { display: block; margin-bottom: 6px; }
 
-.fleetum-demo-shell { width: min(1180px, 100%); }
 .fleetum-demo-page {
+  min-height: 100svh;
+  padding: 18px clamp(14px, 2vw, 30px) 0;
   background:
-    radial-gradient(circle at 12% 8%, rgba(37, 99, 255, .18), transparent 32%),
-    radial-gradient(circle at 86% 12%, rgba(0, 184, 169, .16), transparent 30%),
-    linear-gradient(180deg, #f8fbff, #eef6ff 48%, #f9fbff);
+    radial-gradient(circle at 8% 0%, rgba(21, 94, 239, .18), transparent 29%),
+    radial-gradient(circle at 92% 12%, rgba(0, 143, 134, .15), transparent 30%),
+    linear-gradient(180deg, #f8fbff 0%, #edf4fb 58%, #f8fafc 100%);
 }
+
+.fleetum-demo-shell {
+  width: min(1480px, 100%);
+  margin: 18px auto 0;
+}
+
 .fleetum-demo-card {
   display: grid;
-  grid-template-columns: minmax(0, .96fr) minmax(440px, 1.04fr);
-  gap: 0;
-  border-radius: 40px;
+  grid-template-columns: minmax(0, 1.12fr) minmax(480px, .88fr);
+  width: 100%;
+  height: min(780px, calc(100svh - 124px));
+  min-height: 590px;
+  border: 1px solid rgba(159, 178, 204, .35);
+  border-radius: 34px;
+  background: #ffffff;
   box-shadow:
-    0 38px 110px -72px rgba(7, 17, 31, .88),
-    0 0 0 1px rgba(255,255,255,.74) inset;
+    0 38px 110px -64px rgba(7, 17, 31, .68),
+    0 0 0 1px rgba(255, 255, 255, .76) inset;
+  overflow: hidden;
 }
+
 .fleetum-demo-copy {
   position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  align-content: space-between;
+  gap: clamp(16px, 2.4vh, 28px);
+  min-width: 0;
+  padding: clamp(28px, 3.2vw, 50px);
   overflow: hidden;
-  padding: clamp(34px, 5vw, 64px);
-  background:
-    radial-gradient(circle at 12% 6%, rgba(37, 99, 255, .52), transparent 34%),
-    radial-gradient(circle at 92% 12%, rgba(0, 184, 169, .32), transparent 30%),
-    linear-gradient(145deg, #07111f, #0b1b36 58%, #0d766f);
-  color: #fff;
+  color: #ffffff;
+  background: #07111f;
 }
-.fleetum-demo-copy::before {
+
+.fleetum-demo-copy::before,
+.fleetum-demo-copy::after {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: -1;
   pointer-events: none;
-  background-image:
-    linear-gradient(rgba(230,236,242,.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(230,236,242,.055) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: linear-gradient(to bottom, black, transparent 92%);
 }
-.fleetum-demo-copy > * { position: relative; z-index: 1; }
-.fleetum-demo-brand {
+
+.fleetum-demo-copy::before {
+  background:
+    linear-gradient(90deg, rgba(4, 11, 23, .96) 0%, rgba(4, 13, 27, .78) 54%, rgba(4, 13, 27, .38) 100%),
+    linear-gradient(0deg, rgba(3, 10, 21, .92) 0%, transparent 58%);
+}
+
+.fleetum-demo-copy::after {
+  opacity: .34;
+  background-image:
+    linear-gradient(rgba(226, 236, 248, .1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(226, 236, 248, .1) 1px, transparent 1px);
+  background-size: 62px 62px;
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .72), transparent 86%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .72), transparent 86%);
+}
+
+.fleetum-demo-copy__media {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+}
+
+.fleetum-demo-copy__image {
+  width: 100%;
+  height: 100% !important;
+  max-width: none !important;
+  object-fit: cover;
+  object-position: 58% center;
+  filter: saturate(.82) contrast(1.06);
+  transform: scale(1.015);
+}
+
+.fleetum-demo-copy__content,
+.fleetum-demo-preview,
+.fleetum-demo-proof-grid {
+  position: relative;
+  z-index: 1;
+}
+
+.fleetum-demo-copy__content {
+  max-width: 670px;
+}
+
+.fleetum-demo-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: clamp(13px, 2vh, 21px);
+}
+
+.fleetum-demo-eyebrow span,
+.fleetum-demo-eyebrow strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: .67rem;
+  font-weight: 780;
+  line-height: 1;
+  letter-spacing: .105em;
+  text-transform: uppercase;
+}
+
+.fleetum-demo-eyebrow span {
+  color: #d9e8ff;
+  border: 1px solid rgba(125, 171, 255, .38);
+  background: rgba(21, 94, 239, .3);
+}
+
+.fleetum-demo-eyebrow strong {
+  color: #b6fff7;
+  border: 1px solid rgba(50, 221, 209, .28);
+  background: rgba(0, 143, 134, .2);
+}
+
+.fleetum-demo-copy h1 {
+  max-width: 650px;
+  margin: 0;
+  color: #ffffff;
+  font-family: var(--fleetum-demo-font-display);
+  font-size: clamp(2.65rem, 4.45vw, 5.1rem);
+  font-weight: 760;
+  line-height: .94;
+  letter-spacing: -.062em;
+  text-wrap: balance;
+}
+
+.fleetum-demo-copy__content > p {
+  max-width: 590px;
+  margin: clamp(14px, 2vh, 22px) 0 0;
+  color: rgba(233, 241, 251, .82);
+  font-size: clamp(.95rem, 1.12vw, 1.08rem);
+  font-weight: 510;
+  line-height: 1.52;
+  letter-spacing: -.016em;
+}
+
+.fleetum-demo-preview {
+  align-self: center;
+  width: min(610px, 100%);
+  border: 1px solid rgba(226, 236, 248, .18);
+  border-radius: 22px;
+  background: rgba(7, 17, 31, .66);
+  box-shadow:
+    0 26px 60px -38px rgba(0, 0, 0, .8),
+    inset 0 1px 0 rgba(255, 255, 255, .08);
+  backdrop-filter: blur(18px) saturate(130%);
+  overflow: hidden;
+}
+
+.fleetum-demo-preview__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: clamp(38px, 8vw, 82px);
+  min-height: 54px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(226, 236, 248, .13);
 }
-.fleetum-demo-brand img {
-  width: clamp(154px, 17vw, 190px);
-  max-width: 52%;
-  height: auto;
-  object-fit: contain;
+
+.fleetum-demo-preview__head div,
+.fleetum-demo-preview__grid article > div {
+  display: grid;
+  gap: 2px;
 }
-.fleetum-demo-brand strong {
+
+.fleetum-demo-preview__head small,
+.fleetum-demo-preview__grid small {
+  color: rgba(226, 236, 248, .58);
+  font-size: .67rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.fleetum-demo-preview__head strong {
+  color: #ffffff;
+  font-size: .84rem;
+  letter-spacing: -.015em;
+}
+
+.fleetum-demo-preview__head > span {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
+  min-height: 27px;
+  padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(230,236,242,.18);
-  background: rgba(255,255,255,.08);
-  color: rgba(230,236,242,.88);
-  padding: 0 13px;
-  font-size: .76rem;
-  font-weight: 700;
-  letter-spacing: -.01em;
+  color: #c8fff9;
+  background: rgba(0, 143, 134, .2);
+  font-size: .68rem;
+  font-weight: 720;
 }
-.fleetum-demo-copy p { color: rgba(230,236,242,.78); }
+
+.fleetum-demo-preview__grid {
+  display: grid;
+}
+
+.fleetum-demo-preview__grid article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 48px;
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(226, 236, 248, .095);
+}
+
+.fleetum-demo-preview__grid article:last-child {
+  border-bottom: 0;
+}
+
+.fleetum-demo-preview__grid strong {
+  color: #f8fbff;
+  font-size: .78rem;
+  letter-spacing: -.012em;
+}
+
+.fleetum-demo-preview__grid article > span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 9px;
+  white-space: nowrap;
+  font-size: .64rem;
+  font-weight: 740;
+}
+
+.fleetum-demo-preview__grid .is-blue { color: #dbe8ff; background: rgba(37, 99, 255, .25); }
+.fleetum-demo-preview__grid .is-green { color: #c8fff9; background: rgba(0, 143, 134, .25); }
+.fleetum-demo-preview__grid .is-amber { color: #ffedc2; background: rgba(217, 146, 15, .22); }
+
 .fleetum-demo-proof-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 28px;
+  gap: 9px;
 }
+
 .fleetum-demo-proof-grid article {
-  min-height: 128px;
-  padding: 16px;
-  border-radius: 22px;
-  border: 1px solid rgba(230,236,242,.14);
-  background: rgba(255,255,255,.075);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 11px 12px;
+  border: 1px solid rgba(226, 236, 248, .14);
+  border-radius: 16px;
+  background: rgba(5, 14, 28, .44);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(12px);
 }
+
+.fleetum-demo-proof-grid svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #42e7db;
+}
+
+.fleetum-demo-proof-grid article > span,
 .fleetum-demo-proof-grid strong,
 .fleetum-demo-proof-grid small {
   display: block;
+  min-width: 0;
 }
+
 .fleetum-demo-proof-grid strong {
-  margin-bottom: 8px;
-  font-family: var(--fleetum-demo-font-display);
-  font-size: .94rem;
-  letter-spacing: -.02em;
+  color: #ffffff;
+  font-size: .76rem;
+  line-height: 1.24;
+  letter-spacing: -.012em;
 }
+
 .fleetum-demo-proof-grid small {
-  color: rgba(230,236,242,.68);
-  font-size: .78rem;
-  line-height: 1.45;
+  margin-top: 3px;
+  color: rgba(226, 236, 248, .62);
+  font-size: .65rem;
+  line-height: 1.3;
 }
-.fleetum-demo-copy ul { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 12px; }
-.fleetum-demo-copy li { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,.86); font-weight: 650; letter-spacing: -0.012em; }
-.fleetum-demo-copy svg { color: #32ddd1; }
+
 .fleetum-demo-form {
   position: relative;
-  padding: clamp(28px, 4.4vw, 54px);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: center;
-  gap: 16px;
+  gap: clamp(10px, 1.4vh, 15px) 13px;
+  min-width: 0;
+  padding: clamp(24px, 3vw, 46px);
+  overflow: auto;
   background:
-    radial-gradient(circle at 88% 0%, rgba(37, 99, 255, .08), transparent 28%),
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,251,255,.9));
+    radial-gradient(circle at 100% 0%, rgba(21, 94, 239, .09), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
+
 .fleetum-demo-form-head {
   grid-column: 1 / -1;
-  margin-bottom: 8px;
+  margin-bottom: clamp(1px, .8vh, 8px);
 }
-.fleetum-demo-form-head span {
-  color: #2563ff;
+
+.fleetum-demo-form-head > span {
+  color: #155eef;
+  font-size: .68rem;
+  font-weight: 820;
+  letter-spacing: .14em;
   text-transform: uppercase;
-  letter-spacing: .15em;
-  font-size: .7rem;
-  font-weight: 800;
 }
+
 .fleetum-demo-form-head h2 {
+  max-width: 550px;
   margin: 8px 0 6px;
-  font-family: var(--fleetum-demo-font-display);
-  font-size: clamp(1.7rem, 2.7vw, 2.45rem);
-  line-height: 1.03;
-  letter-spacing: -.045em;
   color: #07111f;
+  font-family: var(--fleetum-demo-font-display);
+  font-size: clamp(1.65rem, 2.35vw, 2.35rem);
+  font-weight: 740;
+  line-height: 1.02;
+  letter-spacing: -.046em;
+  text-wrap: balance;
 }
+
 .fleetum-demo-form-head p {
+  max-width: 34rem;
   margin: 0;
-  max-width: 33rem;
-  color: #64748b;
-  font-size: .95rem;
-  line-height: 1.58;
-  letter-spacing: -.012em;
+  color: #607086;
+  font-size: .86rem;
+  line-height: 1.48;
+  letter-spacing: -.01em;
 }
-.fleetum-demo-form label {
+
+.fleetum-demo-field {
   display: grid;
-  gap: 8px;
-  color: #334155;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  color: #29384c;
   font-family: var(--fleetum-demo-font-sans);
-  font-size: .82rem;
-  font-weight: 700;
-  letter-spacing: -0.008em;
+  font-size: .75rem;
+  font-weight: 720;
+  letter-spacing: -.006em;
 }
+
+.fleetum-demo-field > span {
+  padding-left: 2px;
+}
+
 .fleetum-demo-form input,
 .fleetum-demo-form select,
 .fleetum-demo-form textarea {
   width: 100%;
-  min-height: 52px;
-  border: 1px solid #dbe5f2;
-  border-radius: 16px;
-  padding: 0 15px;
-  font-family: var(--fleetum-demo-font-sans);
-  font-size: .94rem;
-  font-weight: 520;
-  letter-spacing: -0.012em;
+  min-height: 47px;
+  border: 1px solid #d6e0ed;
+  border-radius: 13px;
+  padding: 0 13px;
   color: #07111f;
-  background: rgba(255,255,255,.9);
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 1px 0 rgba(7, 17, 31, .025);
   outline: none;
+  font-family: var(--fleetum-demo-font-sans);
+  font-size: .88rem;
+  font-weight: 520;
+  letter-spacing: -.01em;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
 }
+
+.fleetum-demo-form input:hover,
+.fleetum-demo-form select:hover,
+.fleetum-demo-form textarea:hover {
+  border-color: #b9c9de;
+  background: #ffffff;
+}
+
+.fleetum-demo-form input:focus-visible,
+.fleetum-demo-form select:focus-visible,
+.fleetum-demo-form textarea:focus-visible,
+.fleetum-demo-form button:focus-visible,
+.fleetum-demo-privacy-note a:focus-visible {
+  outline: 3px solid rgba(21, 94, 239, .22);
+  outline-offset: 2px;
+  border-color: #155eef;
+  box-shadow: 0 0 0 1px #155eef;
+}
+
 .fleetum-demo-form input::placeholder,
-.fleetum-demo-form textarea::placeholder { color: #94a3b8; font-weight: 480; }
-.fleetum-demo-form textarea { min-height: 116px; padding-top: 14px; resize: vertical; }
-.fleetum-demo-form label:has(textarea) { grid-column: 1 / -1; }
-.fleetum-demo-honeypot { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.fleetum-demo-form button { grid-column: 1 / -1; border: 0; min-height: 56px; border-radius: 18px; color: #fff; font-family: var(--fleetum-demo-font-sans); font-size: .95rem; font-weight: 760; letter-spacing: -0.012em; cursor: pointer; background: linear-gradient(135deg, #0b1220, #2563ff 55%, #00b8a9); display: inline-flex; align-items: center; justify-content: center; gap: 9px; box-shadow: 0 24px 48px -28px rgba(37,99,255,.9); }
-.fleetum-demo-form button:disabled { opacity: .68; cursor: progress; }
+.fleetum-demo-form textarea::placeholder {
+  color: #92a1b5;
+  font-weight: 470;
+}
+
+.fleetum-demo-field--message {
+  grid-column: 1 / -1;
+}
+
+.fleetum-demo-form textarea {
+  min-height: 78px;
+  padding-top: 12px;
+  resize: vertical;
+}
+
+.fleetum-demo-fit-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  align-self: end;
+  min-height: 47px;
+  padding: 9px 12px;
+  border: 1px solid rgba(0, 143, 134, .2);
+  border-radius: 13px;
+  color: #31544f;
+  background: rgba(225, 251, 247, .66);
+  font-size: .69rem;
+  line-height: 1.3;
+}
+
+.fleetum-demo-fit-note svg {
+  flex: 0 0 auto;
+  color: #008f86;
+}
+
+.fleetum-demo-fit-note strong {
+  color: #0b625c;
+}
+
+.fleetum-demo-honeypot {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fleetum-demo-form button {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 50px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: linear-gradient(118deg, #07111f 0%, #155eef 58%, #008f86 128%);
+  box-shadow: 0 22px 42px -25px rgba(21, 94, 239, .88);
+  cursor: pointer;
+  font-family: var(--fleetum-demo-font-sans);
+  font-size: .88rem;
+  font-weight: 780;
+  letter-spacing: -.008em;
+  transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+
+.fleetum-demo-form button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 26px 48px -23px rgba(21, 94, 239, .94);
+}
+
+.fleetum-demo-form button:disabled {
+  opacity: .68;
+  cursor: progress;
+}
+
 .fleetum-demo-privacy-note {
   grid-column: 1 / -1;
-  margin: -4px 0 0;
-  color: #64748b;
-  font-size: .76rem;
-  line-height: 1.5;
+  margin: -2px 0 0;
+  color: #68788d;
+  font-size: .69rem;
+  line-height: 1.4;
   text-align: center;
 }
+
+.fleetum-demo-privacy-note a {
+  color: #155eef;
+  font-weight: 700;
+  text-underline-offset: 2px;
+}
+
+.fleetum-demo-feedback {
+  grid-column: 1 / -1;
+}
+
 .fleetum-demo-success,
-.fleetum-demo-error { grid-column: 1 / -1; margin: 0; border-radius: 16px; padding: 13px 14px; font-weight: 700; letter-spacing: -0.01em; }
-.fleetum-demo-success { background: #ecfdf5; color: #047857; }
-.fleetum-demo-error { background: #fef2f2; color: #b91c1c; }
+.fleetum-demo-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-radius: 13px;
+  padding: 10px 12px;
+  font-size: .75rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -.008em;
+}
+
+.fleetum-demo-success { color: #08766e; background: #e8faf6; }
+.fleetum-demo-error { color: #b42318; background: #fff0ee; }
+
+@media (min-width: 961px) and (max-height: 820px) {
+  .fleetum-demo-card {
+    height: calc(100svh - 120px);
+    min-height: 584px;
+  }
+
+  .fleetum-demo-copy {
+    gap: 14px;
+    padding: 24px 30px;
+  }
+
+  .fleetum-demo-copy h1 {
+    max-width: 590px;
+    font-size: clamp(2.55rem, 4vw, 4rem);
+  }
+
+  .fleetum-demo-copy__content > p {
+    margin-top: 12px;
+    font-size: .9rem;
+    line-height: 1.42;
+  }
+
+  .fleetum-demo-eyebrow {
+    margin-bottom: 11px;
+  }
+
+  .fleetum-demo-preview__head {
+    min-height: 45px;
+    padding: 7px 12px;
+  }
+
+  .fleetum-demo-preview__grid article {
+    min-height: 40px;
+    padding: 5px 12px;
+  }
+
+  .fleetum-demo-proof-grid article {
+    min-height: 54px;
+    padding: 9px 10px;
+  }
+
+  .fleetum-demo-form {
+    gap: 9px 11px;
+    padding: 22px 28px;
+  }
+
+  .fleetum-demo-form-head h2 {
+    margin-top: 6px;
+    font-size: clamp(1.55rem, 2.2vw, 2rem);
+  }
+
+  .fleetum-demo-form-head p {
+    font-size: .78rem;
+    line-height: 1.38;
+  }
+
+  .fleetum-demo-field {
+    gap: 4px;
+    font-size: .7rem;
+  }
+
+  .fleetum-demo-form input,
+  .fleetum-demo-form select,
+  .fleetum-demo-fit-note {
+    min-height: 42px;
+  }
+
+  .fleetum-demo-form textarea {
+    min-height: 62px;
+  }
+
+  .fleetum-demo-form button {
+    min-height: 45px;
+  }
+
+  .fleetum-demo-privacy-note {
+    font-size: .64rem;
+  }
+}
+
+@media (max-width: 960px) {
+  .fleetum-demo-card {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+
+  .fleetum-demo-copy {
+    min-height: 610px;
+  }
+
+  .fleetum-demo-copy__image {
+    object-position: center 45%;
+  }
+
+  .fleetum-demo-preview {
+    width: min(660px, 100%);
+  }
+
+  .fleetum-demo-form {
+    overflow: visible;
+  }
+}
 
 @media (max-width: 820px) {
   .fleetum-legal-grid,
-  .fleetum-demo-card,
-  .fleetum-demo-form { grid-template-columns: 1fr; }
+  .fleetum-demo-form {
+    grid-template-columns: 1fr;
+  }
 
-  .fleetum-demo-proof-grid { grid-template-columns: 1fr; }
-  .fleetum-demo-brand { margin-bottom: 42px; }
+  .fleetum-demo-page {
+    padding: 12px 12px 0;
+  }
+
+  .fleetum-demo-shell {
+    margin-top: 16px;
+  }
+
+  .fleetum-demo-card {
+    border-radius: 27px;
+  }
+
+  .fleetum-demo-copy {
+    min-height: 580px;
+    padding: 26px;
+  }
+
+  .fleetum-demo-copy h1 {
+    font-size: clamp(2.65rem, 9.5vw, 4.5rem);
+  }
+
+  .fleetum-demo-proof-grid {
+    gap: 7px;
+  }
+
+  .fleetum-demo-form {
+    padding: clamp(25px, 6vw, 42px);
+  }
+
+  .fleetum-demo-field--message,
+  .fleetum-demo-form button,
+  .fleetum-demo-privacy-note,
+  .fleetum-demo-feedback {
+    grid-column: 1;
+  }
+
+  .fleetum-demo-fit-note {
+    align-self: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .fleetum-demo-page {
+    padding-inline: 9px;
+  }
+
+  .fleetum-demo-shell {
+    margin-top: 13px;
+  }
+
+  .fleetum-demo-card {
+    border-radius: 23px;
+  }
+
+  .fleetum-demo-copy {
+    min-height: 610px;
+    gap: 17px;
+    padding: 23px 20px;
+  }
+
+  .fleetum-demo-copy::before {
+    background:
+      linear-gradient(180deg, rgba(4, 11, 23, .92) 0%, rgba(4, 13, 27, .7) 48%, rgba(3, 10, 21, .96) 100%);
+  }
+
+  .fleetum-demo-copy__image {
+    object-position: 58% center;
+  }
+
+  .fleetum-demo-eyebrow strong {
+    display: none;
+  }
+
+  .fleetum-demo-copy h1 {
+    max-width: 340px;
+    font-size: clamp(2.35rem, 12vw, 3.45rem);
+  }
+
+  .fleetum-demo-copy__content > p {
+    margin-top: 13px;
+    font-size: .9rem;
+  }
+
+  .fleetum-demo-preview__grid article {
+    padding-inline: 11px;
+  }
+
+  .fleetum-demo-preview__grid article > span {
+    font-size: .59rem;
+  }
+
+  .fleetum-demo-proof-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetum-demo-proof-grid article {
+    min-height: 45px;
+    padding: 8px 10px;
+  }
+
+  .fleetum-demo-proof-grid small {
+    display: none;
+  }
+
+  .fleetum-demo-form {
+    gap: 13px;
+    padding: 27px 20px 30px;
+  }
+
+  .fleetum-demo-form-head h2 {
+    font-size: 1.85rem;
+  }
+
+  .fleetum-demo-form textarea {
+    min-height: 92px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fleetum-demo-form button,
+  .fleetum-demo-form input,
+  .fleetum-demo-form select,
+  .fleetum-demo-form textarea {
+    transition-duration: .001ms !important;
+  }
 }

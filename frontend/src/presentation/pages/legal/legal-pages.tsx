@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Mail, ShieldCheck } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Check, Mail, ShieldCheck } from "lucide-react";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
-import { getPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { getConsentedPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
+import { PublicFooter } from "../../components/public-site/public-footer";
+import { PublicHeader } from "../../components/public-site/public-header";
+import { ResponsiveMedia } from "../../components/public-site/responsive-media";
 import { SeoHead } from "../../components/seo/seo-head";
-import "./legal-pages.css";
 
 type LegalDocument = {
   badge: string;
@@ -24,10 +25,10 @@ const privacyDocument: LegalDocument = {
     "Questa informativa descrive in modo operativo come Fleetum supporta i clienti SaaS nella gestione di dati, documenti, contratti e processi di flotta. Il testo finale deve essere validato dal titolare e dal consulente privacy prima dell'uso definitivo.",
   sections: [
     { title: "Dati trattati", body: "Dati anagrafici, contatti, dati aziendali, documenti, patente, prenotazioni, contratti, firme, veicoli, manutenzioni, scadenze, log tecnici e audit applicativi." },
-    { title: "Finalita", body: "Erogazione del gestionale, gestione noleggi, contratti, comunicazioni operative, sicurezza, assistenza, obblighi amministrativi e miglioramento del servizio." },
+    { title: "Finalità", body: "Erogazione del gestionale, gestione noleggi, contratti, comunicazioni operative, sicurezza, assistenza, obblighi amministrativi e miglioramento del servizio." },
     { title: "Ruoli privacy", body: "Il cliente SaaS opera normalmente come titolare del trattamento sui dati dei propri clienti. Fleetum opera come fornitore/responsabile tecnico secondo accordi contrattuali e DPA da finalizzare." },
-    { title: "Conservazione", body: "I dati sono conservati per il tempo necessario a finalita contrattuali, fiscali, operative e di sicurezza. Le policy di retention devono essere configurate e validate per ogni contesto produttivo." },
-    { title: "Diritti", body: "Accesso, rettifica, cancellazione, limitazione, opposizione e portabilita possono essere esercitati tramite i canali privacy indicati dal titolare del trattamento." }
+    { title: "Conservazione", body: "I dati sono conservati per il tempo necessario a finalità contrattuali, fiscali, operative e di sicurezza. Le policy di retention devono essere configurate e validate per ogni contesto produttivo." },
+    { title: "Diritti", body: "Accesso, rettifica, cancellazione, limitazione, opposizione e portabilità possono essere esercitati tramite i canali privacy indicati dal titolare del trattamento." }
   ]
 };
 
@@ -35,7 +36,7 @@ const cookieDocument: LegalDocument = {
   badge: "Cookie",
   title: "Cookie Policy",
   version: "2026-05-17",
-  intro: "Fleetum usa cookie tecnici necessari al funzionamento e puo usare strumenti analytics solo dopo consenso esplicito.",
+  intro: "Fleetum usa cookie tecnici necessari al funzionamento e può usare strumenti analytics solo dopo consenso esplicito.",
   sections: [
     { title: "Cookie necessari", body: "Servono per sicurezza, sessione, preferenze essenziali e navigazione. Non possono essere disattivati senza compromettere il servizio." },
     { title: "Analytics", body: "Eventuali analytics vengono caricati solo dopo consenso. In assenza di consenso restano bloccati." },
@@ -51,10 +52,10 @@ const termsDocument: LegalDocument = {
   intro: "Documento operativo preliminare per l'utilizzo di Fleetum come SaaS B2B. La versione contrattuale finale deve essere approvata legalmente prima della vendita definitiva.",
   sections: [
     { title: "Oggetto", body: "Fleetum fornisce strumenti software per booking noleggi, contratti, clienti, flotta, manutenzioni, scadenze e dashboard operative." },
-    { title: "Account aziendale", body: "Ogni azienda cliente opera nel proprio workspace tenant. Gli utenti devono mantenere credenziali sicure e usare ruoli coerenti con le responsabilita interne." },
-    { title: "Piani e pagamenti", body: "L'accesso alle funzionalita dipende dal piano attivo. Mancati pagamenti o uso non conforme possono comportare limitazioni o sospensione del servizio." },
+    { title: "Account aziendale", body: "Ogni azienda cliente opera nel proprio workspace tenant. Gli utenti devono mantenere credenziali sicure e usare ruoli coerenti con le responsabilità interne." },
+    { title: "Piani e pagamenti", body: "L'accesso alle funzionalità dipende dal piano attivo. Mancati pagamenti o uso non conforme possono comportare limitazioni o sospensione del servizio." },
     { title: "Dati e contenuti", body: "Il cliente resta responsabile della correttezza dei dati inseriti, dei documenti caricati e dell'utilizzo dei contratti generati." },
-    { title: "Disponibilita", body: "Fleetum e progettato per uso professionale, con backup, monitoraggio e procedure operative da completare in ambiente di produzione." }
+    { title: "Disponibilità", body: "Fleetum è progettato per uso professionale, con backup, monitoraggio e procedure operative da completare in ambiente di produzione." }
   ]
 };
 
@@ -102,12 +103,11 @@ const documentSeo = {
 } satisfies Record<LegalDocumentType, { title: string; description: string; canonicalPath: string }>;
 
 export const LegalDocumentPage = ({ type }: { type: LegalDocumentType }) => {
-  const navigate = useNavigate();
   const document = documents[type];
   const seo = documentSeo[type];
 
   return (
-    <main className="fleetum-legal-page">
+    <main id="main-content" className="fleetum-legal-page fleetum-public-theme">
       <SeoHead title={seo.title} description={seo.description} canonicalPath={seo.canonicalPath}>
         <script type="application/ld+json">
           {JSON.stringify({
@@ -119,11 +119,8 @@ export const LegalDocumentPage = ({ type }: { type: LegalDocumentType }) => {
           })}
         </script>
       </SeoHead>
+      <PublicHeader tone="light" analyticsPlacement={`legal_${type}`} />
       <div className="fleetum-legal-shell">
-        <div className="fleetum-legal-topbar">
-          <button type="button" onClick={() => navigate(-1)}><ArrowLeft size={17} /> Indietro</button>
-          <Link to="/">Fleetum.it</Link>
-        </div>
         <article className="fleetum-legal-card">
           <div className="fleetum-legal-hero">
             <span>{document.badge}</span>
@@ -146,6 +143,7 @@ export const LegalDocumentPage = ({ type }: { type: LegalDocumentType }) => {
           </div>
         </article>
       </div>
+      <PublicFooter tone="light" />
     </main>
   );
 };
@@ -168,11 +166,12 @@ export const DemoRequestPage = () => {
     setStatus("loading");
     setError("");
     const form = new FormData(formElement);
+    const fleetSize = form.get("fleetSize");
     const payload = {
       ...Object.fromEntries(
         Array.from(form.entries()).filter(([, value]) => typeof value !== "string" || value.trim() !== "")
       ),
-      ...getPublicAnalyticsContext()
+      ...(getConsentedPublicAnalyticsContext() ?? {})
     };
 
     try {
@@ -187,6 +186,10 @@ export const DemoRequestPage = () => {
           problem?.message || problem?.error || "Richiesta non inviata. Riprova tra poco."
         );
       }
+      trackPublicEvent("DEMO_FORM_SUBMIT", {
+        placement: "demo_page",
+        fleetSize: typeof fleetSize === "string" && fleetSize ? fleetSize : "not_provided"
+      });
       setStatus("success");
       formElement.reset();
     } catch (err) {
@@ -196,7 +199,7 @@ export const DemoRequestPage = () => {
   };
 
   return (
-    <main className="fleetum-legal-page fleetum-demo-page">
+    <main id="main-content" className="fleetum-legal-page fleetum-demo-page fleetum-public-theme">
       <SeoHead
         title="Richiedi una demo Fleetum | Gestionale per autonoleggi"
         description="Richiedi una demo Fleetum per vedere booking, contratti digitali, flotta, clienti e KPI nel tuo autonoleggio."
@@ -212,66 +215,126 @@ export const DemoRequestPage = () => {
           })}
         </script>
       </SeoHead>
+      <PublicHeader tone="light" analyticsPlacement="demo" />
       <div className="fleetum-legal-shell fleetum-demo-shell">
-        <div className="fleetum-legal-topbar">
-          <Link to="/">← Torna al sito</Link>
-          <Link to="/login">Accedi</Link>
-        </div>
         <section className="fleetum-demo-card">
           <div className="fleetum-demo-copy">
-            <div className="fleetum-demo-brand">
-              <img src="/brand/fleetum-logo-for-dark-bg.svg" alt="Fleetum" />
-              <strong>Demo operativa</strong>
+            <ResponsiveMedia
+              pictureClassName="fleetum-demo-copy__media"
+              className="fleetum-demo-copy__image"
+              src="/media/fleetum-handover-1440.webp"
+              webpSrcSet="/media/fleetum-handover-640.webp 640w, /media/fleetum-handover-768.webp 768w, /media/fleetum-handover-1024.webp 1024w, /media/fleetum-handover-1440.webp 1440w"
+              sizes="(max-width: 820px) 100vw, 58vw"
+              alt="Consegna professionale di un veicolo in una sede di autonoleggio"
+              priority
+            />
+            <div className="fleetum-demo-copy__content">
+              <div className="fleetum-demo-eyebrow">
+                <span>Demo operativa guidata</span>
+                <strong>Nessuna demo generica</strong>
+              </div>
+              <h1>Guarda Fleetum lavorare sulla tua flotta.</h1>
+              <p>
+                Partiamo dai tuoi processi per mostrarti come booking, contratti, clienti e veicoli
+                possono vivere dentro un'unica regia operativa.
+              </p>
             </div>
-            <span>Control room per autonoleggi</span>
-            <h1>Scopri se Fleetum e adatto alla tua flotta.</h1>
-            <p>
-              Una sessione mirata per capire come centralizzare booking, contratti digitali, clienti,
-              veicoli, manutenzioni e scadenze dentro un flusso operativo unico.
-            </p>
-            <div className="fleetum-demo-proof-grid" aria-label="Aree coperte dalla demo Fleetum">
-              <article>
-                <strong>Booking</strong>
-                <small>Vista mensile per veicolo, sedi, stati e disponibilita.</small>
-              </article>
-              <article>
-                <strong>Contratti</strong>
-                <small>PDF, firma, invio email e storico collegato al cliente.</small>
-              </article>
-              <article>
-                <strong>Flotta</strong>
-                <small>Scadenze, manutenzioni, rientri e criticita operative.</small>
-              </article>
+            <div className="fleetum-demo-preview" aria-label="Anteprima dimostrativa del booking Fleetum">
+              <div className="fleetum-demo-preview__head">
+                <div>
+                  <small>Dati dimostrativi</small>
+                  <strong>Booking Noleggi</strong>
+                </div>
+                <span>Oggi</span>
+              </div>
+              <div className="fleetum-demo-preview__grid" aria-hidden="true">
+                <article>
+                  <div><strong>Fiat 500</strong><small>Roma Centro</small></div>
+                  <span className="is-blue">Consegna 09:00</span>
+                </article>
+                <article>
+                  <div><strong>Toyota Yaris</strong><small>Roma Eur</small></div>
+                  <span className="is-green">In noleggio</span>
+                </article>
+                <article>
+                  <div><strong>Jeep Renegade</strong><small>Fiumicino</small></div>
+                  <span className="is-amber">Rientro 17:30</span>
+                </article>
+              </div>
             </div>
-            <ul>
-              <li><Check size={16} /> Demo costruita sui tuoi processi reali</li>
-              <li><Check size={16} /> Nessun impegno commerciale automatico</li>
-              <li><Check size={16} /> Risposta da Fleetum via email o telefono</li>
-            </ul>
+            <div className="fleetum-demo-proof-grid" aria-label="Vantaggi della demo Fleetum">
+              <article><Check size={15} /><span><strong>Sui tuoi processi</strong><small>Booking, sedi e ruoli reali</small></span></article>
+              <article><Check size={15} /><span><strong>Senza impegno</strong><small>Nessuna attivazione automatica</small></span></article>
+              <article><Check size={15} /><span><strong>Con un referente</strong><small>Risposta via email o telefono</small></span></article>
+            </div>
           </div>
-          <form className="fleetum-demo-form" onSubmit={submit}>
+          <form
+            className="fleetum-demo-form"
+            onSubmit={submit}
+            onChange={() => {
+              if (status === "error" || status === "success") {
+                setStatus("idle");
+                setError("");
+              }
+            }}
+            aria-busy={status === "loading"}
+          >
             <div className="fleetum-demo-form-head">
               <span>Richiedi una demo</span>
-              <h2>Parliamo del tuo autonoleggio</h2>
-              <p>Lasciaci i dati principali: ti ricontattiamo per preparare una demo utile, non generica.</p>
+              <h2>Costruiamola intorno al tuo autonoleggio.</h2>
+              <p>Condividi le informazioni essenziali: prepareremo una sessione focalizzata sulle tue priorità.</p>
             </div>
-            <label>Azienda<input name="companyName" required maxLength={120} placeholder="Es. Autonoleggio Demo" /></label>
-            <label>Nome e cognome<input name="fullName" required maxLength={100} placeholder="Mario Rossi" /></label>
-            <label>Email<input name="email" type="email" required maxLength={160} placeholder="nome@azienda.it" /></label>
-            <label>Telefono<input name="phone" maxLength={40} placeholder="+39 ..." /></label>
-            <label>Dimensione flotta<select name="fleetSize" defaultValue=""><option value="" disabled>Seleziona</option>{fleetSizes.map((size) => <option key={size} value={size}>{size} veicoli</option>)}</select></label>
-            <label>Messaggio<textarea name="message" maxLength={1200} placeholder="Raccontaci cosa vuoi gestire meglio: booking, contratti, scadenze, sedi..." /></label>
+            <label className="fleetum-demo-field">
+              <span>Azienda</span>
+              <input name="companyName" required maxLength={120} autoComplete="organization" placeholder="Es. Autonoleggio Demo" />
+            </label>
+            <label className="fleetum-demo-field">
+              <span>Nome e cognome</span>
+              <input name="fullName" required maxLength={100} autoComplete="name" placeholder="Mario Rossi" />
+            </label>
+            <label className="fleetum-demo-field">
+              <span>Email aziendale</span>
+              <input name="email" type="email" required maxLength={160} autoComplete="email" placeholder="nome@azienda.it" />
+            </label>
+            <label className="fleetum-demo-field">
+              <span>Telefono</span>
+              <input name="phone" type="tel" inputMode="tel" maxLength={40} autoComplete="tel" placeholder="+39 ..." />
+            </label>
+            <label className="fleetum-demo-field">
+              <span>Dimensione flotta</span>
+              <select name="fleetSize" defaultValue="" aria-describedby="fleetum-demo-fit-note">
+                <option value="" disabled>Seleziona</option>
+                {fleetSizes.map((size) => <option key={size} value={size}>{size} veicoli</option>)}
+              </select>
+            </label>
+            <div className="fleetum-demo-fit-note" id="fleetum-demo-fit-note">
+              <ShieldCheck size={18} aria-hidden="true" />
+              <span><strong>Demo dedicata</strong> Nessuna presentazione standard.</span>
+            </div>
+            <label className="fleetum-demo-field fleetum-demo-field--message">
+              <span>Cosa vuoi gestire meglio?</span>
+              <textarea name="message" maxLength={1200} placeholder="Booking, contratti, scadenze, più sedi..." />
+            </label>
             <input type="hidden" name="source" value="fleetum.it/demo" />
             <input className="fleetum-demo-honeypot" type="text" name="websiteUrl" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-            <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Invio in corso..." : "Richiedi demo"} <Mail size={16} /></button>
+            <button type="submit" disabled={status === "loading"}>
+              {status === "loading" ? "Invio in corso..." : "Prepara la mia demo"} <Mail size={16} aria-hidden="true" />
+            </button>
             <p className="fleetum-demo-privacy-note">
-              Usiamo questi dati solo per ricontattarti sulla richiesta demo. Nessuna iscrizione automatica a newsletter.
+              Usiamo i dati solo per gestire questa richiesta. Nessuna newsletter automatica. Consulta la <a href="/privacy">privacy policy</a>.
             </p>
-            {status === "success" ? <p className="fleetum-demo-success">Richiesta ricevuta. Ti ricontatteremo a breve.</p> : null}
-            {status === "error" ? <p className="fleetum-demo-error">{error}</p> : null}
+            <div className="fleetum-demo-feedback" aria-live="polite" aria-atomic="true">
+              {status === "success" ? (
+                <p className="fleetum-demo-success" role="status">
+                  <Check size={17} aria-hidden="true" /> Richiesta ricevuta. Ti ricontatteremo per preparare la sessione.
+                </p>
+              ) : null}
+              {status === "error" ? <p className="fleetum-demo-error" role="alert">{error}</p> : null}
+            </div>
           </form>
         </section>
       </div>
+      <PublicFooter tone="light" />
     </main>
   );
 };

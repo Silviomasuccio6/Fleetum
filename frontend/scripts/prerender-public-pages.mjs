@@ -40,7 +40,16 @@ await writeFile(join(distRoot, "spa.html"), createSpaShell(template), "utf8");
 const vite = await createServer({
   root: frontendRoot,
   appType: "custom",
-  server: { middlewareMode: true }
+  optimizeDeps: {
+    noDiscovery: true
+  },
+  server: {
+    middlewareMode: true,
+    hmr: false,
+    ws: false,
+    watch: null,
+    preTransformRequests: false
+  }
 });
 
 try {
