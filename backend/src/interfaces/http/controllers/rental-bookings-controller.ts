@@ -1157,6 +1157,15 @@ export class RentalBookingsController {
     }
   }
 
+  private async getAssignableVehicleOrThrow(tenantId: string, vehicleId: string) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { tenantId, id: vehicleId, deletedAt: null, isActive: true },
+      select: { id: true }
+    });
+    if (!vehicle) throw new AppError("Veicolo non valido o non attivo", 404, "VEHICLE_NOT_FOUND");
+    return vehicle;
+  }
+
   private async getBookingOrThrow(tenantId: string, bookingId: string) {
     const booking = await prisma.rentalBooking.findFirst({
       where: { tenantId, id: bookingId, deletedAt: null },
@@ -3435,15 +3444,10 @@ export class RentalBookingsController {
     const userId = req.auth?.userId;
     const payload = rentalBookingCreateSchema.parse(req.body);
 
-    const [vehicle, customer] = await Promise.all([
-      prisma.vehicle.findFirst({
-        where: { tenantId, id: payload.vehicleId, deletedAt: null, isActive: true },
-        select: { id: true }
-      }),
+    const [, customer] = await Promise.all([
+      this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId),
       this.getCustomerOrThrow(tenantId, payload.customerId)
     ]);
-
-    if (!vehicle) throw new AppError("Veicolo non valido o non attivo", 404, "VEHICLE_NOT_FOUND");
 
     if (
       typeof payload.pickupKm === "number" &&
@@ -3527,6 +3531,10 @@ export class RentalBookingsController {
     const nextPickupKm = payload.pickupKm ?? current.pickupKm;
     const nextReturnKm = payload.returnKm ?? current.returnKm;
     const nextCustomerId = payload.customerId ?? current.customerId;
+
+    if (payload.vehicleId !== undefined && payload.vehicleId !== current.vehicleId) {
+      await this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId);
+    }
 
     if (!nextCustomerId) throw new AppError("Cliente obbligatorio", 400, "CUSTOMER_REQUIRED");
     const nextCustomer = await this.getCustomerOrThrow(tenantId, nextCustomerId);
