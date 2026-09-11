@@ -498,6 +498,22 @@ model RefreshSession {
   @@index([tenantId, createdAt])
 }
 
+model OauthFlow {
+  id                 String    @id @default(cuid())
+  stateHash          String    @unique
+  browserBindingHash String
+  provider           String
+  intent             String
+  returnTo           String?
+  codeVerifier       String?
+  oidcNonce          String?
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@index([expiresAt, consumedAt])
+}
+
 model PasswordResetToken {
   id        String    @id @default(cuid())
   userId    String

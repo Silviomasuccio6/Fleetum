@@ -13,38 +13,18 @@ import { createPlatformIpAllowlist } from "./interfaces/http/middlewares/platfor
 import { requestContext } from "./interfaces/http/middlewares/request-context.js";
 import { metricsHandler, observeHttpMetrics } from "./interfaces/http/middlewares/metrics-middleware.js";
 import { metrics } from "./infrastructure/observability/metrics.js";
-
-const sensitiveQueryParams = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "otp",
-  "password",
-  "secret",
-  "code"
-]);
-
-const sanitizeRequestUrl = (rawUrl?: string) => {
-  if (!rawUrl) return "/";
-  try {
-    const parsed = new URL(rawUrl, "http://localhost");
-    for (const key of new Set(parsed.searchParams.keys())) {
-      const lowerKey = key.toLowerCase();
-      const shouldMask = sensitiveQueryParams.has(lowerKey) || lowerKey.includes("token") || lowerKey.includes("secret");
-      if (shouldMask) parsed.searchParams.set(key, "***");
-    }
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    const [pathname] = rawUrl.split("?");
-    return pathname || "/";
-  }
-};
+import { sanitizeRequestUrl } from "./infrastructure/logging/sanitize-request-url.js";
 
 morgan.token("safe-url", (req) => {
   const requestWithOriginalUrl = req as unknown as { originalUrl?: string; url?: string };
   const originalUrl = requestWithOriginalUrl.originalUrl ?? requestWithOriginalUrl.url;
   return sanitizeRequestUrl(originalUrl);
+});
+
+morgan.token("safe-referrer", (req) => {
+  const referrer = req.headers.referer ?? req.headers.referrer;
+  if (!referrer) return "-";
+  return sanitizeRequestUrl(Array.isArray(referrer) ? referrer[0] : referrer);
 });
 
 const localTenantOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -158,7 +138,7 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
   app.use(observeHttpMetrics);
   app.use(
     morgan(
-      ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
+      ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":safe-referrer" ":user-agent"'
     )
   );
 };
