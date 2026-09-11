@@ -130,6 +130,17 @@ const createTenantFixture = async (label: "A" | "B"): Promise<TenantFixture> => 
     }
   });
 
+  // Access tokens carry only identity. requireAuth reloads the live role from
+  // PostgreSQL so a role change takes effect on the very next request.
+  const adminRole = await prisma.role.upsert({
+    where: { key: "ADMIN" },
+    update: { name: "ADMIN" },
+    create: { key: "ADMIN", name: "ADMIN" }
+  });
+  await prisma.userRole.create({
+    data: { userId: user.id, roleId: adminRole.id }
+  });
+
   await prisma.tenantSubscription.create({
     data: {
       tenantId: tenant.id,
