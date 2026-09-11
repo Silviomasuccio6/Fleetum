@@ -4,6 +4,7 @@ import { AuthController } from "../controllers/auth-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
 import { authRateLimit } from "../middlewares/auth-rate-limit.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
+import { requireJsonBody } from "../middlewares/require-json-body.js";
 import { asyncHandler } from "./async-handler.js";
 
 const refreshRateLimit = rateLimit({
@@ -19,17 +20,17 @@ const refreshRateLimit = rateLimit({
 
 export const authRoutes = (controller: AuthController) => {
   const router = Router();
-  router.post("/signup", authRateLimit, asyncHandler(controller.signup));
-  router.post("/login", authRateLimit, asyncHandler(controller.login));
-  router.get("/google", asyncHandler(controller.googleAuthStart));
+  router.post("/signup", requireJsonBody, authRateLimit, asyncHandler(controller.signup));
+  router.post("/login", requireJsonBody, authRateLimit, asyncHandler(controller.login));
+  router.get("/google", authRateLimit, asyncHandler(controller.googleAuthStart));
   router.get("/google/callback", asyncHandler(controller.googleAuthCallback));
-  router.get("/apple", asyncHandler(controller.appleAuthStart));
+  router.get("/apple", authRateLimit, asyncHandler(controller.appleAuthStart));
   router.get("/apple/callback", asyncHandler(controller.appleAuthCallback));
   router.post("/apple/callback", asyncHandler(controller.appleAuthCallback));
   router.post("/forgot-password", authRateLimit, asyncHandler(controller.forgotPassword));
   router.post("/reset-password", authRateLimit, asyncHandler(controller.resetPassword));
   router.post("/accept-invite", authRateLimit, asyncHandler(controller.acceptInvite));
-  router.post("/refresh", refreshRateLimit, asyncHandler(controller.refresh));
+  router.post("/refresh", requireJsonBody, refreshRateLimit, asyncHandler(controller.refresh));
   router.post("/logout", requireAuth, requireCsrfProtection, asyncHandler(controller.logout));
   router.get("/me", requireAuth, asyncHandler(controller.me));
   router.get("/me/entitlements", requireAuth, asyncHandler(controller.entitlements));

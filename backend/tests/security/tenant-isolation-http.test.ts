@@ -262,10 +262,19 @@ const createTenantFixture = async (label: "A" | "B"): Promise<TenantFixture> => 
     }
   });
 
+  const session = await prisma.refreshSession.create({
+    data: {
+      userId: user.id,
+      tenantId: tenant.id,
+      tokenHash: `synthetic-${runId}-${marker}`,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000)
+    }
+  });
+
   return {
     tenantId: tenant.id,
     userId: user.id,
-    token: signTenantAccessToken({ tenantId: tenant.id, userId: user.id }),
+    token: signTenantAccessToken({ tenantId: tenant.id, userId: user.id, sessionId: session.id }),
     siteId: site.id,
     vehicleId: vehicle.id,
     customerId: customer.id,
@@ -338,6 +347,81 @@ describe("black-box HTTP tenant isolation", () => {
 
     const contract = await jsonRequest(`/rental-bookings/${tenantB.bookingId}/contract`, tenantA.token);
     assertForbiddenOrNotFound(contract.response.status);
+
+    const originalBooking = await prisma.rentalBooking.findUnique({
+      where: { id: tenantA.bookingId },
+      select: { vehicleId: true }
+    });
+    assert.equal(originalBooking?.vehicleId, tenantA.vehicleId);
+
+    const crossTenantUpdate = await jsonRequest(`/rental-bookings/${tenantA.bookingId}`, tenantA.token, {
+      method: "PATCH",
+      body: JSON.stringify({ vehicleId: tenantB.vehicleId })
+    });
+    assertForbiddenOrNotFound(crossTenantUpdate.response.status);
+    assertPayloadDoesNotContain(crossTenantUpdate.body, tenantB.marker);
+
+    const inactiveVehicle = await prisma.vehicle.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        siteId: tenantA.siteId,
+        plate: `INA${runId.slice(-7).toUpperCase()}`,
+        brand: "Inactive test vehicle",
+        model: "Tenant A",
+        year: 2024,
+        isActive: false
+      }
+    });
+    const deletedVehicle = await prisma.vehicle.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        siteId: tenantA.siteId,
+        plate: `DEL${runId.slice(-7).toUpperCase()}`,
+        brand: "Deleted test vehicle",
+        model: "Tenant A",
+        year: 2024,
+        deletedAt: new Date()
+      }
+    });
+
+    for (const vehicleId of [inactiveVehicle.id, deletedVehicle.id]) {
+      const invalidUpdate = await jsonRequest(`/rental-bookings/${tenantA.bookingId}`, tenantA.token, {
+        method: "PATCH",
+        body: JSON.stringify({ vehicleId })
+      });
+      assert.equal(invalidUpdate.response.status, 404);
+    }
+
+    const bookingAfterRejectedUpdates = await prisma.rentalBooking.findUnique({
+      where: { id: tenantA.bookingId },
+      select: { vehicleId: true }
+    });
+    assert.equal(bookingAfterRejectedUpdates?.vehicleId, tenantA.vehicleId);
+
+    const activeVehicle = await prisma.vehicle.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        siteId: tenantA.siteId,
+        plate: `ACT${runId.slice(-7).toUpperCase()}`,
+        brand: "Active test vehicle",
+        model: "Tenant A",
+        year: 2024,
+        isActive: true
+      }
+    });
+    const validUpdate = await jsonRequest(`/rental-bookings/${tenantA.bookingId}`, tenantA.token, {
+      method: "PATCH",
+      body: JSON.stringify({ vehicleId: activeVehicle.id })
+    });
+    assert.equal(validUpdate.response.status, 200);
+    assert.equal((validUpdate.body as { vehicle?: { id?: string } }).vehicle?.id, activeVehicle.id);
+    assertPayloadDoesNotContain(validUpdate.body, tenantB.marker);
+
+    const persistedBooking = await prisma.rentalBooking.findUnique({
+      where: { id: tenantA.bookingId },
+      select: { vehicleId: true }
+    });
+    assert.equal(persistedBooking?.vehicleId, activeVehicle.id);
   });
 
   it("blocks cross-tenant upload download", async () => {
