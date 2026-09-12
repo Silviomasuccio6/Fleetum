@@ -1,21 +1,5 @@
 import { spawnSync } from "node:child_process";
 
-const allowedHighPackages = new Set([
-  "archiver",
-  "archiver-utils",
-  "brace-expansion",
-  "exceljs",
-  "glob",
-  "minimatch",
-  "readdir-glob",
-  "rimraf",
-  "zip-stream",
-]);
-
-const allowedAdvisoryUrls = new Set([
-  "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
-]);
-
 const npmExecutable =
   process.env.npm_execpath && process.env.npm_execpath.trim()
     ? process.env.npm_execpath
@@ -50,42 +34,13 @@ const vulnerabilities = Object.entries(report.vulnerabilities ?? {});
 const blocking = vulnerabilities.filter(([, vulnerability]) =>
   ["high", "critical"].includes(vulnerability.severity),
 );
-const unexpectedPackages = blocking.filter(
-  ([name]) => !allowedHighPackages.has(name),
-);
-const directHighAdvisories = blocking.flatMap(([, vulnerability]) =>
-  (vulnerability.via ?? []).filter(
-    (entry) =>
-      typeof entry === "object" &&
-      ["high", "critical"].includes(entry.severity),
-  ),
-);
-const unexpectedAdvisories = directHighAdvisories.filter(
-  (advisory) => !allowedAdvisoryUrls.has(advisory.url),
-);
-const expectedAdvisoryPresent = directHighAdvisories.some((advisory) =>
-  allowedAdvisoryUrls.has(advisory.url),
-);
 
-if (
-  unexpectedPackages.length > 0 ||
-  unexpectedAdvisories.length > 0 ||
-  (blocking.length > 0 && !expectedAdvisoryPresent)
-) {
+if (blocking.length > 0) {
   console.error("Production dependency audit failed.");
   for (const [name, vulnerability] of blocking) {
     console.error(`- ${name}: ${vulnerability.severity}`);
   }
   process.exit(1);
-}
-
-if (blocking.length > 0) {
-  console.warn(
-    "Production audit passed with the documented ExcelJS transitive exception.",
-  );
-  console.warn(
-    "Review: docs/security/dependency-audit-exceptions.md (deadline 2026-10-31).",
-  );
 } else {
   console.log("Production dependency audit passed with no high or critical findings.");
 }
