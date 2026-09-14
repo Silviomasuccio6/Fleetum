@@ -156,6 +156,37 @@ const statusForStripePaymentError = (error: unknown): RentalExtraChargeStatus =>
   return RentalExtraChargeStatus.FAILED;
 };
 
+const INDETERMINATE_STRIPE_ERROR_TYPES = new Set([
+  "StripeAPIError",
+  "StripeConnectionError",
+  "StripeRateLimitError",
+  "StripeUnknownError"
+]);
+
+const INDETERMINATE_STRIPE_ERROR_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "idempotency_key_in_use"
+]);
+
+const isIndeterminateStripeError = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { type?: unknown; name?: unknown; code?: unknown; statusCode?: unknown };
+  const type = optionalString(candidate.type) ?? optionalString(candidate.name);
+  const code = optionalString(candidate.code);
+  const statusCode = typeof candidate.statusCode === "number" ? candidate.statusCode : null;
+
+  return Boolean(
+    (type && INDETERMINATE_STRIPE_ERROR_TYPES.has(type)) ||
+    (code && INDETERMINATE_STRIPE_ERROR_CODES.has(code)) ||
+    statusCode === 409 ||
+    statusCode === 429 ||
+    (statusCode !== null && statusCode >= 500)
+  );
+};
+
 type BookingForPayment = {
   id: string;
   tenantId: string;
@@ -260,6 +291,7 @@ type RentalPaymentServiceDeps = {
   listExtraChargesByBooking(tenantId: string, bookingId: string): Promise<ExtraChargeRecord[]>;
   findActiveDeposit(tenantId: string, bookingId: string): Promise<DepositRecord | null>;
   createDeposit(input: Prisma.RentalDepositUncheckedCreateInput): Promise<DepositRecord>;
+  claimActiveDeposit(input: Prisma.RentalDepositUncheckedCreateInput): Promise<{ deposit: DepositRecord; created: boolean }>;
   updateDeposit(tenantId: string, depositId: string, data: Prisma.RentalDepositUncheckedUpdateInput): Promise<DepositRecord>;
   findDepositById(tenantId: string, depositId: string): Promise<DepositRecord | null>;
   findDepositByStripePaymentIntentId(stripePaymentIntentId: string): Promise<DepositRecord | null>;
@@ -411,6 +443,28 @@ const defaultDeps: RentalPaymentServiceDeps = {
   },
   async createDeposit(input) {
     return prisma.rentalDeposit.create({ data: input, select: depositSelect });
+  },
+  async claimActiveDeposit(input) {
+    return prisma.$transaction(async (tx) => {
+      const lockKey = `fleetum:rental-deposit-claim:${input.tenantId}:${input.bookingId}`;
+      await tx.$queryRaw<Array<{ lock: unknown }>>`
+        SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS lock
+      `;
+
+      const existing = await tx.rentalDeposit.findFirst({
+        where: {
+          tenantId: input.tenantId,
+          bookingId: input.bookingId,
+          status: { in: ACTIVE_DEPOSIT_STATUSES },
+          deletedAt: null
+        },
+        select: depositSelect
+      });
+      if (existing) return { deposit: existing, created: false };
+
+      const deposit = await tx.rentalDeposit.create({ data: input, select: depositSelect });
+      return { deposit, created: true };
+    });
   },
   async updateDeposit(tenantId, depositId, data) {
     const updated = await prisma.rentalDeposit.updateMany({ where: { id: depositId, tenantId }, data });
@@ -603,10 +657,7 @@ export class RentalPaymentService {
     const booking = await this.getBookingOrThrow(input.tenantId, input.bookingId);
     const rentalCustomerId = this.requireBookingCustomerId(booking);
     const paymentMethod = await this.getActivePaymentMethodOrThrow(input.tenantId, input.paymentMethodId, rentalCustomerId);
-    const activeDeposit = await this.deps.findActiveDeposit(input.tenantId, input.bookingId);
-    if (activeDeposit) throw new AppError("Esiste gia un deposito attivo per questa prenotazione", 409, "RENTAL_DEPOSIT_ALREADY_ACTIVE");
-
-    let deposit = await this.deps.createDeposit({
+    const claim = await this.deps.claimActiveDeposit({
       tenantId: input.tenantId,
       bookingId: booking.id,
       rentalCustomerId,
@@ -618,15 +669,29 @@ export class RentalPaymentService {
       createdByUserId: input.userId,
       approvedByUserId: input.userId
     });
+    let deposit = claim.deposit;
 
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: "RENTAL_DEPOSIT_CREATED",
-      resource: "rental-deposit",
-      resourceId: deposit.id,
-      details: { bookingId: booking.id, rentalCustomerId, amountCents: input.amountCents }
-    });
+    if (!claim.created) {
+      const sameRequest = deposit.rentalCustomerId === rentalCustomerId &&
+        deposit.paymentMethodId === paymentMethod.id &&
+        deposit.amountCents === input.amountCents &&
+        deposit.currency.toUpperCase() === "EUR";
+      if (!sameRequest) {
+        throw new AppError("Esiste gia un deposito attivo per questa prenotazione", 409, "RENTAL_DEPOSIT_ALREADY_ACTIVE");
+      }
+      if (deposit.status === RentalDepositStatus.AUTHORIZED) return deposit;
+    }
+
+    if (claim.created) {
+      await this.auditRepository.create({
+        tenantId: input.tenantId,
+        userId: input.userId,
+        action: "RENTAL_DEPOSIT_CREATED",
+        resource: "rental-deposit",
+        resourceId: deposit.id,
+        details: { bookingId: booking.id, rentalCustomerId, amountCents: input.amountCents }
+      });
+    }
 
     try {
       const paymentIntent = await stripe.paymentIntents.create({
@@ -651,6 +716,17 @@ export class RentalPaymentService {
       deposit = await this.applyDepositPaymentIntent(input.tenantId, deposit.id, paymentIntent);
       return deposit;
     } catch (error) {
+      if (isIndeterminateStripeError(error)) {
+        await this.auditRepository.create({
+          tenantId: input.tenantId,
+          userId: input.userId,
+          action: "RENTAL_DEPOSIT_AUTHORIZATION_UNCERTAIN",
+          resource: "rental-deposit",
+          resourceId: deposit.id,
+          details: { errorCode: stripeErrorCode(error) }
+        });
+        throw error;
+      }
       deposit = await this.deps.updateDeposit(input.tenantId, deposit.id, {
         status: RentalDepositStatus.FAILED,
         failureReason: stripeErrorMessage(error)

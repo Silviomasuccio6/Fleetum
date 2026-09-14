@@ -154,6 +154,158 @@ test("deposit creation requires an active payment method with mandate", async ()
   );
 });
 
+test("concurrent deposit requests reuse one atomic claim and one Stripe attempt key", async () => {
+  setStripeTestEnv();
+  const deposit = {
+    id: "deposit-shared",
+    tenantId: "tenant-1",
+    bookingId: "booking-1",
+    rentalCustomerId: "customer-1",
+    vehicleId: "vehicle-1",
+    paymentMethodId: "rpm-active",
+    stripePaymentIntentId: null,
+    amountCents: 50_000,
+    capturedAmountCents: 0,
+    currency: "EUR",
+    status: "AUTHORIZING",
+    failureReason: null
+  };
+  let claimed = false;
+  const stripeAttemptKeys: string[] = [];
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      create: async (_params: unknown, options?: { idempotencyKey?: string }) => {
+        stripeAttemptKeys.push(String(options?.idempotencyKey));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { id: "pi_shared", status: "requires_capture", amount_received: 0 };
+      }
+    }
+  });
+  const service = new RentalPaymentService(new FakeAuditRepo(), stripe, {
+    async findBookingForPayment() { return booking; },
+    async findPaymentMethodById() { return activePaymentMethod as never; },
+    async claimActiveDeposit() {
+      const created = !claimed;
+      claimed = true;
+      return { deposit: deposit as never, created };
+    },
+    async updateDeposit(_tenantId, _depositId, data) {
+      Object.assign(deposit, data);
+      return deposit as never;
+    }
+  });
+
+  const [first, second] = await Promise.all([
+    service.createDeposit({ tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" }),
+    service.createDeposit({ tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" })
+  ]);
+
+  assert.equal(first.id, "deposit-shared");
+  assert.equal(second.id, "deposit-shared");
+  assert.equal(new Set(stripeAttemptKeys).size, 1);
+  assert.equal(stripeAttemptKeys[0], "rental-deposit:tenant-1:deposit-shared");
+});
+
+test("an active deposit with a different request payload returns 409 without another Stripe call", async () => {
+  setStripeTestEnv();
+  let stripeCalls = 0;
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      create: async () => {
+        stripeCalls += 1;
+        return { id: "pi_unexpected", status: "requires_capture", amount_received: 0 };
+      }
+    }
+  });
+  const service = new RentalPaymentService(new FakeAuditRepo(), stripe, {
+    async findBookingForPayment() { return booking; },
+    async findPaymentMethodById() { return activePaymentMethod as never; },
+    async claimActiveDeposit() {
+      return {
+        created: false,
+        deposit: {
+          id: "deposit-existing",
+          tenantId: "tenant-1",
+          bookingId: "booking-1",
+          rentalCustomerId: "customer-1",
+          vehicleId: "vehicle-1",
+          paymentMethodId: "rpm-active",
+          stripePaymentIntentId: "pi_existing",
+          amountCents: 60_000,
+          capturedAmountCents: 0,
+          currency: "EUR",
+          status: "AUTHORIZED",
+          failureReason: null
+        } as never
+      };
+    }
+  });
+
+  await assert.rejects(
+    () => service.createDeposit({ tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" }),
+    (error) => error instanceof AppError && error.statusCode === 409 && error.code === "RENTAL_DEPOSIT_ALREADY_ACTIVE"
+  );
+  assert.equal(stripeCalls, 0);
+});
+
+test("an indeterminate Stripe error keeps the claim retryable with the same attempt key", async () => {
+  setStripeTestEnv();
+  const deposit = {
+    id: "deposit-retry",
+    tenantId: "tenant-1",
+    bookingId: "booking-1",
+    rentalCustomerId: "customer-1",
+    vehicleId: "vehicle-1",
+    paymentMethodId: "rpm-active",
+    stripePaymentIntentId: null,
+    amountCents: 50_000,
+    capturedAmountCents: 0,
+    currency: "EUR",
+    status: "AUTHORIZING",
+    failureReason: null
+  };
+  let callCount = 0;
+  const stripeAttemptKeys: string[] = [];
+  const statusUpdates: string[] = [];
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      create: async (_params: unknown, options?: { idempotencyKey?: string }) => {
+        callCount += 1;
+        stripeAttemptKeys.push(String(options?.idempotencyKey));
+        if (callCount === 1) {
+          const timeout = new Error("Connection timed out") as Error & { type?: string; code?: string };
+          timeout.type = "StripeConnectionError";
+          timeout.code = "ETIMEDOUT";
+          throw timeout;
+        }
+        return { id: "pi_retry", status: "requires_capture", amount_received: 0 };
+      }
+    }
+  });
+  const service = new RentalPaymentService(new FakeAuditRepo(), stripe, {
+    async findBookingForPayment() { return booking; },
+    async findPaymentMethodById() { return activePaymentMethod as never; },
+    async claimActiveDeposit() { return { deposit: deposit as never, created: callCount === 0 }; },
+    async updateDeposit(_tenantId, _depositId, data) {
+      if (typeof data.status === "string") statusUpdates.push(data.status);
+      Object.assign(deposit, data);
+      return deposit as never;
+    }
+  });
+
+  const request = { tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" };
+  await assert.rejects(() => service.createDeposit(request), /Connection timed out/);
+  assert.equal(deposit.status, "AUTHORIZING");
+  assert.ok(!statusUpdates.includes("FAILED"));
+
+  const retried = await service.createDeposit(request);
+  assert.equal(retried.status, "AUTHORIZED");
+  assert.deepEqual(stripeAttemptKeys, [
+    "rental-deposit:tenant-1:deposit-retry",
+    "rental-deposit:tenant-1:deposit-retry"
+  ]);
+});
+
 test("extra charge cannot be charged twice or after paid status", async () => {
   setStripeTestEnv();
   const service = new RentalPaymentService(new FakeAuditRepo(), fakeStripeBase(), {

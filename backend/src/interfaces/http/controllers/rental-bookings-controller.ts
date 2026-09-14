@@ -24,7 +24,9 @@ import {
   type RecognizedCustomerDocumentType
 } from "../../../application/services/customer-document-parser-service.js";
 import {
+  buildRentalPricingTermsSnapshot,
   computeRentalQuote,
+  restoreRentalPricingTermsSnapshot,
   toSafeNonNegativeInt
 } from "../../../application/services/rental-pricing-service.js";
 import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
@@ -1113,12 +1115,12 @@ export class RentalBookingsController {
     return { from, to: now };
   }
 
-  private async generateCode(tenantId: string) {
+  private async generateCode(tenantId: string, db: Prisma.TransactionClient = prisma) {
     const year = String(new Date().getFullYear()).slice(-2);
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const suffix = String(Math.floor(Math.random() * 99999) + 1).padStart(5, "0");
       const code = `BK${year}-${suffix}`;
-      const exists = await prisma.rentalBooking.findFirst({
+      const exists = await db.rentalBooking.findFirst({
         where: { tenantId, code, deletedAt: null },
         select: { id: true }
       });
@@ -1133,8 +1135,8 @@ export class RentalBookingsController {
     pickupAt: Date;
     returnAt: Date;
     excludeBookingId?: string;
-  }) {
-    const overlap = await prisma.rentalBooking.findFirst({
+  }, db: Prisma.TransactionClient = prisma) {
+    const overlap = await db.rentalBooking.findFirst({
       where: {
         tenantId: input.tenantId,
         vehicleId: input.vehicleId,
@@ -1157,8 +1159,40 @@ export class RentalBookingsController {
     }
   }
 
-  private async getAssignableVehicleOrThrow(tenantId: string, vehicleId: string) {
-    const vehicle = await prisma.vehicle.findFirst({
+  private async lockTransactionScope(tx: Prisma.TransactionClient, lockKey: string) {
+    await tx.$queryRaw<Array<{ locked: string }>>`
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS locked
+    `;
+  }
+
+  private async lockBookingSchedule(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    vehicleId: string
+  ) {
+    await this.lockTransactionScope(
+      tx,
+      `fleetum:rental-booking-schedule:${tenantId}:${vehicleId}`
+    );
+  }
+
+  private async lockBookingMutation(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    bookingId: string
+  ) {
+    await this.lockTransactionScope(
+      tx,
+      `fleetum:rental-booking-record:${tenantId}:${bookingId}`
+    );
+  }
+
+  private async getAssignableVehicleOrThrow(
+    tenantId: string,
+    vehicleId: string,
+    db: Prisma.TransactionClient = prisma
+  ) {
+    const vehicle = await db.vehicle.findFirst({
       where: { tenantId, id: vehicleId, deletedAt: null, isActive: true },
       select: { id: true }
     });
@@ -1185,8 +1219,12 @@ export class RentalBookingsController {
     return this.hydrateBookingMoney(tenantId, booking);
   }
 
-  private async getCustomerOrThrow(tenantId: string, customerId: string) {
-    const customer = await prisma.rentalCustomer.findFirst({
+  private async getCustomerOrThrow(
+    tenantId: string,
+    customerId: string,
+    db: Prisma.TransactionClient = prisma
+  ) {
+    const customer = await db.rentalCustomer.findFirst({
       where: { tenantId, id: customerId, deletedAt: null },
       select: customerSelect
     });
@@ -1915,7 +1953,12 @@ export class RentalBookingsController {
       finalSubtotal: quote.pricing.finalSubtotal,
       finalTaxAmount: quote.pricing.finalTaxAmount,
       finalTotal: quote.pricing.finalTotal,
-      notes: payload.notes
+      notes: payload.notes,
+      metadata: buildRentalPricingTermsSnapshot({
+        priceList: setup.list,
+        pricePackage: setup.selectedPackage,
+        extraKmPolicy: setup.selectedPolicy
+      })
     } as const;
 
     const [snapshot] = await prisma.$transaction([
@@ -3444,11 +3487,6 @@ export class RentalBookingsController {
     const userId = req.auth?.userId;
     const payload = rentalBookingCreateSchema.parse(req.body);
 
-    const [, customer] = await Promise.all([
-      this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId),
-      this.getCustomerOrThrow(tenantId, payload.customerId)
-    ]);
-
     if (
       typeof payload.pickupKm === "number" &&
       typeof payload.returnKm === "number" &&
@@ -3457,44 +3495,51 @@ export class RentalBookingsController {
       throw new AppError("I km rientro devono essere maggiori o uguali ai km uscita.", 400, "BOOKING_KM_RANGE_INVALID");
     }
 
-    await this.assertVehicleAvailability({
-      tenantId,
-      vehicleId: payload.vehicleId,
-      pickupAt: payload.pickupAt,
-      returnAt: payload.returnAt
-    });
-
-    const code = await this.generateCode(tenantId);
-    const created = await prisma.rentalBooking.create({
-      data: {
+    const created = await prisma.$transaction(async (tx) => {
+      await this.lockBookingSchedule(tx, tenantId, payload.vehicleId);
+      const [, customer] = await Promise.all([
+        this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId, tx),
+        this.getCustomerOrThrow(tenantId, payload.customerId, tx)
+      ]);
+      await this.assertVehicleAvailability({
         tenantId,
-        createdByUserId: userId,
         vehicleId: payload.vehicleId,
-        customerId: customer.id,
-        contractRequired: payload.contractRequired ?? true,
-        code,
-        customerName: customerDisplayName(customer),
-        customerEmail: customer.email ?? null,
-        customerPhone: customer.phone ?? null,
-        customerDocument: customerPrimaryDocument(customer),
         pickupAt: payload.pickupAt,
-        returnAt: payload.returnAt,
-        pickupKm: payload.pickupKm ?? null,
-        returnKm: payload.returnKm ?? null,
-        pickupLocation: payload.pickupLocation,
-        returnLocation: payload.returnLocation,
-        expectedTotal: payload.expectedTotal ?? null,
-        finalTotal: payload.finalTotal ?? null,
-        reason: payload.reason,
-        internalNotes: payload.internalNotes,
-        contractStatus: payload.contractStatus ?? "NOT_READY",
-        cargosStatus: payload.cargosStatus ?? "NOT_REQUIRED"
-      },
-      include: {
-        vehicle: { select: vehicleSelect },
-        customer: { select: customerSelect }
-      }
-    });
+        returnAt: payload.returnAt
+      }, tx);
+
+      const code = await this.generateCode(tenantId, tx);
+      return tx.rentalBooking.create({
+        data: {
+          tenantId,
+          createdByUserId: userId,
+          vehicleId: payload.vehicleId,
+          customerId: customer.id,
+          contractRequired: payload.contractRequired ?? true,
+          code,
+          customerName: customerDisplayName(customer),
+          customerEmail: customer.email ?? null,
+          customerPhone: customer.phone ?? null,
+          customerDocument: customerPrimaryDocument(customer),
+          pickupAt: payload.pickupAt,
+          returnAt: payload.returnAt,
+          pickupKm: payload.pickupKm ?? null,
+          returnKm: payload.returnKm ?? null,
+          pickupLocation: payload.pickupLocation,
+          returnLocation: payload.returnLocation,
+          expectedTotal: payload.expectedTotal ?? null,
+          finalTotal: payload.finalTotal ?? null,
+          reason: payload.reason,
+          internalNotes: payload.internalNotes,
+          contractStatus: payload.contractStatus ?? "NOT_READY",
+          cargosStatus: payload.cargosStatus ?? "NOT_REQUIRED"
+        },
+        include: {
+          vehicle: { select: vehicleSelect },
+          customer: { select: customerSelect }
+        }
+      });
+    }, { timeout: 10_000 });
 
     await this.logNote({
       tenantId,
@@ -3523,81 +3568,90 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingUpdateSchema.parse(req.body);
-    const current = await this.getBookingOrThrow(tenantId, req.params.id);
-
-    const nextVehicleId = payload.vehicleId ?? current.vehicleId;
-    const nextPickupAt = payload.pickupAt ?? current.pickupAt;
-    const nextReturnAt = payload.returnAt ?? current.returnAt;
-    const nextPickupKm = payload.pickupKm ?? current.pickupKm;
-    const nextReturnKm = payload.returnKm ?? current.returnKm;
-    const nextCustomerId = payload.customerId ?? current.customerId;
-
-    if (payload.vehicleId !== undefined && payload.vehicleId !== current.vehicleId) {
-      await this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId);
-    }
-
-    if (!nextCustomerId) throw new AppError("Cliente obbligatorio", 400, "CUSTOMER_REQUIRED");
-    const nextCustomer = await this.getCustomerOrThrow(tenantId, nextCustomerId);
-
-    if (nextReturnAt.getTime() <= nextPickupAt.getTime()) {
-      throw new AppError("La data/ora di rientro deve essere successiva al ritiro", 400, "BOOKING_DATE_RANGE_INVALID");
-    }
-    if (typeof nextPickupKm === "number" && typeof nextReturnKm === "number" && nextReturnKm < nextPickupKm) {
-      throw new AppError("I km rientro devono essere maggiori o uguali ai km uscita.", 400, "BOOKING_KM_RANGE_INVALID");
-    }
-
-    if (
-      nextVehicleId !== current.vehicleId ||
-      nextPickupAt.getTime() !== current.pickupAt.getTime() ||
-      nextReturnAt.getTime() !== current.returnAt.getTime()
-    ) {
-      await this.assertVehicleAvailability({
-        tenantId,
-        vehicleId: nextVehicleId,
-        pickupAt: nextPickupAt,
-        returnAt: nextReturnAt,
-        excludeBookingId: current.id
+    const updated = await prisma.$transaction(async (tx) => {
+      await this.lockBookingMutation(tx, tenantId, req.params.id);
+      const current = await tx.rentalBooking.findFirst({
+        where: { tenantId, id: req.params.id, deletedAt: null }
       });
-    }
+      if (!current) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
 
-    const updated = await prisma.rentalBooking.update({
-      where: { id: current.id },
-      data: {
-        ...(payload.vehicleId !== undefined ? { vehicleId: payload.vehicleId } : {}),
-        ...(payload.customerId !== undefined ? { customerId: payload.customerId } : {}),
-        ...(payload.contractRequired !== undefined ? { contractRequired: payload.contractRequired } : {}),
-        customerName: customerDisplayName(nextCustomer),
-        customerEmail: nextCustomer.email ?? null,
-        customerPhone: nextCustomer.phone ?? null,
-        customerDocument: customerPrimaryDocument(nextCustomer),
-        ...(payload.pickupAt !== undefined ? { pickupAt: payload.pickupAt } : {}),
-        ...(payload.returnAt !== undefined ? { returnAt: payload.returnAt } : {}),
-        ...(payload.pickupKm !== undefined ? { pickupKm: payload.pickupKm } : {}),
-        ...(payload.returnKm !== undefined ? { returnKm: payload.returnKm } : {}),
-        ...(payload.pickupLocation !== undefined ? { pickupLocation: payload.pickupLocation } : {}),
-        ...(payload.returnLocation !== undefined ? { returnLocation: payload.returnLocation } : {}),
-        ...(payload.expectedTotal !== undefined ? { expectedTotal: payload.expectedTotal } : {}),
-        ...(payload.finalTotal !== undefined ? { finalTotal: payload.finalTotal } : {}),
-        ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
-        ...(payload.internalNotes !== undefined ? { internalNotes: payload.internalNotes } : {}),
-        ...(payload.contractStatus !== undefined
-          ? {
-              contractStatus: payload.contractStatus,
-              contractSignedAt: payload.contractStatus === "SIGNED" ? current.contractSignedAt ?? new Date() : null
-            }
-          : {}),
-        ...(payload.cargosStatus !== undefined
-          ? {
-              cargosStatus: payload.cargosStatus,
-              cargosSentAt: payload.cargosStatus === "SENT" ? current.cargosSentAt ?? new Date() : null
-            }
-          : {})
-      },
-      include: {
-        vehicle: { select: vehicleSelect },
-        customer: { select: customerSelect }
+      const nextVehicleId = payload.vehicleId ?? current.vehicleId;
+      const nextPickupAt = payload.pickupAt ?? current.pickupAt;
+      const nextReturnAt = payload.returnAt ?? current.returnAt;
+      const nextPickupKm = payload.pickupKm ?? current.pickupKm;
+      const nextReturnKm = payload.returnKm ?? current.returnKm;
+      const nextCustomerId = payload.customerId ?? current.customerId;
+      const scheduleChanged =
+        nextVehicleId !== current.vehicleId ||
+        nextPickupAt.getTime() !== current.pickupAt.getTime() ||
+        nextReturnAt.getTime() !== current.returnAt.getTime();
+
+      if (scheduleChanged) {
+        await this.lockBookingSchedule(tx, tenantId, nextVehicleId);
       }
-    });
+      if (payload.vehicleId !== undefined && payload.vehicleId !== current.vehicleId) {
+        await this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId, tx);
+      }
+
+      if (!nextCustomerId) throw new AppError("Cliente obbligatorio", 400, "CUSTOMER_REQUIRED");
+      const nextCustomer = await this.getCustomerOrThrow(tenantId, nextCustomerId, tx);
+
+      if (nextReturnAt.getTime() <= nextPickupAt.getTime()) {
+        throw new AppError("La data/ora di rientro deve essere successiva al ritiro", 400, "BOOKING_DATE_RANGE_INVALID");
+      }
+      if (typeof nextPickupKm === "number" && typeof nextReturnKm === "number" && nextReturnKm < nextPickupKm) {
+        throw new AppError("I km rientro devono essere maggiori o uguali ai km uscita.", 400, "BOOKING_KM_RANGE_INVALID");
+      }
+
+      if (scheduleChanged) {
+        await this.assertVehicleAvailability({
+          tenantId,
+          vehicleId: nextVehicleId,
+          pickupAt: nextPickupAt,
+          returnAt: nextReturnAt,
+          excludeBookingId: current.id
+        }, tx);
+      }
+
+      return tx.rentalBooking.update({
+        where: { id: current.id },
+        data: {
+          ...(payload.vehicleId !== undefined ? { vehicleId: payload.vehicleId } : {}),
+          ...(payload.customerId !== undefined ? { customerId: payload.customerId } : {}),
+          ...(payload.contractRequired !== undefined ? { contractRequired: payload.contractRequired } : {}),
+          customerName: customerDisplayName(nextCustomer),
+          customerEmail: nextCustomer.email ?? null,
+          customerPhone: nextCustomer.phone ?? null,
+          customerDocument: customerPrimaryDocument(nextCustomer),
+          ...(payload.pickupAt !== undefined ? { pickupAt: payload.pickupAt } : {}),
+          ...(payload.returnAt !== undefined ? { returnAt: payload.returnAt } : {}),
+          ...(payload.pickupKm !== undefined ? { pickupKm: payload.pickupKm } : {}),
+          ...(payload.returnKm !== undefined ? { returnKm: payload.returnKm } : {}),
+          ...(payload.pickupLocation !== undefined ? { pickupLocation: payload.pickupLocation } : {}),
+          ...(payload.returnLocation !== undefined ? { returnLocation: payload.returnLocation } : {}),
+          ...(payload.expectedTotal !== undefined ? { expectedTotal: payload.expectedTotal } : {}),
+          ...(payload.finalTotal !== undefined ? { finalTotal: payload.finalTotal } : {}),
+          ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+          ...(payload.internalNotes !== undefined ? { internalNotes: payload.internalNotes } : {}),
+          ...(payload.contractStatus !== undefined
+            ? {
+                contractStatus: payload.contractStatus,
+                contractSignedAt: payload.contractStatus === "SIGNED" ? current.contractSignedAt ?? new Date() : null
+              }
+            : {}),
+          ...(payload.cargosStatus !== undefined
+            ? {
+                cargosStatus: payload.cargosStatus,
+                cargosSentAt: payload.cargosStatus === "SENT" ? current.cargosSentAt ?? new Date() : null
+              }
+            : {})
+        },
+        include: {
+          vehicle: { select: vehicleSelect },
+          customer: { select: customerSelect }
+        }
+      });
+    }, { timeout: 10_000 });
 
     await this.logNote({
       tenantId,
@@ -3722,34 +3776,49 @@ export class RentalBookingsController {
     if (
       payload.toStatus === "CLOSED" &&
       typeof drivenKm === "number" &&
-      current.pricingSnapshot?.priceListId
+      current.pricingSnapshot
     ) {
-      const setup = await this.resolvePricingSelection({
-        tenantId,
-        priceListId: current.pricingSnapshot.priceListId,
-        pricePackageId: current.pricingSnapshot.pricePackageId,
-        extraKmPolicyId: current.pricingSnapshot.extraKmPolicyId
-      });
+      const snapshottedTerms = restoreRentalPricingTermsSnapshot(
+        current.pricingSnapshot.metadata
+      );
 
-      const quote = computeRentalQuote({
-        priceList: setup.list,
-        pricePackage: setup.selectedPackage,
-        extraKmPolicy: setup.selectedPolicy,
-        pickupAt: current.pickupAt,
-        returnAt: current.returnAt,
-        estimatedKm: toSafeNonNegativeInt(current.pricingSnapshot.estimatedKm),
-        actualKm: drivenKm
-      });
+      if (snapshottedTerms) {
+        const quote = computeRentalQuote({
+          ...snapshottedTerms,
+          pickupAt: current.pickupAt,
+          returnAt: current.returnAt,
+          estimatedKm: toSafeNonNegativeInt(current.pricingSnapshot.estimatedKm),
+          actualKm: drivenKm
+        });
 
-      finalTotalFromKm = quote.pricing.finalTotal;
-      snapshotUpdateData = {
-        actualKm: quote.km.actualKm,
-        extraKmActual: quote.km.extraKmActual,
-        extraKmActualCost: quote.pricing.extraKmActualCost,
-        finalSubtotal: quote.pricing.finalSubtotal,
-        finalTaxAmount: quote.pricing.finalTaxAmount,
-        finalTotal: quote.pricing.finalTotal
-      };
+        finalTotalFromKm = quote.pricing.finalTotal;
+        snapshotUpdateData = {
+          actualKm: quote.km.actualKm,
+          extraKmActual: quote.km.extraKmActual,
+          extraKmActualCost: quote.pricing.extraKmActualCost,
+          finalSubtotal: quote.pricing.finalSubtotal,
+          finalTaxAmount: quote.pricing.finalTaxAmount,
+          finalTotal: quote.pricing.finalTotal
+        };
+      } else {
+        // Legacy snapshots do not contain the package/policy/tier inputs. Keep
+        // their agreed amount immutable rather than silently applying today's
+        // price list or blocking the operational close when that list is gone.
+        const legacyFinalTotal =
+          current.finalTotal ??
+          (current.pricingSnapshot.actualKm != null
+            ? current.pricingSnapshot.finalTotal
+            : current.pricingSnapshot.expectedTotal) ??
+          current.expectedTotal;
+        const includedKm = current.pricingSnapshot.includedKmTotal;
+
+        finalTotalFromKm = typeof legacyFinalTotal === "number" ? legacyFinalTotal : null;
+        snapshotUpdateData = {
+          actualKm: drivenKm,
+          extraKmActual: includedKm == null ? 0 : Math.max(0, drivenKm - includedKm),
+          ...(finalTotalFromKm != null ? { finalTotal: finalTotalFromKm } : {})
+        };
+      }
     } else if (payload.toStatus === "CLOSED" && typeof drivenKm === "number") {
       snapshotUpdateData = { actualKm: drivenKm };
     }

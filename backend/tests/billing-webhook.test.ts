@@ -65,6 +65,7 @@ const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalS
   const events = new Map<string, StoredBillingEvent>();
   const websiteEvents: Array<Record<string, unknown>> = [];
   const subscriptions = new Map<string, TenantSubscriptionSnapshot>();
+  const authoritativeSubscriptions = new Map<string, Record<string, unknown>>();
   const upserts: TenantSubscriptionUpsertInput[] = [];
   const notifications: Array<{ type: string; input: Record<string, unknown> }> = [];
   const notificationInput = (input: object): Record<string, unknown> => ({ ...input }) as Record<string, unknown>;
@@ -86,7 +87,18 @@ const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalS
     }
   };
 
-  const service = new BillingService(audit, stripeClient ?? stripe, {
+  const defaultStripeClient = {
+    webhooks: stripe.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => {
+        const subscription = authoritativeSubscriptions.get(subscriptionId);
+        assert.ok(subscription, `authoritative Stripe subscription ${subscriptionId} must be registered by the test`);
+        return subscription;
+      }
+    }
+  } as unknown as Stripe;
+
+  const service = new BillingService(audit, stripeClient ?? defaultStripeClient, {
     async createBillingEvent(event, tenantId) {
       const existing = events.get(event.id);
       if (existing) return existing;
@@ -124,16 +136,97 @@ const makeHarness = (stripeClient?: Stripe, rentalStripeWebhookHandler?: RentalS
       const snapshot = snapshotFromInput(input);
       subscriptions.set(input.tenantId, snapshot);
       return snapshot;
+    },
+    async upsertStripeSubscriptionIfCurrent(input, guard) {
+      const previous = subscriptions.get(input.tenantId) ?? null;
+      if (guard.expectedCurrent !== undefined && previous !== guard.expectedCurrent) {
+        return { applied: false, previous, subscription: previous, reason: "STALE_SNAPSHOT" };
+      }
+      if (
+        previous?.provider === "stripe" &&
+        previous.stripeSubscriptionId &&
+        previous.stripeSubscriptionId !== guard.stripeSubscriptionId &&
+        !guard.allowSubscriptionReplacement
+      ) {
+        return { applied: false, previous, subscription: previous, reason: "SUBSCRIPTION_REPLACED" };
+      }
+      if (
+        previous?.provider === "stripe" &&
+        previous.stripeCustomerId &&
+        guard.stripeCustomerId &&
+        previous.stripeCustomerId !== guard.stripeCustomerId &&
+        !guard.allowSubscriptionReplacement
+      ) {
+        return { applied: false, previous, subscription: previous, reason: "CUSTOMER_MISMATCH" };
+      }
+
+      const guardedInput = {
+        ...input,
+        provider: "stripe" as const,
+        stripeCustomerId: guard.stripeCustomerId ?? input.stripeCustomerId ?? null,
+        stripeSubscriptionId: guard.stripeSubscriptionId
+      };
+      upserts.push(guardedInput);
+      const snapshot = snapshotFromInput(guardedInput);
+      subscriptions.set(input.tenantId, snapshot);
+      return { applied: true, previous, subscription: snapshot };
     }
   }, notifier, rentalStripeWebhookHandler);
 
   const sign = (event: Record<string, unknown>) => {
+    const eventType = typeof event.type === "string" ? event.type : "";
+    const dataObject = event.data && typeof event.data === "object"
+      ? (event.data as { object?: unknown }).object
+      : null;
+    if (dataObject && typeof dataObject === "object") {
+      const source = dataObject as Record<string, unknown>;
+      const sourceObject = typeof source.object === "string" ? source.object : null;
+      const subscriptionId = typeof source.subscription === "string"
+        ? source.subscription
+        : sourceObject === "subscription" && typeof source.id === "string"
+          ? source.id
+          : null;
+      if (subscriptionId && !authoritativeSubscriptions.has(subscriptionId)) {
+        const customerId = typeof source.customer === "string" ? source.customer : null;
+        const existingEntry = [...subscriptions.entries()].find(([, value]) =>
+          value.stripeSubscriptionId === subscriptionId || (customerId && value.stripeCustomerId === customerId)
+        );
+        const existingTenantId = existingEntry?.[0] ?? null;
+        const existing = existingEntry?.[1] ?? null;
+        const sourceMetadata = source.metadata && typeof source.metadata === "object"
+          ? source.metadata as Record<string, unknown>
+          : {};
+        const status = eventType === "invoice.payment_failed"
+          ? "past_due"
+          : eventType === "invoice.paid" || eventType === "invoice.payment_succeeded" || eventType === "checkout.session.completed"
+            ? "active"
+            : String(source.status ?? "active");
+        authoritativeSubscriptions.set(subscriptionId, sourceObject === "subscription"
+          ? { ...source }
+          : {
+              id: subscriptionId,
+              object: "subscription",
+              status,
+              customer: customerId,
+              current_period_end: existing?.expiresAt
+                ? Math.floor(new Date(existing.expiresAt).getTime() / 1000)
+                : 1_800_000_000,
+              metadata: {
+                ...(existingTenantId ? { tenantId: existingTenantId } : {}),
+                ...(existing?.plan ? { plan: existing.plan } : {}),
+                ...(existing?.billingCycle ? { billingCycle: existing.billingCycle } : {}),
+                ...sourceMetadata
+              }
+            });
+      }
+    }
+
     const payload = JSON.stringify(event);
     const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: webhookSecret });
     return { signature, rawBody: Buffer.from(payload), body: event };
   };
 
-  return { audit, events, notifications, service, sign, subscriptions, upserts, websiteEvents };
+  return { audit, authoritativeSubscriptions, events, notifications, service, sign, subscriptions, upserts, websiteEvents };
 };
 
 const baseEvent = (id: string, type: string, object: Record<string, unknown>) => ({
@@ -350,6 +443,7 @@ test("billing webhook verifies Stripe signature and persists checkout.session.co
     object: "checkout.session",
     client_reference_id: "tenant-1",
     customer: "cus_1",
+    subscription: "sub_1",
     metadata: {
       tenantId: "tenant-1",
       plan: "PRO",
@@ -375,6 +469,128 @@ test("billing webhook verifies Stripe signature and persists checkout.session.co
   assert.equal(websiteEvents[0]?.eventType, "STRIPE_CHECKOUT_COMPLETED");
   assert.equal(websiteEvents[0]?.visitorId, "visitor_hash");
   assert.equal(websiteEvents[0]?.utmSource, "google");
+});
+
+test("a delayed checkout completion cannot replace a newer canceled subscription", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  const authoritative = new Map<string, Record<string, unknown>>([
+    ["sub_checkout_old", {
+      id: "sub_checkout_old",
+      object: "subscription",
+      created: 100,
+      status: "active",
+      customer: "cus_checkout_old",
+      current_period_end: 1_900_000_000,
+      metadata: { tenantId: "tenant-checkout-order", plan: "PRO", billingCycle: "monthly" }
+    }],
+    ["sub_checkout_new", {
+      id: "sub_checkout_new",
+      object: "subscription",
+      created: 200,
+      status: "canceled",
+      customer: "cus_checkout_new",
+      current_period_end: 1_900_000_000,
+      metadata: { tenantId: "tenant-checkout-order", plan: "PRO", billingCycle: "monthly" }
+    }]
+  ]);
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => {
+        const subscription = authoritative.get(subscriptionId);
+        assert.ok(subscription);
+        return subscription;
+      }
+    }
+  } as unknown as Stripe;
+  const { events, notifications, service, sign, subscriptions, upserts } = makeHarness(stripeClient);
+  subscriptions.set("tenant-checkout-order", {
+    plan: "PRO",
+    seats: 5,
+    status: "CANCELED",
+    expiresAt: new Date(1_900_000_000 * 1000).toISOString(),
+    priceMonthly: 199,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_checkout_new",
+    stripeSubscriptionId: "sub_checkout_new"
+  });
+
+  const result = await service.handleWebhook(sign(baseEvent("evt_checkout_old_delayed", "checkout.session.completed", {
+    id: "cs_checkout_old",
+    object: "checkout.session",
+    client_reference_id: "tenant-checkout-order",
+    customer: "cus_checkout_old",
+    subscription: "sub_checkout_old",
+    metadata: { tenantId: "tenant-checkout-order", plan: "PRO", billingCycle: "monthly" }
+  })));
+
+  assert.deepEqual(result, { received: true, ignored: true });
+  assert.equal(events.get("evt_checkout_old_delayed")?.status, "IGNORED");
+  assert.equal(subscriptions.get("tenant-checkout-order")?.stripeSubscriptionId, "sub_checkout_new");
+  assert.equal(subscriptions.get("tenant-checkout-order")?.status, "CANCELED");
+  assert.equal(upserts.length, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test("a newer checkout can replace a terminal Stripe subscription", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  const authoritative = new Map<string, Record<string, unknown>>([
+    ["sub_checkout_previous", {
+      id: "sub_checkout_previous",
+      object: "subscription",
+      created: 100,
+      status: "canceled",
+      customer: "cus_checkout_previous",
+      current_period_end: 1_800_000_000,
+      metadata: { tenantId: "tenant-checkout-renew", plan: "STARTER", billingCycle: "monthly" }
+    }],
+    ["sub_checkout_latest", {
+      id: "sub_checkout_latest",
+      object: "subscription",
+      created: 200,
+      status: "active",
+      customer: "cus_checkout_latest",
+      current_period_end: 1_900_000_000,
+      metadata: { tenantId: "tenant-checkout-renew", plan: "PRO", billingCycle: "yearly" }
+    }]
+  ]);
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => {
+        const subscription = authoritative.get(subscriptionId);
+        assert.ok(subscription);
+        return subscription;
+      }
+    }
+  } as unknown as Stripe;
+  const { notifications, service, sign, subscriptions } = makeHarness(stripeClient);
+  subscriptions.set("tenant-checkout-renew", {
+    plan: "STARTER",
+    seats: 3,
+    status: "CANCELED",
+    expiresAt: new Date(1_800_000_000 * 1000).toISOString(),
+    priceMonthly: 99,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_checkout_previous",
+    stripeSubscriptionId: "sub_checkout_previous"
+  });
+
+  const result = await service.handleWebhook(sign(baseEvent("evt_checkout_latest", "checkout.session.completed", {
+    id: "cs_checkout_latest",
+    object: "checkout.session",
+    client_reference_id: "tenant-checkout-renew",
+    customer: "cus_checkout_latest",
+    subscription: "sub_checkout_latest",
+    metadata: { tenantId: "tenant-checkout-renew", plan: "PRO", billingCycle: "yearly" }
+  })));
+
+  assert.deepEqual(result, { received: true, ignored: false });
+  assert.equal(subscriptions.get("tenant-checkout-renew")?.stripeSubscriptionId, "sub_checkout_latest");
+  assert.equal(subscriptions.get("tenant-checkout-renew")?.status, "ACTIVE");
+  assert.equal(notifications.filter((notification) => notification.type === "BILLING_SUBSCRIPTION_REACTIVATED").length, 1);
 });
 
 test("billing webhook records trial activation funnel event from verified Stripe subscription", async () => {
@@ -648,6 +864,224 @@ test("customer.subscription.updated with unpaid status suspends the tenant after
   assert.equal(subscriptions.get("tenant-suspended")?.status, "SUSPENDED");
   assert.equal(notifications.at(-1)?.type, "BILLING_SUBSCRIPTION_SUSPENDED");
   assert.equal(notifications.at(-1)?.input.previousStatus, "PAST_DUE");
+});
+
+test("an out-of-order paid invoice uses the authoritative Stripe subscription state", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  let retrieveCalls = 0;
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => {
+        retrieveCalls += 1;
+        return {
+          id: subscriptionId,
+          object: "subscription",
+          status: "past_due",
+          customer: "cus_out_of_order",
+          current_period_end: 1_800_000_000,
+          metadata: { tenantId: "tenant-out-of-order", plan: "PRO", billingCycle: "monthly" }
+        };
+      }
+    }
+  } as unknown as Stripe;
+  const { notifications, service, sign, subscriptions } = makeHarness(stripeClient);
+  subscriptions.set("tenant-out-of-order", {
+    plan: "PRO",
+    seats: 5,
+    status: "PAST_DUE",
+    expiresAt: new Date(1_800_000_000 * 1000).toISOString(),
+    priceMonthly: 199,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_out_of_order",
+    stripeSubscriptionId: "sub_out_of_order"
+  });
+
+  await service.handleWebhook(sign(baseEvent("evt_old_paid_invoice", "invoice.paid", {
+    id: "in_old_paid",
+    object: "invoice",
+    customer: "cus_out_of_order",
+    subscription: "sub_out_of_order"
+  })));
+
+  assert.equal(retrieveCalls, 1, "the event payload must not be treated as the current subscription state");
+  assert.equal(subscriptions.get("tenant-out-of-order")?.status, "PAST_DUE");
+  assert.equal(notifications.some((notification) => notification.type === "BILLING_SUBSCRIPTION_REACTIVATED"), false);
+});
+
+test("a webhook for a replaced Stripe subscription cannot mutate the tenant license", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => ({
+        id: subscriptionId,
+        object: "subscription",
+        status: "canceled",
+        customer: "cus_replaced",
+        current_period_end: 1_700_000_000,
+        metadata: { tenantId: "tenant-replaced", plan: "STARTER", billingCycle: "monthly" }
+      })
+    }
+  } as unknown as Stripe;
+  const { events, notifications, service, sign, subscriptions, upserts } = makeHarness(stripeClient);
+  subscriptions.set("tenant-replaced", {
+    plan: "PRO",
+    seats: 5,
+    status: "ACTIVE",
+    expiresAt: new Date(1_900_000_000 * 1000).toISOString(),
+    priceMonthly: 199,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_replaced",
+    stripeSubscriptionId: "sub_current"
+  });
+
+  const result = await service.handleWebhook(sign(baseEvent("evt_replaced_subscription_deleted", "customer.subscription.deleted", {
+    id: "sub_previous",
+    object: "subscription",
+    status: "canceled",
+    customer: "cus_replaced",
+    metadata: { tenantId: "tenant-replaced" }
+  })));
+
+  assert.deepEqual(result, { received: true, ignored: true });
+  assert.equal(events.get("evt_replaced_subscription_deleted")?.status, "IGNORED");
+  assert.equal(subscriptions.get("tenant-replaced")?.stripeSubscriptionId, "sub_current");
+  assert.equal(subscriptions.get("tenant-replaced")?.status, "ACTIVE");
+  assert.equal(upserts.length, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test("concurrent billing webhooks converge on the authoritative Stripe state", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  let releaseFirstRetrieve: (() => void) | undefined;
+  const firstRetrieveBlocked = new Promise<void>((resolve) => {
+    releaseFirstRetrieve = resolve;
+  });
+  let retrieveCalls = 0;
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => {
+        retrieveCalls += 1;
+        if (retrieveCalls === 1) await firstRetrieveBlocked;
+        return {
+          id: subscriptionId,
+          object: "subscription",
+          status: "active",
+          customer: "cus_concurrent",
+          current_period_end: 1_900_000_000,
+          metadata: { tenantId: "tenant-concurrent", plan: "PRO", billingCycle: "monthly" }
+        };
+      }
+    }
+  } as unknown as Stripe;
+  const { notifications, service, sign, subscriptions, upserts } = makeHarness(stripeClient);
+  subscriptions.set("tenant-concurrent", {
+    plan: "PRO",
+    seats: 5,
+    status: "PAST_DUE",
+    expiresAt: new Date(1_800_000_000 * 1000).toISOString(),
+    priceMonthly: 199,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_concurrent",
+    stripeSubscriptionId: "sub_concurrent"
+  });
+
+  const staleFailure = service.handleWebhook(sign(baseEvent("evt_concurrent_failure", "invoice.payment_failed", {
+    id: "in_concurrent_failure",
+    object: "invoice",
+    customer: "cus_concurrent",
+    subscription: "sub_concurrent"
+  })));
+  const currentSuccess = service.handleWebhook(sign(baseEvent("evt_concurrent_success", "invoice.paid", {
+    id: "in_concurrent_success",
+    object: "invoice",
+    customer: "cus_concurrent",
+    subscription: "sub_concurrent"
+  })));
+  releaseFirstRetrieve?.();
+
+  await Promise.all([staleFailure, currentSuccess]);
+
+  assert.equal(retrieveCalls, 3);
+  assert.equal(subscriptions.get("tenant-concurrent")?.status, "ACTIVE");
+  assert.equal(upserts.every((input) => input.status === "ACTIVE"), true);
+  assert.equal(notifications.filter((notification) => notification.type === "BILLING_SUBSCRIPTION_REACTIVATED").length, 1);
+  assert.equal(notifications.some((notification) => notification.type === "BILLING_PAYMENT_FAILED"), false);
+});
+
+test("a delayed stale Stripe response cannot overwrite a newer authoritative response", async () => {
+  const signer = new Stripe("sk_test_unit_billing");
+  let markStaleRetrieveReady: (() => void) | undefined;
+  const staleRetrieveReady = new Promise<void>((resolve) => {
+    markStaleRetrieveReady = resolve;
+  });
+  let releaseStaleRetrieve: (() => void) | undefined;
+  const staleRetrieveBlocked = new Promise<void>((resolve) => {
+    releaseStaleRetrieve = resolve;
+  });
+  let retrieveCalls = 0;
+  const stripeClient = {
+    webhooks: signer.webhooks,
+    subscriptions: {
+      retrieve: async (subscriptionId: string) => {
+        retrieveCalls += 1;
+        const selectedStatus = retrieveCalls === 1 ? "active" : "past_due";
+        if (retrieveCalls === 1) {
+          markStaleRetrieveReady?.();
+          await staleRetrieveBlocked;
+        }
+        return {
+          id: subscriptionId,
+          object: "subscription",
+          status: selectedStatus,
+          customer: "cus_stale_response",
+          current_period_end: selectedStatus === "active" ? 1_850_000_000 : 1_900_000_000,
+          metadata: { tenantId: "tenant-stale-response", plan: "PRO", billingCycle: "monthly" }
+        };
+      }
+    }
+  } as unknown as Stripe;
+  const { notifications, service, sign, subscriptions, upserts } = makeHarness(stripeClient);
+  subscriptions.set("tenant-stale-response", {
+    plan: "PRO",
+    seats: 5,
+    status: "ACTIVE",
+    expiresAt: new Date(1_800_000_000 * 1000).toISOString(),
+    priceMonthly: 199,
+    billingCycle: "monthly",
+    provider: "stripe",
+    stripeCustomerId: "cus_stale_response",
+    stripeSubscriptionId: "sub_stale_response"
+  });
+
+  const delayedOldSuccess = service.handleWebhook(sign(baseEvent("evt_delayed_old_success", "invoice.paid", {
+    id: "in_delayed_old_success",
+    object: "invoice",
+    customer: "cus_stale_response",
+    subscription: "sub_stale_response"
+  })));
+  await staleRetrieveReady;
+
+  const currentFailure = service.handleWebhook(sign(baseEvent("evt_current_failure", "invoice.payment_failed", {
+    id: "in_current_failure",
+    object: "invoice",
+    customer: "cus_stale_response",
+    subscription: "sub_stale_response"
+  })));
+  await currentFailure;
+  releaseStaleRetrieve?.();
+  await delayedOldSuccess;
+
+  assert.equal(retrieveCalls, 3, "the rejected stale write must re-read Stripe before retrying");
+  assert.equal(subscriptions.get("tenant-stale-response")?.status, "PAST_DUE");
+  assert.equal(upserts.every((input) => input.status === "PAST_DUE"), true);
+  assert.equal(notifications.filter((notification) => notification.type === "BILLING_PAYMENT_FAILED").length, 1);
+  assert.equal(notifications.some((notification) => notification.type === "BILLING_SUBSCRIPTION_REACTIVATED"), false);
 });
 
 test("customer.source.expiring notifies tenant to replace expiring card", async () => {

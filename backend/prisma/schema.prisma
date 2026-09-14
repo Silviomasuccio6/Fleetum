@@ -1109,6 +1109,9 @@ model RentalDeposit {
   approvedBy            User?                      @relation("RentalDepositApprover", fields: [approvedByUserId], references: [id])
   paymentEvents         RentalPaymentEvent[]
 
+  /// The database migration adds a partial unique index for one non-deleted
+  /// AUTHORIZING/AUTHORIZED deposit per tenant booking. Prisma cannot express
+  /// partial indexes in this schema.
   @@index([tenantId, bookingId])
   @@index([tenantId, rentalCustomerId])
   @@index([tenantId, status])

@@ -31,6 +31,8 @@ const createController = () => {
   (controller as any).getBookingOrThrow = async () => currentBooking;
   (controller as any).getCustomerOrThrow = async () => currentCustomer;
   (controller as any).assertVehicleAvailability = async () => undefined;
+  (controller as any).lockBookingMutation = async () => undefined;
+  (controller as any).lockBookingSchedule = async () => undefined;
   (controller as any).logNote = async () => undefined;
   return controller;
 };
@@ -58,7 +60,9 @@ test("booking update rejects a vehicle outside the tenant before mutation or res
   } as any;
 
   const originalVehicleFindFirst = prisma.vehicle.findFirst;
+  const originalBookingFindFirst = prisma.rentalBooking.findFirst;
   const originalBookingUpdate = prisma.rentalBooking.update;
+  const originalTransaction = prisma.$transaction;
   let vehicleLookup: any = null;
   let mutations = 0;
 
@@ -66,6 +70,7 @@ test("booking update rejects a vehicle outside the tenant before mutation or res
     vehicleLookup = input;
     return null;
   };
+  (prisma.rentalBooking as any).findFirst = async () => currentBooking;
   (prisma.rentalBooking as any).update = async () => {
     mutations += 1;
     return {
@@ -75,6 +80,7 @@ test("booking update rejects a vehicle outside the tenant before mutation or res
       customer: currentCustomer
     };
   };
+  (prisma as any).$transaction = async (callback: (tx: typeof prisma) => unknown) => callback(prisma);
 
   try {
     await assert.rejects(
@@ -98,7 +104,9 @@ test("booking update rejects a vehicle outside the tenant before mutation or res
     assert.equal(JSON.stringify(response.body).includes("TENANT_B_SECRET"), false);
   } finally {
     (prisma.vehicle as any).findFirst = originalVehicleFindFirst;
+    (prisma.rentalBooking as any).findFirst = originalBookingFindFirst;
     (prisma.rentalBooking as any).update = originalBookingUpdate;
+    (prisma as any).$transaction = originalTransaction;
   }
 });
 
@@ -112,7 +120,9 @@ test("booking update accepts an active vehicle owned by the tenant", async () =>
   } as any;
 
   const originalVehicleFindFirst = prisma.vehicle.findFirst;
+  const originalBookingFindFirst = prisma.rentalBooking.findFirst;
   const originalBookingUpdate = prisma.rentalBooking.update;
+  const originalTransaction = prisma.$transaction;
   let vehicleLookup: any = null;
   let availabilityCheck: any = null;
   let bookingUpdate: any = null;
@@ -121,6 +131,7 @@ test("booking update accepts an active vehicle owned by the tenant", async () =>
     vehicleLookup = input;
     return { id: "vehicle-tenant-a-2" };
   };
+  (prisma.rentalBooking as any).findFirst = async () => currentBooking;
   (prisma.rentalBooking as any).update = async (input: any) => {
     bookingUpdate = input;
     return {
@@ -133,6 +144,7 @@ test("booking update accepts an active vehicle owned by the tenant", async () =>
   (controller as any).assertVehicleAvailability = async (input: unknown) => {
     availabilityCheck = input;
   };
+  (prisma as any).$transaction = async (callback: (tx: typeof prisma) => unknown) => callback(prisma);
 
   try {
     await controller.update(request, response as any);
@@ -150,7 +162,9 @@ test("booking update accepts an active vehicle owned by the tenant", async () =>
     assert.equal((response.body as any).vehicle.id, "vehicle-tenant-a-2");
   } finally {
     (prisma.vehicle as any).findFirst = originalVehicleFindFirst;
+    (prisma.rentalBooking as any).findFirst = originalBookingFindFirst;
     (prisma.rentalBooking as any).update = originalBookingUpdate;
+    (prisma as any).$transaction = originalTransaction;
   }
 });
 
@@ -164,19 +178,23 @@ test("booking update does not block unrelated edits when the assigned vehicle is
   } as any;
 
   const originalVehicleFindFirst = prisma.vehicle.findFirst;
+  const originalBookingFindFirst = prisma.rentalBooking.findFirst;
   const originalBookingUpdate = prisma.rentalBooking.update;
+  const originalTransaction = prisma.$transaction;
   let vehicleLookups = 0;
 
   (prisma.vehicle as any).findFirst = async () => {
     vehicleLookups += 1;
     return null;
   };
+  (prisma.rentalBooking as any).findFirst = async () => currentBooking;
   (prisma.rentalBooking as any).update = async (input: any) => ({
     ...currentBooking,
     ...input.data,
     vehicle: { id: currentBooking.vehicleId },
     customer: currentCustomer
   });
+  (prisma as any).$transaction = async (callback: (tx: typeof prisma) => unknown) => callback(prisma);
 
   try {
     await controller.update(request, response as any);
@@ -186,6 +204,8 @@ test("booking update does not block unrelated edits when the assigned vehicle is
     assert.equal((response.body as any).vehicle.id, currentBooking.vehicleId);
   } finally {
     (prisma.vehicle as any).findFirst = originalVehicleFindFirst;
+    (prisma.rentalBooking as any).findFirst = originalBookingFindFirst;
     (prisma.rentalBooking as any).update = originalBookingUpdate;
+    (prisma as any).$transaction = originalTransaction;
   }
 });
