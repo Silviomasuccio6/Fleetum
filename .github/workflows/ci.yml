@@ -132,6 +132,9 @@ jobs:
             caddy:2-alpine \
             caddy validate --config /etc/caddy/Caddyfile
 
+      - name: Operations safety tests
+        run: npm run test:operations
+
       - name: Production dependency audit
         run: npm run audit:production
 

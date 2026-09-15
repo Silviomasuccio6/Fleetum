@@ -15,10 +15,10 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 
 ## Deploy order
 
-1. CI green.
-2. GitHub Actions builds and pushes backend/frontend images to GHCR.
-3. Upload deployment manifests to the VPS.
-4. Save currently running image tags in `/opt/fleetum/last-deploy.txt`.
+1. Resolve one full commit SHA. A CI-triggered release uses `workflow_run.head_sha`; a manual release is rejected unless CI succeeded for that exact SHA.
+2. GitHub Actions checks out that same immutable SHA in every job, then builds and pushes backend/frontend images to GHCR.
+3. Upload deployment manifests from the same SHA to a SHA-versioned staging directory on the VPS.
+4. Acquire `/opt/fleetum/deploy.lock`, promote the staged manifests, then save the running images and release metadata atomically in `/opt/fleetum/last-deploy.txt`.
 5. Reclaim unused Docker build cache, dangling layers and obsolete Fleetum image tags while preserving the running, rollback and target releases.
 6. Verify both the free-space and usage thresholds before pulling images, after the pull and again before Prisma migration; abort before migration if a threshold is not met.
 7. Pull the selected images on the VPS.
@@ -26,20 +26,22 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 9. Backup uploads with `deploy/backup/backup-uploads.sh`.
 10. Run Prisma migration separately only if both backups completed.
 11. Restart services.
-12. Health check `/api/ready`.
-13. Automatic application rollback if health fails.
-14. Repeat safe Docker cleanup after a healthy release, emit a `df -h` / `docker system df` report, then perform public health checks and log review.
+12. Verify backend readiness plus the frontend, robots, sitemap, `llms.txt` and social-preview asset while the release lock remains active.
+13. Automatic application rollback if the restart command fails, including a partial restart, or if any release health check fails. The previous release must pass the same health set before rollback is reported as complete.
+14. Repeat safe Docker cleanup after a healthy release, emit a `df -h` / `docker system df` report and finalize the release log.
 
 ## Images
 
-Production uses immutable GHCR image tags generated from the deployed commit SHA:
+Production publishes GHCR image tags generated from the selected full commit SHA:
 
 ```txt
 ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha>
 ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha>
 ```
 
-The workflow also updates `latest`, but the deploy step passes the explicit SHA-tagged images through `FLEETUM_BACKEND_IMAGE` and `FLEETUM_FRONTEND_IMAGE` to keep the release traceable.
+The production deploy uses the immutable image digests returned by the two builds and records the full Git SHA, CI run and deploy run in the release state. Before backup or migration, the VPS confirms that each digest resolves to the same local image as its full-SHA release tag. The production workflow does not publish or consume `latest`.
+
+All release jobs consume the output of the initial source-resolution job. Moving `main` while a workflow is running therefore cannot change the source, images or manifests in that release.
 
 ### Disk capacity guard
 
@@ -82,8 +84,11 @@ Any mismatch stops the release while the previous application remains active. Se
 
 ```bash
 cd /opt/fleetum/app
-FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
-FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend@sha256:<backend-digest> \
+FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend@sha256:<frontend-digest> \
+FLEETUM_BACKEND_RELEASE_TAG=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
+FLEETUM_FRONTEND_RELEASE_TAG=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+FLEETUM_RELEASE_SHA=<full-40-character-commit-sha> \
 ENV_FILE=/opt/fleetum/env/compose.env \
 ./deploy/scripts/safe-production-deploy.sh
 ```
@@ -92,8 +97,11 @@ ENV_FILE=/opt/fleetum/env/compose.env \
 
 ```bash
 cd /opt/fleetum/app
-FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
-FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+FLEETUM_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend@sha256:<backend-digest> \
+FLEETUM_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend@sha256:<frontend-digest> \
+FLEETUM_BACKEND_RELEASE_TAG=ghcr.io/silviomasuccio6/fleetum-backend:<commit-sha> \
+FLEETUM_FRONTEND_RELEASE_TAG=ghcr.io/silviomasuccio6/fleetum-frontend:<commit-sha> \
+FLEETUM_RELEASE_SHA=<full-40-character-commit-sha> \
 ENV_FILE=/opt/fleetum/env/compose.env \
 ./deploy/scripts/safe-production-deploy.sh
 ```
@@ -126,6 +134,8 @@ For offsite copies, configure `OFFSITE_RCLONE_TARGET` outside the repository.
 ## Rollback
 
 - Automatic rollback uses `/opt/fleetum/last-deploy.txt`.
+- The safe deploy and manual rollback share `/opt/fleetum/deploy.lock`; a second operation exits instead of changing the same services concurrently.
+- Application rollback is attempted after a failed or partial container restart and after any failed release health check. A rollback failure is reported separately and requires operator intervention.
 - Manual rollback command:
 
 ```bash
@@ -136,7 +146,8 @@ LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt \
 ./deploy/scripts/rollback-production.sh
 ```
 
-- Restore DB only if the migration changed data destructively and rollback was approved.
+- Application rollback does not restore the database. Restore DB only if the migration changed data destructively and a separately reviewed restore was approved.
+- Before releasing a migration, verify in an isolated rehearsal that the preceding application version can start and serve its critical flows on the migrated schema.
 - Verify `/api/ready` and core login/booking flows.
 
 ## Notes
