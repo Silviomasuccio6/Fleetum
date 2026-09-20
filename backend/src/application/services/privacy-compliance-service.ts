@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { logger } from "../../infrastructure/logging/logger.js";
 import { PrismaAuditLogRepository } from "../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { metrics } from "../../infrastructure/observability/metrics.js";
+import { deleteRetiredPhysicalObject } from "../../infrastructure/storage/upload-persistence.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
@@ -16,13 +18,46 @@ const retentionDefaults = {
   expiredTokenRetentionDays: 30,
   expiredSessionRetentionDays: 90,
   deletedCustomerAttachmentGraceDays: 30,
-  deletedStoredFileObjectGraceDays: env.PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS
+  deletedStoredFileObjectGraceDays: env.PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS,
+  websiteEventRetentionDays: env.PRIVACY_RETENTION_WEBSITE_EVENT_DAYS,
+  demoLeadRetentionDays: env.PRIVACY_RETENTION_DEMO_LEAD_DAYS,
+  emailQueuePayloadRetentionDays: env.PRIVACY_RETENTION_EMAIL_QUEUE_PAYLOAD_DAYS
 };
 
 const subDays = (date: Date, days: number) => new Date(date.getTime() - days * 86400000);
 
-const unlinkStoredFile = async (filePath: string) => {
-  await storageProvider.delete(filePath);
+const validateRetentionDays = (value: number | undefined, fallback: number, name: string) => {
+  const days = value ?? fallback;
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    throw new AppError(`${name} deve essere un intero tra 1 e 3650`, 400, "INVALID_RETENTION_POLICY");
+  }
+  return days;
+};
+
+const safeEmailQueueMetaKeys = new Set([
+  "tenantId",
+  "contractId",
+  "contractDeliveryId",
+  "bookingId",
+  "invoiceId",
+  "invoiceDeliveryId",
+  "stoppageId",
+  "reminderType",
+  "emailProvider",
+  "sentAt"
+]);
+
+const purgeEmailQueueMeta = (value: Prisma.JsonValue | null): Prisma.InputJsonObject => {
+  const retained: Record<string, Prisma.InputJsonValue> = { payloadPurged: true };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return retained as Prisma.InputJsonObject;
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (!safeEmailQueueMetaKeys.has(key)) continue;
+    if (nested !== null && ["string", "number", "boolean"].includes(typeof nested)) {
+      retained[key] = nested as string | number | boolean;
+    }
+  }
+  return retained as Prisma.InputJsonObject;
 };
 
 const anonymizedLabel = (id: string) => `Cliente anonimizzato ${crypto.createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
@@ -95,6 +130,138 @@ export class PrivacyComplianceService {
       provider: storageProvider.name,
       deletedAt: { lt: cutoff },
       ...bucketFilter
+    };
+  }
+
+  async previewGlobalRetention(input: {
+    websiteEventRetentionDays?: number;
+    demoLeadRetentionDays?: number;
+    emailQueuePayloadRetentionDays?: number;
+  } = {}) {
+    const now = new Date();
+    const policy = {
+      websiteEventRetentionDays: validateRetentionDays(
+        input.websiteEventRetentionDays,
+        retentionDefaults.websiteEventRetentionDays,
+        "websiteEventRetentionDays"
+      ),
+      demoLeadRetentionDays: validateRetentionDays(
+        input.demoLeadRetentionDays,
+        retentionDefaults.demoLeadRetentionDays,
+        "demoLeadRetentionDays"
+      ),
+      emailQueuePayloadRetentionDays: validateRetentionDays(
+        input.emailQueuePayloadRetentionDays,
+        retentionDefaults.emailQueuePayloadRetentionDays,
+        "emailQueuePayloadRetentionDays"
+      )
+    };
+    const cutoffs = {
+      websiteEventCutoff: subDays(now, policy.websiteEventRetentionDays),
+      demoLeadCutoff: subDays(now, policy.demoLeadRetentionDays),
+      emailQueuePayloadCutoff: subDays(now, policy.emailQueuePayloadRetentionDays)
+    };
+
+    const [websiteEvents, demoLeads, emailQueuePayloads] = await Promise.all([
+      prisma.websiteEvent.count({ where: { createdAt: { lt: cutoffs.websiteEventCutoff } } }),
+      prisma.demoLead.count({ where: { createdAt: { lt: cutoffs.demoLeadCutoff } } }),
+      prisma.emailQueue.count({
+        where: {
+          status: { in: ["SENT", "FAILED"] },
+          payloadPurgedAt: null,
+          updatedAt: { lt: cutoffs.emailQueuePayloadCutoff }
+        }
+      })
+    ]);
+
+    return {
+      generatedAt: now.toISOString(),
+      mode: "dry_run",
+      policy,
+      cutoffs: {
+        websiteEventCutoff: cutoffs.websiteEventCutoff.toISOString(),
+        demoLeadCutoff: cutoffs.demoLeadCutoff.toISOString(),
+        emailQueuePayloadCutoff: cutoffs.emailQueuePayloadCutoff.toISOString()
+      },
+      candidates: { websiteEvents, demoLeads, emailQueuePayloads }
+    };
+  }
+
+  async runGlobalRetention(input: {
+    confirmation: string;
+    websiteEventRetentionDays?: number;
+    demoLeadRetentionDays?: number;
+    emailQueuePayloadRetentionDays?: number;
+  }) {
+    if (input.confirmation !== "RUN_GLOBAL_RETENTION") {
+      throw new AppError(
+        "Conferma richiesta per eseguire la retention globale",
+        400,
+        "RETENTION_CONFIRMATION_REQUIRED"
+      );
+    }
+
+    const preview = await this.previewGlobalRetention(input);
+    const websiteEventCutoff = new Date(preview.cutoffs.websiteEventCutoff);
+    const demoLeadCutoff = new Date(preview.cutoffs.demoLeadCutoff);
+    const emailQueuePayloadCutoff = new Date(preview.cutoffs.emailQueuePayloadCutoff);
+    const purgedAt = new Date();
+
+    const deleted = await prisma.$transaction(async (tx) => {
+      const websiteEvents = await tx.websiteEvent.deleteMany({
+        where: { createdAt: { lt: websiteEventCutoff } }
+      });
+      const demoLeads = await tx.demoLead.deleteMany({
+        where: { createdAt: { lt: demoLeadCutoff } }
+      });
+      return { websiteEvents: websiteEvents.count, demoLeads: demoLeads.count };
+    });
+
+    let emailQueuePayloads = 0;
+    let remainingCandidates = preview.candidates.emailQueuePayloads;
+    const emailBatchSize = 100;
+    while (remainingCandidates > 0) {
+      const emailPayloads = await prisma.emailQueue.findMany({
+        where: {
+          status: { in: ["SENT", "FAILED"] },
+          payloadPurgedAt: null,
+          updatedAt: { lt: emailQueuePayloadCutoff }
+        },
+        orderBy: { id: "asc" },
+        take: Math.min(emailBatchSize, remainingCandidates),
+        select: { id: true, meta: true }
+      });
+      if (emailPayloads.length === 0) break;
+
+      const batchPurged = await prisma.$transaction(async (tx) => {
+        let count = 0;
+        for (const email of emailPayloads) {
+          const updated = await tx.emailQueue.updateMany({
+            where: { id: email.id, payloadPurgedAt: null },
+            data: {
+              recipient: "[redacted]",
+              subject: "[redacted]",
+              body: "[redacted]",
+              lastError: null,
+              meta: purgeEmailQueueMeta(email.meta),
+              payloadPurgedAt: purgedAt
+            }
+          });
+          count += updated.count;
+        }
+        return count;
+      });
+      emailQueuePayloads += batchPurged;
+      remainingCandidates -= emailPayloads.length;
+    }
+
+    return {
+      executed: true,
+      generatedAt: new Date().toISOString(),
+      policy: preview.policy,
+      cutoffs: preview.cutoffs,
+      deleted,
+      purged: { emailQueuePayloads }
     };
   }
 
@@ -580,6 +747,21 @@ export class PrivacyComplianceService {
           })
         : { count: 0 };
 
+      if (attachments.length > 0) {
+        await tx.storedFileObject.updateMany({
+          where: {
+            tenantId: input.tenantId,
+            provider: storageProvider.name,
+            ...(storageProvider.name === "local"
+              ? { OR: [{ bucket: this.currentStorageBucket }, { bucket: null }] }
+              : { bucket: this.currentStorageBucket }),
+            storageKey: { in: attachments.map((attachment) => attachment.filePath) },
+            deletedAt: null
+          },
+          data: { deletedAt: now }
+        });
+      }
+
       await tx.rentalCustomer.update({
         where: { id: input.customerId },
         data: buildRentalCustomerAnonymizationData({ label, deletedAt: now })
@@ -611,7 +793,10 @@ export class PrivacyComplianceService {
     });
 
     for (const attachment of attachments) {
-      await unlinkStoredFile(attachment.filePath);
+      await deleteRetiredPhysicalObject({
+        key: attachment.filePath,
+        resourceType: "RentalCustomerAttachment"
+      });
     }
 
     return {
@@ -714,6 +899,24 @@ export class PrivacyComplianceService {
       })
     ]);
 
+    const physicalCleanup = await Promise.allSettled(
+      deletedStoredFiles.map((file) => storageProvider.delete(file.storageKey))
+    );
+    const deletedStoredFileIds = deletedStoredFiles
+      .filter((_file, index) => physicalCleanup[index]?.status === "fulfilled")
+      .map((file) => file.id);
+    const failedPhysicalCleanup = physicalCleanup.filter((entry) => entry.status === "rejected").length;
+    if (failedPhysicalCleanup > 0) {
+      logger.error(
+        {
+          failedObjects: failedPhysicalCleanup,
+          objectCount: deletedStoredFiles.length,
+          resourceType: "PrivacyRetention"
+        },
+        "Retention kept stored-file metadata because physical cleanup failed"
+      );
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       const passwordResetTokens = await tx.passwordResetToken.deleteMany({
         where: { expiresAt: { lt: tokenCutoff }, user: { tenantId: input.tenantId } }
@@ -736,11 +939,25 @@ export class PrivacyComplianceService {
           customer: { deletedAt: { lt: deletedCustomerCutoff } }
         }
       });
-      const deletedStoredFileObjects = deletedStoredFiles.length
+      if (attachments.length > 0) {
+        await tx.storedFileObject.updateMany({
+          where: {
+            tenantId: input.tenantId,
+            provider: storageProvider.name,
+            ...(storageProvider.name === "local"
+              ? { OR: [{ bucket: this.currentStorageBucket }, { bucket: null }] }
+              : { bucket: this.currentStorageBucket }),
+            storageKey: { in: attachments.map((attachment) => attachment.filePath) },
+            deletedAt: null
+          },
+          data: { deletedAt: new Date() }
+        });
+      }
+      const deletedStoredFileObjects = deletedStoredFileIds.length
         ? await tx.storedFileObject.deleteMany({
             where: {
               tenantId: input.tenantId,
-              id: { in: deletedStoredFiles.map((file) => file.id) }
+              id: { in: deletedStoredFileIds }
             }
           })
         : { count: 0 };
@@ -778,10 +995,10 @@ export class PrivacyComplianceService {
     });
 
     for (const attachment of attachments) {
-      await unlinkStoredFile(attachment.filePath);
-    }
-    for (const file of deletedStoredFiles) {
-      await unlinkStoredFile(file.storageKey);
+      await deleteRetiredPhysicalObject({
+        key: attachment.filePath,
+        resourceType: "RentalCustomerAttachment"
+      });
     }
 
     metrics.observeRetentionRun({

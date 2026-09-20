@@ -191,6 +191,7 @@ export function DemoForm({ initialPlan }: { initialPlan?: string }) {
       message,
       source: window.location.hostname || "fleetum.it",
       websiteUrl: fieldValue(form, "websiteUrl"),
+      consentAnalytics: Boolean(analyticsContext),
       ...(analyticsContext ?? {}),
     };
 

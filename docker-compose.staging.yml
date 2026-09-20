@@ -30,7 +30,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - /opt/fleetum-staging/uploads:/app/uploads
+      - /opt/fleetum-staging/uploads:/app/backend/uploads
       - /opt/fleetum-staging/logs:/app/logs
     expose:
       - "4000"

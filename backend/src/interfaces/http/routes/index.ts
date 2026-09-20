@@ -23,6 +23,7 @@ import { InvoiceService } from "../../../application/services/invoice-service.js
 import { LicensePolicyService } from "../../../application/services/license-policy-service.js";
 import { NotificationsService } from "../../../application/services/notifications-service.js";
 import { PrivacyComplianceService } from "../../../application/services/privacy-compliance-service.js";
+import { buildConsentedDemoAnalyticsEvent } from "../../../application/services/public-demo-analytics-service.js";
 import { PrivacyNoticeService } from "../../../application/services/privacy-notice-service.js";
 import { RentalPaymentService } from "../../../application/services/rental-payment-service.js";
 import { SocialOAuthService } from "../../../application/services/social-oauth-service.js";
@@ -32,6 +33,7 @@ import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { env } from "../../../shared/config/env.js";
 import { privacyHash } from "../../../shared/utils/privacy-hash.js";
 import { uploadCompanyVerificationDocument } from "../../../infrastructure/storage/multer.js";
+import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { metrics } from "../../../infrastructure/observability/metrics.js";
@@ -251,26 +253,15 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
       sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined
     }
   });
-  await prisma.websiteEvent.create({
-    data: {
-      eventType: "DEMO_FORM_SUBMIT",
-      path: "/demo",
-      referrer: input.referrer,
-      utmSource: input.utmSource,
-      utmMedium: input.utmMedium,
-      utmCampaign: input.utmCampaign,
-      utmContent: input.utmContent,
-      utmTerm: input.utmTerm,
-      consentAnalytics: true,
-      visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
-      sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined,
-      ipHash: privacyHash(req.ip),
-      userAgentHash: privacyHash(String(req.headers["user-agent"] ?? "")),
-      deviceType: detectDevice(String(req.headers["user-agent"] ?? "")),
-      browser: detectBrowser(String(req.headers["user-agent"] ?? "")),
-      metadata: { source: input.source, leadId: lead.id }
-    }
+  const analyticsEvent = buildConsentedDemoAnalyticsEvent({
+    input,
+    leadId: lead.id,
+    ip: req.ip,
+    userAgent: String(req.headers["user-agent"] ?? "")
   });
+  if (analyticsEvent) {
+    await prisma.websiteEvent.create({ data: analyticsEvent });
+  }
   const body = [
     "Nuova richiesta demo Fleetum",
     `Azienda: ${input.companyName}`,
@@ -359,7 +350,7 @@ apiRouter.use("/tenant", requireCsrfProtection, tenantProfileRoutes(tenantProfil
 apiRouter.post(
   "/tenant/onboarding/company-verification-document",
   requireCsrfProtection,
-  uploadCompanyVerificationDocument.single("file"),
+  cleanupOnUploadFailure(uploadCompanyVerificationDocument.single("file")),
   asyncHandler(tenantProfileController.uploadCompanyVerificationDocument)
 );
 apiRouter.use(requireValidLicense(licensePolicyService));

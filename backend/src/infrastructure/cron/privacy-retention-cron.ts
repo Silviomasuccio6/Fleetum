@@ -10,23 +10,45 @@ export const startPrivacyRetentionCron = (service: PrivacyComplianceService): Sc
     if (!env.PRIVACY_RETENTION_CRON_ENABLED) return;
 
     try {
+      const globalResult = env.PRIVACY_RETENTION_GLOBAL_ENABLED
+        ? await service.runGlobalRetention({ confirmation: "RUN_GLOBAL_RETENTION" })
+        : null;
       const tenants = await prisma.tenant.findMany({
         where: { isActive: true, deletedAt: null },
         select: { id: true },
         take: 500
       });
 
-      const results = [];
+      const tenantDeleted = {
+        passwordResetTokens: 0,
+        invitationTokens: 0,
+        refreshSessions: 0,
+        deletedCustomerAttachments: 0,
+        deletedStoredFileObjects: 0
+      };
       for (const tenant of tenants) {
         const result = await service.runRetention({
           tenantId: tenant.id,
           userId: null,
           confirmation: "RUN_RETENTION"
         });
-        results.push({ tenantId: tenant.id, deleted: result.deleted });
+        tenantDeleted.passwordResetTokens += result.deleted.passwordResetTokens;
+        tenantDeleted.invitationTokens += result.deleted.invitationTokens;
+        tenantDeleted.refreshSessions += result.deleted.refreshSessions;
+        tenantDeleted.deletedCustomerAttachments += result.deleted.deletedCustomerAttachments;
+        tenantDeleted.deletedStoredFileObjects += result.deleted.deletedStoredFileObjects;
       }
 
-      logger.info({ tenants: results.length, results }, "Privacy retention cron completed");
+      logger.info(
+        {
+          global: globalResult
+            ? { enabled: true, deleted: globalResult.deleted, purged: globalResult.purged }
+            : { enabled: false },
+          tenantsProcessed: tenants.length,
+          tenantDeleted
+        },
+        "Privacy retention cron completed"
+      );
     } catch (error) {
       metrics.observeRetentionRun({ status: "failure", tenants: 0 });
       logger.error({ error }, "Privacy retention cron failed");

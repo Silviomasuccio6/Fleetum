@@ -23,6 +23,8 @@ export interface StorageProvider {
   read(key: string): Promise<Buffer>;
   write(key: string, data: Buffer, metadata?: StoredFileMetadata): Promise<void>;
   writeFromFile(key: string, filePath: string, metadata?: StoredFileMetadata): Promise<void>;
+  writeNew(key: string, data: Buffer, metadata?: StoredFileMetadata): Promise<void>;
+  writeNewFromFile(key: string, filePath: string, metadata?: StoredFileMetadata): Promise<void>;
   delete(key: string): Promise<void>;
   getSignedReadUrl(key: string, expiresInSeconds?: number): Promise<string>;
 }
@@ -44,13 +46,23 @@ const assertSafeStorageKey = (key: string) => {
 class LocalStorageProvider implements StorageProvider {
   readonly name = "local" as const;
   private readonly rootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
+  private readonly legacyRelativePrefix = path.isAbsolute(env.UPLOAD_DIR)
+    ? null
+    : normalizeSegment(path.posix.normalize(env.UPLOAD_DIR.replace(/\\/g, "/"))).replace(/^\.\//, "");
 
   buildKey(...segments: string[]) {
-    return path.posix.join(env.UPLOAD_DIR, ...segments.map(normalizeSegment).filter(Boolean));
+    return path.posix.join(...segments.map(normalizeSegment).filter(Boolean));
   }
 
   resolveLocalPath(key: string) {
-    const fullPath = path.resolve(process.cwd(), assertSafeStorageKey(key));
+    const safeKey = assertSafeStorageKey(key);
+    const isLegacyKey = Boolean(
+      this.legacyRelativePrefix &&
+      (safeKey === this.legacyRelativePrefix || safeKey.startsWith(`${this.legacyRelativePrefix}/`))
+    );
+    const fullPath = isLegacyKey
+      ? path.resolve(process.cwd(), safeKey)
+      : path.resolve(this.rootDir, safeKey);
     if (fullPath !== this.rootDir && !fullPath.startsWith(`${this.rootDir}${path.sep}`)) {
       throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
     }
@@ -111,8 +123,56 @@ class LocalStorageProvider implements StorageProvider {
     });
   }
 
+  async writeNew(key: string, data: Buffer, metadata?: StoredFileMetadata) {
+    const fullPath = this.resolveLocalPath(key);
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    try {
+      await fs.writeFile(fullPath, data, { flag: "wx", mode: 0o600 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new AppError("Chiave storage gia esistente", 409, "STORAGE_OBJECT_EXISTS");
+      }
+      throw error;
+    }
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: data.byteLength
+    });
+  }
+
+  async writeNewFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
+    const fullPath = this.resolveLocalPath(key);
+    const sourcePath = path.resolve(filePath);
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    let created = false;
+    try {
+      await fs.copyFile(sourcePath, fullPath, fs.constants.COPYFILE_EXCL);
+      created = true;
+      await fs.chmod(fullPath, 0o600);
+    } catch (error) {
+      if (created) await fs.unlink(fullPath).catch(() => undefined);
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new AppError("Chiave storage gia esistente", 409, "STORAGE_OBJECT_EXISTS");
+      }
+      throw error;
+    }
+    const stat = await fs.stat(fullPath);
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: stat.size
+    });
+  }
+
   async delete(key: string) {
-    await fs.unlink(this.resolveLocalPath(key)).catch(() => undefined);
+    try {
+      await fs.unlink(this.resolveLocalPath(key));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     metrics.observeStorageOperation({
       operation: "delete",
       provider: this.name
@@ -219,7 +279,13 @@ export class S3StorageProvider implements StorageProvider {
     };
   }
 
-  private async request(method: string, key: string, body?: Buffer, metadata?: StoredFileMetadata) {
+  private async request(
+    method: string,
+    key: string,
+    body?: Buffer,
+    metadata?: StoredFileMetadata,
+    options?: { createOnly?: boolean }
+  ) {
     const url = this.objectUrl(key);
     const now = new Date();
     const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
@@ -230,6 +296,7 @@ export class S3StorageProvider implements StorageProvider {
     if (metadata?.tenantId) extraHeaders["x-amz-meta-tenant-id"] = metadata.tenantId;
     if (metadata?.resourceType) extraHeaders["x-amz-meta-resource-type"] = metadata.resourceType;
     if (metadata?.resourceId) extraHeaders["x-amz-meta-resource-id"] = metadata.resourceId;
+    if (options?.createOnly) extraHeaders["if-none-match"] = "*";
 
     const signed = this.authorization({ method, url, payloadHash, amzDate, dateStamp, extraHeaders });
     const response = await this.fetchImpl(url, {
@@ -241,6 +308,10 @@ export class S3StorageProvider implements StorageProvider {
         authorization: signed.authorization
       }
     });
+
+    if (options?.createOnly && response.status === 412) {
+      throw new AppError("Chiave storage gia esistente", 409, "STORAGE_OBJECT_EXISTS");
+    }
 
     if (!response.ok && !(method === "HEAD" && response.status === 404) && !(method === "DELETE" && response.status === 404)) {
       throw new AppError(`Errore storage S3 (${response.status})`, 502, "S3_STORAGE_ERROR");
@@ -278,6 +349,21 @@ export class S3StorageProvider implements StorageProvider {
   async writeFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
     const data = await fs.readFile(filePath);
     await this.write(key, data, metadata);
+  }
+
+  async writeNew(key: string, data: Buffer, metadata?: StoredFileMetadata) {
+    await this.request("PUT", key, data, metadata, { createOnly: true });
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: data.byteLength
+    });
+  }
+
+  async writeNewFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
+    const data = await fs.readFile(filePath);
+    await this.writeNew(key, data, metadata);
   }
 
   async delete(key: string) {

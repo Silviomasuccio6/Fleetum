@@ -245,6 +245,7 @@ test("contracts smoke: markContractSigned updates contract and booking status", 
 
   const originalBookingContractUpdate = prisma.bookingContract.update;
   const originalRentalBookingUpdate = prisma.rentalBooking.update;
+  const originalTransaction = prisma.$transaction;
 
   let capturedContractUpdate: any = null;
   let capturedBookingUpdate: any = null;
@@ -257,6 +258,10 @@ test("contracts smoke: markContractSigned updates contract and booking status", 
     capturedBookingUpdate = input;
     return { id: "booking_1" };
   };
+  (prisma as any).$transaction = async (callback: any) => callback({
+    bookingContract: { update: (prisma.bookingContract as any).update },
+    rentalBooking: { update: (prisma.rentalBooking as any).update }
+  });
 
   let capturedEvent: any = null;
   (controller as any).logContractEvent = async (input: unknown) => {
@@ -281,6 +286,7 @@ test("contracts smoke: markContractSigned updates contract and booking status", 
   } finally {
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
     (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
+    (prisma as any).$transaction = originalTransaction;
   }
 });
 
@@ -295,6 +301,7 @@ test("contracts smoke: markContractSigned persists graphical signature metadata"
 
   const originalBookingContractUpdate = prisma.bookingContract.update;
   const originalRentalBookingUpdate = prisma.rentalBooking.update;
+  const originalTransaction = prisma.$transaction;
 
   (prisma.bookingContract as any).update = async (input: unknown) => ({
     id: "contract_1",
@@ -302,6 +309,10 @@ test("contracts smoke: markContractSigned persists graphical signature metadata"
     signedAt: (input as any).data.signedAt
   });
   (prisma.rentalBooking as any).update = async () => ({ id: "booking_1" });
+  (prisma as any).$transaction = async (callback: any) => callback({
+    bookingContract: { update: (prisma.bookingContract as any).update },
+    rentalBooking: { update: (prisma.rentalBooking as any).update }
+  });
 
   let capturedEvent: any = null;
   (controller as any).persistContractSignature = async () => ({
@@ -333,5 +344,23 @@ test("contracts smoke: markContractSigned persists graphical signature metadata"
   } finally {
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
     (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
+    (prisma as any).$transaction = originalTransaction;
   }
+});
+
+test("contracts smoke: signature data URLs must match the declared image format", () => {
+  const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  const forged = `data:image/png;base64,${Buffer.from("not-a-png").toString("base64")}`;
+
+  assert.throws(
+    () => (controller as any).decodeSignatureDataUrl(forged),
+    (error: any) => error?.code === "INVALID_FILE_MAGIC"
+  );
+
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
+  const decoded = (controller as any).decodeSignatureDataUrl(
+    `data:image/jpg;base64,${jpeg.toString("base64")}`
+  );
+  assert.equal(decoded.mimeType, "image/jpeg");
+  assert.equal(decoded.extension, "jpg");
 });

@@ -29,6 +29,18 @@ test("public demo request treats optional empty fields as missing", () => {
 
   assert.equal(parsed.fleetSize, undefined);
   assert.equal(parsed.message, undefined);
+  assert.equal(parsed.consentAnalytics, false);
+});
+
+test("public demo request records analytics consent only when explicitly supplied", () => {
+  const parsed = publicDemoRequestSchema.parse({
+    companyName: "Autonoleggio Demo",
+    fullName: "Mario Rossi",
+    email: "mario.rossi@example.com",
+    consentAnalytics: true
+  });
+
+  assert.equal(parsed.consentAnalytics, true);
 });
 
 test("public demo request rejects invalid email and unsafe oversize payload", () => {

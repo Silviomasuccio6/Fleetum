@@ -1,11 +1,21 @@
-import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import { Prisma, RentalBookingStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
-import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
+import {
+  scanBufferForThreats,
+  validateImageBufferMagic,
+  validateUploadedFile
+} from "../../../infrastructure/storage/file-security.js";
+import { cleanupRequestUploads, withRequestUploadCleanup } from "../../../infrastructure/storage/upload-lifecycle.js";
+import {
+  compensateCommittedUpload,
+  deleteRetiredPhysicalObject,
+  persistNewBuffer,
+  persistNewUploadedFiles
+} from "../../../infrastructure/storage/upload-persistence.js";
 import { storageProvider } from "../../../infrastructure/storage/storage-provider.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { env } from "../../../shared/config/env.js";
@@ -425,7 +435,8 @@ export class RentalBookingsController {
     if (!match) {
       throw new AppError("Formato firma non valido", 400, "SIGNATURE_INVALID_FORMAT");
     }
-    const mimeType = match[1].toLowerCase();
+    const rawMimeType = match[1].toLowerCase();
+    const mimeType = rawMimeType === "image/jpg" ? "image/jpeg" : rawMimeType;
     const base64Payload = match[2].replace(/\s+/g, "");
     const buffer = Buffer.from(base64Payload, "base64");
     if (!buffer.length) {
@@ -434,6 +445,8 @@ export class RentalBookingsController {
     if (buffer.length > 2 * 1024 * 1024) {
       throw new AppError("Firma troppo grande (max 2MB)", 400, "SIGNATURE_TOO_LARGE");
     }
+    validateImageBufferMagic(buffer, mimeType);
+    scanBufferForThreats(buffer);
     const extension = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
     return { mimeType, buffer, extension };
   }
@@ -444,56 +457,22 @@ export class RentalBookingsController {
     signatureDataUrl: string;
   }) {
     const decoded = this.decodeSignatureDataUrl(input.signatureDataUrl);
-    const safeTenant = input.tenantId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const fileName = `${input.contractId}-${Date.now()}.${decoded.extension}`;
-    const relativePath = storageProvider.buildKey("contract-signatures", safeTenant, fileName);
-    await storageProvider.write(relativePath, decoded.buffer, {
+    const fileName = `signature.${decoded.extension}`;
+    const persisted = await persistNewBuffer({
       tenantId: input.tenantId,
+      category: "contract-signatures",
       resourceType: "BookingContractSignature",
       resourceId: input.contractId,
       originalName: fileName,
-      mimeType: decoded.mimeType
-    });
-    const checksumSha256 = crypto.createHash("sha256").update(decoded.buffer).digest("hex");
-
-    await prisma.storedFileObject.upsert({
-      where: {
-        provider_bucket_storageKey: {
-          provider: storageProvider.name,
-          bucket: this.storageBucket(),
-          storageKey: relativePath
-        }
-      },
-      create: {
-        tenantId: input.tenantId,
-        provider: storageProvider.name,
-        bucket: this.storageBucket(),
-        storageKey: relativePath,
-        originalName: fileName,
-        mimeType: decoded.mimeType,
-        sizeBytes: decoded.buffer.length,
-        checksumSha256,
-        resourceType: "BookingContractSignature",
-        resourceId: input.contractId,
-        visibility: "private"
-      },
-      update: {
-        tenantId: input.tenantId,
-        originalName: fileName,
-        mimeType: decoded.mimeType,
-        sizeBytes: decoded.buffer.length,
-        checksumSha256,
-        resourceType: "BookingContractSignature",
-        resourceId: input.contractId,
-        visibility: "private",
-        deletedAt: null
-      }
+      mimeType: decoded.mimeType,
+      buffer: decoded.buffer
     });
 
     return {
-      filePath: relativePath,
+      filePath: persisted.key,
       mimeType: decoded.mimeType,
-      sizeBytes: decoded.buffer.length
+      sizeBytes: decoded.buffer.length,
+      storedFileObjectId: persisted.storedFileObjectId
     };
   }
 
@@ -712,8 +691,8 @@ export class RentalBookingsController {
     type: string;
     message: string;
     details?: Prisma.InputJsonValue;
-  }) {
-    await prisma.bookingContractEvent.create({
+  }, db: Prisma.TransactionClient = prisma) {
+    await db.bookingContractEvent.create({
       data: {
         tenantId: input.tenantId,
         bookingId: input.bookingId,
@@ -2481,40 +2460,55 @@ export class RentalBookingsController {
         })
       : null;
 
-    const updated = await prisma.bookingContract.update({
-      where: { id: contract.id },
-      data: {
-        status: "SIGNED",
-        signedAt,
-        errorMessage: null,
-        updatedByUserId: actorUserId
-      }
-    });
+    let updated;
+    try {
+      updated = await prisma.$transaction(async (tx) => {
+        const nextContract = await tx.bookingContract.update({
+          where: { id: contract.id },
+          data: {
+            status: "SIGNED",
+            signedAt,
+            errorMessage: null,
+            updatedByUserId: actorUserId
+          }
+        });
 
-    await prisma.rentalBooking.update({
-      where: { id: contract.bookingId },
-      data: {
-        contractStatus: "SIGNED",
-        contractSignedAt: signedAt,
-        ...(contract.booking.status === "CONFIRMED" ? { status: "CONTRACT_SIGNED" } : {})
-      }
-    });
+        await tx.rentalBooking.update({
+          where: { id: contract.bookingId },
+          data: {
+            contractStatus: "SIGNED",
+            contractSignedAt: signedAt,
+            ...(contract.booking.status === "CONFIRMED" ? { status: "CONTRACT_SIGNED" } : {})
+          }
+        });
 
-    await this.logContractEvent({
-      tenantId,
-      bookingId: contract.bookingId,
-      contractId: contract.id,
-      actorUserId,
-      type: "SIGNED",
-      message: signature ? "Contratto firmato con acquisizione grafica" : "Contratto marcato come firmato",
-      details: withDefined({
-        signedAt: signedAt.toISOString(),
-        signatureFilePath: signature?.filePath,
-        signatureMimeType: signature?.mimeType,
-        signatureSizeBytes: signature?.sizeBytes,
-        idempotencyKey: idempotencyKey ?? undefined
-      })
-    });
+        await this.logContractEvent({
+          tenantId,
+          bookingId: contract.bookingId,
+          contractId: contract.id,
+          actorUserId,
+          type: "SIGNED",
+          message: signature ? "Contratto firmato con acquisizione grafica" : "Contratto marcato come firmato",
+          details: withDefined({
+            signedAt: signedAt.toISOString(),
+            signatureFilePath: signature?.filePath,
+            signatureMimeType: signature?.mimeType,
+            signatureSizeBytes: signature?.sizeBytes,
+            idempotencyKey: idempotencyKey ?? undefined
+          })
+        }, tx);
+        return nextContract;
+      });
+    } catch (error) {
+      if (signature) {
+        await compensateCommittedUpload({
+          tenantId,
+          key: signature.filePath,
+          resourceType: "BookingContractSignature"
+        });
+      }
+      throw error;
+    }
 
     res.json({
       ...updated,
@@ -2661,100 +2655,112 @@ export class RentalBookingsController {
   };
 
   uploadDefaultContractLogo = async (req: Request, res: Response) => {
-    const tenantId = req.auth!.tenantId;
-    const actorUserId = req.auth?.userId;
-    const file = req.file as Express.Multer.File | undefined;
-    if (!file) throw new AppError("Logo mancante", 400, "MISSING_FILE");
-    const validation = await validateUploadedFile(file.path, file.mimetype);
-    file.size = validation.sizeBytes;
+    await withRequestUploadCleanup(req, async () => {
+      const tenantId = req.auth!.tenantId;
+      const actorUserId = req.auth?.userId;
+      const file = req.file as Express.Multer.File | undefined;
+      if (!file) throw new AppError("Logo mancante", 400, "MISSING_FILE");
+      const validation = await validateUploadedFile(file.path, file.mimetype);
+      file.size = validation.sizeBytes;
 
-    const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
-    const nextLogoPath = storageProvider.buildKey(file.filename);
-    const fileBuffer = await fs.readFile(file.path);
-    const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
-    await storageProvider.writeFromFile(nextLogoPath, file.path, { tenantId, resourceType: "ContractTemplateLogo", resourceId: template.id, originalName: file.originalname || file.filename, mimeType: file.mimetype });
-    if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
-
-    await prisma.contractTemplate.update({
-      where: { id: template.id },
-      data: {
-        logoFilePath: nextLogoPath,
-        logoFileName: file.originalname || file.filename,
-        logoMimeType: file.mimetype,
-        version: { increment: 1 }
-      }
-    });
-
-    if (template.logoFilePath && template.logoFilePath !== nextLogoPath) {
-      await storageProvider.delete(template.logoFilePath);
-      await prisma.storedFileObject.updateMany({
-        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: template.logoFilePath, deletedAt: null },
-        data: { deletedAt: new Date() }
-      });
-    }
-
-    await prisma.storedFileObject.upsert({
-      where: {
-        provider_bucket_storageKey: {
-          provider: storageProvider.name,
-          bucket: this.storageBucket(),
-          storageKey: nextLogoPath
+      const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
+      const persisted = await persistNewUploadedFiles({
+        tenantId,
+        category: "contract-template-logos",
+        resourceType: "ContractTemplateLogo",
+        resourceId: template.id,
+        files: [file],
+        commit: async (tx, [upload]) => {
+          const current = await tx.contractTemplate.findFirst({
+            where: { id: template.id, tenantId, deletedAt: null }
+          });
+          if (!current) throw new AppError("Template contratto non trovato", 404, "NOT_FOUND");
+          const updated = await tx.contractTemplate.update({
+            where: { id: current.id },
+            data: {
+              logoFilePath: upload.key,
+              logoFileName: file.originalname || file.filename,
+              logoMimeType: file.mimetype,
+              version: { increment: 1 }
+            }
+          });
+          if (current.logoFilePath && current.logoFilePath !== upload.key) {
+            await tx.storedFileObject.updateMany({
+              where: {
+                tenantId,
+                provider: storageProvider.name,
+                ...(storageProvider.name === "local"
+                  ? { OR: [{ bucket: this.storageBucket() }, { bucket: null }] }
+                  : { bucket: this.storageBucket() }),
+                storageKey: current.logoFilePath,
+                deletedAt: null
+              },
+              data: { deletedAt: new Date() }
+            });
+          }
+          return {
+            updated,
+            retiredKey: current.logoFilePath && current.logoFilePath !== upload.key
+              ? current.logoFilePath
+              : null
+          };
         }
-      },
-      create: {
-        tenantId,
-        provider: storageProvider.name,
-        bucket: this.storageBucket(),
-        storageKey: nextLogoPath,
-        originalName: file.originalname || file.filename,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        checksumSha256,
-        resourceType: "ContractTemplateLogo",
-        resourceId: template.id,
-        visibility: "private"
-      },
-      update: {
-        tenantId,
-        originalName: file.originalname || file.filename,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        checksumSha256,
-        resourceType: "ContractTemplateLogo",
-        resourceId: template.id,
-        visibility: "private",
-        deletedAt: null
-      }
-    });
+      });
 
-    const refreshed = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
-    res.status(201).json(refreshed);
+      if (persisted.result.retiredKey) {
+        await deleteRetiredPhysicalObject({
+          key: persisted.result.retiredKey,
+          resourceType: "ContractTemplateLogo"
+        });
+      }
+
+      const refreshed = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
+      res.status(201).json(refreshed);
+    });
   };
 
   removeDefaultContractLogo = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
     const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
-
-    if (template.logoFilePath) {
-      await storageProvider.delete(template.logoFilePath);
-      await prisma.storedFileObject.updateMany({
-        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: template.logoFilePath, deletedAt: null },
-        data: { deletedAt: new Date() }
+    const result = await prisma.$transaction(async (tx) => {
+      const current = await tx.contractTemplate.findFirst({
+        where: { id: template.id, tenantId, deletedAt: null }
+      });
+      if (!current) throw new AppError("Template contratto non trovato", 404, "NOT_FOUND");
+      const updated = await tx.contractTemplate.update({
+        where: { id: current.id },
+        data: {
+          logoFilePath: null,
+          logoFileName: null,
+          logoMimeType: null,
+          version: { increment: 1 }
+        }
+      });
+      if (current.logoFilePath) {
+        await tx.storedFileObject.updateMany({
+          where: {
+            tenantId,
+            provider: storageProvider.name,
+            ...(storageProvider.name === "local"
+              ? { OR: [{ bucket: this.storageBucket() }, { bucket: null }] }
+              : { bucket: this.storageBucket() }),
+            storageKey: current.logoFilePath,
+            deletedAt: null
+          },
+          data: { deletedAt: new Date() }
+        });
+      }
+      return { updated, retiredKey: current.logoFilePath };
+    }, { isolationLevel: "Serializable" });
+    if (result.retiredKey) {
+      await deleteRetiredPhysicalObject({
+        key: result.retiredKey,
+        resourceType: "ContractTemplateLogo"
       });
     }
 
-    const updated = await prisma.contractTemplate.update({
-      where: { id: template.id },
-      data: {
-        logoFilePath: null,
-        logoFileName: null,
-        logoMimeType: null,
-        version: { increment: 1 }
-      }
-    });
-
-    res.json(updated);
+    res.json(result.updated);
   };
 
   getDefaultContractLogoFile = async (req: Request, res: Response) => {
@@ -2810,6 +2816,10 @@ export class RentalBookingsController {
 
     try {
       for (const file of files) {
+        const validation = await validateUploadedFile(file.path, file.mimetype);
+        file.size = validation.sizeBytes;
+      }
+      for (const file of files) {
         try {
           const parsed = await parseCustomerDocumentDraft(file.path, file.mimetype);
           const documentType = parsed.fields.documentType as RecognizedCustomerDocumentType | undefined;
@@ -2824,7 +2834,7 @@ export class RentalBookingsController {
         }
       }
     } finally {
-      await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => undefined)));
+      await cleanupRequestUploads(req);
     }
 
     if (parsedItems.length === 0) {

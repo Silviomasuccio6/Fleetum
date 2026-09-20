@@ -1780,10 +1780,12 @@ model EmailQueue {
   nextAttemptAt DateTime         @default(now())
   /// @pii
   lastError     String?
+  payloadPurgedAt DateTime?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@index([payloadPurgedAt, status, updatedAt])
 }
 
 model Invoice {
