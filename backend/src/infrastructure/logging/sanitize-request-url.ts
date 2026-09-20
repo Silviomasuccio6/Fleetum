@@ -16,11 +16,15 @@ const isSensitiveQueryParam = (key: string) => {
   return sensitiveQueryParams.has(lowerKey) || lowerKey.includes("token") || lowerKey.includes("secret");
 };
 
-const containsSensitiveNestedQuery = (value: string) => {
-  if (!value.includes("?")) return false;
+// The final segment is the credential for a public contract, so logs retain only the route shape.
+const sanitizeSensitivePathSegments = (pathname: string) =>
+  pathname.replace(/(\/api\/contracts\/public\/)[^/?#]+/gi, "$1:token");
+
+const containsSensitiveNestedUrl = (value: string) => {
   try {
     const nested = new URL(value, "http://localhost");
-    return Array.from(nested.searchParams.keys()).some(isSensitiveQueryParam);
+    return sanitizeSensitivePathSegments(nested.pathname) !== nested.pathname
+      || Array.from(nested.searchParams.keys()).some(isSensitiveQueryParam);
   } catch {
     return false;
   }
@@ -32,12 +36,12 @@ export const sanitizeRequestUrl = (rawUrl?: string) => {
     const parsed = new URL(rawUrl, "http://localhost");
     for (const key of new Set(parsed.searchParams.keys())) {
       const values = parsed.searchParams.getAll(key);
-      const shouldMask = isSensitiveQueryParam(key) || values.some(containsSensitiveNestedQuery);
+      const shouldMask = isSensitiveQueryParam(key) || values.some(containsSensitiveNestedUrl);
       if (shouldMask) parsed.searchParams.set(key, "***");
     }
-    return `${parsed.pathname}${parsed.search}`;
+    return `${sanitizeSensitivePathSegments(parsed.pathname)}${parsed.search}`;
   } catch {
     const [pathname] = rawUrl.split("?");
-    return pathname || "/";
+    return sanitizeSensitivePathSegments(pathname || "/");
   }
 };
