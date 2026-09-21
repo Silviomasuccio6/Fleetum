@@ -43,7 +43,7 @@
 - [ ] Nessun `.env` copiato nell'immagine.
 - [ ] Container backend avviato.
 - [ ] Container Caddy avviato.
-- [ ] Container PostgreSQL healthy.
+- [ ] Managed PostgreSQL readiness, provider status and direct migration connection verificati; se e' attivo il fallback locale, il relativo container PostgreSQL e' healthy.
 - [ ] Volumi persistenti corretti.
 
 ## Health check

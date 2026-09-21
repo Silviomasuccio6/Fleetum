@@ -200,6 +200,32 @@ jobs:
       - name: Run black-box tenant isolation tests
         run: npm run test:tenant-isolation -w backend
 
+  migration-compatibility:
+    name: Previous Release / Migrated Schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PREVIOUS_RELEASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+
+    steps:
+      - name: Checkout complete release history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - name: Install candidate dependencies
+        run: npm ci
+
+      - name: Verify migration and previous-release compatibility
+        run: npm run verify:migration-compatibility
+
   lighthouse:
     name: Lighthouse CI
     runs-on: ubuntu-latest

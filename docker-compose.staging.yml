@@ -18,7 +18,7 @@ services:
       - fleetum_staging_private
 
   backend:
-    image: ${FLEETUM_BACKEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-backend:staging-latest}
+    image: ${FLEETUM_BACKEND_IMAGE:?FLEETUM_BACKEND_IMAGE must be an immutable GHCR digest reference}
     container_name: fleetum_staging_backend
     restart: unless-stopped
     env_file:
@@ -39,7 +39,7 @@ services:
       - fleetum_staging_private
 
   caddy:
-    image: ${FLEETUM_FRONTEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend:staging-latest}
+    image: ${FLEETUM_FRONTEND_IMAGE:?FLEETUM_FRONTEND_IMAGE must be an immutable GHCR digest reference}
     container_name: fleetum_staging_caddy
     restart: unless-stopped
     depends_on:

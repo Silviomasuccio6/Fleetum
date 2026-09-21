@@ -21,6 +21,12 @@ const healthCheckSource = resolve(repositoryRoot, "deploy/scripts/check-producti
 const releaseSha = "b".repeat(40);
 const previousSha = "a".repeat(40);
 
+test("manual rollback defaults to the public production readiness endpoint", () => {
+  const rollback = readFileSync(rollbackSource, "utf8");
+  assert.match(rollback, /HEALTH_URL="\$\{HEALTH_URL:-https:\/\/api\.fleetum\.it\/api\/ready\}"/);
+  assert.doesNotMatch(rollback, /HEALTH_URL="\$\{HEALTH_URL:-http:\/\/127\.0\.0\.1:4000/);
+});
+
 const writeExecutable = (path, contents) => {
   writeFileSync(path, contents, { mode: 0o755 });
   chmodSync(path, 0o755);

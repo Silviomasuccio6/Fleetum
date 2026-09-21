@@ -10,8 +10,10 @@ Production deploys must be repeatable, logged and reversible. Do not deploy manu
 - Env dir: `/opt/fleetum/env`
 - Backend env: `/opt/fleetum/env/backend.env`
 - Compose env: `/opt/fleetum/env/compose.env`
-- PostgreSQL volume: `/opt/fleetum/postgres`
+- PostgreSQL: managed service reached through `DATABASE_URL`/`DIRECT_URL`; no database service exists in the canonical production compose
 - Uploads volume: `/opt/fleetum/uploads`
+
+`docker-compose.prod.local-postgres.yml` is an emergency rollback topology, not the normal production topology. Its `/opt/fleetum/postgres` volume is relevant only when that separately approved fallback is active.
 
 ## Deploy order
 
@@ -143,6 +145,7 @@ cd /opt/fleetum/app
 APP_DIR=/opt/fleetum/app \
 ENV_FILE=/opt/fleetum/env/compose.env \
 LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt \
+HEALTH_URL=https://api.fleetum.it/api/ready \
 ./deploy/scripts/rollback-production.sh
 ```
 

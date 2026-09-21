@@ -23,6 +23,7 @@
     "verify:frontend": "npm run lint -w frontend && npm run test:frontend && npm run build -w frontend",
     "verify:website": "npm run lint -w website && npm run build -w website && npm run test:website",
     "verify:database": "bash ops/verify-database.sh",
+    "verify:migration-compatibility": "bash ops/verify-migration-compatibility.sh",
     "verify:release": "npm run prisma:generate -w backend && npm run lint && npm run build && npm run test:backend && npm run test:frontend && npm run test:website && npm run test:operations && npm run verify:prerender -w frontend && npm run audit:production",
     "work:status": "bash ops/current-work-status.sh",
     "analyze": "ANALYZE=true npm run build -w frontend",
