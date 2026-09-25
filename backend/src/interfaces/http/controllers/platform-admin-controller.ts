@@ -3,6 +3,7 @@ import { PlatformAdminService } from "../../../application/services/platform-adm
 import { InvoiceService } from "../../../application/services/invoice-service.js";
 import { PlatformConsoleService } from "../../../application/services/platform-console-service.js";
 import { getClientIp } from "../../../shared/utils/ip.js";
+import { AppError } from "../../../shared/errors/app-error.js";
 import {
   demoLeadIdSchema,
   invoiceIdSchema,
@@ -25,6 +26,24 @@ import {
   clearPlatformTrustedDeviceCookie,
   setPlatformTrustedDeviceCookie
 } from "../utils/platform-trusted-device-cookies.js";
+
+const IDEMPOTENCY_HEADER = "x-idempotency-key";
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+const requiredIdempotencyKey = (req: Request) => {
+  const header = req.header(IDEMPOTENCY_HEADER)?.trim();
+  if (!header) {
+    throw new AppError(
+      "Header x-idempotency-key obbligatorio per inviare una fattura.",
+      400,
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(header)) {
+    throw new AppError("Header x-idempotency-key non valido.", 400, "INVALID_IDEMPOTENCY_KEY");
+  }
+  return header;
+};
 
 export class PlatformAdminController {
   constructor(
@@ -243,8 +262,10 @@ export class PlatformAdminController {
     const result = await this.invoiceService.sendEmail({
       invoiceId,
       actorUserId: req.auth?.userId ?? "platform-admin",
-      sourceIp: getClientIp(req)
+      sourceIp: getClientIp(req),
+      idempotencyKey: requiredIdempotencyKey(req)
     });
+    if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
     res.json(result);
   };
 

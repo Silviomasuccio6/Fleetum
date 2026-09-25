@@ -465,8 +465,27 @@ export class TenantProfileService {
     return this.getProfile(tenantId);
   }
 
-  async contractBranding(tenantId: string) {
-    const { profile, branding, legalSettings } = await this.getProfile(tenantId);
+  async contractBranding(tenantId: string, options: { ensureDefaults?: boolean } = {}) {
+    const current = options.ensureDefaults === false
+      ? await (async () => {
+          const tenant = await prisma.tenant.findUnique({
+            where: { id: tenantId },
+            select: {
+              tenantProfile: true,
+              tenantBranding: true,
+              tenantLegalSettings: true
+            }
+          });
+          if (!tenant) throw new AppError("Tenant non trovato", 404, "TENANT_NOT_FOUND");
+          return {
+            profile: tenant.tenantProfile,
+            branding: tenant.tenantBranding,
+            legalSettings: tenant.tenantLegalSettings
+          };
+        })()
+      : await this.getProfile(tenantId);
+    const { profile, branding, legalSettings } = current;
+
     return {
       companyName: profile?.tradeName ?? profile?.legalName ?? undefined,
       companyAddress: [profile?.legalAddress, profile?.postalCode, profile?.city, profile?.province, profile?.country].filter(Boolean).join(", "),

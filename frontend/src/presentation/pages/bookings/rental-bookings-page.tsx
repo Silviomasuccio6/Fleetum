@@ -541,6 +541,8 @@ export const RentalBookingsPage = () => {
   const controlPanelRef = useRef<HTMLDivElement | null>(null);
   const vehicleSuggestRef = useRef<HTMLDivElement | null>(null);
   const customerSuggestRef = useRef<HTMLDivElement | null>(null);
+  const bookingCreateRequestRef = useRef<string | null>(null);
+  const contractEmailRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1085,6 +1087,7 @@ export const RentalBookingsPage = () => {
   };
 
   const openCreateModalFromCell = (input?: { vehicleId: string; date: Date }) => {
+    bookingCreateRequestRef.current = globalThis.crypto.randomUUID();
     const nextForm = buildBookingFormForCell(input);
     const defaultPriceListId = priceLists[0]?.id ?? "";
     nextForm.priceListId = defaultPriceListId;
@@ -1312,7 +1315,11 @@ export const RentalBookingsPage = () => {
 
       let targetBookingId: string | undefined = bookingForm.bookingId;
       if (bookingForm.mode === "create") {
-        const created = await rentalBookingsUseCases.create(payload);
+        bookingCreateRequestRef.current ??= globalThis.crypto.randomUUID();
+        const created = await rentalBookingsUseCases.create(
+          payload,
+          bookingCreateRequestRef.current
+        );
         targetBookingId = created.id;
         setSelectedBookingId(created.id);
         setSuccess("Prenotazione creata con successo.");
@@ -1335,6 +1342,7 @@ export const RentalBookingsPage = () => {
         setPricingQuote(pricing.quote);
       }
 
+      if (bookingForm.mode === "create") bookingCreateRequestRef.current = null;
       forceCloseBookingModal();
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
@@ -1662,11 +1670,21 @@ export const RentalBookingsPage = () => {
     setError(null);
     setSuccess(null);
     try {
-      await rentalBookingsUseCases.sendContractEmail(selectedBooking.id, {
+      const input = {
         to: contractEditor.emailTo || undefined,
         subject: contractEditor.emailSubject || undefined,
         body: contractEditor.emailBody || undefined
-      });
+      };
+      const fingerprint = JSON.stringify({ bookingId: selectedBooking.id, contractId: contract.id, input });
+      if (contractEmailRequestRef.current?.fingerprint !== fingerprint) {
+        contractEmailRequestRef.current = { fingerprint, key: globalThis.crypto.randomUUID() };
+      }
+      await rentalBookingsUseCases.sendContractEmail(
+        selectedBooking.id,
+        input,
+        contractEmailRequestRef.current.key
+      );
+      contractEmailRequestRef.current = null;
       await loadContract(selectedBooking.id);
       setSuccess("Invio email contratto accodato.");
       setRefreshKey((prev) => prev + 1);

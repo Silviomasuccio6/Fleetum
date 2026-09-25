@@ -114,11 +114,13 @@ test("contracts smoke: updateContractDocument sanitizes unsafe content", async (
   }
 });
 
-test("contracts smoke: sendContractEmail queues delivery and sets SENT status", async () => {
+test("contracts smoke: sendContractEmail reports the queue SENT state without finalizing the contract", async () => {
   const queued: any[] = [];
+  const enqueueDbClients: any[] = [];
   const controller = new RentalBookingsController({
-    enqueue: async (payload: unknown) => {
+    enqueue: async (payload: unknown, db: unknown) => {
       queued.push(payload);
+      enqueueDbClients.push(db);
       return { id: "queue_1" };
     },
     processPending: async () => ({ processed: 1 })
@@ -127,6 +129,7 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_3" },
     params: { id: "booking_1" },
+    headers: { "x-idempotency-key": "contract-email-0001" },
     body: {}
   } as any;
 
@@ -137,16 +140,28 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
     })
   };
 
-  const originalDeliveryCreate = prisma.bookingContractDelivery.create;
+  const originalTransaction = prisma.$transaction;
   const originalDeliveryFindUnique = prisma.bookingContractDelivery.findUnique;
+  const originalEmailQueueFindUnique = prisma.emailQueue.findUnique;
   const originalBookingContractUpdate = prisma.bookingContract.update;
 
-  let capturedContractUpdate: any = null;
-  (prisma.bookingContractDelivery as any).create = async () => ({ id: "delivery_1" });
+  let contractUpdateCalls = 0;
+  const transactionClient = {
+    $queryRaw: async () => [{ locked: "1" }],
+    bookingContractEmailRequest: {
+      findUnique: async () => null,
+      create: async () => ({ id: "request_1" })
+    },
+    bookingContractDelivery: {
+      create: async () => ({ id: "delivery_1" })
+    }
+  };
+  (prisma as any).$transaction = async (callback: (tx: typeof transactionClient) => unknown) => callback(transactionClient);
   (prisma.bookingContractDelivery as any).findUnique = async () => ({ status: "SENT", errorMessage: null, sentAt: new Date() });
-  (prisma.bookingContract as any).update = async (input: unknown) => {
-    capturedContractUpdate = input;
-    return { id: "contract_1" };
+  (prisma.emailQueue as any).findUnique = async () => ({ status: "SENT", lastError: null });
+  (prisma.bookingContract as any).update = async () => {
+    contractUpdateCalls += 1;
+    throw new Error("The queue worker owns contract finalization");
   };
 
   let capturedEvent: any = null;
@@ -178,15 +193,125 @@ test("contracts smoke: sendContractEmail queues delivery and sets SENT status", 
     assert.equal((response.body as any).queued, false);
     assert.equal((response.body as any).deliveryId, "delivery_1");
     assert.equal((response.body as any).status, "SENT");
+    assert.equal((response.body as any).duplicate, false);
     assert.equal(queued.length, 1);
     assert.equal((queued[0] as any).recipient, "mario.rossi@example.com");
     assert.equal(Array.isArray((queued[0] as any).meta?.attachments), true);
-    assert.equal(capturedContractUpdate.data.status, "SENT");
+    assert.equal((queued[0] as any).meta?.actorUserId, "user_3");
+    assert.equal(enqueueDbClients[0], transactionClient);
+    assert.equal(contractUpdateCalls, 0);
     assert.equal(capturedEvent.type, "EMAIL_QUEUED");
   } finally {
-    (prisma.bookingContractDelivery as any).create = originalDeliveryCreate;
+    (prisma as any).$transaction = originalTransaction;
     (prisma.bookingContractDelivery as any).findUnique = originalDeliveryFindUnique;
+    (prisma.emailQueue as any).findUnique = originalEmailQueueFindUnique;
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
+  }
+});
+
+test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queued", async () => {
+  const controller = new RentalBookingsController({
+    enqueue: async () => ({ id: "queue_pending" }),
+    processPending: async () => ({ processed: 0 })
+  } as any);
+  const response = createMockResponse();
+  const request = {
+    auth: { tenantId: "demo_tenant", userId: "user_pending" },
+    params: { id: "booking_1" },
+    headers: { "x-idempotency-key": "contract-email-pending" },
+    body: {}
+  } as any;
+
+  (controller as any).tenantProfileService = {
+    contractBranding: async () => ({
+      companyName: "Fleetum Demo",
+      companyEmail: "noreply@fleetum.it"
+    })
+  };
+  (controller as any).getContractOrThrow = async () => ({
+    id: "contract_1",
+    bookingId: "booking_1",
+    emailTo: null,
+    emailSubject: "Contratto {{booking.code}}",
+    emailBody: "Body {{customer.fullName}}",
+    title: "Contratto BK-0001",
+    content: "Contenuto contratto",
+    booking: {
+      id: "booking_1",
+      code: "BK-0001",
+      customerName: "Mario Rossi",
+      customerEmail: "mario.rossi@example.com",
+      customer: { firstName: "Mario", lastName: "Rossi", email: "mario.rossi@example.com" },
+      vehicle: { plate: "AB123CD", brand: "Fiat", model: "Tipo" }
+    }
+  });
+  (controller as any).logContractEvent = async () => undefined;
+
+  const originalTransaction = prisma.$transaction;
+  const originalDeliveryFindUnique = prisma.bookingContractDelivery.findUnique;
+  const originalEmailQueueFindUnique = prisma.emailQueue.findUnique;
+  const originalBookingContractUpdate = prisma.bookingContract.update;
+  let contractUpdateCalls = 0;
+  const transactionClient = {
+    $queryRaw: async () => [{ locked: "1" }],
+    bookingContractEmailRequest: {
+      findUnique: async () => null,
+      create: async () => ({ id: "request_pending" })
+    },
+    bookingContractDelivery: {
+      create: async () => ({ id: "delivery_pending" })
+    }
+  };
+  (prisma as any).$transaction = async (callback: (tx: typeof transactionClient) => unknown) => callback(transactionClient);
+  // A stale delivery FAILED value must not override a queue item that is still retryable/in flight.
+  (prisma.bookingContractDelivery as any).findUnique = async () => ({ status: "FAILED", errorMessage: "transient", sentAt: null });
+  (prisma.emailQueue as any).findUnique = async () => ({ status: "PENDING", lastError: "transient" });
+  (prisma.bookingContract as any).update = async () => {
+    contractUpdateCalls += 1;
+    throw new Error("The queue worker owns contract finalization");
+  };
+
+  try {
+    await controller.sendContractEmail(request, response as any);
+
+    assert.equal(response.statusCode, 201);
+    assert.deepEqual(response.body, {
+      queued: true,
+      deliveryId: "delivery_pending",
+      status: "PENDING",
+      sentAt: null,
+      duplicate: false
+    });
+    assert.equal(contractUpdateCalls, 0);
+  } finally {
+    (prisma as any).$transaction = originalTransaction;
+    (prisma.bookingContractDelivery as any).findUnique = originalDeliveryFindUnique;
+    (prisma.emailQueue as any).findUnique = originalEmailQueueFindUnique;
+    (prisma.bookingContract as any).update = originalBookingContractUpdate;
+  }
+});
+
+test("contracts smoke: sendContractEmail requires a valid idempotency key", async () => {
+  const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  const response = createMockResponse();
+
+  for (const headers of [undefined, { "x-idempotency-key": "short" }, { "x-idempotency-key": "x".repeat(129) }]) {
+    await assert.rejects(
+      async () => controller.sendContractEmail({
+        auth: { tenantId: "demo_tenant", userId: "user_invalid_key" },
+        params: { id: "booking_1" },
+        headers,
+        body: {}
+      } as any, response as any),
+      (error: unknown) => {
+        assert.ok(error instanceof AppError);
+        assert.equal(
+          (error as AppError).code,
+          headers ? "INVALID_IDEMPOTENCY_KEY" : "IDEMPOTENCY_KEY_REQUIRED"
+        );
+        return true;
+      }
+    );
   }
 });
 
@@ -196,6 +321,7 @@ test("contracts smoke: sendContractEmail fails when recipient is missing", async
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_4" },
     params: { id: "booking_1" },
+    headers: { "x-idempotency-key": "contract-email-nomail" },
     body: {}
   } as any;
 

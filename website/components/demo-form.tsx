@@ -82,6 +82,7 @@ export function DemoForm({ initialPlan }: { initialPlan?: string }) {
   const [submittedRequest, setSubmittedRequest] =
     useState<SubmittedDemoRequest | null>(null);
   const hasStarted = useRef(false);
+  const requestRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const stepTwoRef = useRef<HTMLDivElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
@@ -194,6 +195,10 @@ export function DemoForm({ initialPlan }: { initialPlan?: string }) {
       consentAnalytics: Boolean(analyticsContext),
       ...(analyticsContext ?? {}),
     };
+    const requestFingerprint = JSON.stringify(request);
+    if (requestRef.current?.fingerprint !== requestFingerprint) {
+      requestRef.current = { fingerprint: requestFingerprint, key: globalThis.crypto.randomUUID() };
+    }
 
     setIsSubmitting(true);
 
@@ -202,7 +207,10 @@ export function DemoForm({ initialPlan }: { initialPlan?: string }) {
         `${getPublicApiBaseUrl()}/public/demo-request`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Idempotency-Key": requestRef.current.key,
+          },
           body: JSON.stringify(request),
         },
       );
@@ -225,6 +233,7 @@ export function DemoForm({ initialPlan }: { initialPlan?: string }) {
 
       setSubmittedRequest(submittedSummary);
       setSubmitted(true);
+      requestRef.current = null;
       currentForm.reset();
     } catch (error) {
       setSaveError(
@@ -271,6 +280,7 @@ export function DemoForm({ initialPlan }: { initialPlan?: string }) {
             setStep(1);
             setErrors({});
             hasStarted.current = false;
+            requestRef.current = null;
           }}
         >
           Prepara un’altra richiesta

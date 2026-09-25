@@ -546,14 +546,14 @@ export const platformAdminUseCases = {
     if (!response.ok) throw toPlatformError(response, data, "Generazione fattura fallita");
     return data as { data: PlatformInvoice };
   },
-  sendInvoiceEmail: async (invoiceId: string) => {
+  sendInvoiceEmail: async (invoiceId: string, idempotencyKey: string) => {
     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/send-email`, {
       method: "POST",
-      headers: { ...authHeaders() }
+      headers: { ...authHeaders(), "X-Idempotency-Key": idempotencyKey }
     });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Invio fattura fallito");
-    return data as { data: PlatformInvoice };
+    return data as { data: PlatformInvoice; replayed?: boolean };
   },
   updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/status`, {

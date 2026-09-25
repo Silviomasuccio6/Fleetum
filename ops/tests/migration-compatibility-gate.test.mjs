@@ -17,6 +17,13 @@ test("migration compatibility gate uses the real preceding release and synthetic
   assert.match(script, /compat-fixture\.mjs/);
   assert.match(script, /compat_deposit/);
   assert.match(script, /compat_email/);
+  assert.match(script, /compat_demo_lead/);
+  assert.match(script, /EmailQueue lease columns missing/);
+  assert.match(script, /RentalBookingCreateRequest table missing/);
+  assert.match(script, /rental booking idempotency constraint missing/);
+  assert.match(script, /contract email command ledger missing/);
+  assert.match(script, /invoice email command ledger missing/);
+  assert.match(script, /demo idempotency columns missing/);
   assert.doesNotMatch(script, /\.env/);
 });
 

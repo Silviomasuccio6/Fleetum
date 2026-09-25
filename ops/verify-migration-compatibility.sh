@@ -250,6 +250,17 @@ try {
       status: "SENT",
     },
   });
+  await prisma.demoLead.upsert({
+    where: { id: "compat_demo_lead" },
+    update: {},
+    create: {
+      id: "compat_demo_lead",
+      companyName: "Compatibility Demo",
+      fullName: "Synthetic Lead",
+      email: "compat-demo@example.test",
+      source: "compatibility-gate",
+    },
+  });
 } finally {
   await prisma.$disconnect();
 }
@@ -278,11 +289,69 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'EmailQueue.payloadPurgedAt missing after candidate migrations';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'EmailQueue'
+      AND column_name IN ('processingToken', 'processingStartedAt', 'leaseExpiresAt')
+    GROUP BY table_schema, table_name
+    HAVING COUNT(*) = 3
+  ) THEN
+    RAISE EXCEPTION 'EmailQueue lease columns missing after candidate migrations';
+  END IF;
+  IF to_regclass('public."EmailQueue_status_nextAttemptAt_leaseExpiresAt_idx"') IS NULL THEN
+    RAISE EXCEPTION 'EmailQueue lease index missing after candidate migrations';
+  END IF;
+  IF to_regclass('public."RentalBookingCreateRequest"') IS NULL THEN
+    RAISE EXCEPTION 'RentalBookingCreateRequest table missing after candidate migrations';
+  END IF;
+  IF to_regclass('public."RentalBookingCreateRequest_tenantId_idempotencyKey_key"') IS NULL THEN
+    RAISE EXCEPTION 'rental booking idempotency constraint missing after candidate migrations';
+  END IF;
+  IF to_regclass('public."BookingContractEmailRequest"') IS NULL
+    OR to_regclass('public."BookingContractEmailRequest_tenantId_idempotencyKey_key"') IS NULL
+    OR to_regclass('public."BookingContractEmailRequest_queueEmailId_key"') IS NULL THEN
+    RAISE EXCEPTION 'contract email command ledger missing after candidate migrations';
+  END IF;
+  IF to_regclass('public."InvoiceEmailRequest"') IS NULL
+    OR to_regclass('public."InvoiceEmailRequest_tenantId_idempotencyKey_key"') IS NULL
+    OR to_regclass('public."InvoiceEmailRequest_queueEmailId_key"') IS NULL THEN
+    RAISE EXCEPTION 'invoice email command ledger missing after candidate migrations';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'DemoLead'
+      AND column_name IN ('idempotencyKey', 'requestHash')
+    GROUP BY table_schema, table_name
+    HAVING COUNT(*) = 2
+  ) THEN
+    RAISE EXCEPTION 'demo idempotency columns missing after candidate migrations';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM "RentalDeposit" WHERE "id" = 'compat_deposit' AND "status" = 'AUTHORIZED') THEN
     RAISE EXCEPTION 'historical rental deposit was not preserved';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM "EmailQueue" WHERE "id" = 'compat_email' AND "body" = 'synthetic historical payload') THEN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM "EmailQueue"
+    WHERE "id" = 'compat_email'
+      AND "body" = 'synthetic historical payload'
+      AND "processingToken" IS NULL
+      AND "processingStartedAt" IS NULL
+      AND "leaseExpiresAt" IS NULL
+  ) THEN
     RAISE EXCEPTION 'historical email queue payload was not preserved';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM "DemoLead"
+    WHERE "id" = 'compat_demo_lead'
+      AND "idempotencyKey" IS NULL
+      AND "requestHash" IS NULL
+  ) THEN
+    RAISE EXCEPTION 'historical demo lead was not preserved';
   END IF;
 END $$;
 SQL

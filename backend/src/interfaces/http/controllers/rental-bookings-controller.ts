@@ -650,6 +650,37 @@ export class RentalBookingsController {
     return lines.join("\n");
   }
 
+  private async buildDefaultContractTemplateData(
+    tenantId: string,
+    userId?: string,
+    options: { ensureTenantDefaults?: boolean } = {}
+  ) {
+    const defaults = defaultContractTemplate();
+    const tenantBranding = await this.tenantProfileService.contractBranding(tenantId, {
+      ensureDefaults: options.ensureTenantDefaults
+    });
+    return {
+      tenantId,
+      name: defaults.name,
+      content: defaults.content,
+      emailSubject: defaults.emailSubject,
+      emailBody: defaults.emailBody,
+      companyName: tenantBranding.companyName ?? "Fleetum",
+      companyAddress: tenantBranding.companyAddress ?? "Via Demo 1, 00100 Roma",
+      companyVat: tenantBranding.companyVat ?? "P.IVA 00000000000",
+      companyEmail: tenantBranding.companyEmail ?? "contratti@fleetops.demo",
+      companyPhone: tenantBranding.companyPhone ?? "+39 000 0000000",
+      logoFilePath: tenantBranding.logoFilePath,
+      logoFileName: tenantBranding.logoFileName,
+      brandPrimary: tenantBranding.brandPrimary ?? "#21375d",
+      brandAccent: tenantBranding.brandAccent ?? "#5d82c2",
+      brandFont: tenantBranding.brandFont ?? "helvetica",
+      version: 1,
+      isDefault: true,
+      createdByUserId: userId
+    };
+  }
+
   private async getOrCreateDefaultTemplate(tenantId: string, userId?: string) {
     const existing = await prisma.contractTemplate.findFirst({
       where: { tenantId, isDefault: true, deletedAt: null },
@@ -657,29 +688,8 @@ export class RentalBookingsController {
     });
     if (existing) return existing;
 
-    const defaults = defaultContractTemplate();
-    const tenantBranding = await this.tenantProfileService.contractBranding(tenantId);
     return prisma.contractTemplate.create({
-      data: {
-        tenantId,
-        name: defaults.name,
-        content: defaults.content,
-        emailSubject: defaults.emailSubject,
-        emailBody: defaults.emailBody,
-        companyName: tenantBranding.companyName ?? "Fleetum",
-        companyAddress: tenantBranding.companyAddress ?? "Via Demo 1, 00100 Roma",
-        companyVat: tenantBranding.companyVat ?? "P.IVA 00000000000",
-        companyEmail: tenantBranding.companyEmail ?? "contratti@fleetops.demo",
-        companyPhone: tenantBranding.companyPhone ?? "+39 000 0000000",
-        logoFilePath: tenantBranding.logoFilePath,
-        logoFileName: tenantBranding.logoFileName,
-        brandPrimary: tenantBranding.brandPrimary ?? "#21375d",
-        brandAccent: tenantBranding.brandAccent ?? "#5d82c2",
-        brandFont: tenantBranding.brandFont ?? "helvetica",
-        version: 1,
-        isDefault: true,
-        createdByUserId: userId
-      }
+      data: await this.buildDefaultContractTemplateData(tenantId, userId)
     });
   }
 
@@ -749,6 +759,91 @@ export class RentalBookingsController {
       );
     }
     return normalized;
+  }
+
+  private extractRequiredIdempotencyKey(req: Request, operation = "creare una prenotazione") {
+    const key = this.extractIdempotencyKey(req);
+    if (!key) {
+      throw new AppError(
+        `Header x-idempotency-key obbligatorio per ${operation}.`,
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED"
+      );
+    }
+    return key;
+  }
+
+  private bookingCreateRequestHash(payload: ReturnType<typeof rentalBookingCreateSchema.parse>) {
+    const canonicalPayload = {
+      vehicleId: payload.vehicleId,
+      customerId: payload.customerId,
+      contractRequired: payload.contractRequired ?? true,
+      generateContract: payload.generateContract ?? true,
+      pickupAt: payload.pickupAt.toISOString(),
+      returnAt: payload.returnAt.toISOString(),
+      pickupLocation: payload.pickupLocation ?? null,
+      returnLocation: payload.returnLocation ?? null,
+      pickupKm: payload.pickupKm ?? null,
+      returnKm: payload.returnKm ?? null,
+      expectedTotal: payload.expectedTotal ?? null,
+      finalTotal: payload.finalTotal ?? null,
+      reason: payload.reason ?? null,
+      internalNotes: payload.internalNotes ?? null,
+      contractStatus: payload.contractStatus ?? "NOT_READY",
+      cargosStatus: payload.cargosStatus ?? "NOT_REQUIRED"
+    };
+    return crypto.createHash("sha256").update(JSON.stringify(canonicalPayload)).digest("hex");
+  }
+
+  private assertBookingCreateRequestMatches(actualHash: string, expectedHash: string) {
+    if (actualHash !== expectedHash) {
+      throw new AppError(
+        "La chiave di idempotenza e' gia' associata a una richiesta diversa.",
+        409,
+        "IDEMPOTENCY_KEY_REUSED"
+      );
+    }
+  }
+
+  private contractEmailRequestHash(input: {
+    contractId: string;
+    recipient: string;
+    subject: string;
+    body: string;
+  }) {
+    return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  }
+
+  private assertContractEmailRequestMatches(actualHash: string, expectedHash: string) {
+    if (actualHash !== expectedHash) {
+      throw new AppError(
+        "La chiave di idempotenza e' gia' associata a un invio contratto diverso.",
+        409,
+        "IDEMPOTENCY_KEY_REUSED"
+      );
+    }
+  }
+
+  private async getContractEmailQueueOrThrow(
+    tenantId: string,
+    queueEmailId: string,
+    db: Prisma.TransactionClient | typeof prisma = prisma
+  ) {
+    const queuedEmail = await db.emailQueue.findFirst({
+      where: {
+        id: queueEmailId,
+        tenantId,
+        type: "BOOKING_CONTRACT"
+      }
+    });
+    if (!queuedEmail) {
+      throw new AppError(
+        "Coda invio contratto non disponibile per la richiesta idempotente.",
+        500,
+        "CONTRACT_EMAIL_OUTBOX_INCONSISTENT"
+      );
+    }
+    return queuedEmail;
   }
 
   private extractIdempotencyKeyFromDetails(details: Prisma.JsonValue | null | undefined) {
@@ -1196,6 +1291,28 @@ export class RentalBookingsController {
     });
     if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
     return this.hydrateBookingMoney(tenantId, booking);
+  }
+
+  private async getBookingCreateResponse(
+    tenantId: string,
+    bookingId: string,
+    db: Prisma.TransactionClient = prisma
+  ) {
+    const booking = await db.rentalBooking.findFirst({
+      where: { tenantId, id: bookingId, deletedAt: null },
+      include: {
+        vehicle: { select: vehicleSelect },
+        customer: { select: customerSelect }
+      }
+    });
+    if (!booking) {
+      throw new AppError(
+        "La prenotazione associata alla chiave di idempotenza non e' piu' disponibile.",
+        409,
+        "IDEMPOTENCY_RESULT_UNAVAILABLE"
+      );
+    }
+    return booking;
   }
 
   private async getCustomerOrThrow(
@@ -2135,7 +2252,7 @@ export class RentalBookingsController {
   sendContractEmail = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
-    const idempotencyKey = this.extractIdempotencyKey(req);
+    const idempotencyKey = this.extractRequiredIdempotencyKey(req, "inviare un contratto via email");
     const payload = bookingContractEmailSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
     const dictionary = this.buildContractContext(contract.booking as Awaited<ReturnType<RentalBookingsController["getBookingOrThrow"]>>);
@@ -2158,123 +2275,126 @@ export class RentalBookingsController {
       senderName,
       replyTo
     );
+    const requestHash = this.contractEmailRequestHash({ contractId: contract.id, recipient, subject, body });
 
-    const duplicateDelivery = idempotencyKey
-      ? await this.findDuplicateContractDelivery({
+    const filename = this.contractFileName(contract.booking.code, contract.booking.customerName);
+    const pdfBuffer = await this.buildContractPdf(contract);
+    const enqueueResult = await prisma.$transaction(async (tx) => {
+      await this.lockTransactionScope(tx, `fleetum:contract-email:${tenantId}:${idempotencyKey}`);
+      const priorRequest = await tx.bookingContractEmailRequest.findUnique({
+        where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } },
+        include: { delivery: true }
+      });
+      if (priorRequest) {
+        this.assertContractEmailRequestMatches(priorRequest.requestHash, requestHash);
+        return {
+          delivery: priorRequest.delivery,
+          queuedEmail: await this.getContractEmailQueueOrThrow(tenantId, priorRequest.queueEmailId, tx),
+          replayed: true
+        };
+      }
+
+      const delivery = await tx.bookingContractDelivery.create({
+        data: {
           tenantId,
+          bookingId: contract.bookingId,
           contractId: contract.id,
           channel: "EMAIL",
           recipient,
           subject,
           body,
-          idempotencyKey
-        })
-      : null;
-    if (duplicateDelivery) {
-      await this.logContractEvent({
-        tenantId,
-        bookingId: contract.bookingId,
-        contractId: contract.id,
-        actorUserId,
-        type: "EMAIL_DEDUPED",
-        message: `Invio email duplicato ignorato per ${recipient}`,
-        details: withDefined({
-          deliveryId: duplicateDelivery.id,
-          idempotencyKey: idempotencyKey ?? undefined
-        })
+          status: "PENDING",
+          details: withDefined({
+            idempotencyKey,
+            requestId: req.requestId ?? undefined
+          })
+        }
       });
-      res.status(200).json({ queued: duplicateDelivery.status === "PENDING", deliveryId: duplicateDelivery.id, duplicate: true });
-      return;
-    }
 
-    const filename = this.contractFileName(contract.booking.code, contract.booking.customerName);
-    const pdfBuffer = await this.buildContractPdf(contract);
-
-    const delivery = await prisma.bookingContractDelivery.create({
-      data: {
+      const queuedEmail = await this.emailQueueService.enqueue({
         tenantId,
-        bookingId: contract.bookingId,
-        contractId: contract.id,
-        channel: "EMAIL",
+        type: "BOOKING_CONTRACT",
         recipient,
         subject,
         body,
-        status: "PENDING",
-        details: withDefined({
-          idempotencyKey: idempotencyKey ?? undefined,
-          requestId: req.requestId ?? undefined
-        })
-      }
-    });
+        meta: {
+          tenantId,
+          bookingId: contract.bookingId,
+          contractId: contract.id,
+          contractDeliveryId: delivery.id,
+          actorUserId,
+          fromName: senderName,
+          replyTo,
+          attachments: [
+            {
+              filename,
+              contentType: "application/pdf",
+              contentBase64: Buffer.from(pdfBuffer).toString("base64")
+            }
+          ]
+        }
+      }, tx);
 
-    const queuedEmail = await this.emailQueueService.enqueue({
-      tenantId,
-      type: "BOOKING_CONTRACT",
-      recipient,
-      subject,
-      body,
-      meta: {
-        tenantId,
-        bookingId: contract.bookingId,
-        contractId: contract.id,
-        contractDeliveryId: delivery.id,
-        fromName: senderName,
-        replyTo,
-        attachments: [
-          {
-            filename,
-            contentType: "application/pdf",
-            contentBase64: Buffer.from(pdfBuffer).toString("base64")
-          }
-        ]
-      }
+      await tx.bookingContractEmailRequest.create({
+        data: {
+          tenantId,
+          idempotencyKey,
+          requestHash,
+          deliveryId: delivery.id,
+          queueEmailId: queuedEmail.id
+        }
+      });
+
+      return { delivery, queuedEmail, replayed: false };
     });
+    const { delivery, queuedEmail, replayed } = enqueueResult;
 
     await this.emailQueueService.processPending(new Date(), { ids: [queuedEmail.id], take: 1 });
-    const processedDelivery = await prisma.bookingContractDelivery.findUnique({
-      where: { id: delivery.id },
-      select: { status: true, errorMessage: true, sentAt: true }
-    });
+    const [processedQueue, processedDelivery] = await Promise.all([
+      prisma.emailQueue.findUnique({
+        where: { id: queuedEmail.id },
+        select: { status: true, lastError: true }
+      }),
+      prisma.bookingContractDelivery.findUnique({
+        where: { id: delivery.id },
+        select: { status: true, errorMessage: true, sentAt: true }
+      })
+    ]);
 
-    if (processedDelivery?.status === "FAILED") {
+    if (!processedQueue) {
+      throw new AppError("Stato invio email contratto non disponibile", 502, "CONTRACT_EMAIL_FAILED");
+    }
+
+    if (processedQueue.status === "FAILED") {
       throw new AppError(
-        processedDelivery.errorMessage ?? "Invio email contratto fallito",
+        processedQueue.lastError ?? processedDelivery?.errorMessage ?? "Invio email contratto fallito",
         502,
         "CONTRACT_EMAIL_FAILED"
       );
     }
-
-    await prisma.bookingContract.update({
-      where: { id: contract.id },
-      data: {
-        emailTo: recipient,
-        emailSubject: subject,
-        emailBody: body,
-        lastSentAt: new Date(),
-        status: "SENT",
-        errorMessage: null,
-        updatedByUserId: actorUserId
-      }
-    });
 
     await this.logContractEvent({
       tenantId,
       bookingId: contract.bookingId,
       contractId: contract.id,
       actorUserId,
-      type: "EMAIL_QUEUED",
-      message: `Email contratto accodata per ${recipient}`,
+      type: replayed ? "EMAIL_DEDUPED" : "EMAIL_QUEUED",
+      message: replayed
+        ? `Invio email duplicato ignorato per ${recipient}`
+        : `Email contratto accodata per ${recipient}`,
       details: withDefined({
         deliveryId: delivery.id,
-        idempotencyKey: idempotencyKey ?? undefined
+        idempotencyKey
       })
     });
 
-    res.status(201).json({
-      queued: processedDelivery?.status !== "SENT",
+    if (replayed) res.setHeader("Idempotency-Replayed", "true");
+    res.status(replayed ? 200 : 201).json({
+      queued: processedQueue.status === "PENDING",
       deliveryId: delivery.id,
-      status: processedDelivery?.status ?? "PENDING",
-      sentAt: processedDelivery?.sentAt ?? null
+      status: processedQueue.status,
+      sentAt: processedQueue.status === "SENT" ? (processedDelivery?.sentAt ?? null) : null,
+      duplicate: replayed
     });
   };
 
@@ -3496,6 +3616,9 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingCreateSchema.parse(req.body);
+    const idempotencyKey = this.extractRequiredIdempotencyKey(req);
+    const requestHash = this.bookingCreateRequestHash(payload);
+    const shouldGenerateContract = (payload.generateContract ?? true) && (payload.contractRequired ?? true);
 
     if (
       typeof payload.pickupKm === "number" &&
@@ -3505,7 +3628,36 @@ export class RentalBookingsController {
       throw new AppError("I km rientro devono essere maggiori o uguali ai km uscita.", 400, "BOOKING_KM_RANGE_INVALID");
     }
 
-    const created = await prisma.$transaction(async (tx) => {
+    const priorRequest = await prisma.rentalBookingCreateRequest.findUnique({
+      where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } }
+    });
+    if (priorRequest) {
+      this.assertBookingCreateRequestMatches(priorRequest.requestHash, requestHash);
+      const replay = await this.getBookingCreateResponse(tenantId, priorRequest.bookingId);
+      res.setHeader("Idempotency-Replayed", "true");
+      res.status(201).json(replay);
+      return;
+    }
+
+    // Branding is read before opening the transaction. Any missing default template is
+    // created inside the booking transaction so contract setup cannot survive a rollback.
+    const contractTemplateData = shouldGenerateContract
+      ? await this.buildDefaultContractTemplateData(tenantId, userId, { ensureTenantDefaults: false })
+      : null;
+
+    const result = await prisma.$transaction(async (tx) => {
+      await this.lockTransactionScope(tx, `fleetum:rental-booking-create:${tenantId}:${idempotencyKey}`);
+      const concurrentRequest = await tx.rentalBookingCreateRequest.findUnique({
+        where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } }
+      });
+      if (concurrentRequest) {
+        this.assertBookingCreateRequestMatches(concurrentRequest.requestHash, requestHash);
+        return {
+          booking: await this.getBookingCreateResponse(tenantId, concurrentRequest.bookingId, tx),
+          replayed: true
+        };
+      }
+
       await this.lockBookingSchedule(tx, tenantId, payload.vehicleId);
       const [, customer] = await Promise.all([
         this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId, tx),
@@ -3518,8 +3670,20 @@ export class RentalBookingsController {
         returnAt: payload.returnAt
       }, tx);
 
+      let contractTemplate = null;
+      if (shouldGenerateContract && contractTemplateData) {
+        await this.lockTransactionScope(tx, `fleetum:default-contract-template:${tenantId}`);
+        contractTemplate = await tx.contractTemplate.findFirst({
+          where: { tenantId, isDefault: true, deletedAt: null },
+          orderBy: [{ updatedAt: "desc" }]
+        });
+        if (!contractTemplate) {
+          contractTemplate = await tx.contractTemplate.create({ data: contractTemplateData });
+        }
+      }
+
       const code = await this.generateCode(tenantId, tx);
-      return tx.rentalBooking.create({
+      const created = await tx.rentalBooking.create({
         data: {
           tenantId,
           createdByUserId: userId,
@@ -3549,29 +3713,74 @@ export class RentalBookingsController {
           customer: { select: customerSelect }
         }
       });
+
+      await tx.rentalBookingNote.create({
+        data: {
+          tenantId,
+          bookingId: created.id,
+          userId,
+          type: "SYSTEM",
+          message: `Prenotazione creata (${created.code})`
+        }
+      });
+
+      let responseBooking = created;
+      if (shouldGenerateContract && contractTemplate) {
+        const dictionary = this.buildContractContext(
+          created as Awaited<ReturnType<RentalBookingsController["getBookingOrThrow"]>>
+        );
+        const contract = await tx.bookingContract.create({
+          data: {
+            tenantId,
+            bookingId: created.id,
+            templateId: contractTemplate.id,
+            templateVersion: contractTemplate.version,
+            title: `Contratto ${created.code}`,
+            content: renderContractTemplate(contractTemplate.content, dictionary),
+            emailTo: created.customer?.email ?? created.customerEmail ?? null,
+            emailSubject: renderContractTemplate(
+              contractTemplate.emailSubject ?? "Contratto noleggio {{booking.code}}",
+              dictionary
+            ),
+            emailBody: renderContractTemplate(contractTemplate.emailBody ?? "In allegato il contratto.", dictionary),
+            status: "DRAFT",
+            createdByUserId: userId,
+            updatedByUserId: userId
+          }
+        });
+        await this.logContractEvent({
+          tenantId,
+          bookingId: created.id,
+          contractId: contract.id,
+          actorUserId: userId,
+          type: "GENERATED",
+          message: "Contratto generato da template",
+          details: { templateVersion: contractTemplate.version }
+        }, tx);
+        responseBooking = await tx.rentalBooking.update({
+          where: { id: created.id },
+          data: { contractStatus: "READY" },
+          include: {
+            vehicle: { select: vehicleSelect },
+            customer: { select: customerSelect }
+          }
+        });
+      }
+
+      await tx.rentalBookingCreateRequest.create({
+        data: {
+          tenantId,
+          idempotencyKey,
+          requestHash,
+          bookingId: created.id
+        }
+      });
+
+      return { booking: responseBooking, replayed: false };
     }, { timeout: 10_000 });
 
-    await this.logNote({
-      tenantId,
-      bookingId: created.id,
-      userId,
-      type: "SYSTEM",
-      message: `Prenotazione creata (${created.code})`
-    });
-
-    if ((payload.generateContract ?? true) && (payload.contractRequired ?? true)) {
-      await this.upsertBookingContractFromTemplate({
-        tenantId,
-        bookingId: created.id,
-        actorUserId: userId
-      });
-      await prisma.rentalBooking.update({
-        where: { id: created.id },
-        data: { contractStatus: "READY" }
-      });
-    }
-
-    res.status(201).json(created);
+    if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
+    res.status(201).json(result.booking);
   };
 
   update = async (req: Request, res: Response) => {

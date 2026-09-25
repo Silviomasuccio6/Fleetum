@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -362,6 +362,7 @@ export const PlatformAdminPage = () => {
   const [planConfirmState, setPlanConfirmState] = useState<PlanConfirmState>(null);
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({});
   const [invoiceLoading, setInvoiceLoading] = useState<Record<string, boolean>>({});
+  const invoiceEmailRequestKeys = useRef(new Map<string, string>());
   const [rowFeedback, setRowFeedback] = useState<Record<string, { type: "success" | "error" | "loading"; message: string }>>({});
   const [rowActionDrafts, setRowActionDrafts] = useState<Record<string, RowActionSelection>>({});
   const [planDrafts, setPlanDrafts] = useState<Record<string, PlanTier>>({});
@@ -775,8 +776,11 @@ export const PlatformAdminPage = () => {
 
   const sendInvoice = async (invoice: PlatformInvoice) => {
     setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+    const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
+    invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
     try {
-      const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id);
+      const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
+      invoiceEmailRequestKeys.current.delete(invoice.id);
       snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
       setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
     } catch (err) {

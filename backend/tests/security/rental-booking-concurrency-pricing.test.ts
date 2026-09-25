@@ -35,7 +35,9 @@ const cleanup = async () => {
   await prisma.bookingContractDelivery.deleteMany({ where: { tenantId } });
   await prisma.bookingContractEvent.deleteMany({ where: { tenantId } });
   await prisma.bookingContract.deleteMany({ where: { tenantId } });
+  await prisma.contractTemplate.deleteMany({ where: { tenantId } });
   await prisma.rentalBookingNote.deleteMany({ where: { tenantId } });
+  await prisma.rentalBookingCreateRequest.deleteMany({ where: { tenantId } });
   await prisma.rentalBookingPricingSnapshot.deleteMany({ where: { tenantId } });
   await prisma.rentalExtraKmTier.deleteMany({ where: { tenantId } });
   await prisma.rentalExtraKmPolicy.deleteMany({ where: { tenantId } });
@@ -49,6 +51,9 @@ const cleanup = async () => {
   await prisma.user.deleteMany({ where: { tenantId } });
   await prisma.vehicle.deleteMany({ where: { tenantId } });
   await prisma.site.deleteMany({ where: { tenantId } });
+  await prisma.tenantBranding.deleteMany({ where: { tenantId } });
+  await prisma.tenantLegalSettings.deleteMany({ where: { tenantId } });
+  await prisma.tenantProfile.deleteMany({ where: { tenantId } });
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
 };
 
@@ -230,8 +235,12 @@ describe("rental booking concurrency and immutable pricing", () => {
     };
 
     const attempts = await Promise.all(
-      Array.from({ length: 8 }, () =>
-        jsonRequest("/rental-bookings", { method: "POST", body: JSON.stringify(payload) })
+      Array.from({ length: 8 }, (_, index) =>
+        jsonRequest("/rental-bookings", {
+          method: "POST",
+          headers: { "x-idempotency-key": `${runId}-overlap-${index}` },
+          body: JSON.stringify(payload)
+        })
       )
     );
     const successes = attempts.filter(({ response }) => response.status === 201);
@@ -253,6 +262,7 @@ describe("rental booking concurrency and immutable pricing", () => {
 
     const adjacent = await jsonRequest("/rental-bookings", {
       method: "POST",
+      headers: { "x-idempotency-key": `${runId}-adjacent` },
       body: JSON.stringify({
         ...payload,
         pickupAt: returnAt.toISOString(),
@@ -260,6 +270,129 @@ describe("rental booking concurrency and immutable pricing", () => {
       })
     });
     assert.equal(adjacent.response.status, 201, JSON.stringify(adjacent.body));
+  });
+
+  it("returns the same booking for concurrent retries with one idempotency key", async () => {
+    const vehicle = await createVehicle("IDEMPOTENT");
+    const payload = {
+      vehicleId: vehicle.id,
+      customerId,
+      pickupAt: "2027-01-20T08:00:00.000Z",
+      returnAt: "2027-01-22T08:00:00.000Z",
+      generateContract: false
+    };
+    const idempotencyKey = `${runId}-same-create`;
+
+    const attempts = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        jsonRequest("/rental-bookings", {
+          method: "POST",
+          headers: { "x-idempotency-key": idempotencyKey },
+          body: JSON.stringify(payload)
+        })
+      )
+    );
+
+    assert.equal(
+      attempts.filter(({ response }) => response.status === 201).length,
+      attempts.length,
+      attempts.map(({ response, body }) => [response.status, body])
+    );
+    const bookingIds = new Set(attempts.map(({ body }) => String((body as { id: string }).id)));
+    assert.equal(bookingIds.size, 1);
+    const bookingId = [...bookingIds][0];
+    assert.equal(await prisma.rentalBooking.count({ where: { tenantId, id: bookingId } }), 1);
+    assert.equal(await prisma.rentalBookingNote.count({ where: { tenantId, bookingId } }), 1);
+    assert.equal(await prisma.rentalBookingCreateRequest.count({ where: { tenantId, bookingId } }), 1);
+    assert.ok(attempts.some(({ response }) => response.headers.get("idempotency-replayed") === "true"));
+
+    const changedPayload = await jsonRequest("/rental-bookings", {
+      method: "POST",
+      headers: { "x-idempotency-key": idempotencyKey },
+      body: JSON.stringify({ ...payload, returnAt: "2027-01-23T08:00:00.000Z" })
+    });
+    assert.equal(changedPayload.response.status, 409, JSON.stringify(changedPayload.body));
+    assert.equal((changedPayload.body as { error: string }).error, "IDEMPOTENCY_KEY_REUSED");
+  });
+
+  it("requires an idempotency key for booking creation", async () => {
+    const vehicle = await createVehicle("KEYREQUIRED");
+    const result = await jsonRequest("/rental-bookings", {
+      method: "POST",
+      body: JSON.stringify({
+        vehicleId: vehicle.id,
+        customerId,
+        pickupAt: "2027-01-25T08:00:00.000Z",
+        returnAt: "2027-01-26T08:00:00.000Z",
+        generateContract: false
+      })
+    });
+    assert.equal(result.response.status, 400, JSON.stringify(result.body));
+    assert.equal((result.body as { error: string }).error, "IDEMPOTENCY_KEY_REQUIRED");
+  });
+
+  it("rolls back booking, note, and idempotency record when contract persistence fails", async () => {
+    const vehicle = await createVehicle("CONTRACTFAIL");
+    await prisma.contractTemplate.deleteMany({ where: { tenantId } });
+
+    const triggerName = "test_booking_contract_failure";
+    const functionName = "test_raise_booking_contract_failure";
+    const safeTenantId = tenantId.replace(/'/g, "''");
+    await prisma.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION "${functionName}"() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'synthetic contract persistence failure';
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER "${triggerName}"
+      BEFORE INSERT ON "BookingContract"
+      FOR EACH ROW
+      WHEN (NEW."tenantId" = '${safeTenantId}')
+      EXECUTE FUNCTION "${functionName}"();
+    `);
+
+    const idempotencyKey = `${runId}-contract-fault`;
+    const requestPayload = {
+      vehicleId: vehicle.id,
+      customerId,
+      pickupAt: "2027-01-27T08:00:00.000Z",
+      returnAt: "2027-01-28T08:00:00.000Z",
+      generateContract: true
+    };
+    let result: Awaited<ReturnType<typeof jsonRequest>> | undefined;
+    try {
+      result = await jsonRequest("/rental-bookings", {
+        method: "POST",
+        headers: { "x-idempotency-key": idempotencyKey },
+        body: JSON.stringify(requestPayload)
+      });
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "BookingContract"`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${functionName}"()`);
+    }
+
+    assert.equal(result?.response.status, 500, JSON.stringify(result?.body));
+    assert.equal(await prisma.rentalBooking.count({ where: { tenantId, vehicleId: vehicle.id } }), 0);
+    assert.equal(await prisma.rentalBookingCreateRequest.count({ where: { tenantId, idempotencyKey } }), 0);
+    assert.equal(await prisma.rentalBookingNote.count({ where: { tenantId, booking: { vehicleId: vehicle.id } } }), 0);
+    assert.equal(await prisma.contractTemplate.count({ where: { tenantId } }), 0);
+    assert.equal(await prisma.tenantBranding.count({ where: { tenantId } }), 0);
+    assert.equal(await prisma.tenantLegalSettings.count({ where: { tenantId } }), 0);
+
+    const retry = await jsonRequest("/rental-bookings", {
+      method: "POST",
+      headers: { "x-idempotency-key": idempotencyKey },
+      body: JSON.stringify(requestPayload)
+    });
+    assert.equal(retry.response.status, 201, JSON.stringify(retry.body));
+    assert.equal((retry.body as { contractStatus: string }).contractStatus, "READY");
+    const retryBookingId = String((retry.body as { id: string }).id);
+    assert.equal(await prisma.rentalBooking.count({ where: { tenantId, id: retryBookingId } }), 1);
+    assert.equal(await prisma.rentalBookingNote.count({ where: { tenantId, bookingId: retryBookingId } }), 1);
+    assert.equal(await prisma.bookingContract.count({ where: { tenantId, bookingId: retryBookingId } }), 1);
+    assert.equal(await prisma.contractTemplate.count({ where: { tenantId, isDefault: true, deletedAt: null } }), 1);
   });
 
   it("allows only one concurrent update into the same vehicle interval", async () => {
