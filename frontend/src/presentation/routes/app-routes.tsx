@@ -14,6 +14,7 @@ import { GlobalTextTranslator } from "../components/i18n/global-text-translator"
 import { publicPrerenderRoutes } from "../../seo/public-prerender-routes";
 import { getRequiredFeatureForAppPath } from "../../domain/policies/feature-visibility";
 import { FeatureProtectedRoute } from "./feature-protected-route";
+import { AppErrorBoundary } from "../components/errors/app-error-boundary";
 
 const DashboardPage = lazy(() => import("../pages/dashboard/dashboard-page").then((m) => ({ default: m.DashboardPage })));
 const StoppagesListPage = lazy(() => import("../pages/stoppages/stoppages-list-page").then((m) => ({ default: m.StoppagesListPage })));
@@ -46,6 +47,15 @@ const withFeatureProtection = (pathname: string, element: JSX.Element) => {
   return feature ? <FeatureProtectedRoute feature={feature}>{element}</FeatureProtectedRoute> : element;
 };
 
+const RouteErrorBoundary = ({ children }: { children: JSX.Element }) => {
+  const location = useLocation();
+  return (
+    <AppErrorBoundary key={`${location.pathname}${location.search}${location.hash}`} scope="route">
+      {children}
+    </AppErrorBoundary>
+  );
+};
+
 const ContinueOnPublicSite = () => {
   const location = useLocation();
 
@@ -61,7 +71,8 @@ export const AppRoutes = () => (
   <>
     <GlobalTextTranslator />
     <CookieConsentBanner />
-    <Routes>
+    <RouteErrorBoundary>
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -134,6 +145,7 @@ export const AppRoutes = () => (
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </RouteErrorBoundary>
   </>
 );

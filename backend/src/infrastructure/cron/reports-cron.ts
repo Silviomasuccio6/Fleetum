@@ -56,132 +56,209 @@ const buildSimplePdf = (title: string, body: string) => {
   return Buffer.from(header + objects.join("") + xref + trailer, "utf8");
 };
 
+const REPORT_TENANT_PAGE_SIZE = 100;
+
+const uniqueRecipients = (settings: any) => {
+  if (!Array.isArray(settings?.recipients)) return [];
+  const seen = new Set<string>();
+  const recipients: string[] = [];
+  for (const value of settings.recipients) {
+    if (typeof value !== "string") continue;
+    const recipient = value.trim();
+    const dedupeKey = recipient.toLowerCase();
+    if (!recipient || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    recipients.push(recipient);
+  }
+  return recipients;
+};
+
+const enqueueTenantReport = async (
+  emailQueue: EmailQueueService,
+  licensePolicyService: LicensePolicyService,
+  tenantId: string,
+  settings: any,
+  now: Date
+) => {
+  if (!shouldRunNow(settings, now)) return;
+  const recipients = uniqueRecipients(settings);
+  if (!recipients.length) return;
+
+  const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
+  if (entitlements.license.status !== "ACTIVE" && entitlements.license.status !== "TRIAL") return;
+  if (!hasFeature(entitlements.plan, "scheduled_reports")) return;
+
+  const lookback = new Date(now.getTime() - 30 * 86400000);
+  const [total, open, critical, closedLast30, reminders, remindersFailed, topWorkshops, overdue, preventiveDaysDue] =
+    await Promise.all([
+      prisma.stoppage.count({ where: { tenantId, deletedAt: null } }),
+      prisma.stoppage.count({
+        where: { tenantId, deletedAt: null, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] } }
+      }),
+      prisma.stoppage.count({
+        where: { tenantId, deletedAt: null, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] }, priority: "CRITICAL" }
+      }),
+      prisma.stoppage.count({ where: { tenantId, deletedAt: null, status: "CLOSED", closedAt: { gte: lookback } } }),
+      prisma.reminder.count({ where: { tenantId, sentAt: { gte: lookback } } }),
+      prisma.reminder.count({ where: { tenantId, sentAt: { gte: lookback }, success: false } }),
+      prisma.stoppage.groupBy({
+        by: ["workshopId"],
+        where: { tenantId, deletedAt: null, openedAt: { gte: lookback } },
+        _count: { _all: true },
+        orderBy: { _count: { workshopId: "desc" } },
+        take: 3
+      }),
+      prisma.stoppage.count({
+        where: {
+          tenantId,
+          deletedAt: null,
+          status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] },
+          openedAt: { lte: new Date(now.getTime() - 30 * 86400000) }
+        }
+      }),
+      prisma.vehicle.count({ where: { tenantId, deletedAt: null, isActive: true } })
+    ]);
+  const kmRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS count
+    FROM "Vehicle"
+    WHERE "tenantId" = ${tenantId}
+      AND "deletedAt" IS NULL
+      AND "isActive" = true
+      AND "currentKm" IS NOT NULL
+      AND "maintenanceIntervalKm" IS NOT NULL
+  `;
+  const preventiveKmDue = Number(kmRows[0]?.count ?? 0n);
+
+  const workshopIds = topWorkshops.map((x) => x.workshopId);
+  const workshops = workshopIds.length
+    ? await prisma.workshop.findMany({
+        where: { tenantId, id: { in: workshopIds } },
+        select: { id: true, name: true }
+      })
+    : [];
+  const workshopName = new Map(workshops.map((x) => [x.id, x.name]));
+  const topWorkshopsLines = topWorkshops
+    .map((x) => `- ${workshopName.get(x.workshopId) ?? x.workshopId}: ${x._count._all} fermi`)
+    .join("\n");
+
+  const reminderFailureRate = reminders > 0 ? ((remindersFailed / reminders) * 100).toFixed(2) : "0.00";
+  const closureRate = total > 0 ? ((closedLast30 / total) * 100).toFixed(2) : "0.00";
+  const format = settings?.reportStyle === "BASIC" ? "BASIC" : "EXECUTIVE";
+  const subjectPrefix = format === "EXECUTIVE" ? "[Executive Report]" : "[Report]";
+  const subject = `${subjectPrefix} Fleetum - ${now.toISOString().slice(0, 10)}`;
+  const body =
+    format === "EXECUTIVE"
+      ? `Executive Report (ultimo 30 giorni)\n\nTenant: ${tenantId}\nData: ${now.toISOString()}\n\nKPI CORE\n- Totale fermi: ${total}\n- Fermi aperti: ${open}\n- Critici aperti: ${critical}\n- Overdue > 30gg: ${overdue}\n- Chiusi ultimo 30gg: ${closedLast30}\n- Closure rate stimato: ${closureRate}%\n\nREMINDER\n- Reminder inviati: ${reminders}\n- Reminder falliti: ${remindersFailed}\n- Failure rate: ${reminderFailureRate}%\n\nPREVENTIVA\n- Veicoli monitorati: ${preventiveDaysDue}\n- Veicoli con km valorizzato: ${preventiveKmDue}\n\nTOP OFFICINE (volume)\n${topWorkshopsLines || "- Nessun dato"}\n\nNote: per dettaglio completo usa dashboard/statistiche del gestionale.`
+      : `Report sintetico\n\nTenant: ${tenantId}\nTotale fermi: ${total}\nFermi aperti: ${open}\nCritici aperti: ${critical}\nReminder falliti: ${remindersFailed}\n`;
+  const pdf = buildSimplePdf(
+    `Executive Report ${now.toISOString().slice(0, 10)}`,
+    body
+  );
+  const csv = [
+    "metric,value",
+    `total_stoppages,${total}`,
+    `open_stoppages,${open}`,
+    `critical_open,${critical}`,
+    `overdue_30,${overdue}`,
+    `closed_30,${closedLast30}`,
+    `reminders,${reminders}`,
+    `reminders_failed,${remindersFailed}`,
+    `preventive_days_monitored,${preventiveDaysDue}`,
+    `preventive_km_monitored,${preventiveKmDue}`
+  ].join("\n");
+  for (const recipient of recipients) {
+    await emailQueue.enqueue({
+      tenantId,
+      type: "SCHEDULED_REPORT",
+      recipient,
+      subject,
+      body,
+      meta: {
+        reportStyle: format,
+        generatedAt: now.toISOString(),
+        attachments: [
+          {
+            filename: `executive-report-${now.toISOString().slice(0, 10)}.pdf`,
+            contentType: "application/pdf",
+            contentBase64: pdf.toString("base64")
+          },
+          {
+            filename: `executive-kpi-${now.toISOString().slice(0, 10)}.csv`,
+            contentType: "text/csv",
+            contentBase64: Buffer.from(csv, "utf8").toString("base64")
+          }
+        ]
+      }
+    });
+  }
+};
+
+/**
+ * Enumerates every active tenant in a stable order and loads that tenant's latest
+ * report settings independently. Delivery remains at-least-once across multiple
+ * application processes; cross-process exactly-once delivery needs a persistent
+ * scheduled-report ledger and is intentionally outside this application-only fix.
+ */
+export const runReportsCronCycle = async (
+  emailQueue: EmailQueueService,
+  licensePolicyService: LicensePolicyService,
+  now = new Date()
+) => {
+  let cursor: string | undefined;
+
+  while (true) {
+    const tenants = await prisma.tenant.findMany({
+      where: { isActive: true, deletedAt: null },
+      orderBy: { id: "asc" },
+      take: REPORT_TENANT_PAGE_SIZE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true }
+    });
+
+    for (const tenant of tenants) {
+      try {
+        const settingsRow = await prisma.auditLog.findFirst({
+          where: {
+            tenantId: tenant.id,
+            resource: "reports",
+            action: "SETTINGS_REPORTS"
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: { details: true }
+        });
+        if (!settingsRow) continue;
+
+        await enqueueTenantReport(
+          emailQueue,
+          licensePolicyService,
+          tenant.id,
+          settingsRow.details as any,
+          now
+        );
+      } catch (error) {
+        logger.error({ error, tenantId: tenant.id }, "Scheduled report failed for tenant");
+      }
+    }
+
+    if (tenants.length < REPORT_TENANT_PAGE_SIZE) break;
+    cursor = tenants[tenants.length - 1]?.id;
+    if (!cursor) break;
+  }
+};
+
 export const startReportsCron = (
   emailQueue: EmailQueueService,
   licensePolicyService: LicensePolicyService
 ): ScheduledTask => {
-  return cron.schedule("* * * * *", async () => {
-    const now = new Date();
-    try {
-      const settingsRows = await prisma.auditLog.findMany({
-        where: { resource: "reports", action: "SETTINGS_REPORTS" },
-        orderBy: { createdAt: "desc" },
-        take: 300
-      });
-      const latestByTenant = new Map<string, any>();
-      for (const row of settingsRows) {
-        if (!latestByTenant.has(row.tenantId)) latestByTenant.set(row.tenantId, row.details as any);
+  return cron.schedule(
+    "* * * * *",
+    async () => {
+      try {
+        await runReportsCronCycle(emailQueue, licensePolicyService);
+      } catch (error) {
+        logger.error({ error }, "Scheduled report cron failed");
       }
-
-      for (const [tenantId, settings] of latestByTenant.entries()) {
-        const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
-        if (!canRunScheduledReport(entitlements.plan, settings, now)) continue;
-        const recipients = Array.isArray(settings?.recipients) ? settings.recipients : [];
-        if (!recipients.length) continue;
-
-        const lookback = new Date(now.getTime() - 30 * 86400000);
-        const [total, open, critical, closedLast30, reminders, remindersFailed, topWorkshops, overdue, preventiveDaysDue] =
-          await Promise.all([
-            prisma.stoppage.count({ where: { tenantId, deletedAt: null } }),
-            prisma.stoppage.count({
-              where: { tenantId, deletedAt: null, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] } }
-            }),
-            prisma.stoppage.count({
-              where: { tenantId, deletedAt: null, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] }, priority: "CRITICAL" }
-            }),
-            prisma.stoppage.count({ where: { tenantId, deletedAt: null, status: "CLOSED", closedAt: { gte: lookback } } }),
-            prisma.reminder.count({ where: { tenantId, sentAt: { gte: lookback } } }),
-            prisma.reminder.count({ where: { tenantId, sentAt: { gte: lookback }, success: false } }),
-            prisma.stoppage.groupBy({
-              by: ["workshopId"],
-              where: { tenantId, deletedAt: null, openedAt: { gte: lookback } },
-              _count: { _all: true },
-              orderBy: { _count: { workshopId: "desc" } },
-              take: 3
-            }),
-            prisma.stoppage.count({
-              where: {
-                tenantId,
-                deletedAt: null,
-                status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] },
-                openedAt: { lte: new Date(now.getTime() - 30 * 86400000) }
-              }
-            }),
-            prisma.vehicle.count({ where: { tenantId, deletedAt: null, isActive: true } })
-          ]);
-        const kmRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
-          SELECT COUNT(*)::bigint AS count
-          FROM "Vehicle"
-          WHERE "tenantId" = ${tenantId}
-            AND "deletedAt" IS NULL
-            AND "isActive" = true
-            AND "currentKm" IS NOT NULL
-            AND "maintenanceIntervalKm" IS NOT NULL
-        `;
-        const preventiveKmDue = Number(kmRows[0]?.count ?? 0n);
-
-        const workshopIds = topWorkshops.map((x) => x.workshopId);
-        const workshops = workshopIds.length
-          ? await prisma.workshop.findMany({ where: { id: { in: workshopIds } }, select: { id: true, name: true } })
-          : [];
-        const workshopName = new Map(workshops.map((x) => [x.id, x.name]));
-        const topWorkshopsLines = topWorkshops
-          .map((x) => `- ${workshopName.get(x.workshopId) ?? x.workshopId}: ${x._count._all} fermi`)
-          .join("\n");
-
-        const reminderFailureRate = reminders > 0 ? ((remindersFailed / reminders) * 100).toFixed(2) : "0.00";
-        const closureRate = total > 0 ? ((closedLast30 / total) * 100).toFixed(2) : "0.00";
-        const format = settings?.reportStyle === "BASIC" ? "BASIC" : "EXECUTIVE";
-        const subjectPrefix = format === "EXECUTIVE" ? "[Executive Report]" : "[Report]";
-        const subject = `${subjectPrefix} Fleetum - ${now.toISOString().slice(0, 10)}`;
-        const body =
-          format === "EXECUTIVE"
-            ? `Executive Report (ultimo 30 giorni)\n\nTenant: ${tenantId}\nData: ${now.toISOString()}\n\nKPI CORE\n- Totale fermi: ${total}\n- Fermi aperti: ${open}\n- Critici aperti: ${critical}\n- Overdue > 30gg: ${overdue}\n- Chiusi ultimo 30gg: ${closedLast30}\n- Closure rate stimato: ${closureRate}%\n\nREMINDER\n- Reminder inviati: ${reminders}\n- Reminder falliti: ${remindersFailed}\n- Failure rate: ${reminderFailureRate}%\n\nPREVENTIVA\n- Veicoli monitorati: ${preventiveDaysDue}\n- Veicoli con km valorizzato: ${preventiveKmDue}\n\nTOP OFFICINE (volume)\n${topWorkshopsLines || "- Nessun dato"}\n\nNote: per dettaglio completo usa dashboard/statistiche del gestionale.`
-            : `Report sintetico\n\nTenant: ${tenantId}\nTotale fermi: ${total}\nFermi aperti: ${open}\nCritici aperti: ${critical}\nReminder falliti: ${remindersFailed}\n`;
-        const pdf = buildSimplePdf(
-          `Executive Report ${now.toISOString().slice(0, 10)}`,
-          body
-        );
-        const csv = [
-          "metric,value",
-          `total_stoppages,${total}`,
-          `open_stoppages,${open}`,
-          `critical_open,${critical}`,
-          `overdue_30,${overdue}`,
-          `closed_30,${closedLast30}`,
-          `reminders,${reminders}`,
-          `reminders_failed,${remindersFailed}`,
-          `preventive_days_monitored,${preventiveDaysDue}`,
-          `preventive_km_monitored,${preventiveKmDue}`
-        ].join("\n");
-        for (const recipient of recipients) {
-          await emailQueue.enqueue({
-            tenantId,
-            type: "SCHEDULED_REPORT",
-            recipient: String(recipient),
-            subject,
-            body,
-            meta: {
-              reportStyle: format,
-              generatedAt: now.toISOString(),
-              attachments: [
-                {
-                  filename: `executive-report-${now.toISOString().slice(0, 10)}.pdf`,
-                  contentType: "application/pdf",
-                  contentBase64: pdf.toString("base64")
-                },
-                {
-                  filename: `executive-kpi-${now.toISOString().slice(0, 10)}.csv`,
-                  contentType: "text/csv",
-                  contentBase64: Buffer.from(csv, "utf8").toString("base64")
-                }
-              ]
-            }
-          });
-        }
-      }
-    } catch (error) {
-      logger.error({ error }, "Scheduled report cron failed");
-    }
-  });
+    },
+    { noOverlap: true }
+  );
 };

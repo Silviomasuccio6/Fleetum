@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PageHeader } from "../../components/layout/page-header";
@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import { getCrudFieldId, useAccessibleDialog } from "../../components/ui/accessible-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import {
   createCrudListQueryCursor,
@@ -51,6 +52,17 @@ export const GenericCrudPage = ({
   const [saving, setSaving] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const dialogTitleId = useId();
+  const dialogErrorId = useId();
+  const dialogFormId = useId();
+  const createTriggerRef = useRef<HTMLButtonElement>(null);
+  const closePanel = useCallback(() => setPanelOpen(false), []);
+  const { dialogRef, rememberOpener, onKeyDown: onDialogKeyDown } = useAccessibleDialog({
+    open: panelOpen,
+    saving,
+    onClose: closePanel,
+    fallbackFocusRef: createTriggerRef
+  });
   const latestRequestGuard = useRef(createLatestRequestGuard()).current;
   const submissionGuard = useRef(createSubmissionGuard()).current;
   const listRef = useRef(list);
@@ -173,6 +185,13 @@ export const GenericCrudPage = ({
 
   const editingRow = editingId ? rows.find((x) => x.id === editingId) : null;
 
+  const openPanel = (trigger: HTMLElement, nextEditingId: string | null) => {
+    rememberOpener(trigger);
+    setError(null);
+    setEditingId(nextEditingId);
+    setPanelOpen(true);
+  };
+
   return (
     <section className="space-y-3">
       <PageHeader
@@ -180,11 +199,9 @@ export const GenericCrudPage = ({
         subtitle="Gestione anagrafica con inserimento rapido, ricerca e cancellazione record."
         actions={
           <Button
+            ref={createTriggerRef}
             disabled={saving}
-            onClick={() => {
-              setEditingId(null);
-              setPanelOpen(true);
-            }}
+            onClick={(event) => openPanel(event.currentTarget, null)}
           >
             {createLabel}
           </Button>
@@ -217,10 +234,7 @@ export const GenericCrudPage = ({
                       size="sm"
                       variant="outline"
                       disabled={saving}
-                      onClick={() => {
-                        setEditingId(row.id);
-                        setPanelOpen(true);
-                      }}
+                      onClick={(event) => openPanel(event.currentTarget, row.id)}
                     >
                       Modifica
                     </Button>
@@ -256,10 +270,7 @@ export const GenericCrudPage = ({
                           variant="outline"
                           className="h-7 px-2 text-[11px]"
                           disabled={saving}
-                          onClick={() => {
-                            setEditingId(row.id);
-                            setPanelOpen(true);
-                          }}
+                          onClick={(event) => openPanel(event.currentTarget, row.id)}
                         >
                           Modifica
                         </Button>
@@ -303,41 +314,62 @@ export const GenericCrudPage = ({
       {panelOpen ? (
         <>
           <div
+            aria-hidden="true"
             className="fixed inset-0 z-[70] bg-black/55 backdrop-blur-sm"
             onClick={() => {
-              if (!saving) setPanelOpen(false);
+              if (!saving) closePanel();
             }}
           />
-          <aside className="fixed z-[80] right-0 top-0 h-full w-full max-w-xl border-l bg-card shadow-2xl max-sm:bottom-0 max-sm:top-auto max-sm:max-h-[88vh] max-sm:rounded-t-2xl max-sm:border-t max-sm:border-l-0">
+          <aside
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={dialogTitleId}
+            aria-describedby={error ? dialogErrorId : undefined}
+            aria-busy={saving}
+            tabIndex={-1}
+            onKeyDown={onDialogKeyDown}
+            className="fixed z-[80] right-0 top-0 h-full w-full max-w-xl border-l bg-card shadow-2xl max-sm:bottom-0 max-sm:top-auto max-sm:max-h-[88vh] max-sm:rounded-t-2xl max-sm:border-t max-sm:border-l-0"
+          >
             <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="text-sm font-semibold">{editingId ? "Modifica record" : createTitleLabel ?? createLabel}</p>
-              <Button variant="outline" size="icon" disabled={saving} onClick={() => setPanelOpen(false)}>
+              <h2 id={dialogTitleId} className="text-sm font-semibold">{editingId ? "Modifica record" : createTitleLabel ?? createLabel}</h2>
+              <Button aria-label="Chiudi pannello" variant="outline" size="icon" disabled={saving} onClick={closePanel}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
             <div className="h-[calc(100%-64px)] overflow-auto px-4 py-4">
               <form className="grid gap-3 sm:grid-cols-2" aria-busy={saving} onSubmit={editingId ? onUpdate : onCreate}>
-                {fields.map((field) => (
-                  <div key={field.key} className="grid gap-1.5">
-                    <Label>{field.label}</Label>
-                    <Input
-                      name={field.key}
-                      type={field.type ?? "text"}
-                      disabled={saving}
-                      defaultValue={editingRow ? String(editingRow[field.key] ?? "") : ""}
-                      placeholder={field.placeholder}
-                    />
-                  </div>
-                ))}
+                {error ? (
+                  <p id={dialogErrorId} role="alert" className="sm:col-span-2 text-sm text-destructive">
+                    {error}
+                  </p>
+                ) : null}
+                {fields.map((field, index) => {
+                  const fieldId = getCrudFieldId(dialogFormId, index);
+                  return (
+                    <div key={field.key} className="grid gap-1.5">
+                      <Label htmlFor={fieldId}>{field.label}</Label>
+                      <Input
+                        id={fieldId}
+                        data-dialog-initial-focus={index === 0 ? "true" : undefined}
+                        name={field.key}
+                        type={field.type ?? "text"}
+                        disabled={saving}
+                        defaultValue={editingRow ? String(editingRow[field.key] ?? "") : ""}
+                        placeholder={field.placeholder}
+                      />
+                    </div>
+                  );
+                })}
                 <div className="sm:col-span-2 flex gap-2">
-                  <Button type="submit" disabled={saving}>
+                  <Button type="submit" disabled={saving} aria-live="polite">
                     {saving
                       ? "Salvataggio..."
                       : editingId
                         ? "Salva modifiche"
                         : `Crea ${createLabel.toLowerCase().replace(/^nuov[oa]\s+/i, "")}`}
                   </Button>
-                  <Button type="button" variant="outline" disabled={saving} onClick={() => setPanelOpen(false)}>
+                  <Button type="button" variant="outline" disabled={saving} onClick={closePanel}>
                     Annulla
                   </Button>
                 </div>

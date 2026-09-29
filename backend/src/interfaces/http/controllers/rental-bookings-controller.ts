@@ -93,6 +93,103 @@ const IDEMPOTENCY_HEADER = "x-idempotency-key";
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const CONTRACT_DELIVERY_DEDUPE_WINDOW_MS = 2 * 60 * 1000;
 
+type CustomerBookingStatsRow = {
+  customerId: string;
+  allBookingsTotal: bigint | number;
+  activeBookingsTotal: bigint | number;
+  contractsTotal: bigint | number;
+  lastRentalAt: Date | null;
+  lastRentalCode: string | null;
+  lastRentalStatus: string | null;
+  lastRentalContractStatus: string | null;
+};
+
+type CustomerBookingStats = {
+  allBookingsTotal: number;
+  activeBookingsTotal: number;
+  contractsTotal: number;
+  lastRentalAt: Date | null;
+  lastRentalCode: string | null;
+  lastRentalStatus: string | null;
+  lastRentalContractStatus: string | null;
+};
+
+/**
+ * Keeps historical booking rows inside PostgreSQL: the application receives at
+ * most one aggregate row for each customer displayed on the current page.
+ */
+export const buildCustomerBookingStatsQuery = (tenantId: string, customerIds: string[]) => {
+  const customerFilter =
+    customerIds.length === 0
+      ? Prisma.sql`FALSE`
+      : Prisma.sql`booking."customerId" IN (${Prisma.join(customerIds)})`;
+
+  return Prisma.sql`
+    SELECT
+      aggregate."customerId",
+      aggregate."allBookingsTotal",
+      aggregate."activeBookingsTotal",
+      aggregate."contractsTotal",
+      latest."pickupAt" AS "lastRentalAt",
+      latest."code" AS "lastRentalCode",
+      latest."status"::text AS "lastRentalStatus",
+      latest."contractStatus"::text AS "lastRentalContractStatus"
+    FROM (
+      SELECT
+        booking."customerId" AS "customerId",
+        COUNT(*)::bigint AS "allBookingsTotal",
+        COUNT(*) FILTER (WHERE booking."deletedAt" IS NULL)::bigint AS "activeBookingsTotal",
+        COUNT(contract."id") FILTER (WHERE booking."deletedAt" IS NULL)::bigint AS "contractsTotal"
+      FROM "RentalBooking" AS booking
+      LEFT JOIN "BookingContract" AS contract
+        ON contract."bookingId" = booking."id"
+       AND contract."tenantId" = ${tenantId}
+      WHERE booking."tenantId" = ${tenantId}
+        AND ${customerFilter}
+      GROUP BY booking."customerId"
+    ) AS aggregate
+    LEFT JOIN LATERAL (
+      SELECT
+        latest_booking."pickupAt",
+        latest_booking."code",
+        latest_booking."status",
+        latest_booking."contractStatus"
+      FROM "RentalBooking" AS latest_booking
+      WHERE latest_booking."tenantId" = ${tenantId}
+        AND latest_booking."customerId" = aggregate."customerId"
+        AND latest_booking."deletedAt" IS NULL
+      ORDER BY
+        latest_booking."pickupAt" DESC,
+        latest_booking."createdAt" DESC,
+        latest_booking."id" DESC
+      LIMIT 1
+    ) AS latest ON TRUE
+  `;
+};
+
+const loadCustomerBookingStats = async (tenantId: string, customerIds: string[]) => {
+  if (customerIds.length === 0) return new Map<string, CustomerBookingStats>();
+
+  const rows = await prisma.$queryRaw<CustomerBookingStatsRow[]>(
+    buildCustomerBookingStatsQuery(tenantId, customerIds)
+  );
+
+  return new Map(
+    rows.map((row) => [
+      row.customerId,
+      {
+        allBookingsTotal: Number(row.allBookingsTotal),
+        activeBookingsTotal: Number(row.activeBookingsTotal),
+        contractsTotal: Number(row.contractsTotal),
+        lastRentalAt: row.lastRentalAt,
+        lastRentalCode: row.lastRentalCode,
+        lastRentalStatus: row.lastRentalStatus,
+        lastRentalContractStatus: row.lastRentalContractStatus
+      }
+    ])
+  );
+};
+
 const TRANSITIONS: Record<RentalBookingStatus, RentalBookingStatus[]> = {
   DRAFT: ["QUOTED", "HOLD", "CANCELED"],
   QUOTED: ["HOLD", "CONFIRMED", "CANCELED"],
@@ -3126,72 +3223,28 @@ export class RentalBookingsController {
         ...pagination,
         orderBy: [{ updatedAt: "desc" }],
         include: {
-          _count: { select: { bookings: true, attachments: true } }
+          _count: {
+            select: {
+              bookings: { where: { tenantId } },
+              attachments: { where: { tenantId } }
+            }
+          }
         }
       })
     ]);
 
     const customerIds = customers.map((customer) => customer.id);
-    const customerBookings =
-      customerIds.length === 0
-        ? []
-        : await prisma.rentalBooking.findMany({
-            where: { tenantId, deletedAt: null, customerId: { in: customerIds } },
-            orderBy: [{ pickupAt: "desc" }, { createdAt: "desc" }],
-            select: {
-              id: true,
-              customerId: true,
-              code: true,
-              status: true,
-              contractStatus: true,
-              pickupAt: true,
-              createdAt: true,
-              contract: { select: { id: true } }
-            }
-          });
-
-    const statsByCustomer = new Map<
-      string,
-      {
-        bookingsTotal: number;
-        contractsTotal: number;
-        lastRentalAt: Date | null;
-        lastRentalCode: string | null;
-        lastRentalStatus: string | null;
-        lastRentalContractStatus: string | null;
-      }
-    >();
-
-    for (const booking of customerBookings) {
-      const customerId = booking.customerId;
-      if (!customerId) continue;
-      const current =
-        statsByCustomer.get(customerId) ??
-        {
-          bookingsTotal: 0,
-          contractsTotal: 0,
-          lastRentalAt: null,
-          lastRentalCode: null,
-          lastRentalStatus: null,
-          lastRentalContractStatus: null
-        };
-
-      current.bookingsTotal += 1;
-      if (booking.contract?.id) current.contractsTotal += 1;
-      if (!current.lastRentalAt) {
-        current.lastRentalAt = booking.pickupAt;
-        current.lastRentalCode = booking.code;
-        current.lastRentalStatus = booking.status;
-        current.lastRentalContractStatus = booking.contractStatus;
-      }
-      statsByCustomer.set(customerId, current);
-    }
+    const statsByCustomer = await loadCustomerBookingStats(tenantId, customerIds);
 
     const data = customers.map((customer) => {
       const stats = statsByCustomer.get(customer.id);
       return {
         ...customer,
-        bookingsTotal: stats?.bookingsTotal ?? customer._count.bookings,
+        bookingsTotal: stats
+          ? stats.activeBookingsTotal > 0
+            ? stats.activeBookingsTotal
+            : stats.allBookingsTotal
+          : customer._count.bookings,
         contractsTotal: stats?.contractsTotal ?? 0,
         attachmentsTotal: customer._count.attachments,
         lastRentalAt: stats?.lastRentalAt ?? null,
@@ -3211,6 +3264,7 @@ export class RentalBookingsController {
       where: { tenantId, id: customerId, deletedAt: null },
       include: {
         attachments: {
+          where: { tenantId },
           orderBy: [{ createdAt: "desc" }],
           select: {
             id: true,
@@ -3222,37 +3276,28 @@ export class RentalBookingsController {
             createdAt: true
           }
         },
-        _count: { select: { bookings: true, attachments: true } }
+        _count: {
+          select: {
+            bookings: { where: { tenantId } },
+            attachments: { where: { tenantId } }
+          }
+        }
       }
     });
     if (!customer) throw new AppError("Cliente non trovato", 404, "CUSTOMER_NOT_FOUND");
 
-    const bookings = await prisma.rentalBooking.findMany({
-      where: { tenantId, customerId: customer.id, deletedAt: null },
-      orderBy: [{ pickupAt: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        code: true,
-        pickupAt: true,
-        status: true,
-        contractStatus: true,
-        contract: { select: { id: true } }
-      }
-    });
-
-    const contractsTotal = bookings.filter((booking) => Boolean(booking.contract?.id)).length;
-    const last = bookings[0] ?? null;
+    const stats = (await loadCustomerBookingStats(tenantId, [customer.id])).get(customer.id);
 
     res.json({
       ...customer,
       stats: {
-        bookingsTotal: customer._count.bookings,
-        contractsTotal,
+        bookingsTotal: stats?.allBookingsTotal ?? customer._count.bookings,
+        contractsTotal: stats?.contractsTotal ?? 0,
         attachmentsTotal: customer._count.attachments,
-        lastRentalAt: last?.pickupAt ?? null,
-        lastRentalCode: last?.code ?? null,
-        lastRentalStatus: last?.status ?? null,
-        lastRentalContractStatus: last?.contractStatus ?? null
+        lastRentalAt: stats?.lastRentalAt ?? null,
+        lastRentalCode: stats?.lastRentalCode ?? null,
+        lastRentalStatus: stats?.lastRentalStatus ?? null,
+        lastRentalContractStatus: stats?.lastRentalContractStatus ?? null
       }
     });
   };
