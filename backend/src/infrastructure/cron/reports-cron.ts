@@ -5,38 +5,22 @@ import { LicensePolicyService } from "../../application/services/license-policy-
 import { prisma } from "../database/prisma/client.js";
 import { EmailQueueService } from "../email/email-queue-service.js";
 import { logger } from "../logging/logger.js";
+import {
+  latestDueOccurrence,
+  nextScheduledOccurrence,
+  reportTimeZone
+} from "./report-schedule.js";
 
-// Keep the existing process-local schedule. A logical local slot also prevents
-// the repeated hour at the end of daylight saving time from sending twice.
+// Existing schedules have no cursor before this migration. Their first scan
+// keeps the previous short catch-up window; later scans use the durable cursor.
 const REPORT_CATCH_UP_MS = 180 * 60 * 1000;
 
-const latestDueOccurrence = (settings: any, now: Date): Date | null => {
-  if (!settings?.enabled) return null;
-  const hour = Number(settings.hour ?? 8);
-  const minute = Number(settings.minute ?? 0);
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
-    return null;
-  }
-  const freq = settings.frequency ?? "weekly";
-  if (freq !== "daily" && freq !== "weekly" && freq !== "monthly") return null;
-
-  // 180 elapsed minutes can cross at most one local midnight, including DST.
-  for (let dayOffset = 0; dayOffset <= 1; dayOffset += 1) {
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOffset);
-    if (freq === "weekly" && day.getDay() !== 1) continue;
-    if (freq === "monthly" && day.getDate() !== 1) continue;
-
-    const occurrence = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute);
-    // A local time skipped by the spring DST change has no occurrence.
-    if (occurrence.getHours() !== hour || occurrence.getMinutes() !== minute) continue;
-    const elapsed = now.getTime() - occurrence.getTime();
-    if (elapsed >= 0 && elapsed <= REPORT_CATCH_UP_MS) return occurrence;
-  }
-  return null;
-};
-
 export const canRunScheduledReport = (plan: string | null | undefined, settings: unknown, now: Date) =>
-  hasFeature(plan, "scheduled_reports") && latestDueOccurrence(settings, now) !== null;
+  hasFeature(plan, "scheduled_reports") &&
+  (() => {
+    const latest = latestDueOccurrence(settings, now);
+    return latest !== null && now.getTime() - latest.getTime() <= REPORT_CATCH_UP_MS;
+  })();
 
 const deliveryKey = (tenantId: string, occurrence: Date, recipient: string) => {
   const localSlot = [
@@ -103,38 +87,13 @@ const uniqueRecipients = (settings: any) => {
   return recipients;
 };
 
-const enqueueTenantReport = async (
-  emailQueue: EmailQueueService,
-  licensePolicyService: LicensePolicyService,
+const buildTenantReportInputs = async (
   tenantId: string,
   settings: any,
-  settingsCreatedAt: Date,
-  now: Date
+  occurrence: Date,
+  now: Date,
+  recipientsWithKeys: Array<{ recipient: string; deduplicationKey: string }>
 ) => {
-  const occurrence = latestDueOccurrence(settings, now);
-  // Settings saved during the scheduled minute keep the old exact-minute
-  // behavior; a later change must not create a retrospective delivery.
-  if (!occurrence || settingsCreatedAt.getTime() >= occurrence.getTime() + 60_000) return;
-  const recipients = uniqueRecipients(settings);
-  if (!recipients.length) return;
-
-  const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
-  if (entitlements.license.status !== "ACTIVE" && entitlements.license.status !== "TRIAL") return;
-  if (!hasFeature(entitlements.plan, "scheduled_reports")) return;
-
-  const recipientsWithKeys = recipients.map((recipient) => ({
-    recipient,
-    deduplicationKey: deliveryKey(tenantId, occurrence, recipient)
-  }));
-  const existing = await prisma.emailQueue.count({
-    where: {
-      tenantId,
-      type: "SCHEDULED_REPORT",
-      deduplicationKey: { in: recipientsWithKeys.map((row) => row.deduplicationKey) }
-    }
-  });
-  if (existing === recipientsWithKeys.length) return;
-
   const lookback = new Date(now.getTime() - 30 * 86400000);
   const [total, open, critical, closedLast30, reminders, remindersFailed, topWorkshops, overdue, preventiveDaysDue] =
     await Promise.all([
@@ -213,7 +172,7 @@ const enqueueTenantReport = async (
     `preventive_days_monitored,${preventiveDaysDue}`,
     `preventive_km_monitored,${preventiveKmDue}`
   ].join("\n");
-  await emailQueue.enqueueManyOnce(recipientsWithKeys.map(({ recipient, deduplicationKey }) => ({
+  return recipientsWithKeys.map(({ recipient, deduplicationKey }) => ({
     tenantId,
     type: "SCHEDULED_REPORT",
     recipient,
@@ -237,13 +196,193 @@ const enqueueTenantReport = async (
         }
       ]
     }
-  })));
+  }));
+};
+
+const bootstrapNextRunAt = (settings: any, settingsCreatedAt: Date, now: Date) => {
+  const latest = latestDueOccurrence(settings, now);
+  // A pre-migration configuration has no durable history. Keep the old
+  // three-hour recovery window at its first scan; do not send months of
+  // historical reports when the new cursor table is first deployed.
+  if (
+    latest &&
+    now.getTime() - latest.getTime() <= REPORT_CATCH_UP_MS &&
+    settingsCreatedAt.getTime() < latest.getTime() + 60_000
+  ) {
+    return latest;
+  }
+  return nextScheduledOccurrence(settings, now);
+};
+
+const processTenantReport = async (
+  emailQueue: EmailQueueService,
+  licensePolicyService: LicensePolicyService,
+  tenantId: string,
+  settingsRow: { id: string; details: unknown; createdAt: Date },
+  now: Date
+) => {
+  const settings = settingsRow.details as any;
+  const timeZone = reportTimeZone();
+  let cursor = await prisma.scheduledReportCursor.findUnique({ where: { tenantId } });
+  if (!cursor) {
+    await prisma.scheduledReportCursor.createMany({
+      data: [{
+        tenantId,
+        settingsAuditLogId: settingsRow.id,
+        timeZone,
+        nextRunAt: bootstrapNextRunAt(settings, settingsRow.createdAt, now)
+      }],
+      skipDuplicates: true
+    });
+    cursor = await prisma.scheduledReportCursor.findUniqueOrThrow({ where: { tenantId } });
+  }
+
+  if (cursor.timeZone !== timeZone) {
+    throw new Error(`Scheduled report time zone mismatch for tenant ${tenantId}`);
+  }
+  // The settings writer changes its AuditLog row and cursor in one transaction.
+  // An unexpected mismatch means a direct writer bypassed that contract.
+  if (cursor.settingsAuditLogId !== settingsRow.id) {
+    throw new Error(`Scheduled report settings revision mismatch for tenant ${tenantId}`);
+  }
+  const dueFrom = cursor.nextRunAt;
+  if (!dueFrom || dueFrom.getTime() > now.getTime()) return;
+
+  const disabled = settings?.enabled !== true;
+  const latest = disabled ? dueFrom : latestDueOccurrence(settings, now);
+  if (!latest || latest.getTime() < dueFrom.getTime()) {
+    throw new Error(`Scheduled report cursor is not aligned for tenant ${tenantId}`);
+  }
+  const nextRunAt = disabled ? null : nextScheduledOccurrence(settings, latest);
+  if (!disabled && (!nextRunAt || nextRunAt.getTime() <= now.getTime())) {
+    throw new Error(`Scheduled report next occurrence is invalid for tenant ${tenantId}`);
+  }
+
+  const recipients = disabled ? [] : uniqueRecipients(settings);
+  const configurationPostdatesSlot = !disabled &&
+    settingsRow.createdAt.getTime() >= latest.getTime() + 60_000;
+  let skipReason: string | null = disabled
+    ? "DISABLED"
+    : configurationPostdatesSlot
+      ? "CONFIG_AFTER_SLOT"
+      : recipients.length
+        ? null
+        : "NO_RECIPIENTS";
+  if (!skipReason) {
+    const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
+    if (
+      (entitlements.license.status !== "ACTIVE" && entitlements.license.status !== "TRIAL") ||
+      !hasFeature(entitlements.plan, "scheduled_reports")
+    ) {
+      skipReason = "INELIGIBLE";
+    }
+  }
+
+  let inputs: Awaited<ReturnType<typeof buildTenantReportInputs>> = [];
+  if (!skipReason) {
+    const recipientsWithKeys = recipients.map((recipient) => ({
+      recipient,
+      deduplicationKey: deliveryKey(tenantId, latest, recipient)
+    }));
+    const existing = await prisma.emailQueue.count({
+      where: {
+        tenantId,
+        type: "SCHEDULED_REPORT",
+        deduplicationKey: { in: recipientsWithKeys.map((row) => row.deduplicationKey) }
+      }
+    });
+    if (existing !== recipientsWithKeys.length) {
+      inputs = await buildTenantReportInputs(tenantId, settings, latest, now, recipientsWithKeys);
+    }
+  }
+
+  // A subscription row is locked after the tenant. When it does not exist,
+  // FOR UPDATE on Tenant also prevents a concurrent FK-backed insert until
+  // this queue/cursor decision commits.
+  const hadSubscription = Boolean(await prisma.tenantSubscription.findUnique({
+    where: { tenantId },
+    select: { tenantId: true }
+  }));
+  await prisma.$transaction(async (tx) => {
+    const lockedTenants = hadSubscription
+      ? await tx.$queryRaw<Array<{ isActive: boolean; deletedAt: Date | null }>>`
+          SELECT "isActive", "deletedAt" FROM "Tenant" WHERE "id" = ${tenantId} FOR SHARE
+        `
+      : await tx.$queryRaw<Array<{ isActive: boolean; deletedAt: Date | null }>>`
+          SELECT "isActive", "deletedAt" FROM "Tenant" WHERE "id" = ${tenantId} FOR UPDATE
+        `;
+    const lockedTenant = lockedTenants[0];
+    if (!lockedTenant) return;
+    const subscriptions = await tx.$queryRaw<Array<{ tenantId: string }>>`
+      SELECT "tenantId" FROM "TenantSubscription" WHERE "tenantId" = ${tenantId} FOR UPDATE
+    `;
+    if (hadSubscription && subscriptions.length === 0) {
+      // Retry on the next tick with the no-subscription lock order.
+      throw new Error(`Scheduled report subscription changed for tenant ${tenantId}`);
+    }
+
+    // An eligibility decision made before the locks may already be stale.
+    // If it changed from ineligible to eligible, retry on the next tick so
+    // the report body can be built before we advance the cursor.
+    let finalSkipReason = skipReason === "INELIGIBLE" ? null : skipReason;
+    if (!finalSkipReason && (!lockedTenant.isActive || lockedTenant.deletedAt)) {
+      finalSkipReason = "TENANT_INACTIVE";
+    }
+    if (!finalSkipReason) {
+      const statusChanged = await tx.auditLog.findFirst({
+        where: {
+          tenantId,
+          resource: "tenant",
+          action: "PLATFORM_TENANT_STATUS_CHANGED",
+          createdAt: { gt: latest }
+        },
+        select: { id: true }
+      });
+      if (statusChanged) finalSkipReason = "TENANT_STATUS_CHANGED";
+    }
+    if (!finalSkipReason) {
+      const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
+      if (
+        (entitlements.license.status !== "ACTIVE" && entitlements.license.status !== "TRIAL") ||
+        !hasFeature(entitlements.plan, "scheduled_reports")
+      ) {
+        finalSkipReason = "INELIGIBLE";
+      }
+    }
+    if (!finalSkipReason && skipReason === "INELIGIBLE") return;
+
+    const skippedThrough = finalSkipReason
+      ? latest
+      : dueFrom.getTime() < latest.getTime()
+        ? latestDueOccurrence(settings, new Date(latest.getTime() - 1))
+        : null;
+    const skippedFrom = skippedThrough ? dueFrom : null;
+    const effectiveSkipReason = finalSkipReason ?? (skippedThrough ? "BACKLOG" : null);
+    const claimed = await tx.scheduledReportCursor.updateMany({
+      where: {
+        tenantId,
+        settingsAuditLogId: settingsRow.id,
+        timeZone,
+        nextRunAt: dueFrom
+      },
+      data: {
+        nextRunAt,
+        ...(!finalSkipReason ? { lastQueuedFor: latest } : {}),
+        ...(skippedFrom && skippedThrough && effectiveSkipReason ? {
+          lastSkippedFrom: skippedFrom,
+          lastSkippedThrough: skippedThrough,
+          lastSkipReason: effectiveSkipReason
+        } : {})
+      }
+    });
+    if (claimed.count !== 1) return;
+    if (!finalSkipReason && inputs.length) await emailQueue.enqueueManyOnce(inputs, tx);
+  });
 };
 
 /**
- * Enumerates every active tenant in a stable order and loads that tenant's latest
- * report settings independently. The queue's unique delivery key is the durable
- * ledger for each tenant, local schedule slot and normalized recipient.
+ * Enumerates active tenants. Each tenant has a persistent schedule cursor and
+ * the queue has a unique delivery key for each local slot and recipient.
  */
 export const runReportsCronCycle = async (
   emailQueue: EmailQueueService,
@@ -270,16 +409,15 @@ export const runReportsCronCycle = async (
             action: "SETTINGS_REPORTS"
           },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          select: { details: true, createdAt: true }
+          select: { id: true, details: true, createdAt: true }
         });
         if (!settingsRow) continue;
 
-        await enqueueTenantReport(
+        await processTenantReport(
           emailQueue,
           licensePolicyService,
           tenant.id,
-          settingsRow.details as any,
-          settingsRow.createdAt,
+          settingsRow,
           now
         );
       } catch (error) {

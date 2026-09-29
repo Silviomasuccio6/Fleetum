@@ -817,24 +817,14 @@ export class PlatformAdminService {
     const tenant = await this.repository.getTenantById(input.tenantId);
     if (!tenant) throw new AppError("Tenant non trovato", 404, "NOT_FOUND");
 
-    const before = { isActive: tenant.isActive };
     const after = { isActive: input.isActive };
 
-    await this.repository.setTenantActive(input.tenantId, input.isActive);
-    await this.repository.appendPlatformAudit({
-      tenantId: input.tenantId,
+    const wasActive = await this.repository.setTenantActive(input.tenantId, input.isActive, {
       actorUserId: input.actorUserId,
-      action: "PLATFORM_TENANT_STATUS_CHANGED",
-      resource: "tenant",
-      resourceId: input.tenantId,
-      details: {
-        actor: input.actorUserId,
-        sourceIp: input.sourceIp,
-        happenedAt: new Date().toISOString(),
-        before,
-        after
-      }
+      sourceIp: input.sourceIp
     });
+    const before = { isActive: wasActive };
+    if (wasActive === input.isActive) return { updated: false, before, after };
 
     await this.alerts.notify({
       type: "PLATFORM_TENANT_STATUS_CHANGED",

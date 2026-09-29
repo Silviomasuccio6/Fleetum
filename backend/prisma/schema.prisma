@@ -249,6 +249,7 @@ model Tenant {
   stoppages                     Stoppage[]
   reminders                     Reminder[]
   auditLogs                     AuditLog[]
+  scheduledReportCursor         ScheduledReportCursor?
   calendarEvents                CalendarEvent[]
   vehicleMaintenances           VehicleMaintenance[]
   vehicleMaintenanceAttachments VehicleMaintenanceAttachment[]
@@ -1637,6 +1638,21 @@ model AuditLog {
 
   @@index([tenantId, createdAt])
   @@index([resource, resourceId])
+}
+
+model ScheduledReportCursor {
+  tenantId           String   @id
+  settingsAuditLogId String
+  timeZone           String   @db.VarChar(128)
+  nextRunAt          DateTime?
+  lastQueuedFor      DateTime?
+  lastSkippedFrom    DateTime?
+  lastSkippedThrough DateTime?
+  lastSkipReason     String?  @db.VarChar(64)
+  updatedAt          DateTime @updatedAt
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([nextRunAt])
 }
 
 model PrivacyNotice {
