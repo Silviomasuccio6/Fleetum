@@ -243,6 +243,7 @@ export class PrivacyComplianceService {
               subject: "[redacted]",
               body: "[redacted]",
               lastError: null,
+              deduplicationKey: null,
               meta: purgeEmailQueueMeta(email.meta),
               payloadPurgedAt: purgedAt
             }

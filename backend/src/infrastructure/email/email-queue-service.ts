@@ -64,6 +64,26 @@ export class EmailQueueService {
     });
   }
 
+  async enqueueManyOnce(
+    inputs: Array<QueueEmailInput & { deduplicationKey: string }>,
+    db: Prisma.TransactionClient | typeof prisma = prisma
+  ) {
+    if (inputs.length === 0) return { count: 0 };
+
+    return db.emailQueue.createMany({
+      data: inputs.map((input) => ({
+        tenantId: input.tenantId,
+        type: input.type,
+        deduplicationKey: input.deduplicationKey,
+        recipient: input.recipient,
+        subject: input.subject,
+        body: input.body,
+        meta: (input.meta ?? undefined) as Prisma.InputJsonValue | undefined
+      })),
+      skipDuplicates: true
+    });
+  }
+
   async processPending(now = new Date(), options: { ids?: string[]; take?: number } = {}) {
     const invocationWallClock = Date.now();
     const currentTime = () => new Date(now.getTime() + Math.max(0, Date.now() - invocationWallClock));

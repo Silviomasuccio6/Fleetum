@@ -1800,6 +1800,7 @@ model EmailQueue {
   id            String           @id @default(cuid())
   tenantId      String?
   type          String
+  deduplicationKey String?        @unique @db.VarChar(255)
   /// @pii
   recipient     String
   /// @pii

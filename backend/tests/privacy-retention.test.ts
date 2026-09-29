@@ -120,6 +120,7 @@ test("global retention deletes expired public records and purges terminal email 
   assert.equal(emailUpdates[0].data.subject, "[redacted]");
   assert.equal(emailUpdates[0].data.body, "[redacted]");
   assert.equal(emailUpdates[0].data.lastError, null);
+  assert.equal(emailUpdates[0].data.deduplicationKey, null);
   assert.ok(emailUpdates[0].data.payloadPurgedAt instanceof Date);
   assert.deepEqual(emailUpdates[0].data.meta, {
     payloadPurged: true,

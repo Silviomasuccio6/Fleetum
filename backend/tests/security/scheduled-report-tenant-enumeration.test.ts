@@ -125,9 +125,9 @@ describe("scheduled report tenant enumeration", () => {
     const deliveries: Array<{ tenantId?: string; recipient: string }> = [];
     await runReportsCronCycle(
       {
-        enqueue: async (input: { tenantId?: string; recipient: string }) => {
-          deliveries.push({ tenantId: input.tenantId, recipient: input.recipient });
-          return input;
+        enqueueManyOnce: async (inputs: Array<{ tenantId?: string; recipient: string }>) => {
+          deliveries.push(...inputs.map((input) => ({ tenantId: input.tenantId, recipient: input.recipient })));
+          return { count: inputs.length };
         }
       } as any,
       {

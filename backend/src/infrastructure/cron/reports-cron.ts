@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import cron, { ScheduledTask } from "node-cron";
 import { hasFeature } from "../../application/services/feature-entitlements-service.js";
 import { LicensePolicyService } from "../../application/services/license-policy-service.js";
@@ -5,20 +6,49 @@ import { prisma } from "../database/prisma/client.js";
 import { EmailQueueService } from "../email/email-queue-service.js";
 import { logger } from "../logging/logger.js";
 
-const shouldRunNow = (settings: any, now: Date) => {
-  if (!settings?.enabled) return false;
+// Keep the existing process-local schedule. A logical local slot also prevents
+// the repeated hour at the end of daylight saving time from sending twice.
+const REPORT_CATCH_UP_MS = 180 * 60 * 1000;
+
+const latestDueOccurrence = (settings: any, now: Date): Date | null => {
+  if (!settings?.enabled) return null;
   const hour = Number(settings.hour ?? 8);
   const minute = Number(settings.minute ?? 0);
-  if (now.getHours() !== hour || now.getMinutes() !== minute) return false;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return null;
+  }
   const freq = settings.frequency ?? "weekly";
-  if (freq === "daily") return true;
-  if (freq === "weekly") return now.getDay() === 1;
-  if (freq === "monthly") return now.getDate() === 1;
-  return false;
+  if (freq !== "daily" && freq !== "weekly" && freq !== "monthly") return null;
+
+  // 180 elapsed minutes can cross at most one local midnight, including DST.
+  for (let dayOffset = 0; dayOffset <= 1; dayOffset += 1) {
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOffset);
+    if (freq === "weekly" && day.getDay() !== 1) continue;
+    if (freq === "monthly" && day.getDate() !== 1) continue;
+
+    const occurrence = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute);
+    // A local time skipped by the spring DST change has no occurrence.
+    if (occurrence.getHours() !== hour || occurrence.getMinutes() !== minute) continue;
+    const elapsed = now.getTime() - occurrence.getTime();
+    if (elapsed >= 0 && elapsed <= REPORT_CATCH_UP_MS) return occurrence;
+  }
+  return null;
 };
 
 export const canRunScheduledReport = (plan: string | null | undefined, settings: unknown, now: Date) =>
-  hasFeature(plan, "scheduled_reports") && shouldRunNow(settings, now);
+  hasFeature(plan, "scheduled_reports") && latestDueOccurrence(settings, now) !== null;
+
+const deliveryKey = (tenantId: string, occurrence: Date, recipient: string) => {
+  const localSlot = [
+    occurrence.getFullYear(),
+    String(occurrence.getMonth() + 1).padStart(2, "0"),
+    String(occurrence.getDate()).padStart(2, "0"),
+    String(occurrence.getHours()).padStart(2, "0"),
+    String(occurrence.getMinutes()).padStart(2, "0")
+  ].join(":");
+  const digest = crypto.createHash("sha256").update(`${tenantId}\0${localSlot}\0${recipient.toLowerCase()}`).digest("hex");
+  return `scheduled-report:v1:${digest}`;
+};
 
 const escapePdfText = (text: string) =>
   text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
@@ -78,15 +108,32 @@ const enqueueTenantReport = async (
   licensePolicyService: LicensePolicyService,
   tenantId: string,
   settings: any,
+  settingsCreatedAt: Date,
   now: Date
 ) => {
-  if (!shouldRunNow(settings, now)) return;
+  const occurrence = latestDueOccurrence(settings, now);
+  // Settings saved during the scheduled minute keep the old exact-minute
+  // behavior; a later change must not create a retrospective delivery.
+  if (!occurrence || settingsCreatedAt.getTime() >= occurrence.getTime() + 60_000) return;
   const recipients = uniqueRecipients(settings);
   if (!recipients.length) return;
 
   const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
   if (entitlements.license.status !== "ACTIVE" && entitlements.license.status !== "TRIAL") return;
   if (!hasFeature(entitlements.plan, "scheduled_reports")) return;
+
+  const recipientsWithKeys = recipients.map((recipient) => ({
+    recipient,
+    deduplicationKey: deliveryKey(tenantId, occurrence, recipient)
+  }));
+  const existing = await prisma.emailQueue.count({
+    where: {
+      tenantId,
+      type: "SCHEDULED_REPORT",
+      deduplicationKey: { in: recipientsWithKeys.map((row) => row.deduplicationKey) }
+    }
+  });
+  if (existing === recipientsWithKeys.length) return;
 
   const lookback = new Date(now.getTime() - 30 * 86400000);
   const [total, open, critical, closedLast30, reminders, remindersFailed, topWorkshops, overdue, preventiveDaysDue] =
@@ -166,38 +213,37 @@ const enqueueTenantReport = async (
     `preventive_days_monitored,${preventiveDaysDue}`,
     `preventive_km_monitored,${preventiveKmDue}`
   ].join("\n");
-  for (const recipient of recipients) {
-    await emailQueue.enqueue({
-      tenantId,
-      type: "SCHEDULED_REPORT",
-      recipient,
-      subject,
-      body,
-      meta: {
-        reportStyle: format,
-        generatedAt: now.toISOString(),
-        attachments: [
-          {
-            filename: `executive-report-${now.toISOString().slice(0, 10)}.pdf`,
-            contentType: "application/pdf",
-            contentBase64: pdf.toString("base64")
-          },
-          {
-            filename: `executive-kpi-${now.toISOString().slice(0, 10)}.csv`,
-            contentType: "text/csv",
-            contentBase64: Buffer.from(csv, "utf8").toString("base64")
-          }
-        ]
-      }
-    });
-  }
+  await emailQueue.enqueueManyOnce(recipientsWithKeys.map(({ recipient, deduplicationKey }) => ({
+    tenantId,
+    type: "SCHEDULED_REPORT",
+    recipient,
+    deduplicationKey,
+    subject,
+    body,
+    meta: {
+      reportStyle: format,
+      generatedAt: now.toISOString(),
+      scheduledFor: occurrence.toISOString(),
+      attachments: [
+        {
+          filename: `executive-report-${now.toISOString().slice(0, 10)}.pdf`,
+          contentType: "application/pdf",
+          contentBase64: pdf.toString("base64")
+        },
+        {
+          filename: `executive-kpi-${now.toISOString().slice(0, 10)}.csv`,
+          contentType: "text/csv",
+          contentBase64: Buffer.from(csv, "utf8").toString("base64")
+        }
+      ]
+    }
+  })));
 };
 
 /**
  * Enumerates every active tenant in a stable order and loads that tenant's latest
- * report settings independently. Delivery remains at-least-once across multiple
- * application processes; cross-process exactly-once delivery needs a persistent
- * scheduled-report ledger and is intentionally outside this application-only fix.
+ * report settings independently. The queue's unique delivery key is the durable
+ * ledger for each tenant, local schedule slot and normalized recipient.
  */
 export const runReportsCronCycle = async (
   emailQueue: EmailQueueService,
@@ -224,7 +270,7 @@ export const runReportsCronCycle = async (
             action: "SETTINGS_REPORTS"
           },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          select: { details: true }
+          select: { details: true, createdAt: true }
         });
         if (!settingsRow) continue;
 
@@ -233,6 +279,7 @@ export const runReportsCronCycle = async (
           licensePolicyService,
           tenant.id,
           settingsRow.details as any,
+          settingsRow.createdAt,
           now
         );
       } catch (error) {
