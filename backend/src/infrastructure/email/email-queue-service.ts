@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma/client.js";
 import { emailSender } from "./email-sender.js";
+import { dispatchScheduledReport } from "./scheduled-report-dispatch.js";
 
 export type QueueEmailInput = {
   tenantId?: string;
@@ -175,18 +176,22 @@ export class EmailQueueService {
         const storedProvider = metaString(meta, "emailProvider");
         const storedProviderMessageId = metaString(meta, "providerMessageId");
         providerAcceptedAt = metaString(meta, "providerAcceptedAt") ?? currentTime().toISOString();
+        const startDelivery = () => emailSender.send({
+          to: item.recipient,
+          subject: item.subject,
+          text: item.body,
+          html,
+          fromName,
+          replyTo,
+          attachments,
+          idempotencyKey: providerIdempotencyKey(item.id)
+        });
         sent = storedProvider === "resend" && storedProviderMessageId
           ? { provider: "resend" as const, id: storedProviderMessageId }
-          : await emailSender.send({
-              to: item.recipient,
-              subject: item.subject,
-              text: item.body,
-              html,
-              fromName,
-              replyTo,
-              attachments,
-              idempotencyKey: providerIdempotencyKey(item.id)
-            });
+          : item.type === "SCHEDULED_REPORT"
+            ? await dispatchScheduledReport(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
+            : await startDelivery();
+        if (!sent) continue;
         const accepted = sent;
 
         // The provider call cannot share our database transaction. Its stable idempotency key

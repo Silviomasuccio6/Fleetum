@@ -78,7 +78,7 @@ const toDateOrNull = (value: string | null | undefined) => {
 
 const toIsoOrNull = (value: Date | null | undefined) => value?.toISOString() ?? null;
 
-const snapshotFromRow = (row: TenantSubscription): TenantSubscriptionSnapshot => ({
+export const snapshotFromRow = (row: TenantSubscription): TenantSubscriptionSnapshot => ({
   plan: ensureKnownPlan(row.plan),
   seats: toPositiveSeats(row.seats),
   status: toValidStatus(row.status),
