@@ -5,6 +5,7 @@ import { extractRegistrationDateFromBooklet } from "../../../application/service
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { lockOwnedStoppage, ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
+import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import {
@@ -116,7 +117,7 @@ export const uploadsRoutes = () => {
 
   const requireOwnedVehicle = asyncHandler(async (req, _res, next) => {
     const target = await prisma.vehicle.findFirst({
-      where: { id: req.params.id, tenantId: req.auth!.tenantId, deletedAt: null },
+      where: { ...ownedVehicleWhere(req.auth!.tenantId), id: req.params.id },
       select: { id: true }
     });
     if (!target) throw new AppError("Veicolo non trovato", 404, "NOT_FOUND");
@@ -125,12 +126,23 @@ export const uploadsRoutes = () => {
 
   const requireOwnedMaintenance = asyncHandler(async (req, _res, next) => {
     const target = await prisma.vehicleMaintenance.findFirst({
-      where: { id: req.params.id, tenantId: req.auth!.tenantId, deletedAt: null },
+      where: { id: req.params.id, tenantId: req.auth!.tenantId, deletedAt: null,
+        vehicle: ownedVehicleWhere(req.auth!.tenantId, true) },
       select: { id: true }
     });
     if (!target) throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
     next();
   });
+
+  const lockMaintenanceOwner = async (tx: Prisma.TransactionClient, tenantId: string, id: string, historical = false) => {
+    const where = { id, tenantId, ...(!historical ? { deletedAt: null } : {}) };
+    const initial = await tx.vehicleMaintenance.findFirst({ where, select: { vehicleId: true } });
+    if (!initial) throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
+    await lockOwnedVehicle(tx, tenantId, initial.vehicleId, true);
+    await tx.$queryRaw`SELECT "id" FROM "VehicleMaintenance" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+    const current = await tx.vehicleMaintenance.findFirst({ where, select: { vehicleId: true } });
+    if (!current || current.vehicleId !== initial.vehicleId) throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
+  };
 
   const requireOwnedCustomer = asyncHandler(async (req, _res, next) => {
     const target = await prisma.rentalCustomer.findFirst({
@@ -249,7 +261,9 @@ export const uploadsRoutes = () => {
         resourceType: "VehiclePhoto",
         resourceId: req.params.id,
         files,
-        commit: async (tx, uploads) => tx.vehiclePhoto.createMany({
+        commit: async (tx, uploads) => {
+          await lockOwnedVehicle(tx, tenantId, req.params.id);
+          return tx.vehiclePhoto.createMany({
           data: uploads.map((upload) => ({
             vehicleId: req.params.id,
             filePath: upload.key,
@@ -257,7 +271,8 @@ export const uploadsRoutes = () => {
             mimeType: upload.file.mimetype,
             sizeBytes: upload.file.size
           }))
-        })
+          });
+        }
       });
 
       await auditFileEvent({
@@ -279,7 +294,7 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const photo = await prisma.vehiclePhoto.findFirst({
-        where: { id: req.params.photoId, vehicle: { tenantId } },
+        where: { id: req.params.photoId, vehicle: ownedVehicleWhere(tenantId, true) },
         select: { filePath: true, mimeType: true }
       });
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
@@ -301,12 +316,13 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const photo = await prisma.vehiclePhoto.findFirst({
-        where: { id: req.params.photoId, vehicle: { tenantId } },
-        select: { id: true, filePath: true }
+        where: { id: req.params.photoId, vehicle: ownedVehicleWhere(tenantId, true) },
+        select: { id: true, vehicleId: true, filePath: true }
       });
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
 
       await prisma.$transaction(async (tx) => {
+        await lockOwnedVehicle(tx, tenantId, photo.vehicleId, true);
         await tx.vehiclePhoto.delete({ where: { id: photo.id } });
         await markStoredFileDeleted(tx, tenantId, photo.filePath);
       }, { isolationLevel: "Serializable" });
@@ -331,7 +347,7 @@ export const uploadsRoutes = () => {
     uploadedHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const vehicle = await prisma.vehicle.findFirst({
-        where: { id: req.params.id, tenantId, deletedAt: null },
+        where: { ...ownedVehicleWhere(tenantId), id: req.params.id },
         select: { id: true, registrationDate: true, lastRevisionAt: true, revisionDueAt: true }
       });
       if (!vehicle) throw new AppError("Veicolo non trovato", 404, "NOT_FOUND");
@@ -341,13 +357,6 @@ export const uploadsRoutes = () => {
       await secureFiles([file]);
 
       const detectedRegistrationDate = await extractRegistrationDateFromBooklet(file.path, file.mimetype);
-      const nextRegistrationDate = detectedRegistrationDate ?? vehicle.registrationDate ?? null;
-      const nextRevisionDueAt = computeVehicleRevisionDueAt({
-        registrationDate: nextRegistrationDate,
-        lastRevisionAt: vehicle.lastRevisionAt,
-        manualRevisionDueAt: vehicle.revisionDueAt
-      });
-
       const persisted = await persistNewUploadedFiles({
         tenantId,
         category: "vehicle-booklets",
@@ -355,6 +364,13 @@ export const uploadsRoutes = () => {
         resourceId: req.params.id,
         files: [file],
         commit: async (tx, [upload]) => {
+          const currentVehicle = await lockOwnedVehicle(tx, tenantId, req.params.id);
+          const revisionDueAt = computeVehicleRevisionDueAt({
+            registrationDate: detectedRegistrationDate ?? currentVehicle.registrationDate,
+            lastRevisionAt: currentVehicle.lastRevisionAt, manualRevisionDueAt: currentVehicle.revisionDueAt
+          });
+          const existing = await tx.vehicleBooklet.findUnique({ where: { vehicleId: req.params.id }, select: { tenantId: true } });
+          if (existing && existing.tenantId !== tenantId) throw new AppError("Libretto non trovato", 404, "NOT_FOUND");
           const existingBooklet = await tx.vehicleBooklet.findFirst({
             where: { tenantId, vehicleId: req.params.id },
             select: { id: true, filePath: true }
@@ -396,7 +412,7 @@ export const uploadsRoutes = () => {
               where: { id: req.params.id, tenantId, deletedAt: null },
               data: {
                 registrationDate: detectedRegistrationDate,
-                revisionDueAt: nextRevisionDueAt
+                revisionDueAt
               }
             });
           }
@@ -405,13 +421,14 @@ export const uploadsRoutes = () => {
           }
           return {
             booklet,
+            revisionDueAt,
             retiredKey: existingBooklet?.filePath && existingBooklet.filePath !== upload.key
               ? existingBooklet.filePath
               : null
           };
         }
       });
-      const { booklet, retiredKey } = persisted.result;
+      const { booklet, retiredKey, revisionDueAt } = persisted.result;
       if (retiredKey) {
         await deleteRetiredPhysicalObject({ key: retiredKey, resourceType: "VehicleBooklet" });
       }
@@ -434,7 +451,7 @@ export const uploadsRoutes = () => {
       res.status(201).json({
         booklet,
         detectedRegistrationDate: detectedRegistrationDate ? detectedRegistrationDate.toISOString() : null,
-        revisionDueAt: nextRevisionDueAt ? nextRevisionDueAt.toISOString() : null
+        revisionDueAt: revisionDueAt ? revisionDueAt.toISOString() : null
       });
     })
   );
@@ -445,7 +462,7 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const booklet = await prisma.vehicleBooklet.findFirst({
-        where: { id: req.params.bookletId, tenantId },
+        where: { id: req.params.bookletId, tenantId, vehicle: ownedVehicleWhere(tenantId, true) },
         select: { filePath: true, mimeType: true }
       });
       if (!booklet) throw new AppError("Libretto non trovato", 404, "NOT_FOUND");
@@ -467,11 +484,12 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const booklet = await prisma.vehicleBooklet.findFirst({
-        where: { id: req.params.bookletId, tenantId },
-        select: { id: true, filePath: true }
+        where: { id: req.params.bookletId, tenantId, vehicle: ownedVehicleWhere(tenantId, true) },
+        select: { id: true, vehicleId: true, filePath: true }
       });
       if (!booklet) throw new AppError("Libretto non trovato", 404, "NOT_FOUND");
       await prisma.$transaction(async (tx) => {
+        await lockOwnedVehicle(tx, tenantId, booklet.vehicleId, true);
         await tx.vehicleBooklet.delete({ where: { id: booklet.id } });
         await markStoredFileDeleted(tx, tenantId, booklet.filePath);
       }, { isolationLevel: "Serializable" });
@@ -509,6 +527,7 @@ export const uploadsRoutes = () => {
           resourceId: maintenanceId,
           files,
           commit: async (tx, uploads) => {
+            await lockMaintenanceOwner(tx, tenantId, maintenanceId);
             const createdAttachments: Array<{ id: string; file: Express.Multer.File }> = [];
             for (const upload of uploads) {
               const created = await tx.vehicleMaintenanceAttachment.create({
@@ -550,27 +569,30 @@ export const uploadsRoutes = () => {
               if (typeof total === "number" && Number.isFinite(total) && total > 0) {
                 const rounded = roundMoney(total);
                 extractedTotals.push(rounded);
-                await prisma.vehicleMaintenanceAttachment.update({
-                  where: { id: entry.id },
-                  data: { invoiceTotalAmount: rounded }
+                await prisma.$transaction(async (tx) => {
+                  await lockMaintenanceOwner(tx, tenantId, maintenanceId);
+                  await tx.vehicleMaintenanceAttachment.updateMany({
+                    where: { id: entry.id, tenantId, maintenanceId }, data: { invoiceTotalAmount: rounded }
+                  });
                 });
               }
             }
 
             if (extractedTotals.length > 0) {
-              const totals = await prisma.vehicleMaintenanceAttachment.findMany({
-                where: { tenantId, maintenanceId },
-                select: { invoiceTotalAmount: true }
-              });
-              const maintenanceTotal = roundMoney(
-                totals.reduce((acc, row) => acc + (typeof row.invoiceTotalAmount === "number" ? row.invoiceTotalAmount : 0), 0)
-              );
-              if (maintenanceTotal > 0) {
-                await prisma.vehicleMaintenance.updateMany({
-                  where: { id: maintenanceId, tenantId, deletedAt: null },
-                  data: { cost: maintenanceTotal }
+              await prisma.$transaction(async (tx) => {
+                await lockMaintenanceOwner(tx, tenantId, maintenanceId);
+                const totals = await tx.vehicleMaintenanceAttachment.findMany({
+                  where: { tenantId, maintenanceId }, select: { invoiceTotalAmount: true }
                 });
-              }
+                const maintenanceTotal = roundMoney(
+                  totals.reduce((acc, row) => acc + (typeof row.invoiceTotalAmount === "number" ? row.invoiceTotalAmount : 0), 0)
+                );
+                if (maintenanceTotal > 0) {
+                  await tx.vehicleMaintenance.updateMany({
+                    where: { id: maintenanceId, tenantId, deletedAt: null }, data: { cost: maintenanceTotal }
+                  });
+                }
+              });
             }
           } catch (error) {
             logger.error({ error, maintenanceId, tenantId }, "Background invoice analysis failed");
@@ -599,7 +621,8 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const attachment = await prisma.vehicleMaintenanceAttachment.findFirst({
-        where: { id: req.params.attachmentId, tenantId },
+        where: { id: req.params.attachmentId, tenantId,
+          maintenance: { tenantId, vehicle: ownedVehicleWhere(tenantId, true) } },
         select: { filePath: true, mimeType: true, fileName: true }
       });
       if (!attachment) throw new AppError("Allegato non trovato", 404, "NOT_FOUND");
@@ -623,12 +646,14 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const attachment = await prisma.vehicleMaintenanceAttachment.findFirst({
-        where: { id: req.params.attachmentId, tenantId },
-        select: { id: true, filePath: true }
+        where: { id: req.params.attachmentId, tenantId,
+          maintenance: { tenantId, vehicle: ownedVehicleWhere(tenantId, true) } },
+        select: { id: true, maintenanceId: true, filePath: true }
       });
       if (!attachment) throw new AppError("Allegato non trovato", 404, "NOT_FOUND");
 
       await prisma.$transaction(async (tx) => {
+        await lockMaintenanceOwner(tx, tenantId, attachment.maintenanceId, true);
         await tx.vehicleMaintenanceAttachment.delete({ where: { id: attachment.id } });
         await markStoredFileDeleted(tx, tenantId, attachment.filePath);
       }, { isolationLevel: "Serializable" });

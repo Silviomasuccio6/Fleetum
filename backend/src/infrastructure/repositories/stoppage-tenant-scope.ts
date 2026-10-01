@@ -1,6 +1,7 @@
 import type { Prisma, Stoppage } from "@prisma/client";
 import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../database/prisma/client.js";
+import { lockVehicleSite, ownedVehicleWhere } from "./vehicle-tenant-scope.js";
 
 type Reader = Prisma.TransactionClient | typeof prisma;
 export type StoppageLinks = Pick<Stoppage,
@@ -18,7 +19,7 @@ export const stoppageReferenceId = (value: unknown): string => {
 const scopeWithUsers = (tenantId: string, userIds: string[], includeDeleted: boolean): Prisma.StoppageWhereInput => ({
     tenantId,
     ...(!includeDeleted ? { deletedAt: null } : {}),
-    site: { tenantId }, vehicle: { tenantId }, workshop: { tenantId }, createdBy: { tenantId },
+    site: { tenantId }, vehicle: ownedVehicleWhere(tenantId, true), workshop: { tenantId }, createdBy: { tenantId },
     AND: [{ OR: [{ assignedToUserId: null }, { assignedToUserId: { in: userIds } }] }]
 });
 const tenantUserIds = async (tenantId: string, db: Reader) =>
@@ -90,13 +91,15 @@ export const lockStoppageLinks = async (
   `;
   if (!sites.length || (next.siteId !== current?.siteId && sites[0].deletedAt)) throw stoppageNotFound();
   const vehicles = exclusiveVehicle
-    ? await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
-        SELECT "deletedAt" FROM "Vehicle" WHERE "id" = ${next.vehicleId} AND "tenantId" = ${tenantId} FOR UPDATE
+    ? await tx.$queryRaw<Array<{ siteId: string; deletedAt: Date | null }>>`
+        SELECT "siteId", "deletedAt" FROM "Vehicle" WHERE "id" = ${next.vehicleId} AND "tenantId" = ${tenantId} FOR UPDATE
       `
-    : await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
-        SELECT "deletedAt" FROM "Vehicle" WHERE "id" = ${next.vehicleId} AND "tenantId" = ${tenantId} FOR SHARE
+    : await tx.$queryRaw<Array<{ siteId: string; deletedAt: Date | null }>>`
+        SELECT "siteId", "deletedAt" FROM "Vehicle" WHERE "id" = ${next.vehicleId} AND "tenantId" = ${tenantId} FOR SHARE
       `;
   if (!vehicles.length || (next.vehicleId !== current?.vehicleId && vehicles[0].deletedAt)) throw stoppageNotFound();
+  // The operational site of a stoppage may differ from the vehicle's home site.
+  await lockVehicleSite(tx, tenantId, vehicles[0].siteId);
   const workshops = await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
     SELECT "deletedAt" FROM "Workshop" WHERE "id" = ${next.workshopId} AND "tenantId" = ${tenantId} FOR SHARE
   `;

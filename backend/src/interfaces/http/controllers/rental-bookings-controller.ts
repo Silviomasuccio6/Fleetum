@@ -4,6 +4,7 @@ import { Request, Response } from "express";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
+import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 import {
   scanBufferForThreats,
   validateImageBufferMagic,
@@ -66,6 +67,16 @@ import {
   rentalCustomerListQuerySchema,
   rentalCustomerUpdateSchema
 } from "../validators/rental-bookings-validators.js";
+
+// Keep historical bookings readable while excluding a broken Vehicle -> Site tenant link.
+const ownedBookingWhere = (tenantId: string): Prisma.RentalBookingWhereInput => ({
+  tenantId,
+  vehicle: { is: ownedVehicleWhere(tenantId, true) }
+});
+
+const ownedPricingVehicleWhere = (tenantId: string): Prisma.RentalPriceListWhereInput => ({
+  OR: [{ vehicleId: null }, { vehicle: { is: ownedVehicleWhere(tenantId, true) } }]
+});
 
 const ACTIVE_BOOKING_STATUSES = [
   "DRAFT",
@@ -146,6 +157,13 @@ export const buildCustomerBookingStatsQuery = (tenantId: string, customerIds: st
        AND contract."tenantId" = ${tenantId}
       WHERE booking."tenantId" = ${tenantId}
         AND ${customerFilter}
+        AND EXISTS (
+          SELECT 1 FROM "Vehicle" AS vehicle
+          JOIN "Site" AS site ON site."id" = vehicle."siteId"
+          WHERE vehicle."id" = booking."vehicleId"
+            AND vehicle."tenantId" = ${tenantId}
+            AND site."tenantId" = ${tenantId}
+        )
       GROUP BY booking."customerId"
     ) AS aggregate
     LEFT JOIN LATERAL (
@@ -158,6 +176,13 @@ export const buildCustomerBookingStatsQuery = (tenantId: string, customerIds: st
       WHERE latest_booking."tenantId" = ${tenantId}
         AND latest_booking."customerId" = aggregate."customerId"
         AND latest_booking."deletedAt" IS NULL
+        AND EXISTS (
+          SELECT 1 FROM "Vehicle" AS vehicle
+          JOIN "Site" AS site ON site."id" = vehicle."siteId"
+          WHERE vehicle."id" = latest_booking."vehicleId"
+            AND vehicle."tenantId" = ${tenantId}
+            AND site."tenantId" = ${tenantId}
+        )
       ORDER BY
         latest_booking."pickupAt" DESC,
         latest_booking."createdAt" DESC,
@@ -1140,7 +1165,7 @@ export class RentalBookingsController {
 
   private async getContractOrThrow(tenantId: string, bookingId: string) {
     const contract = await prisma.bookingContract.findFirst({
-      where: { tenantId, bookingId, deletedAt: null },
+      where: { tenantId, bookingId, deletedAt: null, booking: { is: ownedBookingWhere(tenantId) } },
       include: {
         booking: {
           include: {
@@ -1363,17 +1388,21 @@ export class RentalBookingsController {
     vehicleId: string,
     db: Prisma.TransactionClient = prisma
   ) {
-    const vehicle = await db.vehicle.findFirst({
-      where: { tenantId, id: vehicleId, deletedAt: null, isActive: true },
-      select: { id: true }
-    });
-    if (!vehicle) throw new AppError("Veicolo non valido o non attivo", 404, "VEHICLE_NOT_FOUND");
-    return vehicle;
+    try {
+      const vehicle = await lockOwnedVehicle(db, tenantId, vehicleId);
+      if (!vehicle.isActive) throw new AppError("Veicolo non valido o non attivo", 404, "VEHICLE_NOT_FOUND");
+      return vehicle;
+    } catch (error) {
+      if (error instanceof AppError && error.statusCode === 404) {
+        throw new AppError("Veicolo non valido o non attivo", 404, "VEHICLE_NOT_FOUND");
+      }
+      throw error;
+    }
   }
 
   private async getBookingOrThrow(tenantId: string, bookingId: string) {
     const booking = await prisma.rentalBooking.findFirst({
-      where: { tenantId, id: bookingId, deletedAt: null },
+      where: { ...ownedBookingWhere(tenantId), id: bookingId, deletedAt: null },
       include: {
         vehicle: { select: vehicleSelect },
         customer: { select: customerSelect },
@@ -1396,7 +1425,7 @@ export class RentalBookingsController {
     db: Prisma.TransactionClient = prisma
   ) {
     const booking = await db.rentalBooking.findFirst({
-      where: { tenantId, id: bookingId, deletedAt: null },
+      where: { ...ownedBookingWhere(tenantId), id: bookingId, deletedAt: null },
       include: {
         vehicle: { select: vehicleSelect },
         customer: { select: customerSelect }
@@ -1432,7 +1461,7 @@ export class RentalBookingsController {
     extraKmPolicyId?: string | null;
   }) {
     const list = await prisma.rentalPriceList.findFirst({
-      where: { tenantId: input.tenantId, id: input.priceListId, deletedAt: null },
+      where: { tenantId: input.tenantId, id: input.priceListId, deletedAt: null, AND: [ownedPricingVehicleWhere(input.tenantId)] },
       include: {
         packages: {
           where: { tenantId: input.tenantId, deletedAt: null, isActive: true },
@@ -1510,13 +1539,14 @@ export class RentalBookingsController {
     return Math.max(0, returnKm - pickupKm);
   }
 
-  private async syncVehicleCurrentKmFromBooking(input: {
+  private async syncVehicleCurrentKmFromBooking(tx: Prisma.TransactionClient, input: {
     tenantId: string;
     vehicleId: string;
     nextKm: number;
   }) {
-    const vehicle = await prisma.vehicle.findFirst({
-      where: { id: input.vehicleId, tenantId: input.tenantId, deletedAt: null },
+    await lockOwnedVehicle(tx, input.tenantId, input.vehicleId);
+    const vehicle = await tx.vehicle.findFirst({
+      where: { ...ownedVehicleWhere(input.tenantId), id: input.vehicleId },
       include: {
         maintenances: {
           where: { tenantId: input.tenantId, deletedAt: null },
@@ -1536,7 +1566,7 @@ export class RentalBookingsController {
       );
     }
 
-    await prisma.vehicle.update({
+    await tx.vehicle.update({
       where: { id: vehicle.id },
       data: { currentKm: input.nextKm }
     });
@@ -1573,7 +1603,7 @@ export class RentalBookingsController {
     const pagination = { skip: (query.page - 1) * query.pageSize, take: query.pageSize };
 
     const where: Prisma.RentalBookingWhereInput = {
-      tenantId,
+      ...ownedBookingWhere(tenantId),
       deletedAt: null,
       ...(query.status ? { status: query.status } : {}),
       ...(query.contractStatus ? { contractStatus: query.contractStatus } : {}),
@@ -1639,12 +1669,12 @@ export class RentalBookingsController {
         }
       }),
       prisma.rentalBooking.count({
-        where: { tenantId, deletedAt: null, status: { in: ["DRAFT", "QUOTED", "HOLD", "CONFIRMED", "CONTRACT_SIGNED", "READY_FOR_HANDOVER"] } }
+        where: { ...ownedBookingWhere(tenantId), deletedAt: null, status: { in: ["DRAFT", "QUOTED", "HOLD", "CONFIRMED", "CONTRACT_SIGNED", "READY_FOR_HANDOVER"] } }
       }),
-      prisma.rentalBooking.count({ where: { tenantId, deletedAt: null, status: "READY_FOR_HANDOVER" } }),
-      prisma.rentalBooking.count({ where: { tenantId, deletedAt: null, status: "IN_RENT" } }),
-      prisma.rentalBooking.count({ where: { tenantId, deletedAt: null, cargosStatus: "PENDING" } }),
-      prisma.rentalBooking.count({ where: { tenantId, deletedAt: null, cargosStatus: "ERROR" } })
+      prisma.rentalBooking.count({ where: { ...ownedBookingWhere(tenantId), deletedAt: null, status: "READY_FOR_HANDOVER" } }),
+      prisma.rentalBooking.count({ where: { ...ownedBookingWhere(tenantId), deletedAt: null, status: "IN_RENT" } }),
+      prisma.rentalBooking.count({ where: { ...ownedBookingWhere(tenantId), deletedAt: null, cargosStatus: "PENDING" } }),
+      prisma.rentalBooking.count({ where: { ...ownedBookingWhere(tenantId), deletedAt: null, cargosStatus: "ERROR" } })
     ]);
 
     res.json({
@@ -1673,10 +1703,10 @@ export class RentalBookingsController {
     });
 
     const bookingWhere: Prisma.RentalBookingWhereInput = {
-      tenantId,
+      ...ownedBookingWhere(tenantId),
       deletedAt: null,
       ...(query.bookingStatus ? { status: query.bookingStatus } : {}),
-      ...(query.siteId ? { vehicle: { is: { siteId: query.siteId } } } : {}),
+      ...(query.siteId ? { AND: [{ vehicle: { is: { siteId: query.siteId } } }] } : {}),
       ...(period ? { pickupAt: { gte: period.from, lte: period.to } } : {}),
       ...(query.search
         ? {
@@ -1705,11 +1735,17 @@ export class RentalBookingsController {
     const tomorrowStart = new Date(todayStart);
     tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
-    const baseBookingDayFilter = {
-      tenantId,
+    const baseBookingDayFilter: Prisma.RentalBookingWhereInput = {
+      ...ownedBookingWhere(tenantId),
       deletedAt: null,
-      ...(query.siteId ? { vehicle: { is: { siteId: query.siteId } } } : {})
-    } as const;
+      ...(query.siteId ? { AND: [{ vehicle: { is: { siteId: query.siteId } } }] } : {})
+    };
+
+    // Delivery history previously included deleted bookings unless a Site was requested.
+    const deliveryBookingFilter: Prisma.RentalBookingWhereInput = {
+      ...ownedBookingWhere(tenantId),
+      ...(query.siteId ? { deletedAt: null, AND: [{ vehicle: { is: { siteId: query.siteId } } }] } : {})
+    };
 
     const [total, rows, contractsToSend, sentToday, signedCount, errorCount, exitsToday, returnsToday, latestPickups, latestReturns, latestDeliveries] =
       await Promise.all([
@@ -1755,7 +1791,7 @@ export class RentalBookingsController {
             tenantId,
             deletedAt: null,
             status: { in: ["DRAFT", "READY"] },
-            booking: { tenantId, deletedAt: null }
+            booking: { is: { ...ownedBookingWhere(tenantId), deletedAt: null } }
           }
         }),
         prisma.bookingContractDelivery.count({
@@ -1763,17 +1799,9 @@ export class RentalBookingsController {
             tenantId,
             status: "SENT",
             sentAt: { gte: todayStart, lt: tomorrowStart },
-            ...(query.siteId
-              ? {
-                  contract: {
-                    booking: {
-                      tenantId,
-                      deletedAt: null,
-                      vehicle: { is: { siteId: query.siteId } }
-                    }
-                  }
-                }
-              : {})
+            contract: {
+              is: { tenantId, booking: { is: deliveryBookingFilter } }
+            }
           }
         }),
         prisma.bookingContract.count({
@@ -1781,7 +1809,7 @@ export class RentalBookingsController {
             tenantId,
             deletedAt: null,
             status: "SIGNED",
-            booking: { tenantId, deletedAt: null, ...(query.siteId ? { vehicle: { is: { siteId: query.siteId } } } : {}) }
+            booking: { is: baseBookingDayFilter }
           }
         }),
         prisma.bookingContract.count({
@@ -1789,7 +1817,7 @@ export class RentalBookingsController {
             tenantId,
             deletedAt: null,
             OR: [{ status: "ERROR" }, { deliveries: { some: { status: "FAILED" } } }],
-            booking: { tenantId, deletedAt: null, ...(query.siteId ? { vehicle: { is: { siteId: query.siteId } } } : {}) }
+            booking: { is: baseBookingDayFilter }
           }
         }),
         prisma.rentalBooking.count({
@@ -1843,17 +1871,9 @@ export class RentalBookingsController {
         prisma.bookingContractDelivery.findMany({
           where: {
             tenantId,
-            ...(query.siteId
-              ? {
-                  contract: {
-                    booking: {
-                      tenantId,
-                      deletedAt: null,
-                      vehicle: { is: { siteId: query.siteId } }
-                    }
-                  }
-                }
-              : {})
+            contract: {
+              is: { tenantId, booking: { is: deliveryBookingFilter } }
+            }
           },
           orderBy: [{ createdAt: "desc" }],
           take: 8,
@@ -1980,7 +2000,7 @@ export class RentalBookingsController {
   getById = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const booking = await prisma.rentalBooking.findFirst({
-      where: { tenantId, id: req.params.id, deletedAt: null },
+      where: { ...ownedBookingWhere(tenantId), id: req.params.id, deletedAt: null },
       include: {
         vehicle: { select: vehicleSelect },
         customer: {
@@ -2028,7 +2048,7 @@ export class RentalBookingsController {
   quickDetail = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const booking = await prisma.rentalBooking.findFirst({
-      where: { tenantId, id: req.params.id, deletedAt: null },
+      where: { ...ownedBookingWhere(tenantId), id: req.params.id, deletedAt: null },
       select: {
         id: true,
         code: true,
@@ -2113,11 +2133,6 @@ export class RentalBookingsController {
       actualKm
     });
 
-    const existingSnapshot = await prisma.rentalBookingPricingSnapshot.findFirst({
-      where: { tenantId, bookingId: booking.id, deletedAt: null },
-      select: { id: true }
-    });
-
     const snapshotData = {
       tenantId,
       bookingId: booking.id,
@@ -2154,23 +2169,44 @@ export class RentalBookingsController {
       })
     } as const;
 
-    const [snapshot] = await prisma.$transaction([
-      existingSnapshot
-        ? prisma.rentalBookingPricingSnapshot.update({
+    const snapshot = await prisma.$transaction(async (tx) => {
+      // Match transition/update: schedule -> Vehicle -> Booking -> Snapshot.
+      // Lock the booking before touching its snapshot to prevent opposite-order deadlocks.
+      await this.lockBookingMutation(tx, tenantId, booking.id);
+      await this.lockBookingSchedule(tx, tenantId, booking.vehicleId);
+      await lockOwnedVehicle(tx, tenantId, booking.vehicleId, true);
+      await tx.$queryRaw`
+        SELECT "id" FROM "RentalBooking"
+        WHERE "id" = ${booking.id} AND "tenantId" = ${tenantId} FOR UPDATE
+      `;
+      const locked = await tx.rentalBooking.findFirst({
+        where: { ...ownedBookingWhere(tenantId), id: booking.id, deletedAt: null }
+      });
+      if (!locked) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+      if (locked.vehicleId !== booking.vehicleId || locked.updatedAt.getTime() !== booking.updatedAt.getTime()) {
+        throw new AppError("La prenotazione e' cambiata. Riprova.", 409, "BOOKING_CHANGED");
+      }
+
+      // Read after the booking fence so two legitimate requests cannot both
+      // decide to create the same first pricing snapshot from a stale lookup.
+      const existingSnapshot = await tx.rentalBookingPricingSnapshot.findFirst({
+        where: { tenantId, bookingId: booking.id, deletedAt: null },
+        select: { id: true }
+      });
+      const savedSnapshot = existingSnapshot
+        ? await tx.rentalBookingPricingSnapshot.update({
             where: { id: existingSnapshot.id },
             data: snapshotData
           })
-        : prisma.rentalBookingPricingSnapshot.create({
-            data: snapshotData
-          }),
-      prisma.rentalBooking.update({
+        : await tx.rentalBookingPricingSnapshot.create({ data: snapshotData });
+      await tx.rentalBooking.update({
         where: { id: booking.id },
         data: {
           expectedTotal: quote.pricing.expectedTotal,
           ...(actualKm != null ? { finalTotal: quote.pricing.finalTotal } : {})
         }
-      }),
-      prisma.rentalBookingNote.create({
+      });
+      await tx.rentalBookingNote.create({
         data: {
           tenantId,
           bookingId: booking.id,
@@ -2180,8 +2216,9 @@ export class RentalBookingsController {
             setup.selectedPolicy ? ` · ${setup.selectedPolicy.name}` : ""
           }`
         }
-      })
-    ]);
+      });
+      return savedSnapshot;
+    });
 
     const exactSnapshot = await this.hydratePricingSnapshot(tenantId, snapshot);
     res.json({
@@ -2198,8 +2235,7 @@ export class RentalBookingsController {
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
+        ...ownedVehicleWhere(tenantId),
         isActive: true,
         ...(query.siteId ? { siteId: query.siteId } : {}),
         OR: [
@@ -3225,7 +3261,7 @@ export class RentalBookingsController {
         include: {
           _count: {
             select: {
-              bookings: { where: { tenantId } },
+              bookings: { where: ownedBookingWhere(tenantId) },
               attachments: { where: { tenantId } }
             }
           }
@@ -3278,7 +3314,7 @@ export class RentalBookingsController {
         },
         _count: {
           select: {
-            bookings: { where: { tenantId } },
+            bookings: { where: ownedBookingWhere(tenantId) },
             attachments: { where: { tenantId } }
           }
         }
@@ -3319,7 +3355,7 @@ export class RentalBookingsController {
       deletedAt: null,
       ...(query.status ? { status: query.status } : {}),
       booking: {
-        tenantId,
+        ...ownedBookingWhere(tenantId),
         customerId,
         deletedAt: null,
         ...(period ? { pickupAt: { gte: period.from, lte: period.to } } : {})
@@ -3393,7 +3429,7 @@ export class RentalBookingsController {
     });
 
     const where: Prisma.RentalBookingWhereInput = {
-      tenantId,
+      ...ownedBookingWhere(tenantId),
       customerId,
       deletedAt: null,
       ...(query.status ? { status: query.status } : {}),
@@ -3835,7 +3871,7 @@ export class RentalBookingsController {
     const updated = await prisma.$transaction(async (tx) => {
       await this.lockBookingMutation(tx, tenantId, req.params.id);
       const current = await tx.rentalBooking.findFirst({
-        where: { tenantId, id: req.params.id, deletedAt: null }
+        where: { ...ownedBookingWhere(tenantId), id: req.params.id, deletedAt: null }
       });
       if (!current) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
 
@@ -3850,11 +3886,29 @@ export class RentalBookingsController {
         nextPickupAt.getTime() !== current.pickupAt.getTime() ||
         nextReturnAt.getTime() !== current.returnAt.getTime();
 
-      if (scheduleChanged) {
-        await this.lockBookingSchedule(tx, tenantId, nextVehicleId);
+      const vehicleIds = [...new Set([current.vehicleId, nextVehicleId])].sort();
+      // Schedule locks always precede Vehicle locks, matching booking creation.
+      for (const vehicleId of vehicleIds) await this.lockBookingSchedule(tx, tenantId, vehicleId);
+      for (const vehicleId of vehicleIds) {
+        if (vehicleId === current.vehicleId) {
+          try { await lockOwnedVehicle(tx, tenantId, vehicleId, true); }
+          catch (error) {
+            if (error instanceof AppError && error.statusCode === 404) {
+              throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+            }
+            throw error;
+          }
+        } else await this.getAssignableVehicleOrThrow(tenantId, vehicleId, tx);
       }
-      if (payload.vehicleId !== undefined && payload.vehicleId !== current.vehicleId) {
-        await this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId, tx);
+      await tx.$queryRaw`
+        SELECT "id" FROM "RentalBooking"
+        WHERE "id" = ${current.id} AND "tenantId" = ${tenantId} FOR UPDATE
+      `;
+      const lockedBooking = await tx.rentalBooking.findFirst({
+        where: { ...ownedBookingWhere(tenantId), id: current.id, deletedAt: null }
+      });
+      if (!lockedBooking || lockedBooking.vehicleId !== current.vehicleId) {
+        throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
       }
 
       if (!nextCustomerId) throw new AppError("Cliente obbligatorio", 400, "CUSTOMER_REQUIRED");
@@ -4087,55 +4141,73 @@ export class RentalBookingsController {
       snapshotUpdateData = { actualKm: drivenKm };
     }
 
-    const updated = await prisma.rentalBooking.update({
-      where: { id: current.id },
-      data: {
-        status: payload.toStatus,
-        ...(payload.toStatus === "CONTRACT_SIGNED"
-          ? { contractStatus: "SIGNED", contractSignedAt: current.contractSignedAt ?? new Date() }
-          : {}),
-        ...(finalTotalFromKm != null
-          ? { finalTotal: finalTotalFromKm }
-          : {}),
-        ...(finalTotalFromKm == null &&
-        payload.toStatus === "CLOSED" &&
-        current.finalTotal == null &&
-        current.expectedTotal != null
-          ? { finalTotal: current.expectedTotal }
-          : {})
-      }
-    });
-
-    if (snapshotUpdateData) {
-      await prisma.rentalBookingPricingSnapshot.updateMany({
-        where: { tenantId, bookingId: updated.id, deletedAt: null },
-        data: snapshotUpdateData
+    const updated = await prisma.$transaction(async (tx) => {
+      await this.lockBookingMutation(tx, tenantId, current.id);
+      await this.lockBookingSchedule(tx, tenantId, current.vehicleId);
+      await lockOwnedVehicle(tx, tenantId, current.vehicleId, kmSyncTarget == null);
+      await tx.$queryRaw`
+        SELECT "id" FROM "RentalBooking"
+        WHERE "id" = ${current.id} AND "tenantId" = ${tenantId} FOR UPDATE
+      `;
+      const locked = await tx.rentalBooking.findFirst({
+        where: { ...ownedBookingWhere(tenantId), id: current.id, deletedAt: null }
       });
-    }
-
-    let kmSyncMessage = "";
-    if (kmSyncTarget != null) {
-      const syncResult = await this.syncVehicleCurrentKmFromBooking({
-        tenantId,
-        vehicleId: updated.vehicleId,
-        nextKm: kmSyncTarget
-      });
-      kmSyncMessage = `Km veicolo aggiornati a ${syncResult.nextKm}`;
-      if (syncResult.dueByKm) {
-        kmSyncMessage += " · manutenzione km SCADUTA";
-      } else if (syncResult.dueSoonByKm && syncResult.remainingKm != null) {
-        kmSyncMessage += ` · manutenzione in scadenza (${syncResult.remainingKm} km residui)`;
+      if (!locked || locked.vehicleId !== current.vehicleId || locked.updatedAt.getTime() !== current.updatedAt.getTime()) {
+        throw new AppError("La prenotazione e' cambiata. Riprova.", 409, "BOOKING_CHANGED");
       }
-    }
+      const changed = await tx.rentalBooking.update({
+        where: { id: current.id },
+        data: {
+          status: payload.toStatus,
+          ...(payload.toStatus === "CONTRACT_SIGNED"
+            ? { contractStatus: "SIGNED", contractSignedAt: current.contractSignedAt ?? new Date() }
+            : {}),
+          ...(finalTotalFromKm != null
+            ? { finalTotal: finalTotalFromKm }
+            : {}),
+          ...(finalTotalFromKm == null &&
+          payload.toStatus === "CLOSED" &&
+          current.finalTotal == null &&
+          current.expectedTotal != null
+            ? { finalTotal: current.expectedTotal }
+            : {})
+        }
+      });
 
-    await this.logNote({
-      tenantId,
-      bookingId: updated.id,
-      userId,
-      type: "SYSTEM",
-      message: `Stato prenotazione: ${current.status} -> ${updated.status}${payload.reason ? ` (${payload.reason})` : ""}${
-        kmSyncMessage ? ` · ${kmSyncMessage}` : ""
-      }`
+      if (snapshotUpdateData) {
+        await tx.rentalBookingPricingSnapshot.updateMany({
+          where: { tenantId, bookingId: changed.id, deletedAt: null },
+          data: snapshotUpdateData
+        });
+      }
+
+      let kmSyncMessage = "";
+      if (kmSyncTarget != null) {
+        const syncResult = await this.syncVehicleCurrentKmFromBooking(tx, {
+          tenantId,
+          vehicleId: changed.vehicleId,
+          nextKm: kmSyncTarget
+        });
+        kmSyncMessage = `Km veicolo aggiornati a ${syncResult.nextKm}`;
+        if (syncResult.dueByKm) {
+          kmSyncMessage += " · manutenzione km SCADUTA";
+        } else if (syncResult.dueSoonByKm && syncResult.remainingKm != null) {
+          kmSyncMessage += ` · manutenzione in scadenza (${syncResult.remainingKm} km residui)`;
+        }
+      }
+
+      await tx.rentalBookingNote.create({
+        data: {
+          tenantId,
+          bookingId: changed.id,
+          userId,
+          type: "SYSTEM",
+          message: `Stato prenotazione: ${current.status} -> ${changed.status}${payload.reason ? ` (${payload.reason})` : ""}${
+            kmSyncMessage ? ` · ${kmSyncMessage}` : ""
+          }`
+        }
+      });
+      return changed;
     });
 
     res.json(updated);
@@ -4227,8 +4299,7 @@ export class RentalBookingsController {
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
+        ...ownedVehicleWhere(tenantId),
         isActive: true,
         ...(parsed.siteId ? { siteId: parsed.siteId } : {})
       },
@@ -4240,7 +4311,7 @@ export class RentalBookingsController {
     const bookings = vehicleIds.length
       ? await prisma.rentalBooking.findMany({
           where: {
-            tenantId,
+            ...ownedBookingWhere(tenantId),
             deletedAt: null,
             vehicleId: { in: vehicleIds },
             status: { in: [...ACTIVE_BOOKING_STATUSES] },
@@ -4313,8 +4384,7 @@ export class RentalBookingsController {
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
+        ...ownedVehicleWhere(tenantId),
         isActive: true,
         ...(parsed.siteId ? { siteId: parsed.siteId } : {})
       },
@@ -4326,7 +4396,7 @@ export class RentalBookingsController {
     const bookings = vehicleIds.length
       ? await prisma.rentalBooking.findMany({
           where: {
-            tenantId,
+            ...ownedBookingWhere(tenantId),
             deletedAt: null,
             vehicleId: { in: vehicleIds },
             status: { in: [...MONTHLY_VISIBLE_STATUSES] },

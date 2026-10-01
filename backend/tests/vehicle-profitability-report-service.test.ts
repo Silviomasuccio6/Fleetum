@@ -45,9 +45,10 @@ const withOwnedUserScope = async <T>(run: () => Promise<T>): Promise<T> => {
 const assertOwnedStoppageScope = (where: any) => {
   assert.equal(where.tenantId, "tenant_a");
   assert.equal(where.deletedAt, null);
-  for (const relation of ["site", "vehicle", "workshop", "createdBy"]) {
+  for (const relation of ["site", "workshop", "createdBy"]) {
     assert.deepEqual(where[relation], { tenantId: "tenant_a" });
   }
+  assert.deepEqual(where.vehicle, { tenantId: "tenant_a", site: { tenantId: "tenant_a" } });
   assert.deepEqual(where.AND, [{
     OR: [{ assignedToUserId: null }, { assignedToUserId: { in: ownedUserIds } }]
   }]);
@@ -57,6 +58,7 @@ test("vehicle profitability report calculates revenue, costs, utilization and RO
   (prisma.vehicle as any).findMany = async (input: any) => {
     assert.equal(input.where.tenantId, "tenant_a");
     assert.equal(input.where.deletedAt, null);
+    assert.deepEqual(input.where.site, { tenantId: "tenant_a" });
     return [
       {
         id: "veh_1",

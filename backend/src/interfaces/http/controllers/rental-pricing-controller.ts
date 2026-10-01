@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
+import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 import { computeRentalQuote } from "../../../application/services/rental-pricing-service.js";
 import {
   rentalPricingCreateExtraPolicySchema,
@@ -17,6 +18,10 @@ import { AppError } from "../../../shared/errors/app-error.js";
 
 const withDefined = <T extends Record<string, unknown>>(input: T): Partial<T> =>
   Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
+
+const ownedPricingVehicleWhere = (tenantId: string): Prisma.RentalPriceListWhereInput => ({
+  OR: [{ vehicleId: null }, { vehicle: { is: ownedVehicleWhere(tenantId, true) } }]
+});
 
 export class RentalPricingController {
   private async hydrateExtraPolicies<
@@ -65,7 +70,7 @@ export class RentalPricingController {
 
     if (input.vehicleId) {
       const vehicle = await prisma.vehicle.findFirst({
-        where: { tenantId: input.tenantId, id: input.vehicleId, deletedAt: null, isActive: true },
+        where: { ...ownedVehicleWhere(input.tenantId), id: input.vehicleId, isActive: true },
         select: { id: true }
       });
       if (!vehicle) throw new AppError("Veicolo non valido per il tenant corrente.", 404, "RENTAL_PRICING_VEHICLE_NOT_FOUND");
@@ -74,7 +79,7 @@ export class RentalPricingController {
 
   private async getPriceListOrThrow(tenantId: string, id: string) {
     const list = await prisma.rentalPriceList.findFirst({
-      where: { tenantId, id, deletedAt: null }
+      where: { tenantId, id, deletedAt: null, AND: [ownedPricingVehicleWhere(tenantId)] }
     });
     if (!list) throw new AppError("Listino non trovato.", 404, "RENTAL_PRICE_LIST_NOT_FOUND");
     return exactMoneyReader.hydrateOne("RentalPriceList", list, { tenantId });
@@ -87,7 +92,7 @@ export class RentalPricingController {
     extraKmPolicyId?: string | null;
   }) {
     const list = await prisma.rentalPriceList.findFirst({
-      where: { tenantId: input.tenantId, id: input.priceListId, deletedAt: null },
+      where: { tenantId: input.tenantId, id: input.priceListId, deletedAt: null, AND: [ownedPricingVehicleWhere(input.tenantId)] },
       include: {
         packages: {
           where: { deletedAt: null, isActive: true },
@@ -147,6 +152,7 @@ export class RentalPricingController {
     const where: Prisma.RentalPriceListWhereInput = {
       tenantId,
       deletedAt: null,
+      AND: [ownedPricingVehicleWhere(tenantId)],
       ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
       ...(query.siteId ? { siteId: query.siteId } : {}),
       ...(query.scope ? { scope: query.scope } : {}),
@@ -195,25 +201,31 @@ export class RentalPricingController {
       vehicleCategory: payload.scope === "VEHICLE_CATEGORY" ? payload.vehicleCategory : undefined
     });
 
-    const created = await prisma.rentalPriceList.create({
-      data: {
-        tenantId,
-        name: payload.name,
-        description: payload.description,
-        isActive: payload.isActive,
-        validFrom: payload.validFrom,
-        validTo: payload.validTo,
-        scope: payload.scope,
-        siteId: payload.scope === "SITE" ? payload.siteId ?? null : null,
-        vehicleId: payload.scope === "VEHICLE" ? payload.vehicleId ?? null : null,
-        vehicleCategory: payload.scope === "VEHICLE_CATEGORY" ? payload.vehicleCategory ?? null : null,
-        baseRateUnit: payload.baseRateUnit,
-        baseRateAmount: payload.baseRateAmount,
-        vatRate: payload.vatRate,
-        discountPercent: payload.discountPercent,
-        hourOverflowRule: payload.hourOverflowRule,
-        priority: payload.priority
+    const created = await prisma.$transaction(async (tx) => {
+      if (payload.scope === "VEHICLE" && payload.vehicleId) {
+        const vehicle = await lockOwnedVehicle(tx, tenantId, payload.vehicleId);
+        if (!vehicle.isActive) throw new AppError("Veicolo non valido per il tenant corrente.", 404, "RENTAL_PRICING_VEHICLE_NOT_FOUND");
       }
+      return tx.rentalPriceList.create({
+        data: {
+          tenantId,
+          name: payload.name,
+          description: payload.description,
+          isActive: payload.isActive,
+          validFrom: payload.validFrom,
+          validTo: payload.validTo,
+          scope: payload.scope,
+          siteId: payload.scope === "SITE" ? payload.siteId ?? null : null,
+          vehicleId: payload.scope === "VEHICLE" ? payload.vehicleId ?? null : null,
+          vehicleCategory: payload.scope === "VEHICLE_CATEGORY" ? payload.vehicleCategory ?? null : null,
+          baseRateUnit: payload.baseRateUnit,
+          baseRateAmount: payload.baseRateAmount,
+          vatRate: payload.vatRate,
+          discountPercent: payload.discountPercent,
+          hourOverflowRule: payload.hourOverflowRule,
+          priority: payload.priority
+        }
+      });
     });
 
     const exactCreated = await exactMoneyReader.hydrateOne(
@@ -242,31 +254,51 @@ export class RentalPricingController {
       vehicleCategory: nextScope === "VEHICLE_CATEGORY" ? nextVehicleCategory : undefined
     });
 
-    const updated = await prisma.rentalPriceList.update({
-      where: { id: current.id },
-      data: {
-        ...withDefined({
-          name: payload.name,
-          description: payload.description,
-          isActive: payload.isActive,
-          validFrom: payload.validFrom,
-          validTo: payload.validTo,
-          baseRateUnit: payload.baseRateUnit,
-          baseRateAmount: payload.baseRateAmount,
-          vatRate: payload.vatRate,
-          discountPercent: payload.discountPercent,
-          hourOverflowRule: payload.hourOverflowRule,
-          priority: payload.priority,
-          scope: payload.scope
-        }),
-        ...(payload.scope !== undefined || payload.siteId !== undefined || payload.vehicleId !== undefined || payload.vehicleCategory !== undefined
-          ? {
-              siteId: nextScope === "SITE" ? nextSiteId ?? null : null,
-              vehicleId: nextScope === "VEHICLE" ? nextVehicleId ?? null : null,
-              vehicleCategory: nextScope === "VEHICLE_CATEGORY" ? nextVehicleCategory ?? null : null
-            }
-          : {})
+    const updated = await prisma.$transaction(async (tx) => {
+      const finalVehicleId = nextScope === "VEHICLE" ? nextVehicleId : undefined;
+      const vehicleIds = [...new Set([current.vehicleId, finalVehicleId].filter((id): id is string => Boolean(id)))].sort();
+      for (const vehicleId of vehicleIds) {
+        const vehicle = await lockOwnedVehicle(tx, tenantId, vehicleId, vehicleId === current.vehicleId && vehicleId !== finalVehicleId);
+        if (vehicleId === finalVehicleId && !vehicle.isActive) {
+          throw new AppError("Veicolo non valido per il tenant corrente.", 404, "RENTAL_PRICING_VEHICLE_NOT_FOUND");
+        }
       }
+      await tx.$queryRaw`
+        SELECT "id" FROM "RentalPriceList"
+        WHERE "id" = ${current.id} AND "tenantId" = ${tenantId} FOR UPDATE
+      `;
+      const locked = await tx.rentalPriceList.findFirst({
+        where: { tenantId, id: current.id, deletedAt: null, AND: [ownedPricingVehicleWhere(tenantId)] }
+      });
+      if (!locked || locked.vehicleId !== current.vehicleId || locked.updatedAt.getTime() !== current.updatedAt.getTime()) {
+        throw new AppError("Il listino e' cambiato. Riprova.", 409, "RENTAL_PRICE_LIST_CHANGED");
+      }
+      return tx.rentalPriceList.update({
+        where: { id: current.id },
+        data: {
+          ...withDefined({
+            name: payload.name,
+            description: payload.description,
+            isActive: payload.isActive,
+            validFrom: payload.validFrom,
+            validTo: payload.validTo,
+            baseRateUnit: payload.baseRateUnit,
+            baseRateAmount: payload.baseRateAmount,
+            vatRate: payload.vatRate,
+            discountPercent: payload.discountPercent,
+            hourOverflowRule: payload.hourOverflowRule,
+            priority: payload.priority,
+            scope: payload.scope
+          }),
+          ...(payload.scope !== undefined || payload.siteId !== undefined || payload.vehicleId !== undefined || payload.vehicleCategory !== undefined
+            ? {
+                siteId: nextScope === "SITE" ? nextSiteId ?? null : null,
+                vehicleId: nextScope === "VEHICLE" ? nextVehicleId ?? null : null,
+                vehicleCategory: nextScope === "VEHICLE_CATEGORY" ? nextVehicleCategory ?? null : null
+              }
+            : {})
+        }
+      });
     });
 
     const exactUpdated = await exactMoneyReader.hydrateOne(

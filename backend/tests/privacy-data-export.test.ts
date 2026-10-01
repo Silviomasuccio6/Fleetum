@@ -108,7 +108,10 @@ test("customer data export returns every inventoried data section", async () => 
   for (const [relation, decision] of Object.entries(RENTAL_CUSTOMER_EXPORT_RELATION_INVENTORY)) {
     if (decision.included) assert.ok(customerQuery.include[relation], `${relation} is not queried by the export`);
   }
-  assert.equal(customerQuery.include.bookings.where, undefined, "Soft-deleted retained bookings must remain exportable");
+  assert.deepEqual(customerQuery.include.bookings.where, {
+    tenantId: "tenant_a",
+    vehicle: { tenantId: "tenant_a", site: { tenantId: "tenant_a" } }
+  }, "Retained bookings and vehicles remain exportable only with an owned vehicle and site");
   assert.equal(customerQuery.include.paymentMethods.select.stripePaymentMethodId, undefined);
   assert.equal(customerQuery.include.rentalPaymentEvents.select.payload, undefined);
   assert.equal(result.schemaVersion, RENTAL_CUSTOMER_DATA_EXPORT_SCHEMA_VERSION);

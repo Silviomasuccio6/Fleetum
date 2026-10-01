@@ -7,6 +7,7 @@ import {
 } from "../../domain/repositories/notifications-repository.js";
 import { prisma } from "../database/prisma/client.js";
 import { ownedStoppageWhere } from "./stoppage-tenant-scope.js";
+import { ownedVehicleWhere } from "./vehicle-tenant-scope.js";
 
 export class PrismaNotificationsRepository implements NotificationsRepository {
   async listOpenStoppages(tenantId: string, take: number): Promise<NotificationStoppageRow[]> {
@@ -43,7 +44,7 @@ export class PrismaNotificationsRepository implements NotificationsRepository {
 
   async listVehicleDeadlineCandidates(tenantId: string, take: number): Promise<NotificationVehicleDeadlineRow[]> {
     return prisma.vehicle.findMany({
-      where: { tenantId, deletedAt: null, isActive: true },
+      where: { ...ownedVehicleWhere(tenantId), isActive: true },
       orderBy: [{ updatedAt: "desc" }],
       take,
       select: {

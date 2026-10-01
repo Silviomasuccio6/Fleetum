@@ -6,6 +6,7 @@ import { prisma } from "../database/prisma/client.js";
 import { EmailQueueService } from "../email/email-queue-service.js";
 import { logger } from "../logging/logger.js";
 import { ownedStoppageWhere } from "../repositories/stoppage-tenant-scope.js";
+import { ownedVehicleWhere } from "../repositories/vehicle-tenant-scope.js";
 import {
   latestDueOccurrence,
   nextScheduledOccurrence,
@@ -126,12 +127,16 @@ const buildTenantReportInputs = async (
           openedAt: { lte: new Date(now.getTime() - 30 * 86400000) }
         }
       }),
-      prisma.vehicle.count({ where: { tenantId, deletedAt: null, isActive: true } })
+      prisma.vehicle.count({ where: { ...ownedVehicleWhere(tenantId), isActive: true } })
     ]);
   const kmRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
     SELECT COUNT(*)::bigint AS count
     FROM "Vehicle"
     WHERE "tenantId" = ${tenantId}
+      AND EXISTS (
+        SELECT 1 FROM "Site" AS site
+        WHERE site."id" = "Vehicle"."siteId" AND site."tenantId" = ${tenantId}
+      )
       AND "deletedAt" IS NULL
       AND "isActive" = true
       AND "currentKm" IS NOT NULL

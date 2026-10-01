@@ -13,6 +13,7 @@ import {
   RENTAL_CUSTOMER_EXPORT_RELATION_INVENTORY
 } from "./rental-customer-data-export-inventory.js";
 import { buildRentalCustomerAnonymizationData } from "./rental-customer-pii.js";
+import { ownedVehicleWhere } from "../../infrastructure/repositories/vehicle-tenant-scope.js";
 
 const retentionDefaults = {
   expiredTokenRetentionDays: 30,
@@ -321,6 +322,7 @@ export class PrivacyComplianceService {
           orderBy: { createdAt: "desc" }
         },
         bookings: {
+          where: { tenantId: input.tenantId, vehicle: ownedVehicleWhere(input.tenantId, true) },
           orderBy: { pickupAt: "desc" },
           select: {
             id: true,

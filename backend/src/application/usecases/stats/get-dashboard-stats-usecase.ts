@@ -2,6 +2,7 @@ import { BookingContractStatus, RentalBookingStatus, StoppageStatus } from "@pri
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
 import { ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
+import { ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 
 type AnalyticsFilters = {
   dateFrom?: Date;
@@ -59,6 +60,7 @@ export class GetDashboardStatsUseCase {
       ownedStoppageWhere(tenantId),
       ownedStoppageWhere(tenantId, prisma, true)
     ]);
+    const historicalVehicleScope = ownedVehicleWhere(tenantId, true);
 
     const [
       stoppageRows,
@@ -97,7 +99,7 @@ export class GetDashboardStatsUseCase {
         }
       }),
       prisma.vehicle.findMany({
-        where: { tenantId, deletedAt: null, isActive: true },
+        where: { ...ownedVehicleWhere(tenantId), isActive: true },
         select: {
           id: true,
           plate: true,
@@ -107,7 +109,7 @@ export class GetDashboardStatsUseCase {
           maintenanceIntervalKm: true,
           revisionDueAt: true,
           maintenances: {
-            where: { deletedAt: null },
+            where: { tenantId, deletedAt: null },
             orderBy: [{ performedAt: "desc" }, { createdAt: "desc" }],
             take: 1,
             select: { kmAtService: true, performedAt: true }
@@ -118,6 +120,7 @@ export class GetDashboardStatsUseCase {
         where: {
           tenantId,
           deletedAt: null,
+          vehicle: historicalVehicleScope,
           pickupAt: { lte: monthEnd },
           returnAt: { gte: new Date(todayStart.getTime() - 30 * dayMs) }
         },
@@ -166,11 +169,11 @@ export class GetDashboardStatsUseCase {
         }
       }),
       prisma.bookingContract.findMany({
-        where: { tenantId, deletedAt: null },
+        where: { tenantId, deletedAt: null, booking: { tenantId, vehicle: historicalVehicleScope } },
         select: { id: true, status: true, createdAt: true, updatedAt: true, lastSentAt: true, signedAt: true }
       }),
       prisma.bookingContractDelivery.findMany({
-        where: { tenantId },
+        where: { tenantId, contract: { tenantId, booking: { tenantId, vehicle: historicalVehicleScope } } },
         orderBy: { createdAt: "desc" },
         take: 50,
         select: { id: true, channel: true, status: true, sentAt: true, errorMessage: true, createdAt: true, bookingId: true }

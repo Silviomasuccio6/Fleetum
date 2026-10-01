@@ -68,13 +68,19 @@ export const lockReminderContext = async (
   const sites = await tx.$queryRaw<Array<{ tenantId: string; deletedAt: Date | null }>>`
     SELECT "tenantId", "deletedAt" FROM "Site" WHERE "id" = ${stoppage.siteId} FOR SHARE
   `;
-  const vehicles = await tx.$queryRaw<Array<{ tenantId: string; deletedAt: Date | null }>>`
-    SELECT "tenantId", "deletedAt" FROM "Vehicle" WHERE "id" = ${stoppage.vehicleId} FOR SHARE
+  const vehicles = await tx.$queryRaw<Array<{ tenantId: string; siteId: string; deletedAt: Date | null }>>`
+    SELECT "tenantId", "siteId", "deletedAt" FROM "Vehicle" WHERE "id" = ${stoppage.vehicleId} FOR SHARE
   `;
   const workshops = await tx.$queryRaw<Array<{ tenantId: string; deletedAt: Date | null; isActive: boolean }>>`
     SELECT "tenantId", "deletedAt", "isActive" FROM "Workshop" WHERE "id" = ${stoppage.workshopId} FOR SHARE
   `;
   if ([sites[0], vehicles[0], workshops[0]].some((row) => !row || row.tenantId !== tenantId || row.deletedAt)) {
+    return { reason: "STOPPAGE_RELATION_INVALID", stoppage: null };
+  }
+  const vehicleSites = await tx.$queryRaw<Array<{ tenantId: string }>>`
+    SELECT "tenantId" FROM "Site" WHERE "id" = ${vehicles[0].siteId} FOR SHARE
+  `;
+  if (!vehicleSites.length || vehicleSites[0].tenantId !== tenantId) {
     return { reason: "STOPPAGE_RELATION_INVALID", stoppage: null };
   }
   if (!workshops[0].isActive) return { reason: "WORKSHOP_INACTIVE", stoppage: null };
