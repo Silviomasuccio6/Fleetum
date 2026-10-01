@@ -40,6 +40,6 @@ Restano CI sullo SHA finale, review umana, staging con due tenant sintetici, mis
 
 ## Finding separati emersi dalla lettura
 
-- I reminder automatici hanno anche un invio diretto in `SendReminderUseCase.automaticRun` e la selezione non filtra tenant/licenza: questa tranche del worker report non lo corregge.
+- Il controllo reminder, inizialmente separato dalla tranche report, e' ora implementato nei producer e nel worker: [reminder-email-security-20260930.md](reminder-email-security-20260930.md) descrive policy, concorrenza, ricevute e limiti.
 - `RENTAL_EXTRA_CHARGE_NOTICE` contiene `bookingId`, che la validazione generica della coda interpreta come metadata di contratto incompleti. Richiede una correzione distinta della classificazione e dei test di dominio.
 - Lo storico completo delle variazioni di licenza durante un'interruzione non e' ricostruito dal controllo corrente, come gia' documentato per il cursore. La decisione usa la licenza al momento dell'autorizzazione.

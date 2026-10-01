@@ -88,11 +88,13 @@ export class PrismaStoppageRepository implements StoppageRepository {
     return prisma.stoppage.findMany({
       where: {
         deletedAt: null,
+        tenant: { isActive: true, deletedAt: null },
         status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] },
         reminderAfterDays: { not: null },
         openedAt: { lt: now }
       },
-      include: { workshop: true, vehicle: true, site: true }
+      // Relationships are read by the producer after locking their owners.
+      select: { id: true, tenantId: true }
     });
   }
 

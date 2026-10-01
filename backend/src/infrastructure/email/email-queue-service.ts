@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma/client.js";
 import { emailSender } from "./email-sender.js";
 import { dispatchScheduledReport } from "./scheduled-report-dispatch.js";
+import { dispatchReminderEmail, openReminderStatuses } from "./reminder-email-dispatch.js";
 
 export type QueueEmailInput = {
   tenantId?: string;
@@ -49,6 +50,20 @@ const tenantBoundTarget = <Keys extends readonly string[]>(
 
 const requireSingleUpdate = (result: { count: number }, label: string) => {
   if (result.count !== 1) throw new Error(`Finalizzazione coda non riuscita: ${label}`);
+};
+
+type ReminderTarget = { tenantId: string; values: Record<"stoppageId" | "reminderType", string> };
+const lockReminderFinalization = async (tx: Prisma.TransactionClient, target: ReminderTarget) => {
+  // Tenant before Stoppage avoids inverting Reminder's implicit FK lock
+  // against a producer authorizing a legacy license under Tenant FOR UPDATE.
+  await tx.$queryRaw`
+    SELECT "id" FROM "Tenant" WHERE "id" = ${target.tenantId} FOR KEY SHARE
+  `;
+  const rows = await tx.$queryRaw<Array<{ id: string; status: string; deletedAt: Date | null }>>`
+    SELECT "id", "status", "deletedAt" FROM "Stoppage"
+    WHERE "id" = ${target.values.stoppageId} AND "tenantId" = ${target.tenantId} FOR UPDATE
+  `;
+  return rows[0];
 };
 
 export class EmailQueueService {
@@ -139,6 +154,7 @@ export class EmailQueueService {
       } | null = null;
       let sent: Awaited<ReturnType<typeof emailSender.send>> | null = null;
       let providerAcceptedAt: string | null = null;
+      let providerStarted = false;
 
       try {
         contractTarget = tenantBoundTarget(
@@ -176,21 +192,26 @@ export class EmailQueueService {
         const storedProvider = metaString(meta, "emailProvider");
         const storedProviderMessageId = metaString(meta, "providerMessageId");
         providerAcceptedAt = metaString(meta, "providerAcceptedAt") ?? currentTime().toISOString();
-        const startDelivery = () => emailSender.send({
-          to: item.recipient,
-          subject: item.subject,
-          text: item.body,
-          html,
-          fromName,
-          replyTo,
-          attachments,
-          idempotencyKey: providerIdempotencyKey(item.id)
-        });
+        const startDelivery = () => {
+          providerStarted = true;
+          return emailSender.send({
+            to: item.recipient,
+            subject: item.subject,
+            text: item.body,
+            html,
+            fromName,
+            replyTo,
+            attachments,
+            idempotencyKey: providerIdempotencyKey(item.id)
+          });
+        };
         sent = storedProvider === "resend" && storedProviderMessageId
           ? { provider: "resend" as const, id: storedProviderMessageId }
           : item.type === "SCHEDULED_REPORT"
             ? await dispatchScheduledReport(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
-            : await startDelivery();
+            : item.type === "REMINDER_EMAIL"
+              ? await dispatchReminderEmail(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
+              : await startDelivery();
         if (!sent) continue;
         const accepted = sent;
 
@@ -200,6 +221,7 @@ export class EmailQueueService {
         // with stale domain state.
         const finalizedAt = currentTime();
         const finalized = await prisma.$transaction(async (tx) => {
+          const reminderStoppage = reminderTarget ? await lockReminderFinalization(tx, reminderTarget) : undefined;
           const markedSent = await tx.emailQueue.updateMany({
             where: { id: item.id, status: "PENDING", processingToken: token },
             data: {
@@ -214,7 +236,9 @@ export class EmailQueueService {
                 emailProvider: accepted.provider,
                 providerMessageId: accepted.id,
                 providerAcceptedAt,
-                sentAt: providerAcceptedAt
+                sentAt: providerAcceptedAt,
+                ...(reminderTarget && !reminderStoppage
+                  ? { localFinalizationSkippedReason: "STOPPAGE_MISSING_OR_FOREIGN" } : {})
               } as Prisma.InputJsonValue
             }
           });
@@ -264,13 +288,13 @@ export class EmailQueueService {
             });
           }
 
-          if (reminderTarget) {
-            requireSingleUpdate(await tx.stoppage.updateMany({
+          if (reminderTarget && reminderStoppage) {
+            if (!reminderStoppage.deletedAt) requireSingleUpdate(await tx.stoppage.updateMany({
               where: { id: reminderTarget.values.stoppageId, tenantId: reminderTarget.tenantId },
               data: {
                 lastReminderSentAt: finalizedAt,
                 totalRemindersSent: { increment: 1 },
-                status: "SOLICITED"
+                ...(openReminderStatuses.includes(reminderStoppage.status) ? { status: "SOLICITED" as const } : {})
               }
             }), "fermo per sollecito");
             await tx.reminder.create({
@@ -345,6 +369,8 @@ export class EmailQueueService {
 
         try {
           await prisma.$transaction(async (tx) => {
+            const failedStoppage = reminderTarget && providerStarted
+              ? await lockReminderFinalization(tx, reminderTarget) : undefined;
             const released = await tx.emailQueue.updateMany({
               where: { id: item.id, status: "PENDING", processingToken: token },
               data: {
@@ -358,6 +384,17 @@ export class EmailQueueService {
               }
             });
             if (released.count !== 1) return;
+
+            if (reminderTarget && failedStoppage && providerStarted) {
+              await tx.reminder.create({
+                data: {
+                  tenantId: reminderTarget.tenantId, stoppageId: reminderTarget.values.stoppageId,
+                  type: reminderTarget.values.reminderType, channel: "EMAIL",
+                  recipient: item.recipient, subject: item.subject, body: item.body,
+                  success: false, sentAt: failureAt, errorMessage
+                }
+              });
+            }
 
             if (contractTarget) {
               requireSingleUpdate(await tx.bookingContractDelivery.updateMany({
