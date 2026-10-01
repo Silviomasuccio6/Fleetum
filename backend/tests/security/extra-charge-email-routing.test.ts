@@ -3,12 +3,15 @@ import { after, afterEach, before, describe, it } from "node:test";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
 import { EmailQueueService } from "../../src/infrastructure/email/email-queue-service.js";
 import { emailSender } from "../../src/infrastructure/email/email-sender.js";
+import { RentalPaymentService } from "../../src/application/services/rental-payment-service.js";
+import { PrismaAuditLogRepository } from "../../src/infrastructure/repositories/prisma-audit-log-repository.js";
 
 const runId = `extra-email-routing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const tenantIds: string[] = [];
 const queueIds: string[] = [];
 const originalSend = emailSender.send;
 const queue = new EmailQueueService();
+const payments = new RentalPaymentService(new PrismaAuditLogRepository(), null, {}, queue);
 let sequence = 0;
 
 const fixture = async (suffix: string) => {
@@ -35,6 +38,12 @@ const fixture = async (suffix: string) => {
     tenantId: tenant.id, vehicleId: vehicle.id, customerId: customer.id, code: `ROUTE-${label}`,
     customerName: "Synthetic Customer", pickupAt: new Date("2030-01-01T00:00:00.000Z"), returnAt: new Date("2030-01-02T00:00:00.000Z")
   } });
+  const extraCharge = await prisma.rentalExtraCharge.create({ data: {
+    tenantId: tenant.id, bookingId: booking.id, rentalCustomerId: customer.id, vehicleId: vehicle.id,
+    type: "DAMAGE", description: "Synthetic approved extra charge", amountCents: 10_000,
+    adminFeeCents: 500, totalAmountCents: 10_500, currency: "EUR", status: "APPROVED",
+    createdByUserId: user.id, approvedByUserId: user.id
+  } });
   const contract = await prisma.bookingContract.create({ data: {
     tenantId: tenant.id, bookingId: booking.id, title: "Synthetic contract", content: "Synthetic contract content", status: "READY"
   } });
@@ -49,7 +58,7 @@ const fixture = async (suffix: string) => {
     subtotal: 100, taxRate: 22, taxAmount: 22, total: 122, billingName: "Synthetic Billing"
   } });
   const invoiceDelivery = await prisma.invoiceDelivery.create({ data: { invoiceId: invoice.id, recipient: `${label}@example.test` } });
-  return { tenant, stoppage, booking, contract, contractDelivery, invoice, invoiceDelivery, workshop };
+  return { tenant, user, stoppage, booking, extraCharge, contract, contractDelivery, invoice, invoiceDelivery, workshop };
 };
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -63,7 +72,7 @@ const reminderMeta = (data: Fixture): Record<string, unknown> => ({
   tenantId: data.tenant.id, stoppageId: data.stoppage.id, reminderType: "MANUAL"
 });
 const legacyExtraMeta = (data: Fixture): Record<string, unknown> => ({
-  bookingId: data.booking.id, extraChargeId: `synthetic-extra-${data.booking.id}`, type: "DAMAGE"
+  bookingId: data.booking.id, extraChargeId: data.extraCharge.id, type: "DAMAGE"
 });
 
 const enqueue = async (data: Fixture, type: string, meta: Record<string, unknown>, options: { noQueueTenant?: boolean; maxAttempts?: number } = {}) => {
@@ -74,6 +83,41 @@ const enqueue = async (data: Fixture, type: string, meta: Record<string, unknown
   queueIds.push(row.id);
   if (options.maxAttempts) await prisma.emailQueue.update({ where: { id: row.id }, data: { maxAttempts: options.maxAttempts } });
   return row;
+};
+
+const enqueueApprovedExtraNotice = async (
+  data: Fixture, additionalMeta: Record<string, unknown> = {}, maxAttempts?: number
+) => {
+  await payments.notifyExtraCharge({ tenantId: data.tenant.id, extraChargeId: data.extraCharge.id, userId: data.user.id });
+  const row = await prisma.emailQueue.findFirstOrThrow({ where: {
+    tenantId: data.tenant.id, type: "RENTAL_EXTRA_CHARGE_NOTICE",
+    meta: { path: ["extraChargeId"], equals: data.extraCharge.id }
+  } });
+  queueIds.push(row.id);
+  return prisma.emailQueue.update({ where: { id: row.id }, data: {
+    ...(Object.keys(additionalMeta).length ? { meta: { ...row.meta as Record<string, unknown>, ...additionalMeta } } : {}),
+    ...(maxAttempts ? { maxAttempts } : {})
+  } });
+};
+
+const assertExtraPending = async (data: Fixture) => {
+  const extra = await prisma.rentalExtraCharge.findUniqueOrThrow({ where: { id: data.extraCharge.id } });
+  assert.equal(extra.status, "APPROVED");
+  assert.equal(extra.notifiedAt, null);
+};
+
+const assertExtraAccepted = async (data: Fixture, itemId: string) => {
+  const [extra, item] = await Promise.all([
+    prisma.rentalExtraCharge.findUniqueOrThrow({ where: { id: data.extraCharge.id } }),
+    prisma.emailQueue.findUniqueOrThrow({ where: { id: itemId } })
+  ]);
+  assert.equal(extra.status, "NOTIFIED");
+  assert.ok(extra.notifiedAt);
+  assert.equal(extra.notifiedAt.toISOString(), (item.meta as Record<string, unknown>).providerAcceptedAt);
+  assert.equal(await prisma.auditLog.count({ where: {
+    tenantId: data.tenant.id, resource: "rental-extra-charge", resourceId: extra.id,
+    action: "RENTAL_EXTRA_CHARGE_NOTIFIED"
+  } }), 1);
 };
 
 const assertDomainUnchanged = async (data: Fixture) => {
@@ -113,6 +157,7 @@ describe("email queue dispatch and domain finalization follow the declared type"
     await prisma.bookingContract.deleteMany({ where: { tenantId: owned } });
     await prisma.invoiceDelivery.deleteMany({ where: { invoice: { tenantId: owned } } });
     await prisma.invoice.deleteMany({ where: { tenantId: owned } });
+    await prisma.rentalExtraCharge.deleteMany({ where: { tenantId: owned } });
     await prisma.rentalBooking.deleteMany({ where: { tenantId: owned } });
     await prisma.rentalCustomer.deleteMany({ where: { tenantId: owned } });
     await prisma.reminder.deleteMany({ where: { tenantId: owned } });
@@ -127,9 +172,10 @@ describe("email queue dispatch and domain finalization follow the declared type"
   });
   after(async () => { await prisma.$disconnect(); });
 
-  it("delivers a legacy extra-charge notice containing bookingId without contract metadata", async () => {
-    const data = await fixture("extra-legacy");
-    const item = await enqueue(data, "RENTAL_EXTRA_CHARGE_NOTICE", legacyExtraMeta(data));
+  it("delivers an approved canonical extra-charge notice without touching other domains", async () => {
+    const data = await fixture("extra-approved");
+    const item = await enqueueApprovedExtraNotice(data);
+    await assertExtraPending(data);
     const sentKeys: string[] = [];
     emailSender.send = async (input) => { sentKeys.push(String(input.idempotencyKey)); return { provider: "resend", id: "synthetic-extra-message" }; };
     await queue.processPending(new Date(), { ids: [item.id] });
@@ -140,12 +186,13 @@ describe("email queue dispatch and domain finalization follow the declared type"
     assert.equal(persisted.lastError, null);
     assert.equal(persisted.processingToken, null);
     assert.equal(persisted.leaseExpiresAt, null);
+    await assertExtraAccepted(data, item.id);
     await assertDomainUnchanged(data);
   });
 
   it("backs off an extra-charge provider failure and retries the same row with the same idempotency key", async () => {
     const data = await fixture("extra-retry");
-    const item = await enqueue(data, "RENTAL_EXTRA_CHARGE_NOTICE", legacyExtraMeta(data));
+    const item = await enqueueApprovedExtraNotice(data);
     const sentKeys: string[] = [];
     emailSender.send = async (input) => {
       sentKeys.push(String(input.idempotencyKey));
@@ -162,6 +209,7 @@ describe("email queue dispatch and domain finalization follow the declared type"
     assert.equal(pending.processingToken, null);
     await queue.processPending(firstAttemptAt, { ids: [item.id] });
     assert.equal(sentKeys.length, 1, "backoff must prevent early retry");
+    await assertExtraPending(data);
     await assertDomainUnchanged(data);
     await prisma.emailQueue.update({ where: { id: item.id }, data: { nextAttemptAt: new Date(0) } });
     await queue.processPending(new Date(), { ids: [item.id] });
@@ -169,10 +217,11 @@ describe("email queue dispatch and domain finalization follow the declared type"
     const completed = await prisma.emailQueue.findUniqueOrThrow({ where: { id: item.id } });
     assert.equal(completed.status, "SENT");
     assert.equal(completed.attempts, 2);
+    await assertExtraAccepted(data, item.id);
     await assertDomainUnchanged(data);
   });
 
-  it("finalizes an extra-charge notice with a stored provider receipt without sending again", async () => {
+  it("finalizes an unverified legacy extra receipt without resending or mutating the extra", async () => {
     const data = await fixture("extra-receipt");
     const item = await enqueue(data, "RENTAL_EXTRA_CHARGE_NOTICE", {
       ...legacyExtraMeta(data), emailProvider: "resend", providerMessageId: "synthetic-stored-extra",
@@ -182,7 +231,27 @@ describe("email queue dispatch and domain finalization follow the declared type"
     emailSender.send = async () => { sends += 1; throw new Error("stored receipt must not call provider"); };
     await queue.processPending(new Date(), { ids: [item.id] });
     assert.equal(sends, 0);
+    const completed = await prisma.emailQueue.findUniqueOrThrow({ where: { id: item.id } });
+    assert.equal(completed.status, "SENT");
+    assert.ok((completed.meta as Record<string, unknown>).localFinalizationSkippedReason);
+    await assertExtraPending(data);
+    await assertDomainUnchanged(data);
+  });
+
+  it("finalizes a canonical extra notice with its stored provider receipt without sending again", async () => {
+    const data = await fixture("extra-canonical-receipt");
+    const item = await enqueueApprovedExtraNotice(data);
+    const acceptedAt = new Date(Math.max(Date.now(), item.createdAt.getTime())).toISOString();
+    await prisma.emailQueue.update({ where: { id: item.id }, data: { meta: {
+      ...(item.meta as Record<string, unknown>),
+      emailProvider: "resend", providerMessageId: "synthetic-stored-canonical-extra", providerAcceptedAt: acceptedAt
+    } } });
+    let sends = 0;
+    emailSender.send = async () => { sends += 1; throw new Error("stored receipt must not call provider"); };
+    await queue.processPending(new Date(), { ids: [item.id] });
+    assert.equal(sends, 0);
     assert.equal((await prisma.emailQueue.findUniqueOrThrow({ where: { id: item.id } })).status, "SENT");
+    await assertExtraAccepted(data, item.id);
     await assertDomainUnchanged(data);
   });
 
@@ -190,7 +259,10 @@ describe("email queue dispatch and domain finalization follow the declared type"
     for (const failure of [false, true]) {
       it(`${type} ignores complete contract, invoice and reminder metadata on ${failure ? "provider failure" : "success"}`, async () => {
         const data = await fixture(`overlap-${type}-${failure}`);
-        const item = await enqueue(data, type, { ...contractMeta(data), ...invoiceMeta(data), ...reminderMeta(data) }, { maxAttempts: 1 });
+        const overlappingMeta = { ...contractMeta(data), ...invoiceMeta(data), ...reminderMeta(data) };
+        const item = type === "RENTAL_EXTRA_CHARGE_NOTICE"
+          ? await enqueueApprovedExtraNotice(data, overlappingMeta, 1)
+          : await enqueue(data, type, overlappingMeta, { maxAttempts: 1 });
         let sends = 0;
         emailSender.send = async () => {
           sends += 1;
@@ -200,17 +272,21 @@ describe("email queue dispatch and domain finalization follow the declared type"
         await queue.processPending(new Date(), { ids: [item.id] });
         assert.equal(sends, 1);
         assert.equal((await prisma.emailQueue.findUniqueOrThrow({ where: { id: item.id } })).status, failure ? "FAILED" : "SENT");
+        if (type === "RENTAL_EXTRA_CHARGE_NOTICE" && !failure) await assertExtraAccepted(data, item.id);
+        else await assertExtraPending(data);
         await assertDomainUnchanged(data);
       });
     }
-    it(`${type} does not require tenant or domain metadata merely because a bookingId exists`, async () => {
+    it(`${type} ${type === "RENTAL_EXTRA_CHARGE_NOTICE" ? "blocks an unverified extra command" : "stays generic"} when only bookingId exists`, async () => {
       const data = await fixture(`partial-${type}`);
       const item = await enqueue(data, type, { bookingId: data.booking.id }, { noQueueTenant: true });
       let sends = 0;
       emailSender.send = async () => { sends += 1; return { provider: "resend", id: "synthetic-unbound-generic" }; };
       await queue.processPending(new Date(), { ids: [item.id] });
-      assert.equal(sends, 1);
-      assert.equal((await prisma.emailQueue.findUniqueOrThrow({ where: { id: item.id } })).status, "SENT");
+      assert.equal(sends, type === "RENTAL_EXTRA_CHARGE_NOTICE" ? 0 : 1);
+      assert.equal((await prisma.emailQueue.findUniqueOrThrow({ where: { id: item.id } })).status,
+        type === "RENTAL_EXTRA_CHARGE_NOTICE" ? "FAILED" : "SENT");
+      await assertExtraPending(data);
       await assertDomainUnchanged(data);
     });
   }

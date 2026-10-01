@@ -5,7 +5,7 @@ import { prisma } from "../database/prisma/client.js";
 
 type CreateAuditLogInput = Parameters<AuditLogRepository["create"]>[0];
 
-const createAuditLog = async (client: Pick<typeof prisma, "auditLog">, input: CreateAuditLogInput, createdAt?: Date) => {
+export const createAuditLog = async (client: Pick<typeof prisma, "auditLog">, input: CreateAuditLogInput, createdAt?: Date) => {
   const previous = await client.auditLog.findFirst({
     where: { tenantId: input.tenantId },
     orderBy: { createdAt: "desc" },

@@ -4,6 +4,11 @@ import { prisma } from "../database/prisma/client.js";
 import { emailSender } from "./email-sender.js";
 import { dispatchScheduledReport } from "./scheduled-report-dispatch.js";
 import { dispatchReminderEmail, openReminderStatuses } from "./reminder-email-dispatch.js";
+import {
+  dispatchExtraChargeNotice,
+  finalizeExtraNotice,
+  lockExtraNoticeFinalization
+} from "./extra-charge-notice.js";
 
 export type QueueEmailInput = {
   tenantId?: string;
@@ -191,7 +196,12 @@ export class EmailQueueService {
 
         const storedProvider = metaString(meta, "emailProvider");
         const storedProviderMessageId = metaString(meta, "providerMessageId");
-        providerAcceptedAt = metaString(meta, "providerAcceptedAt") ?? currentTime().toISOString();
+        const hasStoredProviderReceipt = storedProvider === "resend" &&
+          (item.type === "RENTAL_EXTRA_CHARGE_NOTICE"
+            ? Boolean(storedProviderMessageId?.trim())
+            : Boolean(storedProviderMessageId));
+        providerAcceptedAt = metaString(meta, "providerAcceptedAt") ??
+          (item.type === "RENTAL_EXTRA_CHARGE_NOTICE" ? null : currentTime().toISOString());
         const startDelivery = () => {
           providerStarted = true;
           return emailSender.send({
@@ -205,15 +215,32 @@ export class EmailQueueService {
             idempotencyKey: providerIdempotencyKey(item.id)
           });
         };
-        sent = storedProvider === "resend" && storedProviderMessageId
-          ? { provider: "resend" as const, id: storedProviderMessageId }
+        sent = hasStoredProviderReceipt
+          ? { provider: "resend" as const, id: storedProviderMessageId! }
           : item.type === "SCHEDULED_REPORT"
             ? await dispatchScheduledReport(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
             : item.type === "REMINDER_EMAIL"
               ? await dispatchReminderEmail(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
-              : await startDelivery();
+              : item.type === "RENTAL_EXTRA_CHARGE_NOTICE"
+                ? await dispatchExtraChargeNotice(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
+                : await startDelivery();
         if (!sent) continue;
+        // An extra notice becomes notified only after the actual provider receipt.
+        // A retry with a stored receipt preserves its original acceptance timestamp.
+        if (item.type === "RENTAL_EXTRA_CHARGE_NOTICE" && !hasStoredProviderReceipt) {
+          providerAcceptedAt = currentTime().toISOString();
+        }
         const accepted = sent;
+        // Finalization validates the receipt selected by this attempt, including a
+        // newly obtained receipt replacing untrusted or incomplete older metadata.
+        const finalizationItem = item.type === "RENTAL_EXTRA_CHARGE_NOTICE"
+          ? { ...item, meta: {
+              ...meta,
+              emailProvider: accepted.provider,
+              providerMessageId: accepted.id,
+              providerAcceptedAt
+            } as Prisma.JsonObject }
+          : item;
 
         // The provider call cannot share our database transaction. Its stable idempotency key
         // makes a retry safe, while the queue transition and every local side effect commit
@@ -222,6 +249,11 @@ export class EmailQueueService {
         const finalizedAt = currentTime();
         const finalized = await prisma.$transaction(async (tx) => {
           const reminderStoppage = reminderTarget ? await lockReminderFinalization(tx, reminderTarget) : undefined;
+          const lockedExtraContext = item.type === "RENTAL_EXTRA_CHARGE_NOTICE"
+            ? await lockExtraNoticeFinalization(tx, finalizationItem) : null;
+          const extraContext = lockedExtraContext && !(typeof accepted.id === "string" && accepted.id.trim())
+            ? { ...lockedExtraContext, extra: null, skipReason: "RECEIPT_UNVERIFIED" }
+            : lockedExtraContext;
           const markedSent = await tx.emailQueue.updateMany({
             where: { id: item.id, status: "PENDING", processingToken: token },
             data: {
@@ -238,11 +270,19 @@ export class EmailQueueService {
                 providerAcceptedAt,
                 sentAt: providerAcceptedAt,
                 ...(reminderTarget && !reminderStoppage
-                  ? { localFinalizationSkippedReason: "STOPPAGE_MISSING_OR_FOREIGN" } : {})
+                  ? { localFinalizationSkippedReason: "STOPPAGE_MISSING_OR_FOREIGN" } : {}),
+                ...(extraContext?.skipReason
+                  ? { localFinalizationSkippedReason: extraContext.skipReason } : {})
               } as Prisma.InputJsonValue
             }
           });
           if (markedSent.count !== 1) return false;
+          if (extraContext) {
+            await finalizeExtraNotice(
+              tx, finalizationItem, extraContext, accepted,
+              providerAcceptedAt ? new Date(providerAcceptedAt) : null
+            );
+          }
 
           if (contractTarget) {
             requireSingleUpdate(await tx.bookingContractDelivery.updateMany({

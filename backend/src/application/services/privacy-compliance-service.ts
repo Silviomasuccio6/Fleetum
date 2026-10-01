@@ -725,6 +725,12 @@ export class PrivacyComplianceService {
       : [];
 
     const result = await prisma.$transaction(async (tx) => {
+      // Take the parent lock before bookings and the audit FK, matching notice dispatch.
+      const tenantRows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "Tenant" WHERE "id" = ${input.tenantId} FOR KEY SHARE
+      `;
+      if (!tenantRows.length) throw new AppError("Cliente non trovato", 404, "CUSTOMER_NOT_FOUND");
+
       const bookingUpdate = await tx.rentalBooking.updateMany({
         where: { tenantId: input.tenantId, customerId: input.customerId },
         data: {

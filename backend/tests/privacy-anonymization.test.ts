@@ -73,6 +73,7 @@ test("customer erasure clears every RentalCustomer field marked as PII", async (
   (prisma.rentalCustomerAttachment as any).findMany = async () => [];
   (prisma as any).$transaction = async (callback: any) =>
     callback({
+      $queryRaw: async () => [{ id: "tenant_a" }],
       rentalBooking: { updateMany: async () => ({ count: 2 }) },
       bookingContract: { updateMany: async () => ({ count: 1 }) },
       rentalCustomerAttachment: { deleteMany: async () => ({ count: 0 }) },

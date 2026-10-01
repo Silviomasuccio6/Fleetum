@@ -6,6 +6,9 @@ import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { EmailQueueService } from "../../infrastructure/email/email-queue-service.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { ownedVehicleWhere } from "../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { requestExtraChargeNotice, withExtraChargeNoticeStates } from "../../infrastructure/email/extra-charge-notice.js";
+import type { ExtraNoticeStatus } from "../../infrastructure/email/extra-charge-notice.js";
 
 const RENTAL_PAYMENT_DOMAIN = "rental_payments";
 const SETUP_PURPOSE = "rental_guarantee_card";
@@ -269,6 +272,8 @@ type ExtraChargeRecord = {
   currency: string;
   status: RentalExtraChargeStatus;
   failureReason: string | null;
+  notifiedAt?: Date | null;
+  notificationStatus?: ExtraNoticeStatus;
 };
 
 type RentalPaymentEventRecord = {
@@ -362,13 +367,20 @@ const extraChargeSelect = {
   totalAmountCents: true,
   currency: true,
   status: true,
-  failureReason: true
+  failureReason: true,
+  notifiedAt: true
 } as const;
 
 const defaultDeps: RentalPaymentServiceDeps = {
   async findBookingForPayment(tenantId, bookingId) {
     return prisma.rentalBooking.findFirst({
-      where: { id: bookingId, tenantId, deletedAt: null },
+      where: {
+        id: bookingId,
+        tenantId,
+        deletedAt: null,
+        vehicle: ownedVehicleWhere(tenantId, true),
+        OR: [{ customerId: null }, { customer: { tenantId } }]
+      },
       select: {
         id: true,
         tenantId: true,
@@ -436,7 +448,8 @@ const defaultDeps: RentalPaymentServiceDeps = {
     return prisma.rentalDeposit.findMany({ where: { tenantId, bookingId, deletedAt: null }, orderBy: { createdAt: "desc" }, select: depositSelect });
   },
   async listExtraChargesByBooking(tenantId, bookingId) {
-    return prisma.rentalExtraCharge.findMany({ where: { tenantId, bookingId, deletedAt: null }, orderBy: { createdAt: "desc" }, select: extraChargeSelect });
+    const rows = await prisma.rentalExtraCharge.findMany({ where: { tenantId, bookingId, deletedAt: null }, orderBy: { createdAt: "desc" }, select: extraChargeSelect });
+    return withExtraChargeNoticeStates(tenantId, rows);
   },
   async findActiveDeposit(tenantId, bookingId) {
     return prisma.rentalDeposit.findFirst({ where: { tenantId, bookingId, status: { in: ACTIVE_DEPOSIT_STATUSES }, deletedAt: null }, select: depositSelect });
@@ -885,41 +898,7 @@ export class RentalPaymentService {
   }
 
   async notifyExtraCharge(input: { tenantId: string; extraChargeId: string; userId: string }) {
-    const extraCharge = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
-    const booking = await this.getBookingOrThrow(input.tenantId, extraCharge.bookingId);
-    const recipient = booking.customer?.email ?? booking.customerEmail;
-    if (!recipient) throw new AppError("Email cliente mancante per notifica extra charge", 400, "RENTAL_EXTRA_CHARGE_EMAIL_MISSING");
-
-    const queued = await this.emailQueueService.enqueue({
-      tenantId: input.tenantId,
-      type: "RENTAL_EXTRA_CHARGE_NOTICE",
-      recipient,
-      subject: `Preavviso addebito extra noleggio ${booking.code}`,
-      body: [
-        `Gentile ${booking.customerName},`,
-        "ti informiamo che e stato registrato un importo extra collegato al tuo noleggio.",
-        `Causale: ${extraCharge.description}`,
-        `Importo: ${(extraCharge.totalAmountCents / 100).toFixed(2)} EUR`,
-        "Se hai domande contatta l'autonoleggio prima dell'addebito."
-      ].join("\n\n"),
-      meta: { bookingId: booking.id, extraChargeId: extraCharge.id, type: extraCharge.type }
-    });
-
-    const updated = await this.deps.updateExtraCharge(input.tenantId, input.extraChargeId, {
-      status: RentalExtraChargeStatus.NOTIFIED,
-      notifiedAt: new Date()
-    });
-
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: "RENTAL_EXTRA_CHARGE_NOTIFIED",
-      resource: "rental-extra-charge",
-      resourceId: input.extraChargeId,
-      details: { bookingId: booking.id, queueEmailId: queued.id }
-    });
-
-    return updated;
+    return requestExtraChargeNotice(input, this.emailQueueService);
   }
 
   async chargeExtraCharge(input: { tenantId: string; extraChargeId: string; paymentMethodId?: string; userId: string }) {
