@@ -4,6 +4,7 @@ import { snapshotFromRow } from "../../application/services/tenant-subscription-
 import { daysBetween } from "../../shared/utils/date.js";
 import { prisma } from "../database/prisma/client.js";
 import { logger } from "../logging/logger.js";
+import { stoppageHistoricalUsersOwned } from "../repositories/stoppage-tenant-scope.js";
 import type { emailSender } from "./email-sender.js";
 
 export const automaticReminderTypes = ["AUTOMATIC", "AUTOMATIC_RETRY", "ESCALATION"];
@@ -17,7 +18,8 @@ type Outcome = { receipt: Receipt } | { error: unknown };
 type QueuedReminder = Pick<EmailQueue, "id" | "tenantId" | "createdAt" | "meta" | "recipient">;
 
 // Producers and dispatchers use the same order: Tenant -> Subscription ->
-// Stoppage -> Site/Vehicle/Workshop -> Queue. Provider finalization starts
+// Stoppage -> Site/Vehicle/Workshop -> Queue. Historical users are read without
+// row locks to avoid inverting auth's User -> Tenant FK. Provider finalization starts
 // with Tenant too, so Reminder's FK checks cannot invert this order.
 export const lockReminderContext = async (
   tx: Prisma.TransactionClient,
@@ -76,6 +78,9 @@ export const lockReminderContext = async (
     return { reason: "STOPPAGE_RELATION_INVALID", stoppage: null };
   }
   if (!workshops[0].isActive) return { reason: "WORKSHOP_INACTIVE", stoppage: null };
+  if (!(await stoppageHistoricalUsersOwned(tx, tenantId, stoppage))) {
+    return { reason: "STOPPAGE_RELATION_INVALID", stoppage: null };
+  }
   // Inactive but non-deleted sites/vehicles can still have an operational
   // stoppage. No existing rule requires them to be active for a reminder.
   return {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
+import { AuthSessionService } from "../../src/application/services/auth-session-service.js";
 import { SendReminderUseCase } from "../../src/application/usecases/reminders/send-reminder-usecase.js";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
 import { EmailQueueService } from "../../src/infrastructure/email/email-queue-service.js";
@@ -7,6 +8,7 @@ import { emailSender } from "../../src/infrastructure/email/email-sender.js";
 import { PrismaPlatformAdminRepository } from "../../src/infrastructure/repositories/prisma-platform-admin-repository.js";
 import { PrismaReminderRepository } from "../../src/infrastructure/repositories/prisma-reminder-repository.js";
 import { PrismaStoppageRepository } from "../../src/infrastructure/repositories/prisma-stoppage-repository.js";
+import { PrismaUserRepository } from "../../src/infrastructure/repositories/prisma-user-repository.js";
 
 const runId = `reminder-eligibility-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const tenantIds: string[] = [];
@@ -132,6 +134,7 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     await prisma.vehicle.deleteMany({ where: { tenantId: owned } });
     await prisma.workshop.deleteMany({ where: { tenantId: owned } });
     await prisma.site.deleteMany({ where: { tenantId: owned } });
+    await prisma.refreshSession.deleteMany({ where: { tenantId: owned } });
     await prisma.user.deleteMany({ where: { tenantId: owned } });
     await prisma.auditLog.deleteMany({ where: { tenantId: owned } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: owned } });
@@ -190,6 +193,98 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     assert.equal(await prisma.reminder.count({ where: { stoppageId: data.stoppage.id, success: true } }), 1);
   });
 
+  it("an eligible legacy reminder and a concurrent real auth session finish without a Tenant/User lock cycle", async () => {
+    const data = await fixture("legacy-auth-lock-cycle", { noSubscription: true });
+    await prisma.auditLog.create({ data: {
+      tenantId: data.tenant.id, action: "PLATFORM_LICENSE_UPDATED", resource: "tenant",
+      details: { after: { plan: "STARTER", status: "ACTIVE", seats: 3, expiresAt: null } }
+    } });
+    const row = await enqueueRetry(data, "MANUAL_RETRY");
+    const authUserLocked = deferred();
+    const guardUserReached = deferred();
+    const originalTransaction = prisma.$transaction.bind(prisma);
+    let authLockObserved = false;
+    let guardUserObserved = false;
+    let sends = 0;
+    emailSender.send = async () => { sends += 1; return { provider: "resend", id: "legacy-auth-concurrent-reminder" }; };
+
+    // The hooks only coordinate actual database operations. AuthSessionService
+    // takes its real User UPDATE lock, creates a real RefreshSession and writes
+    // its real AuditLog (including Tenant FK checks). The reminder keeps its
+    // real legacy Tenant UPDATE lock. No lock or database response is mocked.
+    (prisma as any).$transaction = async (callback: unknown, ...args: unknown[]) => {
+      if (typeof callback !== "function") return (originalTransaction as any)(callback, ...args);
+      return (originalTransaction as any)(async (tx: any) => {
+        let reminderTenantLocked = false;
+        const queryRaw = tx.$queryRaw.bind(tx);
+        const userFindMany = tx.user.findMany.bind(tx.user);
+        const instrumentedUser = new Proxy(tx.user, {
+          get(target, property, receiver) {
+            if (property !== "findMany") return Reflect.get(target, property, receiver);
+            return async (...queryArgs: unknown[]) => {
+              if (reminderTenantLocked && !guardUserObserved) {
+                guardUserObserved = true;
+                guardUserReached.resolve();
+              }
+              return userFindMany(...queryArgs);
+            };
+          }
+        });
+        const instrumented = new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property === "user") return instrumentedUser;
+            if (property !== "$queryRaw") return Reflect.get(target, property, receiver);
+            return async (...queryArgs: unknown[]) => {
+              const sql = Array.isArray(queryArgs[0]) ? queryArgs[0].join(" ") : String((queryArgs[0] as any)?.sql ?? "");
+              const isAuthLock = /FROM\s+"User"/.test(sql) && /FOR\s+UPDATE/.test(sql) && queryArgs.includes(data.user.id);
+              const isReminderTenantLock = /FROM\s+"Tenant"/.test(sql) && /FOR\s+UPDATE/.test(sql) && queryArgs.includes(data.tenant.id);
+              const isReminderUserLock = reminderTenantLocked && /FROM\s+"User"/.test(sql) && /FOR\s+SHARE/.test(sql);
+              if (isReminderUserLock && !guardUserObserved) {
+                guardUserObserved = true;
+                guardUserReached.resolve();
+              }
+              const result = await queryRaw(...queryArgs);
+              if (isReminderTenantLock) reminderTenantLocked = true;
+              if (isAuthLock && !authLockObserved) {
+                authLockObserved = true;
+                authUserLocked.resolve();
+                await waitFor(guardUserReached.promise, "reminder reaching user ownership while its Tenant lock is held");
+              }
+              return result;
+            };
+          }
+        });
+        return callback(instrumented);
+      }, ...args);
+    };
+
+    const sessions = new AuthSessionService({ signAccess: () => "synthetic-access-token" } as any, new PrismaUserRepository());
+    let auth: Promise<unknown> | undefined;
+    let worker: Promise<unknown> | undefined;
+    try {
+      auth = sessions.createSession({ userId: data.user.id, tenantId: data.tenant.id, roles: [], permissions: [], userAgent: "synthetic-reminder-auth-race" });
+      // Observe rejection immediately so a real deadlock cannot become an
+      // unhandled rejection while the test waits for the worker transaction.
+      const authOutcome = auth.then((value) => ({ value }), (error: unknown) => ({ error }));
+      await waitFor(authUserLocked.promise, "auth acquiring its User UPDATE lock");
+      worker = queue.processPending(new Date(), { ids: [row.id] });
+      const results = await waitFor(Promise.all([authOutcome, worker]), "auth and reminder transactions completing");
+      assert.equal(authLockObserved, true);
+      assert.equal(guardUserObserved, true);
+      assert.ok(!("error" in results[0]), "real session creation must finish without a PostgreSQL deadlock or timeout");
+      assert.equal(sends, 1);
+      assert.equal((await prisma.emailQueue.findUniqueOrThrow({ where: { id: row.id } })).status, "SENT");
+      assert.equal(await prisma.refreshSession.count({ where: { tenantId: data.tenant.id, userId: data.user.id, revokedAt: null } }), 1);
+      assert.equal(await prisma.auditLog.count({ where: { tenantId: data.tenant.id, action: "AUTH_SESSION_CREATED" } }), 1);
+      assert.equal(await prisma.reminder.count({ where: { stoppageId: data.stoppage.id, success: true } }), 1);
+      assert.equal((await prisma.stoppage.findUniqueOrThrow({ where: { id: data.stoppage.id } })).totalRemindersSent, 1);
+    } finally {
+      guardUserReached.resolve();
+      await Promise.allSettled([...(auth ? [auth] : []), ...(worker ? [worker] : [])]);
+      (prisma as any).$transaction = originalTransaction;
+    }
+  });
+
   for (const relation of ["site", "vehicle", "workshop"] as const) {
     it(`does not leak or send an automatic reminder using a foreign tenant ${relation}`, async () => {
       const data = await fixture(`foreign-${relation}`);
@@ -224,6 +319,86 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     assert.equal(sends, 0);
     await assertNoSuccess(data);
   });
+
+  const invalidUserLinks = [
+    { field: "createdByUserId", condition: "foreign" },
+    { field: "assignedToUserId", condition: "foreign" },
+    { field: "assignedToUserId", condition: "missing" }
+  ] as const;
+  // PostgreSQL's creator FK already prevents a missing creator fixture. The
+  // scalar assignee has no FK and can contain a missing legacy user ID.
+  for (const { field, condition } of invalidUserLinks) {
+    for (const path of ["manual", "automatic", "queued-automatic", "queued-manual"] as const) {
+      it(`${path} rejects a legacy ${condition} ${field} before provider initiation`, async () => {
+        const data = await fixture(`user-link-${field}-${condition}-${path}`);
+        const foreign = condition === "foreign" ? await fixture(`user-link-foreign-${field}-${path}`, { due: false }) : null;
+        const queued = path.startsWith("queued-")
+          ? await enqueueRetry(data, path === "queued-manual" ? "MANUAL_RETRY" : "AUTOMATIC_RETRY")
+          : null;
+        await prisma.stoppage.update({ where: { id: data.stoppage.id }, data: {
+          [field]: foreign?.user.id ?? `${runId}-missing-assignee-${sequence++}`
+        } });
+        const before = await prisma.stoppage.findUniqueOrThrow({ where: { id: data.stoppage.id } });
+        let sends = 0;
+        emailSender.send = async () => { sends += 1; return { provider: "resend", id: "unexpected-invalid-user-link" }; };
+        if (path === "manual") {
+          await assert.rejects(() => useCase().manualEmail(data.tenant.id, data.stoppage.id), (error: unknown) => {
+            const statusCode = (error as any)?.statusCode;
+            assert.ok(Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500);
+            return true;
+          });
+        } else if (path === "automatic") {
+          await useCase().automaticRun(data.now);
+        } else {
+          await queue.processPending(new Date(), { ids: [queued!.id] });
+          await assertTerminalBlocked(queued!.id);
+        }
+        assert.equal(sends, 0, "neither the producer nor the worker may initiate a provider request");
+        assert.equal(await prisma.emailQueue.count({ where: { tenantId: data.tenant.id } }), queued ? 1 : 0);
+        await assertNoSuccess(data);
+        assert.deepEqual(await prisma.stoppage.findUniqueOrThrow({ where: { id: data.stoppage.id } }), before,
+          "denying an invalid user link must preserve stoppage status, counters and all historical fields");
+        if (foreign) {
+          await assertNoSuccess(foreign);
+          assert.equal(await prisma.emailQueue.count({ where: { tenantId: foreign.tenant.id } }), 0);
+        }
+      });
+    }
+  }
+
+  for (const userState of ["suspended", "deleted"] as const) {
+    for (const path of ["manual", "automatic", "queued"] as const) {
+      it(`${path} keeps owned historical ${userState} creator and assignee eligible`, async () => {
+        const data = await fixture(`historical-user-${userState}-${path}`);
+        await prisma.stoppage.update({ where: { id: data.stoppage.id }, data: { assignedToUserId: data.user.id } });
+        const queued = path === "queued" ? await enqueueRetry(data, "MANUAL_RETRY") : null;
+        await prisma.user.update({ where: { id: data.user.id }, data: {
+          status: "SUSPENDED", ...(userState === "deleted" ? { deletedAt: new Date() } : {})
+        } });
+        let sends = 0;
+        emailSender.send = async () => { sends += 1; return { provider: "resend", id: "eligible-historical-owned-user" }; };
+        if (path === "manual") {
+          assert.deepEqual(await useCase().manualEmail(data.tenant.id, data.stoppage.id), { success: true, queued: false });
+        } else if (path === "automatic") {
+          await useCase().automaticRun(data.now);
+        } else {
+          await queue.processPending(new Date(), { ids: [queued!.id] });
+        }
+        assert.equal(sends, 1);
+        const rows = await prisma.emailQueue.findMany({ where: { tenantId: data.tenant.id, type: "REMINDER_EMAIL" } });
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0]!.status, "SENT");
+        const stoppage = await prisma.stoppage.findUniqueOrThrow({ where: { id: data.stoppage.id } });
+        assert.equal(stoppage.status, "SOLICITED");
+        assert.equal(stoppage.totalRemindersSent, 1);
+        assert.ok(stoppage.lastReminderSentAt);
+        assert.equal(stoppage.createdByUserId, data.user.id);
+        assert.equal(stoppage.assignedToUserId, data.user.id);
+        assert.equal(await prisma.reminder.count({ where: { stoppageId: data.stoppage.id, success: true } }), 1);
+        assert.equal(await prisma.reminder.count({ where: { stoppageId: data.stoppage.id, success: false } }), 0);
+      });
+    }
+  }
 
   for (const relation of ["site", "vehicle"] as const) {
     it(`keeps an inactive but not deleted ${relation} eligible for an open stoppage reminder`, async () => {

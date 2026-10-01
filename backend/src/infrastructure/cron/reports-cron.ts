@@ -5,6 +5,7 @@ import { LicensePolicyService } from "../../application/services/license-policy-
 import { prisma } from "../database/prisma/client.js";
 import { EmailQueueService } from "../email/email-queue-service.js";
 import { logger } from "../logging/logger.js";
+import { ownedStoppageWhere } from "../repositories/stoppage-tenant-scope.js";
 import {
   latestDueOccurrence,
   nextScheduledOccurrence,
@@ -95,29 +96,32 @@ const buildTenantReportInputs = async (
   recipientsWithKeys: Array<{ recipient: string; deduplicationKey: string }>
 ) => {
   const lookback = new Date(now.getTime() - 30 * 86400000);
+  const [stoppageScope, historicalStoppageScope] = await Promise.all([
+    ownedStoppageWhere(tenantId),
+    ownedStoppageWhere(tenantId, prisma, true)
+  ]);
   const [total, open, critical, closedLast30, reminders, remindersFailed, topWorkshops, overdue, preventiveDaysDue] =
     await Promise.all([
-      prisma.stoppage.count({ where: { tenantId, deletedAt: null } }),
+      prisma.stoppage.count({ where: stoppageScope }),
       prisma.stoppage.count({
-        where: { tenantId, deletedAt: null, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] } }
+        where: { ...stoppageScope, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] } }
       }),
       prisma.stoppage.count({
-        where: { tenantId, deletedAt: null, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] }, priority: "CRITICAL" }
+        where: { ...stoppageScope, status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] }, priority: "CRITICAL" }
       }),
-      prisma.stoppage.count({ where: { tenantId, deletedAt: null, status: "CLOSED", closedAt: { gte: lookback } } }),
-      prisma.reminder.count({ where: { tenantId, sentAt: { gte: lookback } } }),
-      prisma.reminder.count({ where: { tenantId, sentAt: { gte: lookback }, success: false } }),
+      prisma.stoppage.count({ where: { ...stoppageScope, status: "CLOSED", closedAt: { gte: lookback } } }),
+      prisma.reminder.count({ where: { tenantId, stoppage: historicalStoppageScope, sentAt: { gte: lookback } } }),
+      prisma.reminder.count({ where: { tenantId, stoppage: historicalStoppageScope, sentAt: { gte: lookback }, success: false } }),
       prisma.stoppage.groupBy({
         by: ["workshopId"],
-        where: { tenantId, deletedAt: null, openedAt: { gte: lookback } },
+        where: { ...stoppageScope, openedAt: { gte: lookback } },
         _count: { _all: true },
         orderBy: { _count: { workshopId: "desc" } },
         take: 3
       }),
       prisma.stoppage.count({
         where: {
-          tenantId,
-          deletedAt: null,
+          ...stoppageScope,
           status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] },
           openedAt: { lte: new Date(now.getTime() - 30 * 86400000) }
         }

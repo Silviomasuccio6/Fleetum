@@ -6,13 +6,14 @@ import {
   NotificationVehicleDeadlineRow
 } from "../../domain/repositories/notifications-repository.js";
 import { prisma } from "../database/prisma/client.js";
+import { ownedStoppageWhere } from "./stoppage-tenant-scope.js";
 
 export class PrismaNotificationsRepository implements NotificationsRepository {
   async listOpenStoppages(tenantId: string, take: number): Promise<NotificationStoppageRow[]> {
+    const stoppageScope = await ownedStoppageWhere(tenantId);
     return prisma.stoppage.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
+        ...stoppageScope,
         status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] }
       },
       include: { vehicle: { select: { plate: true } }, site: { select: { name: true } }, workshop: { select: { name: true } } },
@@ -22,8 +23,9 @@ export class PrismaNotificationsRepository implements NotificationsRepository {
   }
 
   async listFailedReminders(tenantId: string, take: number): Promise<NotificationReminderRow[]> {
+    const historicalStoppageScope = await ownedStoppageWhere(tenantId, prisma, true);
     return prisma.reminder.findMany({
-      where: { tenantId, success: false },
+      where: { tenantId, success: false, stoppage: historicalStoppageScope },
       orderBy: { sentAt: "desc" },
       take,
       select: { id: true, recipient: true, errorMessage: true, sentAt: true }

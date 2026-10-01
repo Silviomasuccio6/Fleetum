@@ -1,6 +1,7 @@
 import { BookingContractStatus, RentalBookingStatus, StoppageStatus } from "@prisma/client";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
+import { ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
 
 type AnalyticsFilters = {
   dateFrom?: Date;
@@ -54,6 +55,10 @@ export class GetDashboardStatsUseCase {
     const todayEnd = endOfDay(now);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    const [stoppageScope, historicalStoppageScope] = await Promise.all([
+      ownedStoppageWhere(tenantId),
+      ownedStoppageWhere(tenantId, prisma, true)
+    ]);
 
     const [
       stoppageRows,
@@ -65,7 +70,7 @@ export class GetDashboardStatsUseCase {
       contractDeliveries
     ] = await Promise.all([
       prisma.stoppage.findMany({
-        where: { tenantId, deletedAt: null },
+        where: stoppageScope,
         include: {
           site: true,
           workshop: true,
@@ -80,7 +85,7 @@ export class GetDashboardStatsUseCase {
         select: { id: true, firstName: true, lastName: true, email: true, status: true, createdAt: true }
       }),
       prisma.reminder.findMany({
-        where: { tenantId },
+        where: { tenantId, stoppage: historicalStoppageScope },
         orderBy: { sentAt: "desc" },
         take: 8,
         include: {
@@ -520,16 +525,19 @@ export class GetDashboardStatsUseCase {
     const end = filters.dateTo ?? now;
 
     const whereBase = {
-      tenantId,
-      deletedAt: null,
-      ...(filters.siteId ? { siteId: filters.siteId } : {}),
-      ...(filters.workshopId ? { workshopId: filters.workshopId } : {}),
-      ...(filters.status ? { status: filters.status } : {}),
-      vehicle: {
-        ...(filters.plate ? { plate: { contains: filters.plate, mode: "insensitive" as const } } : {}),
-        ...(filters.brand ? { brand: { contains: filters.brand, mode: "insensitive" as const } } : {}),
-        ...(filters.model ? { model: { contains: filters.model, mode: "insensitive" as const } } : {})
-      }
+      AND: [
+        await ownedStoppageWhere(tenantId),
+        {
+          ...(filters.siteId ? { siteId: filters.siteId } : {}),
+          ...(filters.workshopId ? { workshopId: filters.workshopId } : {}),
+          ...(filters.status ? { status: filters.status } : {}),
+          vehicle: {
+            ...(filters.plate ? { plate: { contains: filters.plate, mode: "insensitive" as const } } : {}),
+            ...(filters.brand ? { brand: { contains: filters.brand, mode: "insensitive" as const } } : {}),
+            ...(filters.model ? { model: { contains: filters.model, mode: "insensitive" as const } } : {})
+          }
+        }
+      ]
     };
 
     const [stoppageRows, closedTrendRows, reminders] = await Promise.all([
@@ -539,7 +547,7 @@ export class GetDashboardStatsUseCase {
           site: true,
           workshop: true,
           vehicle: true,
-          reminders: true
+          reminders: { where: { tenantId } }
         },
         orderBy: { openedAt: "desc" }
       }),
@@ -750,10 +758,11 @@ export class GetDashboardStatsUseCase {
     const now = new Date();
     const start = dateFrom ?? new Date(now.getTime() - 180 * dayMs);
     const end = dateTo ?? now;
+    const stoppageScope = await ownedStoppageWhere(tenantId);
 
     const rows = await prisma.stoppage.findMany({
-      where: { tenantId, deletedAt: null, openedAt: { gte: start, lte: end } },
-      include: { workshop: true, reminders: true }
+      where: { ...stoppageScope, openedAt: { gte: start, lte: end } },
+      include: { workshop: true, reminders: { where: { tenantId } } }
     });
 
     const grouped = new Map<
@@ -822,6 +831,7 @@ export class GetDashboardStatsUseCase {
     const now = new Date();
     const start = dateFrom ?? new Date(now.getTime() - 90 * dayMs);
     const end = dateTo ?? now;
+    const stoppageScope = await ownedStoppageWhere(tenantId);
 
     const [users, stoppages] = await Promise.all([
       prisma.user.findMany({
@@ -829,7 +839,7 @@ export class GetDashboardStatsUseCase {
         select: { id: true, firstName: true, lastName: true, email: true }
       }),
       prisma.stoppage.findMany({
-        where: { tenantId, deletedAt: null, openedAt: { gte: start, lte: end } },
+        where: { ...stoppageScope, openedAt: { gte: start, lte: end } },
         select: { id: true, assignedToUserId: true, status: true, openedAt: true, closedAt: true }
       })
     ]);
@@ -854,10 +864,10 @@ export class GetDashboardStatsUseCase {
 
   async aiSuggestions(tenantId: string) {
     const now = new Date();
+    const stoppageScope = await ownedStoppageWhere(tenantId);
     const rows = await prisma.stoppage.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
+        ...stoppageScope,
         status: { in: ["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED"] }
       },
       include: { vehicle: true, workshop: true, site: true }
@@ -901,10 +911,10 @@ export class GetDashboardStatsUseCase {
     const now = new Date();
     const start = dateFrom ?? new Date(now.getTime() - 30 * dayMs);
     const end = dateTo ?? new Date(now.getTime() + 30 * dayMs);
+    const stoppageScope = await ownedStoppageWhere(tenantId);
     const rows = await prisma.stoppage.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
+        ...stoppageScope,
         openedAt: { lte: end },
         OR: [{ closedAt: null }, { closedAt: { gte: start } }]
       },

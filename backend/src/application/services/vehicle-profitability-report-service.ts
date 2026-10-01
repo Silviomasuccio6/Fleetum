@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { ownedStoppageWhere } from "../../infrastructure/repositories/stoppage-tenant-scope.js";
 
 const DAY_MS = 86_400_000;
 
@@ -90,6 +91,7 @@ export class VehicleProfitabilityReportService {
     if (!vehicleIds.length) {
       return this.empty(params);
     }
+    const stoppageScope = await ownedStoppageWhere(tenantId);
 
     const [bookingRows, maintenanceRows, vehicleCostRows, stoppages] = await Promise.all([
       prisma.rentalBooking.findMany({
@@ -128,8 +130,7 @@ export class VehicleProfitabilityReportService {
       }),
       prisma.stoppage.findMany({
         where: {
-          tenantId,
-          deletedAt: null,
+          ...stoppageScope,
           vehicleId: { in: vehicleIds },
           status: { not: "CANCELED" as any },
           openedAt: { lte: params.dateTo },

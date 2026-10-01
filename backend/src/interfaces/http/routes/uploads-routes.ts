@@ -4,6 +4,7 @@ import { extractInvoiceTotalFromPdf } from "../../../application/services/invoic
 import { extractRegistrationDateFromBooklet } from "../../../application/services/vehicle-booklet-parser-service.js";
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { lockOwnedStoppage, ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import {
@@ -106,7 +107,7 @@ export const uploadsRoutes = () => {
 
   const requireOwnedStoppage = asyncHandler(async (req, _res, next) => {
     const target = await prisma.stoppage.findFirst({
-      where: { id: req.params.id, tenantId: req.auth!.tenantId, deletedAt: null },
+      where: { ...await ownedStoppageWhere(req.auth!.tenantId), id: req.params.id },
       select: { id: true }
     });
     if (!target) throw new AppError("Fermo non trovato", 404, "NOT_FOUND");
@@ -155,15 +156,18 @@ export const uploadsRoutes = () => {
         resourceType: "StoppagePhoto",
         resourceId: req.params.id,
         files,
-        commit: async (tx, uploads) => tx.stoppagePhoto.createMany({
-          data: uploads.map((upload) => ({
-            stoppageId: req.params.id,
-            filePath: upload.key,
-            fileName: upload.file.originalname || upload.file.filename,
-            mimeType: upload.file.mimetype,
-            sizeBytes: upload.file.size
-          }))
-        })
+        commit: async (tx, uploads) => {
+          await lockOwnedStoppage(tx, tenantId, req.params.id);
+          return tx.stoppagePhoto.createMany({
+            data: uploads.map((upload) => ({
+              stoppageId: req.params.id,
+              filePath: upload.key,
+              fileName: upload.file.originalname || upload.file.filename,
+              mimeType: upload.file.mimetype,
+              sizeBytes: upload.file.size
+            }))
+          });
+        }
       });
 
       await auditFileEvent({
@@ -185,7 +189,7 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const photo = await prisma.stoppagePhoto.findFirst({
-        where: { id: req.params.photoId, stoppage: { tenantId } },
+        where: { id: req.params.photoId, stoppage: await ownedStoppageWhere(tenantId, prisma, true) },
         select: { filePath: true, mimeType: true }
       });
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
@@ -207,12 +211,13 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const photo = await prisma.stoppagePhoto.findFirst({
-        where: { id: req.params.photoId, stoppage: { tenantId } },
-        select: { id: true, filePath: true }
+        where: { id: req.params.photoId, stoppage: await ownedStoppageWhere(tenantId, prisma, true) },
+        select: { id: true, stoppageId: true, filePath: true }
       });
       if (!photo) throw new AppError("Foto non trovata", 404, "NOT_FOUND");
 
       await prisma.$transaction(async (tx) => {
+        await lockOwnedStoppage(tx, tenantId, photo.stoppageId, true);
         await tx.stoppagePhoto.delete({ where: { id: photo.id } });
         await markStoredFileDeleted(tx, tenantId, photo.filePath);
       }, { isolationLevel: "Serializable" });
