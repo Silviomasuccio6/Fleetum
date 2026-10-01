@@ -127,6 +127,8 @@ describe("scheduled report dispatch eligibility", () => {
     emailSender.send = originalSend;
     await prisma.emailQueue.deleteMany({ where: { id: { in: queueIds.splice(0) } } });
     await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await prisma.invoiceDelivery.deleteMany({ where: { invoice: { tenantId: { in: tenantIds } } } });
+    await prisma.invoice.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.tenant.deleteMany({ where: { id: { in: tenantIds.splice(0) } } });
   });
@@ -289,13 +291,27 @@ describe("scheduled report dispatch eligibility", () => {
     await assertBlocked(row.id, "TENANT_INACTIVE");
   });
 
-  it("leaves password, invitation, billing, public and unknown queue types deliverable", async () => {
+  it("leaves password, invitation, valid invoices, billing, public and unknown queue types deliverable", async () => {
     const tenantId = await createTenant("other-types", { active: false, deleted: true, licenseStatus: "SUSPENDED", plan: "STARTER" });
+    // A reserved invoice type still needs its own valid domain command. The
+    // scheduled-report guard must not authorize or reject it as a report.
+    const invoice = await prisma.invoice.create({ data: {
+      tenantId, invoiceNumber: `${runId}-other-types`,
+      issueDate: new Date("2030-01-01T00:00:00.000Z"), dueDate: new Date("2030-01-31T00:00:00.000Z"),
+      periodStart: new Date("2029-12-01T00:00:00.000Z"), periodEnd: new Date("2029-12-31T00:00:00.000Z"),
+      subtotal: 100, taxRate: 22, taxAmount: 22, total: 122, billingName: "Synthetic Billing"
+    } });
+    const invoiceDelivery = await prisma.invoiceDelivery.create({
+      data: { invoiceId: invoice.id, recipient: "other-2@example.test" }
+    });
     const types = [
       "PASSWORD_RESET", "USER_INVITATION", "SAAS_INVOICE_EMAIL", "BILLING_SUBSCRIPTION_SUSPENDED",
       "PUBLIC_DEMO_REQUEST", "SYNTHETIC_UNKNOWN_QUEUE_TYPE"
     ];
-    const rows = await Promise.all(types.map((type, index) => enqueue(`other-${index}`, type === "PUBLIC_DEMO_REQUEST" ? undefined : tenantId, { type })));
+    const rows = await Promise.all(types.map((type, index) => enqueue(`other-${index}`, type === "PUBLIC_DEMO_REQUEST" ? undefined : tenantId, {
+      type, meta: type === "SAAS_INVOICE_EMAIL"
+        ? { tenantId, invoiceId: invoice.id, invoiceDeliveryId: invoiceDelivery.id } : undefined
+    })));
     const calls: string[] = [];
     emailSender.send = async (input) => {
       calls.push(String(input.idempotencyKey));
@@ -306,6 +322,8 @@ describe("scheduled report dispatch eligibility", () => {
     const persisted = await prisma.emailQueue.findMany({ where: { id: { in: rows.map((row) => row.id) } } });
     assert.ok(persisted.every((row) => row.status === "SENT" && row.attempts === 1));
     assert.ok(persisted.every((row) => (row.meta as any).dispatchBlockedReason === undefined));
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status, "SENT");
+    assert.equal((await prisma.invoiceDelivery.findUniqueOrThrow({ where: { id: invoiceDelivery.id } })).status, "SENT");
   });
 
   it("serializes authorization behind a tenant suspension that commits first", async () => {

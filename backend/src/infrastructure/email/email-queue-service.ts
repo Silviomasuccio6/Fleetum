@@ -37,8 +37,6 @@ const tenantBoundTarget = <Keys extends readonly string[]>(
   label: string,
   keys: Keys
 ) => {
-  if (!keys.some((key) => metaString(meta, key))) return null;
-
   const metaTenantId = metaString(meta, "tenantId");
   const values = Object.fromEntries(keys.map((key) => [key, metaString(meta, key)])) as Record<Keys[number], string | null>;
   if (!queueTenantId || metaTenantId !== queueTenantId || keys.some((key) => !metaString(meta, key))) {
@@ -157,24 +155,26 @@ export class EmailQueueService {
       let providerStarted = false;
 
       try {
-        contractTarget = tenantBoundTarget(
+        // The declared queue type owns its domain side effects. Shared keys
+        // such as bookingId are also used by unrelated notifications.
+        contractTarget = item.type === "BOOKING_CONTRACT" ? tenantBoundTarget(
           item.tenantId,
           meta,
           "contratto",
           ["contractDeliveryId", "contractId", "bookingId"] as const
-        );
-        reminderTarget = tenantBoundTarget(
+        ) : null;
+        reminderTarget = item.type === "REMINDER_EMAIL" ? tenantBoundTarget(
           item.tenantId,
           meta,
           "sollecito",
           ["stoppageId", "reminderType"] as const
-        );
-        invoiceTarget = tenantBoundTarget(
+        ) : null;
+        invoiceTarget = item.type === "SAAS_INVOICE_EMAIL" ? tenantBoundTarget(
           item.tenantId,
           meta,
           "fattura",
           ["invoiceDeliveryId", "invoiceId"] as const
-        );
+        ) : null;
 
         const rawAttachments = Array.isArray(meta.attachments) ? meta.attachments : [];
         const fromName = typeof meta.fromName === "string" ? meta.fromName : undefined;
