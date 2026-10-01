@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BookingContract,
   BookingContractStatus,
@@ -494,8 +494,35 @@ export const RentalBookingsPage = () => {
   const [statusFilter, setStatusFilter] = useState<RentalBookingStatus | "">("");
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
-  const [selectedBooking, setSelectedBooking] = useState<BookingDetail | null>(null);
+  const selectedBookingId = routeBookingId ?? searchParams.get("bookingId");
+  const selectedBookingIdRef = useRef(selectedBookingId);
+  const detailRequestVersionRef = useRef(0);
+  const contractRequestVersionRef = useRef(0);
+  const bookingSelectionMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (selectedBookingIdRef.current !== selectedBookingId) {
+      selectedBookingIdRef.current = selectedBookingId;
+      detailRequestVersionRef.current += 1;
+      contractRequestVersionRef.current += 1;
+    }
+  }, [selectedBookingId]);
+  const selectBooking = useCallback((bookingId: string | null, replace = false) => {
+    if (selectedBookingId === bookingId) return;
+    const next = new URLSearchParams(searchParams);
+    if (bookingId) next.set("bookingId", bookingId);
+    else next.delete("bookingId");
+
+    if (routeBookingId) {
+      navigate({
+        pathname: bookingId ? `/rental-bookings/${encodeURIComponent(bookingId)}` : "/booking",
+        search: next.toString()
+      }, { replace });
+    } else {
+      setSearchParams(next, { replace });
+    }
+  }, [navigate, routeBookingId, searchParams, selectedBookingId, setSearchParams]);
+  const [selectedBookingDetail, setSelectedBooking] = useState<BookingDetail | null>(null);
+  const selectedBooking = selectedBookingDetail?.id === selectedBookingId ? selectedBookingDetail : null;
 
   const [transitionTo, setTransitionTo] = useState<RentalBookingStatus | "">("");
   const [contractTo, setContractTo] = useState<RentalContractStatus>("NOT_READY");
@@ -514,7 +541,8 @@ export const RentalBookingsPage = () => {
   const [customerScanFiles, setCustomerScanFiles] = useState<File[]>([]);
   const [customerScanRunning, setCustomerScanRunning] = useState(false);
   const [customerScanInfo, setCustomerScanInfo] = useState<string | null>(null);
-  const [contract, setContract] = useState<BookingContract | null>(null);
+  const [bookingContract, setContract] = useState<BookingContract | null>(null);
+  const contract = bookingContract?.bookingId === selectedBookingId ? bookingContract : null;
   const [contractEditor, setContractEditor] = useState<ContractEditorState>(() => defaultContractEditor());
   const [contractLoading, setContractLoading] = useState(false);
   const [priceLists, setPriceLists] = useState<RentalPriceList[]>([]);
@@ -799,8 +827,13 @@ export const RentalBookingsPage = () => {
   };
 
   const loadSelectedBooking = async (bookingId: string) => {
+    if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== bookingId) return;
+    const requestVersion = ++detailRequestVersionRef.current;
+    const isCurrent = () => bookingSelectionMountedRef.current &&
+      selectedBookingIdRef.current === bookingId && detailRequestVersionRef.current === requestVersion;
     try {
       const detail = (await rentalBookingsUseCases.getById(bookingId)) as BookingDetail;
+      if (!isCurrent()) return;
       setSelectedBooking(detail);
       setContractTo(detail.contractStatus);
       setCargosTo(detail.cargosStatus);
@@ -810,6 +843,7 @@ export const RentalBookingsPage = () => {
       setVehicleInput(`${detail.vehicle.plate} · ${detail.vehicle.brand} ${detail.vehicle.model}`);
       setCustomerInput(detail.customer ? customerDisplayName(detail.customer) : detail.customerName);
     } catch (e) {
+      if (!isCurrent()) return;
       setError((e as Error).message);
     }
   };
@@ -830,12 +864,18 @@ export const RentalBookingsPage = () => {
   };
 
   const loadContract = async (bookingId: string) => {
+    if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== bookingId) return;
+    const requestVersion = ++contractRequestVersionRef.current;
+    const isCurrent = () => bookingSelectionMountedRef.current &&
+      selectedBookingIdRef.current === bookingId && contractRequestVersionRef.current === requestVersion;
     setContractLoading(true);
     try {
       const contractData = await rentalBookingsUseCases.getContract(bookingId);
+      if (!isCurrent()) return;
       setContract(contractData);
       syncContractEditor(contractData);
     } catch (e) {
+      if (!isCurrent()) return;
       const message = (e as Error).message || "";
       if (message.toLowerCase().includes("non trovato") || message.includes("404")) {
         setContract(null);
@@ -844,37 +884,24 @@ export const RentalBookingsPage = () => {
         setError(message);
       }
     } finally {
-      setContractLoading(false);
+      if (isCurrent()) setContractLoading(false);
     }
   };
+
+  useLayoutEffect(() => {
+    bookingSelectionMountedRef.current = true;
+    return () => {
+      bookingSelectionMountedRef.current = false;
+      detailRequestVersionRef.current += 1;
+      contractRequestVersionRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     void loadMasterData();
     void loadCustomers();
     void loadPricingLists();
   }, []);
-
-  useEffect(() => {
-    const bookingIdFromQuery = routeBookingId ?? searchParams.get("bookingId");
-    if (bookingIdFromQuery && bookingIdFromQuery !== selectedBookingId) {
-      setSelectedBookingId(bookingIdFromQuery);
-    }
-  }, [routeBookingId, searchParams, selectedBookingId]);
-
-  useEffect(() => {
-    const currentBookingId = searchParams.get("bookingId");
-    const nextBookingId = selectedBookingId ?? null;
-    if (currentBookingId === nextBookingId) return;
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      if (selectedBookingId) {
-        next.set("bookingId", selectedBookingId);
-      } else {
-        next.delete("bookingId");
-      }
-      return next;
-    }, { replace: true });
-  }, [selectedBookingId, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!bookingModalOpen && !customerModalOpen && !templateModalOpen) return undefined;
@@ -899,12 +926,21 @@ export const RentalBookingsPage = () => {
   }, [customerSearch]);
 
   useEffect(() => {
-    if (!selectedBookingId) {
-      setSelectedBooking(null);
-      setContract(null);
-      syncContractEditor(null);
-      return;
-    }
+    setSelectedBooking(null);
+    setContract(null);
+    syncContractEditor(null);
+    setContractLoading(false);
+    setTransitionTo("");
+    setContractTo("NOT_READY");
+    setCargosTo("NOT_REQUIRED");
+    setCargosTransmissionId("");
+    setCargosMessage("");
+    setNoteInput("");
+    setError(null);
+  }, [selectedBookingId]);
+
+  useEffect(() => {
+    if (!selectedBookingId) return;
     void loadSelectedBooking(selectedBookingId);
     void loadContract(selectedBookingId);
   }, [selectedBookingId, refreshKey]);
@@ -1074,9 +1110,9 @@ export const RentalBookingsPage = () => {
       .flatMap((row) => row.bookings)
       .filter((booking) => (statusFilter ? booking.status === statusFilter : true))[0];
     if (!selectedBookingId && firstBooking?.id) {
-      setSelectedBookingId(firstBooking.id);
+      selectBooking(firstBooking.id, true);
     }
-  }, [monthAvailability.data, selectedBookingId, statusFilter]);
+  }, [monthAvailability.data, selectBooking, selectedBookingId, statusFilter]);
 
   const goPrevMonth = () => {
     setMonthCursor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1));
@@ -1170,7 +1206,7 @@ export const RentalBookingsPage = () => {
   const openDetailFromContext = async (bookingId: string) => {
     setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
     if (selectedBookingId !== bookingId) {
-      setSelectedBookingId(bookingId);
+      selectBooking(bookingId);
       // Aspettiamo il render successivo così il pannello risulta subito visibile.
       window.setTimeout(scrollToControlPanel, 80);
       return;
@@ -1321,12 +1357,12 @@ export const RentalBookingsPage = () => {
           bookingCreateRequestRef.current
         );
         targetBookingId = created.id;
-        setSelectedBookingId(created.id);
+        selectBooking(created.id);
         setSuccess("Prenotazione creata con successo.");
       } else if (bookingForm.bookingId) {
         await rentalBookingsUseCases.update(bookingForm.bookingId, payload);
         targetBookingId = bookingForm.bookingId;
-        setSelectedBookingId(bookingForm.bookingId);
+        selectBooking(bookingForm.bookingId);
         setSuccess("Prenotazione aggiornata.");
       }
 
@@ -1579,14 +1615,17 @@ export const RentalBookingsPage = () => {
     setSuccess(null);
     try {
       const generated = await rentalBookingsUseCases.generateContract(selectedBooking.id);
+      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
+      contractRequestVersionRef.current += 1;
       setContract(generated);
       syncContractEditor(generated);
       setSuccess("Contratto generato dal template tenant.");
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
+      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
       setError((e as Error).message);
     } finally {
-      setSaving(false);
+      if (bookingSelectionMountedRef.current) setSaving(false);
     }
   };
 
@@ -1604,14 +1643,17 @@ export const RentalBookingsPage = () => {
         emailBody: contractEditor.emailBody || undefined,
         status: contractEditor.status
       });
+      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
+      contractRequestVersionRef.current += 1;
       setContract(updated);
       syncContractEditor(updated);
       setSuccess("Contratto salvato.");
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
+      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
       setError((e as Error).message);
     } finally {
-      setSaving(false);
+      if (bookingSelectionMountedRef.current) setSaving(false);
     }
   };
 
@@ -1726,15 +1768,18 @@ export const RentalBookingsPage = () => {
     setSuccess(null);
     try {
       const updated = await rentalBookingsUseCases.markContractSigned(selectedBooking.id, {});
+      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
+      contractRequestVersionRef.current += 1;
       setContract(updated);
       syncContractEditor(updated);
       setContractTo("SIGNED");
       setSuccess("Contratto marcato come firmato.");
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
+      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
       setError((e as Error).message);
     } finally {
-      setSaving(false);
+      if (bookingSelectionMountedRef.current) setSaving(false);
     }
   };
 
@@ -1939,7 +1984,7 @@ export const RentalBookingsPage = () => {
     setSuccess(null);
     try {
       await rentalBookingsUseCases.remove(selectedBooking.id);
-      setSelectedBookingId(null);
+      selectBooking(null, true);
       setSelectedBooking(null);
       setSuccess("Prenotazione eliminata.");
       setRefreshKey((prev) => prev + 1);
@@ -2173,7 +2218,7 @@ export const RentalBookingsPage = () => {
                 statusFilter={statusFilter}
                 selectedBookingId={selectedBookingId}
                 onSelectBooking={(bookingId) => {
-                  setSelectedBookingId(bookingId);
+                  selectBooking(bookingId);
                   setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
                 }}
                 onEmptyCellClick={({ vehicleId, date }) => {

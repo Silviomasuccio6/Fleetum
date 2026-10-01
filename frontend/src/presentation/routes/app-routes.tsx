@@ -50,7 +50,7 @@ const withFeatureProtection = (pathname: string, element: JSX.Element) => {
 const RouteErrorBoundary = ({ children }: { children: JSX.Element }) => {
   const location = useLocation();
   return (
-    <AppErrorBoundary key={`${location.pathname}${location.search}${location.hash}`} scope="route">
+    <AppErrorBoundary resetKey={`${location.pathname}${location.search}${location.hash}`} scope="route">
       {children}
     </AppErrorBoundary>
   );

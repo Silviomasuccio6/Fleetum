@@ -5,6 +5,7 @@ import { getUiRecoveryCopy, reportUiRecovery, type UiRecoveryScope } from "./ui-
 type Props = {
   children: ReactNode;
   scope: Exclude<UiRecoveryScope, "bootstrap">;
+  resetKey?: string;
 };
 
 type State = {
@@ -20,6 +21,13 @@ export class AppErrorBoundary extends Component<Props, State> {
 
   componentDidCatch() {
     reportUiRecovery(this.props.scope);
+  }
+
+  componentDidUpdate(previous: Props) {
+    // Navigation recovers a failed route without remounting a healthy app.
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false });
+    }
   }
 
   render() {
