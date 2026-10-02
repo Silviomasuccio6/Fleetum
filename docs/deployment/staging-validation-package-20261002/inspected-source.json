@@ -1,0 +1,26 @@
+{
+  "candidateSha": "459ceed2f7b9a2ee1d2756d326c94dd23acde2e3",
+  "scope": "Sorgenti e .example pubblici; nessun env reale",
+  "sha256": {
+    ".github/workflows/ci.yml": "2c657064dd8c8536f7b63cab35736af1813ef6feeb6c011cd24827849993b8fd",
+    ".github/workflows/deploy-staging.yml": "48264f14a331a5838985c2030b9773515b6e93c91d39e557f35790e14e1fb11c",
+    ".github/workflows/deploy-production.yml": "be3bc67d308417e4c95ecb8393f34d44a4b92386f124a00d80a10890dab18e3a",
+    ".github/workflows/e2e-nightly.yml": "acd9b8d10bac88c5ff1b77081547faaf89e8a48ec9a38bf72e69cdf2a1040b51",
+    "docker-compose.staging.yml": "8a16d42bb76e0a92fe67abdd8874edd42cb3ab92175cd0de8d3b1e176f612e62",
+    "deploy/caddy/Caddyfile.staging": "090520e1df53fbaa21d19e40014d819a9194b3af5ce1bf96505d9aeba59552dd",
+    "deploy/env/backend.env.staging.example": "cfdddc11a97d4fa64df29df0eba67e2b236e4813658b68947571b2699d410fed",
+    "ops/e2e/validate-config.mjs": "6d3ffeee28ed40a9b261169befb3a531370f84e2e4927dd200a76113614fa373",
+    "ops/e2e/verify-report.mjs": "fe18bcde0982ce290d1c879644ae13b522145a15da0fe37e832dd8eae091dd9c",
+    "ops/preflight-release.sh": "35a856bd859d80d2f67d8f369ed8853dbad456a291ca63fbcdec8e28cea6b3eb",
+    "ops/verify-database.sh": "cd9ecd6e85f0233c140ba0332c11d2f6b460726e2106ee3ba07f1e758d84e10a",
+    "ops/verify-migration-compatibility.sh": "159e234287a65526be7e5cd36918cfc4983f146fac66e9f25b8bf9bea41044a5",
+    "backend/tests/security/rental-payment-lifecycle-db.test.ts": "b4ac63bd93514cd58b1179d114bcdc62b80f7ed18e269f11104d70501bdb93f1",
+    "backend/package.json": "e16cfa7ea6c72e8c704b70a422ddffa7e99e78e4aafabd945de0858d3955d045",
+    "backend/src/server.ts": "77de5f445e73ea2cb9edfa6480e98f13a66ed0f23c965ce1c2b9201e7fc707aa",
+    "docs/deployment/staging.md": "64ef1fbaeed3a77cdd2b699385f9238bb4211a20b395e72dcb39fffc7fa52891",
+    "docs/deployment/rental-payment-ordering-20261002.md": "edcd3408f3eb4afb020421abe37748bca47fd41a939a8c0e1882f3b193401407",
+    "docs/deployment/vehicle-pagination-count-20261002.md": "60b716c88996fa22cfdeb910f55a59eca2a311582d19bec85d7baa45459ed33f",
+    "frontend/public/robots.txt": "ce5b673930ea919f798d2ff3a07cc2759b082a1f2b091fff2aec09e1476a83bc",
+    "frontend/public/sitemap.xml": "2f01bb33479252f94ce6afcae4261e83acd7fe63cf9deedacd4f8ab144069350"
+  }
+}
