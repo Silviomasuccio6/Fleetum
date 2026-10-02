@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { createAuditLog } from "../../infrastructure/repositories/prisma-audit-log-repository.js";
 import { EmailQueueService } from "../../infrastructure/email/email-queue-service.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
@@ -103,12 +104,8 @@ const APPROVABLE_EXTRA_STATUSES: readonly RentalExtraChargeStatus[] = [
   RentalExtraChargeStatus.PENDING_APPROVAL
 ];
 
-const EXTRA_CHARGE_ALREADY_PROCESSING_STATUSES: readonly RentalExtraChargeStatus[] = [
-  RentalExtraChargeStatus.PAYMENT_PROCESSING,
-  RentalExtraChargeStatus.PAID
-];
-
 const NON_CANCELABLE_EXTRA_STATUSES: readonly RentalExtraChargeStatus[] = [
+  RentalExtraChargeStatus.PAYMENT_PROCESSING,
   RentalExtraChargeStatus.PAID,
   RentalExtraChargeStatus.REFUNDED,
   RentalExtraChargeStatus.DISPUTED
@@ -190,6 +187,14 @@ const isIndeterminateStripeError = (error: unknown) => {
   );
 };
 
+const isDefinitiveStripeError = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { type?: unknown; statusCode?: unknown };
+  return ["StripeCardError", "StripeInvalidRequestError", "StripeAuthenticationError", "StripePermissionError"].includes(String(candidate.type))
+    || [400, 401, 402, 403, 404].includes(Number(candidate.statusCode))
+    || stripeErrorCode(error) === "authentication_required";
+};
+
 type BookingForPayment = {
   id: string;
   tenantId: string;
@@ -242,6 +247,8 @@ type PaymentMethodRecord = {
 };
 
 type DepositRecord = {
+  createdAt?: Date;
+  updatedAt?: Date;
   id: string;
   tenantId: string;
   bookingId: string;
@@ -257,6 +264,7 @@ type DepositRecord = {
 };
 
 type ExtraChargeRecord = {
+  updatedAt?: Date;
   id: string;
   tenantId: string;
   bookingId: string;
@@ -282,6 +290,8 @@ type RentalPaymentEventRecord = {
   processedAt: Date | null;
 };
 
+type PaymentAudit = Parameters<AuditLogRepository["create"]>[0];
+
 type RentalPaymentServiceDeps = {
   findBookingForPayment(tenantId: string, bookingId: string): Promise<BookingForPayment | null>;
   findPaymentProfile(tenantId: string, rentalCustomerId: string): Promise<PaymentProfileRecord | null>;
@@ -289,6 +299,7 @@ type RentalPaymentServiceDeps = {
   createPendingPaymentMethod(input: Prisma.RentalCustomerPaymentMethodUncheckedCreateInput): Promise<PaymentMethodRecord>;
   updatePaymentMethod(tenantId: string, paymentMethodId: string, data: Prisma.RentalCustomerPaymentMethodUncheckedUpdateInput): Promise<PaymentMethodRecord>;
   findPaymentMethodById(tenantId: string, paymentMethodId: string): Promise<PaymentMethodRecord | null>;
+  findHistoricalPaymentMethodById(tenantId: string, paymentMethodId: string): Promise<PaymentMethodRecord | null>;
   findPaymentMethodByStripeId(stripePaymentMethodId: string): Promise<PaymentMethodRecord | null>;
   findPaymentMethodBySetupIntentId(stripeSetupIntentId: string): Promise<PaymentMethodRecord | null>;
   listPaymentMethods(tenantId: string, rentalCustomerId: string): Promise<PaymentMethodRecord[]>;
@@ -298,10 +309,12 @@ type RentalPaymentServiceDeps = {
   createDeposit(input: Prisma.RentalDepositUncheckedCreateInput): Promise<DepositRecord>;
   claimActiveDeposit(input: Prisma.RentalDepositUncheckedCreateInput): Promise<{ deposit: DepositRecord; created: boolean }>;
   updateDeposit(tenantId: string, depositId: string, data: Prisma.RentalDepositUncheckedUpdateInput): Promise<DepositRecord>;
+  compareAndUpdateDeposit(expected: DepositRecord, data: Prisma.RentalDepositUncheckedUpdateInput, audit?: PaymentAudit): Promise<DepositRecord | null>;
   findDepositById(tenantId: string, depositId: string): Promise<DepositRecord | null>;
   findDepositByStripePaymentIntentId(stripePaymentIntentId: string): Promise<DepositRecord | null>;
   createExtraCharge(input: Prisma.RentalExtraChargeUncheckedCreateInput): Promise<ExtraChargeRecord>;
   updateExtraCharge(tenantId: string, extraChargeId: string, data: Prisma.RentalExtraChargeUncheckedUpdateInput): Promise<ExtraChargeRecord>;
+  compareAndUpdateExtraCharge(expected: ExtraChargeRecord, data: Prisma.RentalExtraChargeUncheckedUpdateInput, audit?: PaymentAudit): Promise<ExtraChargeRecord | null>;
   findExtraChargeById(tenantId: string, extraChargeId: string): Promise<ExtraChargeRecord | null>;
   findExtraChargeByStripePaymentIntentId(stripePaymentIntentId: string): Promise<ExtraChargeRecord | null>;
   createRentalPaymentEvent(event: Stripe.Event, tenantId: string, refs: RentalPaymentEventRefs): Promise<RentalPaymentEventRecord>;
@@ -338,6 +351,8 @@ const paymentMethodSelect = {
 } as const;
 
 const depositSelect = {
+  createdAt: true,
+  updatedAt: true,
   id: true,
   tenantId: true,
   bookingId: true,
@@ -353,6 +368,7 @@ const depositSelect = {
 } as const;
 
 const extraChargeSelect = {
+  updatedAt: true,
   id: true,
   tenantId: true,
   bookingId: true,
@@ -431,6 +447,9 @@ const defaultDeps: RentalPaymentServiceDeps = {
   async findPaymentMethodById(tenantId, paymentMethodId) {
     return prisma.rentalCustomerPaymentMethod.findFirst({ where: { id: paymentMethodId, tenantId, deletedAt: null }, select: paymentMethodSelect });
   },
+  async findHistoricalPaymentMethodById(tenantId, paymentMethodId) {
+    return prisma.rentalCustomerPaymentMethod.findFirst({ where: { id: paymentMethodId, tenantId }, select: paymentMethodSelect });
+  },
   async findPaymentMethodByStripeId(stripePaymentMethodId) {
     return prisma.rentalCustomerPaymentMethod.findUnique({ where: { stripePaymentMethodId }, select: paymentMethodSelect });
   },
@@ -486,6 +505,23 @@ const defaultDeps: RentalPaymentServiceDeps = {
     if (!row) throw new AppError("Deposito non trovato", 404, "RENTAL_DEPOSIT_NOT_FOUND");
     return row;
   },
+  async compareAndUpdateDeposit(expected, data, audit) {
+    return prisma.$transaction(async (tx) => {
+      // Match privacy/notice lock order before locking the financial row and audit FKs.
+      await tx.$queryRaw`SELECT "id" FROM "Tenant" WHERE "id" = ${expected.tenantId} FOR KEY SHARE`;
+      const result = await tx.rentalDeposit.updateMany({ where: {
+        id: expected.id, tenantId: expected.tenantId, deletedAt: null,
+        status: expected.status, stripePaymentIntentId: expected.stripePaymentIntentId,
+        paymentMethodId: expected.paymentMethodId, amountCents: expected.amountCents,
+        capturedAmountCents: expected.capturedAmountCents, currency: expected.currency,
+        bookingId: expected.bookingId, rentalCustomerId: expected.rentalCustomerId,
+        ...(expected.updatedAt ? { updatedAt: expected.updatedAt } : {})
+      }, data });
+      if (result.count !== 1) return null;
+      if (audit) await createAuditLog(tx, audit);
+      return tx.rentalDeposit.findFirst({ where: { id: expected.id, tenantId: expected.tenantId }, select: depositSelect });
+    });
+  },
   async findDepositById(tenantId, depositId) {
     return prisma.rentalDeposit.findFirst({ where: { id: depositId, tenantId, deletedAt: null }, select: depositSelect });
   },
@@ -501,6 +537,23 @@ const defaultDeps: RentalPaymentServiceDeps = {
     const row = await prisma.rentalExtraCharge.findFirst({ where: { id: extraChargeId, tenantId }, select: extraChargeSelect });
     if (!row) throw new AppError("Extra charge non trovato", 404, "RENTAL_EXTRA_CHARGE_NOT_FOUND");
     return row;
+  },
+  async compareAndUpdateExtraCharge(expected, data, audit) {
+    return prisma.$transaction(async (tx) => {
+      // Match privacy/notice lock order before locking the financial row and audit FKs.
+      await tx.$queryRaw`SELECT "id" FROM "Tenant" WHERE "id" = ${expected.tenantId} FOR KEY SHARE`;
+      const result = await tx.rentalExtraCharge.updateMany({ where: {
+        id: expected.id, tenantId: expected.tenantId, deletedAt: null,
+        status: expected.status, stripePaymentIntentId: expected.stripePaymentIntentId,
+        paymentMethodId: expected.paymentMethodId, amountCents: expected.amountCents,
+        adminFeeCents: expected.adminFeeCents, totalAmountCents: expected.totalAmountCents,
+        currency: expected.currency, bookingId: expected.bookingId, rentalCustomerId: expected.rentalCustomerId,
+        ...(expected.updatedAt ? { updatedAt: expected.updatedAt } : {})
+      }, data });
+      if (result.count !== 1) return null;
+      if (audit) await createAuditLog(tx, audit);
+      return tx.rentalExtraCharge.findFirst({ where: { id: expected.id, tenantId: expected.tenantId }, select: extraChargeSelect });
+    });
   },
   async findExtraChargeById(tenantId, extraChargeId) {
     return prisma.rentalExtraCharge.findFirst({ where: { id: extraChargeId, tenantId, deletedAt: null }, select: extraChargeSelect });
@@ -682,7 +735,7 @@ export class RentalPaymentService {
       createdByUserId: input.userId,
       approvedByUserId: input.userId
     });
-    let deposit = claim.deposit;
+    const deposit = claim.deposit;
 
     if (!claim.created) {
       const sameRequest = deposit.rentalCustomerId === rentalCustomerId &&
@@ -692,7 +745,10 @@ export class RentalPaymentService {
       if (!sameRequest) {
         throw new AppError("Esiste gia un deposito attivo per questa prenotazione", 409, "RENTAL_DEPOSIT_ALREADY_ACTIVE");
       }
-      if (deposit.status === RentalDepositStatus.AUTHORIZED) return deposit;
+      if (deposit.stripePaymentIntentId) return this.reconcileIntent("deposit", input.tenantId, deposit.id, deposit.stripePaymentIntentId);
+      if (!deposit.createdAt || Date.now() - deposit.createdAt.getTime() >= 23 * 60 * 60 * 1000) {
+        throw new AppError("Autorizzazione deposito da verificare prima di un nuovo tentativo", 409, "RENTAL_DEPOSIT_OUTCOME_UNCERTAIN");
+      }
     }
 
     if (claim.created) {
@@ -706,8 +762,9 @@ export class RentalPaymentService {
       });
     }
 
+    let paymentIntent: Stripe.PaymentIntent;
     try {
-      const paymentIntent = await stripe.paymentIntents.create({
+      paymentIntent = await stripe.paymentIntents.create({
         amount: input.amountCents,
         currency: "eur",
         customer: paymentMethod.stripeCustomerId,
@@ -726,10 +783,13 @@ export class RentalPaymentService {
         }
       }, { idempotencyKey: `rental-deposit:${input.tenantId}:${deposit.id}` });
 
-      deposit = await this.applyDepositPaymentIntent(input.tenantId, deposit.id, paymentIntent);
-      return deposit;
     } catch (error) {
-      if (isIndeterminateStripeError(error)) {
+      const current = await this.getDepositOrThrow(input.tenantId, deposit.id);
+      if (current.stripePaymentIntentId) return this.reconcileIntent("deposit", input.tenantId, current.id, current.stripePaymentIntentId);
+      const errorIntentId = stripeId((error as { payment_intent?: unknown; raw?: { payment_intent?: unknown } })?.payment_intent)
+        ?? stripeId((error as { raw?: { payment_intent?: unknown } })?.raw?.payment_intent);
+      if (errorIntentId) return this.reconcileIntent("deposit", input.tenantId, current.id, errorIntentId);
+      if (isIndeterminateStripeError(error) || !isDefinitiveStripeError(error)) {
         await this.auditRepository.create({
           tenantId: input.tenantId,
           userId: input.userId,
@@ -740,20 +800,15 @@ export class RentalPaymentService {
         });
         throw error;
       }
-      deposit = await this.deps.updateDeposit(input.tenantId, deposit.id, {
-        status: RentalDepositStatus.FAILED,
-        failureReason: stripeErrorMessage(error)
-      });
-      await this.auditRepository.create({
-        tenantId: input.tenantId,
-        userId: input.userId,
-        action: "RENTAL_DEPOSIT_FAILED",
-        resource: "rental-deposit",
-        resourceId: deposit.id,
-        details: { errorCode: stripeErrorCode(error), declineCode: stripeDeclineCode(error) }
-      });
+      const updated = await this.deps.compareAndUpdateDeposit(deposit, {
+        status: RentalDepositStatus.FAILED, failureReason: stripeErrorMessage(error)
+      }, { tenantId: input.tenantId, userId: input.userId, action: "RENTAL_DEPOSIT_FAILED",
+        resource: "rental-deposit", resourceId: deposit.id,
+        details: { errorCode: stripeErrorCode(error), declineCode: stripeDeclineCode(error) } });
+      if (!updated) return this.getDepositOrThrow(input.tenantId, deposit.id);
       throw error;
     }
+    return this.applyDepositPaymentIntent(input.tenantId, deposit.id, paymentIntent);
   }
 
   async captureDeposit(input: { tenantId: string; depositId: string; amountToCaptureCents?: number; userId: string }) {
@@ -770,30 +825,17 @@ export class RentalPaymentService {
       throw new AppError("Importo cattura deposito non valido", 400, "RENTAL_DEPOSIT_CAPTURE_AMOUNT_INVALID");
     }
 
+    const beforeCapture = await stripe.paymentIntents.retrieve(deposit.stripePaymentIntentId);
+    await this.validateIntent("deposit", deposit, beforeCapture);
+    if (beforeCapture.status !== "requires_capture") return this.reconcileIntent("deposit", input.tenantId, deposit.id, deposit.stripePaymentIntentId);
     const paymentIntent = await stripe.paymentIntents.capture(
       deposit.stripePaymentIntentId,
       { amount_to_capture: amountToCapture },
       { idempotencyKey: `rental-deposit-capture:${input.tenantId}:${deposit.id}:${amountToCapture}` }
     );
 
-    const capturedTotal = deposit.capturedAmountCents + amountToCapture;
-    const nextStatus = capturedTotal >= deposit.amountCents ? RentalDepositStatus.CAPTURED : RentalDepositStatus.PARTIALLY_CAPTURED;
-    const updated = await this.deps.updateDeposit(input.tenantId, deposit.id, {
-      status: nextStatus,
-      capturedAmountCents: capturedTotal,
-      capturedAt: new Date(),
-      stripePaymentIntentId: paymentIntent.id
-    });
-
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: nextStatus === RentalDepositStatus.CAPTURED ? "RENTAL_DEPOSIT_CAPTURED" : "RENTAL_DEPOSIT_PARTIALLY_CAPTURED",
-      resource: "rental-deposit",
-      resourceId: deposit.id,
-      details: { amountToCaptureCents: amountToCapture, capturedTotalCents: capturedTotal }
-    });
-
+    if (paymentIntent.id !== deposit.stripePaymentIntentId) this.bindingError();
+    const updated = await this.reconcileIntent("deposit", input.tenantId, deposit.id, deposit.stripePaymentIntentId);
     return updated;
   }
 
@@ -805,23 +847,15 @@ export class RentalPaymentService {
       throw new AppError("Deposito non rilasciabile nello stato corrente", 409, "RENTAL_DEPOSIT_NOT_RELEASABLE");
     }
 
-    await stripe.paymentIntents.cancel(deposit.stripePaymentIntentId, {}, {
+    const beforeRelease = await stripe.paymentIntents.retrieve(deposit.stripePaymentIntentId);
+    await this.validateIntent("deposit", deposit, beforeRelease);
+    if (beforeRelease.status === "succeeded" || beforeRelease.status === "canceled") return this.reconcileIntent("deposit", input.tenantId, deposit.id, deposit.stripePaymentIntentId);
+    const canceled = await stripe.paymentIntents.cancel(deposit.stripePaymentIntentId, {}, {
       idempotencyKey: `rental-deposit-release:${input.tenantId}:${deposit.id}`
     });
 
-    const updated = await this.deps.updateDeposit(input.tenantId, deposit.id, {
-      status: RentalDepositStatus.RELEASED,
-      releasedAt: new Date()
-    });
-
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: "RENTAL_DEPOSIT_RELEASED",
-      resource: "rental-deposit",
-      resourceId: deposit.id,
-      details: { bookingId: deposit.bookingId, capturedAmountCents: deposit.capturedAmountCents }
-    });
+    if (canceled.id !== deposit.stripePaymentIntentId) this.bindingError();
+    const updated = await this.reconcileIntent("deposit", input.tenantId, deposit.id, deposit.stripePaymentIntentId);
 
     return updated;
   }
@@ -882,18 +916,12 @@ export class RentalPaymentService {
     if (!APPROVABLE_EXTRA_STATUSES.includes(extraCharge.status)) {
       throw new AppError("Extra charge non approvabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_APPROVABLE");
     }
-    const updated = await this.deps.updateExtraCharge(input.tenantId, input.extraChargeId, {
-      status: RentalExtraChargeStatus.APPROVED,
-      approvedByUserId: input.userId
-    });
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: "RENTAL_EXTRA_CHARGE_APPROVED",
-      resource: "rental-extra-charge",
-      resourceId: input.extraChargeId,
-      details: { bookingId: extraCharge.bookingId, totalAmountCents: extraCharge.totalAmountCents }
-    });
+    const updated = await this.deps.compareAndUpdateExtraCharge(extraCharge, {
+      status: RentalExtraChargeStatus.APPROVED, approvedByUserId: input.userId
+    }, { tenantId: input.tenantId, userId: input.userId, action: "RENTAL_EXTRA_CHARGE_APPROVED",
+      resource: "rental-extra-charge", resourceId: input.extraChargeId,
+      details: { bookingId: extraCharge.bookingId, totalAmountCents: extraCharge.totalAmountCents } });
+    if (!updated) throw new AppError("Pagamento modificato da un'altra richiesta", 409, "RENTAL_PAYMENT_CONFLICT");
     return updated;
   }
 
@@ -903,101 +931,91 @@ export class RentalPaymentService {
 
   async chargeExtraCharge(input: { tenantId: string; extraChargeId: string; paymentMethodId?: string; userId: string }) {
     const stripe = this.requireStripeClient();
-    let extraCharge = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
-    if (!CHARGEABLE_EXTRA_STATUSES.includes(extraCharge.status)) {
+    const extra = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
+    if (!CHARGEABLE_EXTRA_STATUSES.includes(extra.status) && extra.status !== RentalExtraChargeStatus.PAYMENT_PROCESSING) {
       throw new AppError("Extra charge non addebitabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_CHARGEABLE");
     }
-    if (extraCharge.stripePaymentIntentId && EXTRA_CHARGE_ALREADY_PROCESSING_STATUSES.includes(extraCharge.status)) {
-      throw new AppError("Extra charge gia in pagamento o pagato", 409, "RENTAL_EXTRA_CHARGE_ALREADY_CHARGED");
+    // A known intent is reconciled, never replaced by a second create request.
+    if (extra.stripePaymentIntentId) {
+      return this.reconcileIntent("extra", extra.tenantId, extra.id, extra.stripePaymentIntentId);
     }
-
-    const paymentMethodId = input.paymentMethodId ?? extraCharge.paymentMethodId;
+    if (!CHARGEABLE_EXTRA_STATUSES.includes(extra.status)) {
+      throw new AppError("Extra charge non addebitabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_CHARGEABLE");
+    }
+    const paymentMethodId = input.paymentMethodId ?? extra.paymentMethodId;
     if (!paymentMethodId) throw new AppError("Metodo di pagamento obbligatorio", 400, "RENTAL_EXTRA_CHARGE_PAYMENT_METHOD_REQUIRED");
-    const paymentMethod = await this.getActivePaymentMethodOrThrow(input.tenantId, paymentMethodId, extraCharge.rentalCustomerId);
-
-    extraCharge = await this.deps.updateExtraCharge(input.tenantId, input.extraChargeId, {
-      status: RentalExtraChargeStatus.PAYMENT_PROCESSING,
-      paymentMethodId: paymentMethod.id,
-      failureReason: null
-    });
-
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: "RENTAL_EXTRA_CHARGE_PAYMENT_STARTED",
-      resource: "rental-extra-charge",
-      resourceId: input.extraChargeId,
-      details: { bookingId: extraCharge.bookingId, totalAmountCents: extraCharge.totalAmountCents }
-    });
-
+    const method = await this.getActivePaymentMethodOrThrow(input.tenantId, paymentMethodId, extra.rentalCustomerId);
+    const claimed = await this.deps.compareAndUpdateExtraCharge(extra, {
+      status: RentalExtraChargeStatus.PAYMENT_PROCESSING, paymentMethodId: method.id, failureReason: null
+    }, { tenantId: input.tenantId, userId: input.userId,
+      action: "RENTAL_EXTRA_CHARGE_PAYMENT_STARTED", resource: "rental-extra-charge", resourceId: extra.id,
+      details: { bookingId: extra.bookingId, totalAmountCents: extra.totalAmountCents } });
+    if (!claimed) throw new AppError("Pagamento modificato da un'altra richiesta", 409, "RENTAL_PAYMENT_CONFLICT");
+    let intent: Stripe.PaymentIntent;
     try {
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: extraCharge.totalAmountCents,
-        currency: "eur",
-        customer: paymentMethod.stripeCustomerId,
-        payment_method: paymentMethod.stripePaymentMethodId,
-        off_session: true,
-        confirm: true,
-        description: `Addebito extra noleggio ${extraCharge.bookingId} - ${extraCharge.type}`,
-        metadata: {
-          domain: RENTAL_PAYMENT_DOMAIN,
-          purpose: EXTRA_CHARGE_PURPOSE,
-          tenantId: input.tenantId,
-          bookingId: extraCharge.bookingId,
-          rentalCustomerId: extraCharge.rentalCustomerId,
-          rentalExtraChargeId: extraCharge.id,
-          paymentMethodId: paymentMethod.id,
-          chargeType: extraCharge.type
-        }
-      }, { idempotencyKey: `rental-extra-charge:${input.tenantId}:${extraCharge.id}` });
-
-      const status = paymentIntent.status === "succeeded" ? RentalExtraChargeStatus.PAID : RentalExtraChargeStatus.PAYMENT_PROCESSING;
-      const updated = await this.deps.updateExtraCharge(input.tenantId, extraCharge.id, {
-        stripePaymentIntentId: paymentIntent.id,
-        status,
-        chargedAt: status === RentalExtraChargeStatus.PAID ? new Date() : undefined
-      });
-      return updated;
+      intent = await stripe.paymentIntents.create({
+        amount: claimed.totalAmountCents, currency: claimed.currency.toLowerCase(), customer: method.stripeCustomerId,
+        payment_method: method.stripePaymentMethodId, off_session: true, confirm: true,
+        description: `Addebito extra noleggio ${claimed.bookingId} - ${claimed.type}`,
+        metadata: { domain: RENTAL_PAYMENT_DOMAIN, purpose: EXTRA_CHARGE_PURPOSE, tenantId: claimed.tenantId,
+          bookingId: claimed.bookingId, rentalCustomerId: claimed.rentalCustomerId,
+          rentalExtraChargeId: claimed.id, paymentMethodId: method.id, chargeType: claimed.type }
+      }, { idempotencyKey: `rental-extra-charge:${claimed.tenantId}:${claimed.id}` });
     } catch (error) {
+      const current = await this.getExtraChargeOrThrow(input.tenantId, extra.id);
+      if (current.stripePaymentIntentId) return this.reconcileIntent("extra", current.tenantId, current.id, current.stripePaymentIntentId);
+      const errorIntentId = stripeId((error as { payment_intent?: unknown; raw?: { payment_intent?: unknown } })?.payment_intent)
+        ?? stripeId((error as { raw?: { payment_intent?: unknown } })?.raw?.payment_intent);
+      if (errorIntentId) return this.reconcileIntent("extra", current.tenantId, current.id, errorIntentId);
+      if (isIndeterminateStripeError(error) || !isDefinitiveStripeError(error)) {
+        // No automatic re-create: Stripe can prune idempotency keys after 24 hours.
+        await this.auditRepository.create({ tenantId: input.tenantId, userId: input.userId,
+          action: "RENTAL_EXTRA_CHARGE_PAYMENT_UNCERTAIN", resource: "rental-extra-charge", resourceId: extra.id,
+          details: { errorCode: stripeErrorCode(error) } });
+        throw error;
+      }
       const nextStatus = statusForStripePaymentError(error);
-      const updated = await this.deps.updateExtraCharge(input.tenantId, extraCharge.id, {
-        status: nextStatus,
-        failureReason: stripeErrorMessage(error)
-      });
-      await this.auditRepository.create({
-        tenantId: input.tenantId,
-        userId: input.userId,
+      const updated = await this.deps.compareAndUpdateExtraCharge(claimed, { status: nextStatus, failureReason: stripeErrorMessage(error) }, { tenantId: input.tenantId, userId: input.userId,
         action: nextStatus === RentalExtraChargeStatus.REQUIRES_ACTION ? "RENTAL_EXTRA_CHARGE_REQUIRES_ACTION" : "RENTAL_EXTRA_CHARGE_FAILED",
-        resource: "rental-extra-charge",
-        resourceId: input.extraChargeId,
-        details: { errorCode: stripeErrorCode(error), declineCode: stripeDeclineCode(error) }
-      });
+        resource: "rental-extra-charge", resourceId: extra.id,
+        details: { errorCode: stripeErrorCode(error), declineCode: stripeDeclineCode(error) } });
+      if (!updated) return this.getExtraChargeOrThrow(input.tenantId, extra.id);
       return updated;
     }
+    // Provider success must not be caught and mistaken for a declined charge if persistence fails.
+    return this.reconcileIntent("extra", claimed.tenantId, claimed.id, intent.id);
   }
 
   async cancelExtraCharge(input: { tenantId: string; extraChargeId: string; userId: string }) {
-    const extraCharge = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
-    if (NON_CANCELABLE_EXTRA_STATUSES.includes(extraCharge.status)) {
-      throw new AppError("Extra charge non annullabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_CANCELABLE");
+    const extra = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
+    if (NON_CANCELABLE_EXTRA_STATUSES.includes(extra.status) || extra.stripePaymentIntentId) {
+      throw new AppError("Extra charge non annullabile mentre il pagamento e in verifica", 409, "RENTAL_EXTRA_CHARGE_NOT_CANCELABLE");
     }
-    const updated = await this.deps.updateExtraCharge(input.tenantId, input.extraChargeId, {
-      status: RentalExtraChargeStatus.CANCELED
-    });
-    await this.auditRepository.create({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      action: "RENTAL_EXTRA_CHARGE_CANCELED",
-      resource: "rental-extra-charge",
-      resourceId: input.extraChargeId,
-      details: { bookingId: extraCharge.bookingId }
-    });
+    if (extra.status === RentalExtraChargeStatus.CANCELED) return extra;
+    const updated = await this.deps.compareAndUpdateExtraCharge(extra, { status: RentalExtraChargeStatus.CANCELED }, { tenantId: input.tenantId, userId: input.userId,
+      action: "RENTAL_EXTRA_CHARGE_CANCELED", resource: "rental-extra-charge", resourceId: extra.id,
+      details: { bookingId: extra.bookingId } });
+    if (!updated) throw new AppError("Pagamento modificato da un'altra richiesta", 409, "RENTAL_PAYMENT_CONFLICT");
     return updated;
   }
 
   async handleStripeEvent(event: Stripe.Event) {
     const dataObject = event.data.object as unknown as Record<string, unknown> | undefined;
-    const metadata = metadataFromObject(dataObject);
+    let metadata = metadataFromObject(dataObject);
+    if (event.type.startsWith("payment_intent.")) {
+      const intentId = stripeId(dataObject?.id);
+      if (!intentId) this.bindingError();
+      const verified = await this.verifiedEventIntent(intentId, metadata);
+      if (!verified) return { ignored: true, tenantId: null };
+      metadata = verified.metadata;
+    } else if (["charge.refunded", "charge.dispute.created", "charge.dispute.closed"].includes(event.type)) {
+      const charge = await this.eventCharge(event);
+      const intentId = stripeId(charge.payment_intent);
+      if (!intentId) return { ignored: true, tenantId: null };
+      const verified = await this.verifiedEventIntent(intentId, metadata);
+      if (!verified || verified.kind !== "extra") return { ignored: true, tenantId: null };
+      metadata = verified.metadata;
+    }
     const tenantId = metadata.tenantId;
     if (!tenantId) return { ignored: true, tenantId: null };
 
@@ -1066,12 +1084,12 @@ export class RentalPaymentService {
     }
 
     if (event.type === "charge.refunded") {
-      await this.markPaymentIntentLinkedRecord(dataObject, RentalExtraChargeStatus.REFUNDED, "RENTAL_EXTRA_CHARGE_REFUNDED");
+      await this.markPaymentIntentLinkedRecord(event, metadata);
       return;
     }
 
     if (event.type === "charge.dispute.created" || event.type === "charge.dispute.closed") {
-      await this.markPaymentIntentLinkedRecord(dataObject, RentalExtraChargeStatus.DISPUTED, "RENTAL_EXTRA_CHARGE_DISPUTED");
+      await this.markPaymentIntentLinkedRecord(event, metadata);
     }
   }
 
@@ -1123,151 +1141,158 @@ export class RentalPaymentService {
     });
   }
 
-  private async applyPaymentIntentEvent(eventType: string, dataObject: Record<string, unknown>, metadata: Record<string, string>) {
-    const paymentIntentId = stripeId(dataObject.id);
-    if (!paymentIntentId) return;
-    const purpose = metadata.purpose;
+  private bindingError(): never {
+    throw new AppError("Identita o importo del pagamento non coerente", 409, "RENTAL_PAYMENT_BINDING_MISMATCH");
+  }
 
-    if (purpose === DEPOSIT_PURPOSE || metadata.rentalDepositId) {
-      const deposit = metadata.rentalDepositId
-        ? await this.deps.findDepositById(metadata.tenantId, metadata.rentalDepositId)
-        : await this.deps.findDepositByStripePaymentIntentId(paymentIntentId);
-      if (!deposit) return;
-
-      if (eventType === "payment_intent.amount_capturable_updated") {
-        await this.deps.updateDeposit(deposit.tenantId, deposit.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: RentalDepositStatus.AUTHORIZED,
-          authorizedAt: new Date(),
-          failureReason: null
-        });
-        await this.auditRepository.create({
-          tenantId: deposit.tenantId,
-          userId: null,
-          action: "RENTAL_DEPOSIT_AUTHORIZED",
-          resource: "rental-deposit",
-          resourceId: deposit.id,
-          details: { bookingId: deposit.bookingId, stripePaymentIntentId: paymentIntentId }
-        });
-      }
-
-      if (eventType === "payment_intent.succeeded") {
-        await this.deps.updateDeposit(deposit.tenantId, deposit.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: RentalDepositStatus.CAPTURED,
-          capturedAmountCents: Number(dataObject.amount_received ?? deposit.amountCents),
-          capturedAt: new Date()
-        });
-      }
-
-      if (eventType === "payment_intent.payment_failed") {
-        await this.deps.updateDeposit(deposit.tenantId, deposit.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: RentalDepositStatus.FAILED,
-          failureReason: optionalString((dataObject.last_payment_error as { message?: unknown } | undefined)?.message) ?? "Pagamento deposito fallito"
-        });
-      }
-
-      if (eventType === "payment_intent.canceled") {
-        await this.deps.updateDeposit(deposit.tenantId, deposit.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: RentalDepositStatus.RELEASED,
-          releasedAt: new Date()
-        });
-      }
-      return;
-    }
-
-    if (purpose === EXTRA_CHARGE_PURPOSE || metadata.rentalExtraChargeId) {
-      const extraCharge = metadata.rentalExtraChargeId
-        ? await this.deps.findExtraChargeById(metadata.tenantId, metadata.rentalExtraChargeId)
-        : await this.deps.findExtraChargeByStripePaymentIntentId(paymentIntentId);
-      if (!extraCharge) return;
-
-      if (eventType === "payment_intent.succeeded") {
-        await this.deps.updateExtraCharge(extraCharge.tenantId, extraCharge.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: RentalExtraChargeStatus.PAID,
-          chargedAt: new Date(),
-          failureReason: null
-        });
-        await this.auditRepository.create({
-          tenantId: extraCharge.tenantId,
-          userId: null,
-          action: "RENTAL_EXTRA_CHARGE_PAID",
-          resource: "rental-extra-charge",
-          resourceId: extraCharge.id,
-          details: { bookingId: extraCharge.bookingId, totalAmountCents: extraCharge.totalAmountCents }
-        });
-      }
-
-      if (eventType === "payment_intent.payment_failed") {
-        const nextStatus = statusForStripePaymentError(dataObject.last_payment_error);
-        await this.deps.updateExtraCharge(extraCharge.tenantId, extraCharge.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: nextStatus,
-          failureReason: optionalString((dataObject.last_payment_error as { message?: unknown } | undefined)?.message) ?? "Addebito extra fallito"
-        });
-      }
-
-      if (eventType === "payment_intent.canceled") {
-        await this.deps.updateExtraCharge(extraCharge.tenantId, extraCharge.id, {
-          stripePaymentIntentId: paymentIntentId,
-          status: RentalExtraChargeStatus.CANCELED
-        });
-      }
+  private assertMetadataAgreement(observed: Record<string, string>, authoritative: Record<string, string>) {
+    for (const key of ["domain", "purpose", "tenantId", "bookingId", "rentalCustomerId", "paymentMethodId", "rentalDepositId", "rentalExtraChargeId"]) {
+      if (observed[key] && observed[key] !== authoritative[key]) this.bindingError();
     }
   }
 
-  private async markPaymentIntentLinkedRecord(dataObject: Record<string, unknown> | undefined, status: RentalExtraChargeStatus, action: string) {
-    const paymentIntentId = stripeId(dataObject?.payment_intent);
-    if (!paymentIntentId) return;
-    const extraCharge = await this.deps.findExtraChargeByStripePaymentIntentId(paymentIntentId);
-    if (!extraCharge) return;
-    await this.deps.updateExtraCharge(extraCharge.tenantId, extraCharge.id, { status });
-    await this.auditRepository.create({
-      tenantId: extraCharge.tenantId,
-      userId: null,
-      action,
-      resource: "rental-extra-charge",
-      resourceId: extraCharge.id,
-      details: { bookingId: extraCharge.bookingId, stripePaymentIntentId: paymentIntentId }
-    });
+  private async validateIntent(kind: "extra" | "deposit", row: ExtraChargeRecord | DepositRecord, intent: Stripe.PaymentIntent) {
+    const metadata = metadataFromObject(intent);
+    const resourceKey = kind === "extra" ? "rentalExtraChargeId" : "rentalDepositId";
+    const oppositeKey = kind === "extra" ? "rentalDepositId" : "rentalExtraChargeId";
+    const expectedAmount = kind === "extra" ? (row as ExtraChargeRecord).totalAmountCents : (row as DepositRecord).amountCents;
+    if (metadata.domain !== RENTAL_PAYMENT_DOMAIN || metadata.purpose !== (kind === "extra" ? EXTRA_CHARGE_PURPOSE : DEPOSIT_PURPOSE)
+      || metadata[resourceKey] !== row.id || metadata[oppositeKey] || metadata.tenantId !== row.tenantId
+      || metadata.bookingId !== row.bookingId || metadata.rentalCustomerId !== row.rentalCustomerId
+      || !row.paymentMethodId || metadata.paymentMethodId !== row.paymentMethodId
+      || intent.object !== "payment_intent" || !["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"].includes(intent.status)
+      || !intent.id || !Number.isSafeInteger(intent.amount) || intent.amount !== expectedAmount
+      || intent.currency?.toLowerCase() !== row.currency.toLowerCase()
+      || !Number.isSafeInteger(intent.amount_received) || intent.amount_received < 0 || intent.amount_received > expectedAmount) this.bindingError();
+    if (row.stripePaymentIntentId ? row.stripePaymentIntentId !== intent.id
+      : row.status !== (kind === "extra" ? RentalExtraChargeStatus.PAYMENT_PROCESSING : RentalDepositStatus.AUTHORIZING)) this.bindingError();
+    const method = await this.deps.findHistoricalPaymentMethodById(row.tenantId, row.paymentMethodId!);
+    if (!method || method.id !== row.paymentMethodId || method.tenantId !== row.tenantId || method.rentalCustomerId !== row.rentalCustomerId
+      || stripeId(intent.customer) !== method.stripeCustomerId || stripeId(intent.payment_method) !== method.stripePaymentMethodId) this.bindingError();
+  }
+
+  private async verifiedEventIntent(intentId: string, observed: Record<string, string>) {
+    const intent = await this.requireStripeClient().paymentIntents.retrieve(intentId);
+    if (intent.id !== intentId) this.bindingError();
+    const metadata = metadataFromObject(intent);
+    if (metadata.domain !== RENTAL_PAYMENT_DOMAIN) {
+      if (observed.domain === RENTAL_PAYMENT_DOMAIN || observed.rentalDepositId || observed.rentalExtraChargeId) this.bindingError();
+      return null;
+    }
+    this.assertMetadataAgreement(observed, metadata);
+    const kind = metadata.purpose === DEPOSIT_PURPOSE ? "deposit" : metadata.purpose === EXTRA_CHARGE_PURPOSE ? "extra" : null;
+    if (!kind || !metadata.tenantId) this.bindingError();
+    const row = kind === "deposit" ? await this.deps.findDepositById(metadata.tenantId, metadata.rentalDepositId)
+      : await this.deps.findExtraChargeById(metadata.tenantId, metadata.rentalExtraChargeId);
+    if (!row) this.bindingError();
+    await this.validateIntent(kind, row, intent);
+    return { intent, metadata, kind, row };
+  }
+
+  private async reconcileIntent(kind: "extra", tenantId: string, recordId: string, intentId: string): Promise<ExtraChargeRecord>;
+  private async reconcileIntent(kind: "deposit", tenantId: string, recordId: string, intentId: string): Promise<DepositRecord>;
+  private async reconcileIntent(kind: "extra" | "deposit", tenantId: string, recordId: string, intentId: string): Promise<ExtraChargeRecord | DepositRecord> {
+    // Each conflict reloads both the committed row and the provider object; never reuse a stale snapshot.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const snapshot = kind === "extra" ? await this.getExtraChargeOrThrow(tenantId, recordId) : await this.getDepositOrThrow(tenantId, recordId);
+      const intent = await this.requireStripeClient().paymentIntents.retrieve(intentId);
+      if (intent.id !== intentId) this.bindingError();
+      if (kind === "extra") {
+        const row = snapshot as ExtraChargeRecord;
+        await this.validateIntent(kind, row, intent);
+        if (["PAID", "REFUNDED", "DISPUTED"].includes(row.status)) return row;
+        if (row.status === "CANCELED" && intent.status !== "canceled") this.bindingError();
+        const status = intent.status === "succeeded" ? RentalExtraChargeStatus.PAID
+          : intent.status === "canceled" ? RentalExtraChargeStatus.CANCELED
+          : intent.status === "requires_action" ? RentalExtraChargeStatus.REQUIRES_ACTION
+          : intent.status === "requires_payment_method" ? RentalExtraChargeStatus.FAILED : RentalExtraChargeStatus.PAYMENT_PROCESSING;
+        if (status === "PAID" && intent.amount_received !== row.totalAmountCents) this.bindingError();
+        if (row.status === status && row.stripePaymentIntentId === intent.id) return row;
+        const updated = await this.deps.compareAndUpdateExtraCharge(row, {
+          stripePaymentIntentId: intent.id, status,
+          chargedAt: status === "PAID" ? new Date() : undefined,
+          failureReason: status === "FAILED" || status === "REQUIRES_ACTION" ? optionalString(intent.last_payment_error?.message) : null
+        }, row.status !== status ? { tenantId, userId: null,
+          action: `RENTAL_EXTRA_CHARGE_${status}`, resource: "rental-extra-charge", resourceId: row.id,
+          details: { bookingId: row.bookingId, totalAmountCents: row.totalAmountCents } } : undefined);
+        if (!updated) continue;
+        return updated;
+      }
+      const row = snapshot as DepositRecord;
+      await this.validateIntent(kind, row, intent);
+      if (row.capturedAmountCents > 0 || ["CAPTURED", "PARTIALLY_CAPTURED"].includes(row.status)) return row;
+      if (["RELEASED", "CANCELED", "EXPIRED"].includes(row.status) && intent.status !== "canceled") this.bindingError();
+      const status = intent.status === "succeeded" ? (intent.amount_received < row.amountCents ? RentalDepositStatus.PARTIALLY_CAPTURED : RentalDepositStatus.CAPTURED)
+        : intent.status === "requires_capture" ? RentalDepositStatus.AUTHORIZED
+        : intent.status === "canceled" ? RentalDepositStatus.RELEASED
+        : ["requires_payment_method", "requires_action"].includes(intent.status) ? RentalDepositStatus.FAILED : RentalDepositStatus.AUTHORIZING;
+      if (intent.status === "succeeded" && intent.amount_received <= 0) this.bindingError();
+      if (row.status === status && row.stripePaymentIntentId === intent.id) return row;
+      const updated = await this.deps.compareAndUpdateDeposit(row, {
+        stripePaymentIntentId: intent.id, status,
+        capturedAmountCents: intent.status === "succeeded" ? intent.amount_received : row.capturedAmountCents,
+        capturedAt: intent.status === "succeeded" ? new Date() : undefined,
+        authorizedAt: status === "AUTHORIZED" ? new Date() : undefined,
+        releasedAt: status === "RELEASED" ? new Date() : undefined,
+        failureReason: status === "FAILED" ? optionalString(intent.last_payment_error?.message) : null
+      }, row.status !== status ? { tenantId, userId: null,
+        action: `RENTAL_DEPOSIT_${status}`, resource: "rental-deposit", resourceId: row.id,
+        details: { bookingId: row.bookingId, stripePaymentIntentId: intent.id, capturedTotalCents: intent.amount_received } } : undefined);
+      if (!updated) continue;
+      return updated;
+    }
+    throw new AppError("Pagamento aggiornato da richieste concorrenti, riprovare la verifica", 503, "RENTAL_PAYMENT_RECONCILIATION_CONFLICT");
+  }
+
+  private async applyPaymentIntentEvent(_eventType: string, dataObject: Record<string, unknown>, metadata: Record<string, string>) {
+    const intentId = stripeId(dataObject.id);
+    if (!intentId) this.bindingError();
+    if (metadata.purpose === EXTRA_CHARGE_PURPOSE) await this.reconcileIntent("extra", metadata.tenantId, metadata.rentalExtraChargeId, intentId);
+    else await this.reconcileIntent("deposit", metadata.tenantId, metadata.rentalDepositId, intentId);
+  }
+
+  private async eventCharge(event: Stripe.Event) {
+    const object = event.data.object as unknown as Record<string, unknown>;
+    const stripe = this.requireStripeClient();
+    let chargeId = event.type === "charge.refunded" ? stripeId(object.id) : stripeId(object.charge);
+    if (event.type.startsWith("charge.dispute.")) {
+      const disputeId = stripeId(object.id);
+      if (!disputeId) this.bindingError();
+      const dispute = await stripe.disputes.retrieve(disputeId);
+      if (dispute.id !== disputeId) this.bindingError();
+      chargeId = stripeId(dispute.charge);
+    }
+    if (!chargeId) this.bindingError();
+    const charge = await stripe.charges.retrieve(chargeId);
+    if (charge.id !== chargeId || (stripeId(object.payment_intent) && stripeId(object.payment_intent) !== stripeId(charge.payment_intent))) this.bindingError();
+    return charge;
+  }
+
+  private async markPaymentIntentLinkedRecord(event: Stripe.Event, metadata: Record<string, string>) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const charge = await this.eventCharge(event);
+      const intentId = stripeId(charge.payment_intent);
+      if (!intentId) return;
+      const verified = await this.verifiedEventIntent(intentId, metadata);
+      if (!verified || verified.kind !== "extra") return;
+      const row = verified.row as ExtraChargeRecord;
+      if (charge.amount !== row.totalAmountCents || charge.currency.toLowerCase() !== row.currency.toLowerCase()
+        || stripeId(charge.customer) !== stripeId(verified.intent.customer)) this.bindingError();
+      const status = event.type.startsWith("charge.dispute.") || charge.disputed || row.status === "DISPUTED"
+        ? RentalExtraChargeStatus.DISPUTED : charge.amount_refunded > 0 ? RentalExtraChargeStatus.REFUNDED : null;
+      if (!status || row.status === status) return;
+      const updated = await this.deps.compareAndUpdateExtraCharge(row, { stripePaymentIntentId: intentId, status }, { tenantId: row.tenantId, userId: null,
+        action: status === "DISPUTED" ? "RENTAL_EXTRA_CHARGE_DISPUTED" : "RENTAL_EXTRA_CHARGE_REFUNDED",
+        resource: "rental-extra-charge", resourceId: row.id,
+        details: { bookingId: row.bookingId, stripePaymentIntentId: intentId } });
+      if (!updated) continue;
+      return;
+    }
+    throw new AppError("Riconciliazione pagamento concorrente", 503, "RENTAL_PAYMENT_RECONCILIATION_CONFLICT");
   }
 
   private async applyDepositPaymentIntent(tenantId: string, depositId: string, paymentIntent: Stripe.PaymentIntent) {
-    if (paymentIntent.status === "requires_capture") {
-      const updated = await this.deps.updateDeposit(tenantId, depositId, {
-        stripePaymentIntentId: paymentIntent.id,
-        status: RentalDepositStatus.AUTHORIZED,
-        authorizedAt: new Date(),
-        failureReason: null
-      });
-      await this.auditRepository.create({
-        tenantId,
-        userId: null,
-        action: "RENTAL_DEPOSIT_AUTHORIZED",
-        resource: "rental-deposit",
-        resourceId: depositId,
-        details: { stripePaymentIntentId: paymentIntent.id }
-      });
-      return updated;
-    }
-
-    if (paymentIntent.status === "succeeded") {
-      return this.deps.updateDeposit(tenantId, depositId, {
-        stripePaymentIntentId: paymentIntent.id,
-        status: RentalDepositStatus.CAPTURED,
-        capturedAmountCents: paymentIntent.amount_received,
-        capturedAt: new Date(),
-        failureReason: null
-      });
-    }
-
-    return this.deps.updateDeposit(tenantId, depositId, {
-      stripePaymentIntentId: paymentIntent.id,
-      status: RentalDepositStatus.AUTHORIZING
-    });
+    return this.reconcileIntent("deposit", tenantId, depositId, paymentIntent.id);
   }
 
   private async getOrCreateRentalStripeCustomer(tenantId: string, rentalCustomerId: string, booking: BookingForPayment) {

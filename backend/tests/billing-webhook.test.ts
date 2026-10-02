@@ -1144,6 +1144,99 @@ test("rental payment checkout setup webhook is delegated and does not update Saa
   assert.equal(audit.rows.some((row) => row.action === "BILLING_PAYMENT_METHOD_UPDATED"), false);
 });
 
+const rentalChargeDispatchCases = [
+  { type: "charge.refunded", object: "charge", id: "ch_rental_refund_dispatch" },
+  { type: "charge.dispute.created", object: "dispute", id: "dp_rental_created_dispatch" },
+  { type: "charge.dispute.closed", object: "dispute", id: "dp_rental_closed_dispatch" }
+] as const;
+
+for (const dispatchCase of rentalChargeDispatchCases) {
+  test(`rental refund/dispute webhook dispatch delegates ${dispatchCase.type} without metadata`, async () => {
+    const eventId = `evt_rental_dispatch_${dispatchCase.type.replaceAll(".", "_")}`;
+    const delegated: Stripe.Event[] = [];
+    const rentalHandler: RentalStripeWebhookHandler = {
+      async handleStripeEvent(event) {
+        delegated.push(event);
+        assert.equal(event.id, eventId);
+        assert.equal(event.type, dispatchCase.type);
+        assert.deepEqual((event.data.object as { metadata?: unknown }).metadata, {});
+        return { tenantId: "tenant-rental-dispatch", received: true };
+      }
+    };
+    const { audit, events, notifications, service, sign, subscriptions, upserts, websiteEvents } = makeHarness(undefined, rentalHandler);
+    const existingLicense = snapshotFromInput({
+      tenantId: "tenant-saas-dispatch", plan: "PRO", seats: 5, status: "ACTIVE",
+      provider: "stripe", stripeCustomerId: "cus_dispatch_shared", stripeSubscriptionId: "sub_dispatch_existing"
+    });
+    subscriptions.set("tenant-saas-dispatch", existingLicense);
+    const licensesBefore = structuredClone([...subscriptions.entries()]);
+    const event = baseEvent(eventId, dispatchCase.type, {
+      id: dispatchCase.id,
+      object: dispatchCase.object,
+      metadata: {},
+      payment_intent: "pi_rental_dispatch",
+      ...(dispatchCase.object === "charge"
+        ? { customer: "cus_dispatch_shared", amount: 1200, amount_refunded: 1200, refunded: true }
+        : { charge: "ch_rental_dispatch", amount: 1200, status: dispatchCase.type.endsWith("closed") ? "won" : "needs_response" })
+    });
+
+    const result = await service.handleWebhook(sign(event));
+
+    assert.deepEqual(result, { received: true, ignored: false });
+    assert.equal(delegated.length, 1);
+    assert.equal(events.get(eventId)?.status, "PROCESSED");
+    assert.equal(events.get(eventId)?.tenantId, "tenant-rental-dispatch", "journal ownership comes from the verified rental handler");
+    assert.equal(events.get(eventId)?.type, dispatchCase.type);
+    assert.ok(events.get(eventId)?.processedAt instanceof Date);
+    assert.equal(upserts.length, 0, "rental refund/dispute must not mutate TenantSubscription");
+    assert.deepEqual([...subscriptions.entries()], licensesBefore);
+    assert.equal(notifications.length, 0);
+    assert.equal(websiteEvents.length, 0);
+    assert.equal(audit.rows.some((row) => row.action === "PLATFORM_LICENSE_UPDATED" || row.action === "BILLING_PAYMENT_METHOD_UPDATED"), false);
+  });
+}
+
+test("non-rental refund/dispute webhook dispatch remains ignored without SaaS mutations", async () => {
+  for (const dispatchCase of rentalChargeDispatchCases) {
+    const eventId = `evt_nonrental_dispatch_${dispatchCase.type.replaceAll(".", "_")}`;
+    let delegated = 0;
+    const rentalHandler: RentalStripeWebhookHandler = {
+      async handleStripeEvent(event) {
+        delegated += 1;
+        assert.equal(event.id, eventId);
+        assert.equal(event.type, dispatchCase.type);
+        assert.deepEqual((event.data.object as { metadata?: unknown }).metadata, {});
+        return { received: true, ignored: true };
+      }
+    };
+    const { audit, events, notifications, service, sign, subscriptions, upserts, websiteEvents } = makeHarness(undefined, rentalHandler);
+    subscriptions.set("tenant-nonrental-saas", snapshotFromInput({
+      tenantId: "tenant-nonrental-saas", plan: "PRO", seats: 5, status: "ACTIVE",
+      provider: "stripe", stripeCustomerId: "cus_nonrental_saas", stripeSubscriptionId: "sub_nonrental_saas"
+    }));
+    const licensesBefore = structuredClone([...subscriptions.entries()]);
+    const result = await service.handleWebhook(sign(baseEvent(eventId, dispatchCase.type, {
+      id: `nonrental_${dispatchCase.id}`,
+      object: dispatchCase.object,
+      metadata: {},
+      payment_intent: "pi_nonrental_dispatch",
+      ...(dispatchCase.object === "charge"
+        ? { customer: "cus_nonrental_saas", amount: 1200, amount_refunded: 1200, refunded: true }
+        : { charge: "ch_nonrental_dispatch", amount: 1200, status: dispatchCase.type.endsWith("closed") ? "won" : "needs_response" })
+    })));
+
+    assert.deepEqual(result, { received: true, ignored: true });
+    assert.equal(delegated, 1, "the rental handler authoritatively classifies an event without rental metadata");
+    assert.equal(events.get(eventId)?.status, "IGNORED");
+    assert.ok(events.get(eventId)?.processedAt instanceof Date);
+    assert.equal(upserts.length, 0);
+    assert.deepEqual([...subscriptions.entries()], licensesBefore);
+    assert.equal(notifications.length, 0);
+    assert.equal(websiteEvents.length, 0);
+    assert.equal(audit.rows.some((row) => row.action === "PLATFORM_LICENSE_UPDATED" || row.action === "BILLING_PAYMENT_METHOD_UPDATED"), false);
+  }
+});
+
 test("billing webhook rejects missing or invalid Stripe signature", async () => {
   const { service, sign } = makeHarness();
   const signed = sign(baseEvent("evt_invalid_signature", "customer.subscription.updated", {

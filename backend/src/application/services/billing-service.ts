@@ -624,7 +624,7 @@ export class BillingService {
   private async processStripeEvent(event: Stripe.Event, dataObject?: Record<string, unknown>) {
     if (!dataObject) return { ignored: true, tenantId: null };
 
-    if (this.rentalStripeWebhookHandler && isRentalPaymentEvent(event, dataObject)) {
+    if (this.rentalStripeWebhookHandler && (isRentalPaymentEvent(event, dataObject) || ["charge.refunded", "charge.dispute.created", "charge.dispute.closed"].includes(event.type))) {
       const result = await this.rentalStripeWebhookHandler.handleStripeEvent(event);
       return {
         ignored: result.ignored ?? false,

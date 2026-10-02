@@ -124,23 +124,34 @@ describe("rental deposit PostgreSQL concurrency", () => {
   it("creates one database claim and one logical Stripe authorization under concurrent requests", async () => {
     const stripeCallKeys: string[] = [];
     const logicalAuthorizations = new Map<string, Promise<Stripe.PaymentIntent>>();
+    const intents = new Map<string, Stripe.PaymentIntent>();
     const stripeClient = {
       paymentIntents: {
-        create: async (_params: unknown, options?: { idempotencyKey?: string }) => {
+        create: async (params: Stripe.PaymentIntentCreateParams, options?: { idempotencyKey?: string }) => {
           const key = String(options?.idempotencyKey ?? "");
           stripeCallKeys.push(key);
           let authorization = logicalAuthorizations.get(key);
           if (!authorization) {
             authorization = new Promise<Stripe.PaymentIntent>((resolve) => {
-              setTimeout(() => resolve({
-                id: `pi_${runId}`,
-                status: "requires_capture",
-                amount_received: 0
-              } as Stripe.PaymentIntent), 20);
+              setTimeout(() => {
+                const intent = {
+                  id: `pi_${runId}`, object: "payment_intent", status: "requires_capture",
+                  amount: params.amount, amount_received: 0, currency: params.currency,
+                  customer: params.customer, payment_method: params.payment_method,
+                  metadata: params.metadata ?? {}
+                } as Stripe.PaymentIntent;
+                intents.set(intent.id, intent);
+                resolve(structuredClone(intent));
+              }, 20);
             });
             logicalAuthorizations.set(key, authorization);
           }
-          return authorization;
+          return structuredClone(await authorization);
+        },
+        retrieve: async (id: string) => {
+          const intent = intents.get(id);
+          assert.ok(intent, "Only a synthetic intent created by this test can be retrieved");
+          return structuredClone(intent);
         }
       }
     } as unknown as Stripe;
