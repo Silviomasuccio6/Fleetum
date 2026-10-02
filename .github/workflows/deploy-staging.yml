@@ -69,7 +69,7 @@ jobs:
             const successfulRun = data.workflow_runs.find((run) =>
               run.head_sha === releaseSha &&
               run.conclusion === "success" &&
-              ["push", "pull_request"].includes(run.event) &&
+              ["push", "pull_request", "workflow_dispatch"].includes(run.event) &&
               run.head_repository?.full_name === expectedRepository
             );
 
@@ -82,6 +82,20 @@ jobs:
             await core.summary
               .addRaw(`CI proof: [run ${successfulRun.id}](${successfulRun.html_url}) for \`${releaseSha}\``)
               .write();
+
+      - name: Download exact CI source proof
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-source-proof-${{ steps.ci.outputs.ci_run_id }}
+          run-id: ${{ steps.ci.outputs.ci_run_id }}
+          github-token: ${{ github.token }}
+          path: .ci-proof
+
+      - name: Verify tested source matches staging candidate
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
+          CI_RUN_ID: ${{ steps.ci.outputs.ci_run_id }}
+        run: node ops/ci-release-identity.mjs verify .ci-proof/ci-source.json
 
   build-images:
     name: Build and publish staging images
@@ -325,3 +339,34 @@ jobs:
           done
           curl -fsS --max-time 20 https://staging.fleetum.it/ | grep -q "Fleetum"
           curl -fsS --max-time 20 https://platform-staging.fleetum.it/platform-api/health
+
+      - name: Publish staging release proof
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          CI_RUN_ID: ${{ needs.resolve-release.outputs.ci_run_id }}
+          BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { writeFileSync } from 'node:fs';
+          assert.match(process.env.RELEASE_SHA, /^[0-9a-f]{40}$/);
+          assert.match(process.env.CI_RUN_ID, /^[1-9][0-9]*$/);
+          const repository = process.env.GITHUB_REPOSITORY;
+          const backendImage = process.env.BACKEND_IMAGE;
+          const frontendImage = process.env.FRONTEND_IMAGE;
+          assert.match(backendImage, /^ghcr\.io\/silviomasuccio6\/fleetum-backend@sha256:[0-9a-f]{64}$/);
+          assert.match(frontendImage, /^ghcr\.io\/silviomasuccio6\/fleetum-frontend@sha256:[0-9a-f]{64}$/);
+          writeFileSync('staging-release.json', JSON.stringify({ schemaVersion: 1, repository,
+            releaseSha: process.env.RELEASE_SHA, ciRunId: process.env.CI_RUN_ID,
+            deployRunId: process.env.GITHUB_RUN_ID, backendImage, frontendImage, completed: true }, null, 2) + '\n');
+          NODE
+
+      - name: Upload staging release proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-release-proof-${{ github.run_id }}
+          path: staging-release.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14

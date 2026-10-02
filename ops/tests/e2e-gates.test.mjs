@@ -104,22 +104,27 @@ test("configuration CLI fails closed without revealing credential values", () =>
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(secretMarker));
 });
 
-test("report gate accepts all six required tests across four critical flows", () => {
-  const result = verifyE2EReport(reportFor(), { minExecuted: 6 });
+test("report gate accepts exactly seven required tests across five critical flows", () => {
+  assert.equal(REQUIRED_CRITICAL_CASES.length, 7);
+  assert.deepEqual(REQUIRED_CRITICAL_CASES.at(-1), {
+    file: "05-vehicle-pagination.spec.ts",
+    title: "keeps API totals and page rows accurate through search and IT/EN language changes"
+  });
+  const result = verifyE2EReport(reportFor(), { minExecuted: 7 });
   assert.equal(result.ok, true);
   assert.deepEqual(result.summary, {
-    executed: 6,
-    passed: 6,
+    executed: 7,
+    passed: 7,
     failed: 0,
     skipped: 0,
-    attempts: 6,
+    attempts: 7,
     executedFlows: [...REQUIRED_CRITICAL_FLOWS],
     executedCases: REQUIRED_CRITICAL_CASES.map(criticalCaseId).sort()
   });
 });
 
 test("report gate rejects skips, failures, missing flows, and an unmet threshold", () => {
-  const tenantIsolationCase = criticalCaseId(REQUIRED_CRITICAL_CASES.at(-1));
+  const tenantIsolationCase = criticalCaseId(REQUIRED_CRITICAL_CASES[5]);
   const bookingCase = criticalCaseId(REQUIRED_CRITICAL_CASES[2]);
   const skipped = verifyE2EReport(reportFor({ [tenantIsolationCase]: "skipped" }));
   assert.equal(skipped.ok, false);
@@ -136,15 +141,15 @@ test("report gate rejects skips, failures, missing flows, and an unmet threshold
   assert.equal(missing.ok, false);
   assert.match(missing.errors.join("\n"), /04-tenant-isolation\.spec\.ts/);
 
-  const threshold = verifyE2EReport(reportFor(), { minExecuted: 7 });
+  const threshold = verifyE2EReport(reportFor(), { minExecuted: 8 });
   assert.equal(threshold.ok, false);
-  assert.match(threshold.errors.join("\n"), /at least 7/);
+  assert.match(threshold.errors.join("\n"), /at least 8/);
 
   const notRun = reportFor();
   notRun.suites[0].specs[0].tests[0].results = [];
   const notRunResult = verifyE2EReport(notRun);
   assert.equal(notRunResult.ok, false);
-  assert.equal(notRunResult.summary.executed, 5);
+  assert.equal(notRunResult.summary.executed, 6);
   assert.match(notRunResult.errors.join("\n"), /01-login\.spec\.ts/);
 
   const unexpectedPass = reportFor();
@@ -152,6 +157,30 @@ test("report gate rejects skips, failures, missing flows, and an unmet threshold
   const unexpectedResult = verifyE2EReport(unexpectedPass);
   assert.equal(unexpectedResult.ok, false);
   assert.equal(unexpectedResult.summary.failed, 1);
+});
+
+test("report gate rejects a missing pagination case, extra cases, and duplicate cases", () => {
+  const missing = reportFor();
+  missing.suites = missing.suites.filter((suite) => suite.file !== "05-vehicle-pagination.spec.ts");
+  assert.equal(verifyE2EReport(missing).ok, false);
+
+  const extra = reportFor();
+  extra.suites.push({ file: "extra.spec.ts", specs: [{ file: "extra.spec.ts", title: "extra", tests: [{ results: [{ status: "passed" }] }] }] });
+  assert.equal(verifyE2EReport(extra).ok, false);
+
+  const duplicate = reportFor();
+  duplicate.suites.push(structuredClone(duplicate.suites[0]));
+  assert.equal(verifyE2EReport(duplicate).ok, false);
+});
+
+test("report gate rejects flaky outcomes and passes recovered through retries", () => {
+  const flaky = reportFor();
+  flaky.suites[0].specs[0].tests[0].status = "flaky";
+  assert.equal(verifyE2EReport(flaky).ok, false);
+
+  const recovered = reportFor();
+  recovered.suites[0].specs[0].tests[0].results = [{ status: "failed" }, { status: "passed" }];
+  assert.equal(verifyE2EReport(recovered).ok, false);
 });
 
 test("report gate rejects removal of the authenticated cross-tenant case", () => {
@@ -180,6 +209,21 @@ test("nightly workflow fails closed and always verifies execution evidence", () 
   assert.match(workflow, /PLAYWRIGHT_JSON_OUTPUT_FILE:\s*test-results\/e2e\/e2e-results\.json/);
   assert.match(workflow, /--reporter=line,html,json/);
   assert.match(workflow, /node ops\/e2e\/verify-report\.mjs test-results\/e2e\/e2e-results\.json/);
-  assert.match(workflow, /E2E_MIN_EXECUTED_TESTS:\s*"6"/);
+  assert.match(workflow, /E2E_MIN_EXECUTED_TESTS:\s*"7"/);
   assert.match(workflow, /if:\s*always\(\) && steps\.playwright\.outcome != 'skipped'/);
+  assert.match(workflow, /releaseSha:[\s\S]*?required: true/);
+  assert.match(workflow, /stagingRunId:[\s\S]*?required: true/);
+  assert.match(workflow, /vars\.E2E_RELEASE_SHA/);
+  assert.match(workflow, /vars\.E2E_STAGING_RUN_ID/);
+  assert.match(workflow, /actions:\s*read/);
+  assert.match(workflow, /environment:\s*staging/);
+  assert.match(workflow, /group:\s*fleetum-staging\s+cancel-in-progress:\s*false/);
+  assert.match(workflow, /actions\/download-artifact@v4/);
+  assert.match(workflow, /run-id:\s*\$\{\{ steps\.binding\.outputs\.staging_run_id \}\}/);
+  assert.match(workflow, /github-token:\s*\$\{\{ github\.token \}\}/);
+  assert.match(workflow, /FLEETUM_STAGING_KNOWN_HOSTS/);
+  assert.doesNotMatch(workflow, /ssh-keyscan/);
+  assert.match(workflow, /--retries=0/);
+  assert.match(workflow, /capture-staging-runtime\.mjs before/);
+  assert.match(workflow, /capture-staging-runtime\.mjs after/);
 });

@@ -9,7 +9,8 @@ export const REQUIRED_CRITICAL_CASES = [
   { file: "02-booking-contract.spec.ts", title: "creates vehicle and booking, generates PDF and signs contract" },
   { file: "03-vehicle-report.spec.ts", title: "exports vehicle profitability report as PDF, XLSX and CSV" },
   { file: "04-tenant-isolation.spec.ts", title: "unauthenticated users cannot read tenant booking details" },
-  { file: "04-tenant-isolation.spec.ts", title: "another tenant cannot read or mutate this tenant booking" }
+  { file: "04-tenant-isolation.spec.ts", title: "another tenant cannot read or mutate this tenant booking" },
+  { file: "05-vehicle-pagination.spec.ts", title: "keeps API totals and page rows accurate through search and IT/EN language changes" }
 ];
 export const REQUIRED_CRITICAL_FLOWS = [...new Set(REQUIRED_CRITICAL_CASES.map(({ file }) => file))];
 
@@ -74,9 +75,14 @@ export function summarizeE2EReport(report) {
 
 export function verifyE2EReport(report, { minExecuted = REQUIRED_CRITICAL_CASES.length } = {}) {
   const summary = summarizeE2EReport(report);
+  const tests = collectTests(report?.suites);
   const errors = [];
   const missingFlows = REQUIRED_CRITICAL_FLOWS.filter((file) => !summary.executedFlows.includes(file));
   const missingCases = REQUIRED_CRITICAL_CASES.filter((requiredCase) => !summary.executedCases.includes(caseId(requiredCase)));
+  const requiredIds = new Set(REQUIRED_CRITICAL_CASES.map(caseId));
+  const unexpectedCases = tests.filter((test) => !requiredIds.has(caseId(test)));
+  const duplicateCases = tests.filter((test, index) => tests.findIndex((other) => caseId(other) === caseId(test)) !== index);
+  const recoveredCases = tests.filter((test) => test.outcome === "flaky" || test.attempts > 1);
 
   if (!Number.isInteger(minExecuted) || minExecuted < REQUIRED_CRITICAL_CASES.length) {
     errors.push(`Minimum executed-test threshold must be an integer of at least ${REQUIRED_CRITICAL_CASES.length}.`);
@@ -94,6 +100,12 @@ export function verifyE2EReport(report, { minExecuted = REQUIRED_CRITICAL_CASES.
   }
   if (summary.failed > 0) {
     errors.push(`${summary.failed} tests failed or did not produce a successful final result.`);
+  }
+  if (unexpectedCases.length > 0 || duplicateCases.length > 0 || tests.length !== REQUIRED_CRITICAL_CASES.length) {
+    errors.push(`The report must contain exactly ${REQUIRED_CRITICAL_CASES.length} distinct required critical tests, without extra or duplicate cases.`);
+  }
+  if (recoveredCases.length > 0) {
+    errors.push(`${recoveredCases.length} tests were flaky or used retries; every critical test must pass on its first attempt.`);
   }
   if (Array.isArray(report?.errors) && report.errors.length > 0) {
     errors.push(`The Playwright report contains ${report.errors.length} top-level errors.`);
