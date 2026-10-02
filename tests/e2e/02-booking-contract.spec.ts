@@ -9,7 +9,7 @@ const tinySignaturePng =
 test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
   test.skip(!hasTenantCredentials(), "Set E2E_TENANT_EMAIL and E2E_TENANT_PASSWORD to run tenant E2E tests.");
 
-  test("creates vehicle and booking, generates PDF and signs contract", async ({ page, context }) => {
+  test("creates vehicle and booking, generates PDF and signs contract", async ({ page, context }, testInfo) => {
     let availabilityRequests = 0;
     let detailRequests = 0;
     let contractRequests = 0;
@@ -31,8 +31,35 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
       contractPaths.add(`/api/rental-bookings/${booking.id}/contract`);
     }
 
+    const vehiclesResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname === "/api/master-data/vehicles"
+        && url.searchParams.get("page") === "1" && url.searchParams.get("pageSize") === "20";
+    });
     await page.goto("/anagrafiche/veicoli");
+    const vehiclesResponse = await vehiclesResponsePromise;
+    expect(vehiclesResponse.ok()).toBeTruthy();
+    const vehiclesPayload = await vehiclesResponse.json();
+    const syntheticVehicleIds = new Set([dataset.vehicle.id, secondDataset.vehicle.id]);
+    const syntheticRecordCount = vehiclesPayload.data.filter((vehicle: { id: string }) => syntheticVehicleIds.has(vehicle.id)).length;
+    await testInfo.attach("vehicle-list-count-contract", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        total: vehiclesPayload.total,
+        page: vehiclesPayload.page,
+        pageSize: vehiclesPayload.pageSize,
+        syntheticRecordCount
+      }, null, 2)
+    });
+    expect(vehiclesPayload.total, "the real API total must include both synthetic vehicles").toBeGreaterThanOrEqual(2);
+    expect(syntheticRecordCount).toBe(2);
     await expect(page.getByText(dataset.vehicle.plate, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    const vehiclePagination = page.locator("main p").filter({ hasText: /Totale record|Total records/ }).filter({ visible: true });
+    await expect(vehiclePagination).toBeVisible();
+    await expect(vehiclePagination.locator("span").last(), "visible vehicle total must match the real API total").toHaveText(String(vehiclesPayload.total));
     const consentDialog = page.getByRole("dialog", { name: "Preferenze cookie Fleetum" });
     const consentVisible = await consentDialog.waitFor({ state: "visible", timeout: 2000 }).then(
       () => true,

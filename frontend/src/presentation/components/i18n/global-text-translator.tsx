@@ -11,7 +11,9 @@ import {
   translationsItEn
 } from "../../i18n/fleetum-language";
 
-const textOriginals = new WeakMap<Text, string>();
+type TranslationState = { original: string; lastRendered: string };
+const textOriginals = new WeakMap<Text, TranslationState>();
+const attributeOriginals = new WeakMap<Element, Map<string, TranslationState>>();
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEXTAREA", "NOSCRIPT", "CODE", "PRE"]);
 const ATTRIBUTES = ["placeholder", "title", "aria-label"] as const;
 
@@ -21,41 +23,47 @@ function preserveSpacing(source: string, translated: string) {
   return `${prefix}${translated}${suffix}`;
 }
 
-function translateTextNode(node: Text, language: FleetumLanguage) {
+export function translateTextNode(node: Text, language: FleetumLanguage) {
   const parent = node.parentElement;
   if (!parent || SKIP_TAGS.has(parent.tagName)) return;
 
   const raw = node.textContent ?? "";
   const trimmed = raw.trim();
-  if (!trimmed) return;
-
-  if (!textOriginals.has(node)) {
-    textOriginals.set(node, reverseTranslateText(trimmed));
+  if (!trimmed) {
+    textOriginals.delete(node);
+    return;
   }
 
-  const original = textOriginals.get(node) ?? trimmed;
-  const next = language === "en" ? translateText(original, "en") : original;
-  if (next !== trimmed) node.textContent = preserveSpacing(raw, next);
+  const previous = textOriginals.get(node);
+  // A render changed the value unless it is exactly the translator's own output.
+  const original = previous?.lastRendered === raw ? previous.original : reverseTranslateText(trimmed);
+  const translated = language === "en" ? translateText(original, "en") : original;
+  const next = preserveSpacing(raw, translated);
+
+  textOriginals.set(node, { original, lastRendered: next });
+  if (next !== raw) node.textContent = next;
 }
 
-function translateElementAttributes(element: Element, language: FleetumLanguage) {
+export function translateElementAttributes(element: Element, language: FleetumLanguage) {
+  const originals = attributeOriginals.get(element) ?? new Map<string, TranslationState>();
+  attributeOriginals.set(element, originals);
   for (const attr of ATTRIBUTES) {
     const current = element.getAttribute(attr);
-    if (!current) continue;
-
-    const dataAttr = `data-fleetum-original-${attr}`;
-    if (!element.hasAttribute(dataAttr)) {
-      const original = attr === "placeholder" ? reverseTranslatePlaceholder(current) : reverseTranslateText(current);
-      element.setAttribute(dataAttr, original);
+    if (!current) {
+      originals.delete(attr);
+      continue;
     }
 
-    const original = element.getAttribute(dataAttr) ?? current;
+    const previous = originals.get(attr);
+    const original = previous?.lastRendered === current ? previous.original
+      : attr === "placeholder" ? reverseTranslatePlaceholder(current) : reverseTranslateText(current);
     const next = language === "en"
       ? attr === "placeholder"
         ? translatePlaceholder(original, "en")
         : translateText(original, "en")
       : original;
 
+    originals.set(attr, { original, lastRendered: next });
     if (next !== current) element.setAttribute(attr, next);
   }
 }
@@ -85,8 +93,8 @@ export function GlobalTextTranslator() {
     window.addEventListener(FLEETUM_LANGUAGE_EVENT, onLanguageChange);
 
     const observer = new MutationObserver((mutations) => {
-      const language = getFleetumLanguage();
       window.requestAnimationFrame(() => {
+        const language = getFleetumLanguage();
         for (const mutation of mutations) {
           mutation.addedNodes.forEach((node) => {
             if (node.nodeType === Node.TEXT_NODE) translateTextNode(node as Text, language);
