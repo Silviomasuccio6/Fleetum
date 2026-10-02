@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "459ceed2f7b9a2ee1d2756d326c94dd23acde2e3",
+  "candidateSha": "97b56ca126f14e89846ef0b2fbc836bf27952413",
   "preparedOn": "2026-10-02",
   "mode": "PREPARATION_ONLY",
   "productionAuthorized": false,
@@ -51,8 +51,8 @@
       ],
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
-      "status": "BLOCKED_BY_IMPLEMENTATION",
-      "scenario": "Correggere in una tranche locale separata trigger/test identity, ambiente DB e origine E2E. Non usare merge main per ottenere CI: può attivare Deploy Production.",
+      "status": "PENDING",
+      "scenario": "Implementazione locale CI/E2E chiusa in 97b56ca126f14e89846ef0b2fbc836bf27952413: checkout espliciti, opt-in DB/dotenv, CIproof e binding deploy/runtime/report7. Restano review umana, CI hosted e pipeline E2E effettivamente eseguita sul candidato. Nessun merge main o deploy autorizzato.",
       "acceptance": "Percorso CI sul commit realmente checkoutato e non su merge commit diverso; guardie DB attive con dotenv/devnull su PG temporaneo; E2E sullo stesso candidato e release osservata. Controlli YAML/fixtures/PR da review prima di qualunque esecuzione hosted.",
       "failureMeans": "Verde head_sha senza prova checkout, test DB non eseguiti o E2E senza binding lasciano il gate bloccato.",
       "requiredEvidence": [

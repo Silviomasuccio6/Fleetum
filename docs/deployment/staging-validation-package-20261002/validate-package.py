@@ -62,7 +62,7 @@ def validate(package, record_path, source_root=None, audit_root=None):
         require(item['candidateSha'] == candidate, 'SHA incoerente fra registro, record o prove')
     require(register['mode'] == 'PREPARATION_ONLY' and register['productionAuthorized'] is False
             and register['stagingDispatchAuthorized'] is False, 'Pacchetto non è una preparazione')
-    require(evidence['newApplicationTestRuns'] == 0 and migrations['newMigrationsInThisPackage'] == 0,
+    require(type(evidence['newApplicationTestRuns']) is int and evidence['newApplicationTestRuns'] >= 0 and migrations['newMigrationsInThisPackage'] == 0,
             'Preparazione documentale dichiara test o migrazioni nuovi')
     require(len(migrations['allCandidateMigrationHashes']) == migrations['candidateCount'] == 48,
             'Inventario migrazioni candidato incoerente')

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "preparedOn": "2026-10-02",
-  "candidateSha": "459ceed2f7b9a2ee1d2756d326c94dd23acde2e3",
-  "candidateTree": "b06205c64c2352f24cb7e4afc38ff6448757abbb",
+  "candidateSha": "97b56ca126f14e89846ef0b2fbc836bf27952413",
+  "candidateTree": "c56b0252be254999b28cdc3552bdde39f78a477a",
   "comparisonMain": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
   "auditRootHint": "/Users/silvio/Documents/Playground/Fleetum-audit-20260909",
-  "newApplicationTestRuns": 0,
+  "newApplicationTestRuns": 2,
   "bundles": [
     {
       "id": "20261002-vehicle-pagination-count",
@@ -218,8 +218,9 @@
         "passed": 522
       },
       "result": "HISTORICAL_BACKEND_EQUIVALENT",
-      "backendAndOpsIdenticalToCandidate": true,
-      "limit": "Non rieseguito su459ceed2 o durante la preparazione. Identità verificata col diff dei sorgenti; non sostituisce CI/restore."
+      "backendAndOpsIdenticalToCandidate": false,
+      "limit": "522storici non vengono chiamati nuovo run; ops ora modificati. Il runner corrente è provato nuovamente nel currentLocalEvidence.",
+      "backendIdenticalToCandidate": true
     }
   ],
   "findingRegistry": {
@@ -251,5 +252,20 @@
       "INT-06"
     ],
     "productionCertification": false
+  },
+  "currentLocalEvidence": {
+    "sourceCommit": "97b56ca126f14e89846ef0b2fbc836bf27952413",
+    "release": "264backend/44frontend/9website/55operations",
+    "database": "522/522,zero fail/skip,PG16temporaneo; callerDOTENV/optin assenti",
+    "browser": "Nuovo reportgate verifica7/7storico; nessun nuovo browser eseguito",
+    "hostedCi": "NOT_RUN",
+    "staging": "NOT_RUN",
+    "auditRelativeDirectory": "evidence/20261002-ci-e2e-release-binding",
+    "files": {
+      "tested-source-freeze.json": "2b0b53360d714d964bc5b3fa0e2ba2410d53fd3e32708348bdd2945f93026bbd",
+      "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
+      "database-result.json": "4a403a1e3e21a744f187ef998a96cfa5cd3e5149f4eba376e94dc57c92a02e06",
+      "code-commit.json": "eaf6171dd0266d6133076f9af6d3107d85a3c43decc5a02f762afb871b78e522"
+    }
   }
 }

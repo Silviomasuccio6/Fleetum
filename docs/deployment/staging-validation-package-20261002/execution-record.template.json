@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "459ceed2f7b9a2ee1d2756d326c94dd23acde2e3",
+  "candidateSha": "97b56ca126f14e89846ef0b2fbc836bf27952413",
   "environment": "STAGING_SYNTHETIC",
   "preparedOn": "2026-10-02",
   "observedReleaseSha": null,
@@ -38,7 +38,7 @@
     },
     {
       "id": "G01",
-      "status": "BLOCKED_BY_IMPLEMENTATION",
+      "status": "PENDING",
       "owner": null,
       "startedAt": null,
       "completedAt": null,
@@ -223,7 +223,8 @@
     "verify": null,
     "tenant-isolation": null,
     "migration-compatibility": null,
-    "lighthouse": null
+    "lighthouse": null,
+    "source-attestation": null
   },
   "deployRunId": null,
   "e2eRunnerErrors": null,
