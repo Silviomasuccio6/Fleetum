@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "97b56ca126f14e89846ef0b2fbc836bf27952413",
-  "preparedOn": "2026-10-02",
+  "candidateSha": "70fdfab3522907d9d956ac260224c165774e2af6",
+  "preparedOn": "2026-10-03",
   "mode": "PREPARATION_ONLY",
   "productionAuthorized": false,
   "stagingDispatchAuthorized": false,
@@ -25,7 +25,7 @@
       "requiredForProductionDecision": true,
       "status": "PENDING",
       "scenario": "Riesaminare diff dall’ultimo rilascio approvato, report finali e limiti; congelare lo SHA completo. Separare parent dei test, manifest dei file e commit documentale.",
-      "acceptance": "Reviewer assegnato firma il candidato esatto e registra i rischi residui; 154 artefatti coerenti e sorgenti applicativi immutati rispetto459ceed2.",
+      "acceptance": "Reviewer assegnato firma candidato70fdfab3522907d9d956ac260224c165774e2af6, provenance commitsbf215f69/70fdfab3 e rischi residui; 154 artefatti storici e manifest sorgente corrente verificati. Baseline staging modifica backendbootstrap/env/email; produzione resta disattivata senza flagstaging, UI/schema invariati.",
       "failureMeans": "SHA diverso, review mancante o prove senza identità bloccano la dispatch; una modifica invalida il binding e richiede nuovo candidato/gate pertinenti.",
       "requiredEvidence": [
         "sha candidato/tree",
@@ -52,7 +52,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "Implementazione locale CI/E2E chiusa in 97b56ca126f14e89846ef0b2fbc836bf27952413: checkout espliciti, opt-in DB/dotenv, CIproof e binding deploy/runtime/report7. Restano review umana, CI hosted e pipeline E2E effettivamente eseguita sul candidato. Nessun merge main o deploy autorizzato.",
+      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidato70fdfab3522907d9d956ac260224c165774e2af6 con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
       "acceptance": "Percorso CI sul commit realmente checkoutato e non su merge commit diverso; guardie DB attive con dotenv/devnull su PG temporaneo; E2E sullo stesso candidato e release osservata. Controlli YAML/fixtures/PR da review prima di qualunque esecuzione hosted.",
       "failureMeans": "Verde head_sha senza prova checkout, test DB non eseguiti o E2E senza binding lasciano il gate bloccato.",
       "requiredEvidence": [
@@ -79,9 +79,9 @@
       ],
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
-      "status": "BLOCKED_BY_IMPLEMENTATION",
-      "scenario": "Prima di avviare server o worker: attestare host/path/network/DB/upload/lock distinti; account e tenant A/B sintetici diversi; email simulata, cron/dunning/retention disabilitati, egress negato. Solo dopo, sandbox per casi autorizzati. Non esiste ora un toggle globale che spenga i cron email/reminder/report nel CMD production: predisporre il controllo nella tranche locale di hardening o un contenimento equivalente provato prima di avviare server.",
-      "acceptance": "Consentiti solo i tre host staging definiti; destinatari example.test o sink attestato; nessuna chiave production/dato reale. Robots/header noindex effettivo e sitemap non production. Isolamento e storage verificati senza esporre segreti.",
+      "status": "PENDING",
+      "scenario": "Baseline isolamento implementata localmente in 70fdfab3522907d9d956ac260224c165774e2af6: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
+      "acceptance": "Policy version1 e controlSHA approvati, nessuna chiave provider, 0cron e email disabled; project fleetum-staging, target filesystem reale dedicato senza symlink/orfani/ownership ambiguo, backend solo rete internal, tenantIDs sintetici distinti, robots/header/sitemap effettivi. Stato dati/host e protezioni indipendentemente attestati prima avvio.",
       "failureMeans": "Placeholder nell’esempio o parola “staging” non sono prova. Destinatario reale, cron attivo all’avvio, dominio arbitrario, directory condivisa o indice pubblico bloccano l’avvio.",
       "requiredEvidence": [
         "attestazione isolamenti senza valori segreti",

@@ -96,9 +96,22 @@ def validate(package, record_path, source_root=None, audit_root=None):
                 expected = artifact.get('sha256', '')
                 require(bool(re.fullmatch(r'[a-f0-9]{64}', expected)), 'SHA artefatto non valido: ' + id)
                 require(digest(safe_file(record_path.parent, artifact['path'])) == expected, 'Artefatto mutato: ' + id)
+    if rows['G02']['status'] == 'PASS':
+        isolation = record.get('stagingIsolation', {})
+        require(bool(re.fullmatch(r'[a-f0-9]{40}', record.get('approvedControlSha') or ''))
+                and record.get('observedControlSha') == record['approvedControlSha']
+                and record.get('approvedReleaseSha') == candidate, 'Control/release approvati non attestati')
+        require(type(isolation.get('policyVersion')) is int and isolation['policyVersion'] == 1
+                and isolation.get('emailDelivery') == 'DISABLED'
+                and type(isolation.get('cronStarted')) is int and isolation['cronStarted'] == 0, 'Email/cron policy non attestata')
+        require(all(isolation.get(key) is True for key in ('privateNetworkInternal', 'backendOnlyPrivateNetwork', 'providersDisabled', 'discoveryVerified'))
+                and isolation.get('composeProject') == 'fleetum-staging' and isolation.get('hostPreflight') == 'PASS', 'Contenimento staging non attestato')
+        ids = isolation.get('syntheticTenantIds')
+        require(isinstance(ids, list) and len(ids) == 2 and all(nonempty(value) for value in ids)
+                and ids[0] != ids[1] and nonempty(isolation.get('syntheticDataAttestedBy')), 'Tenant/dati sintetici non attestati')
     if rows['G05']['status'] == 'PASS':
         require(record['ciCheckoutSha'] == candidate and positive_run_id(record['ciRunId']), 'Identità CI non provata')
-        required = {'secret-scan', 'sast', 'verify', 'tenant-isolation', 'migration-compatibility', 'lighthouse'}
+        required = {'secret-scan', 'sast', 'verify', 'tenant-isolation', 'migration-compatibility', 'lighthouse', 'source-attestation'}
         require(all(record.get('ciChecks', {}).get(check) == 'success' for check in required), 'Check CI non PASS')
     if rows['G06']['status'] == 'PASS':
         require(record['observedReleaseSha'] == candidate, 'Release osservata diversa dal candidato')

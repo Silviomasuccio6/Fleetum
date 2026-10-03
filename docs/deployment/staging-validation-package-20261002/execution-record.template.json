@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "97b56ca126f14e89846ef0b2fbc836bf27952413",
+  "candidateSha": "70fdfab3522907d9d956ac260224c165774e2af6",
   "environment": "STAGING_SYNTHETIC",
   "preparedOn": "2026-10-02",
   "observedReleaseSha": null,
@@ -48,7 +48,7 @@
     },
     {
       "id": "G02",
-      "status": "BLOCKED_BY_IMPLEMENTATION",
+      "status": "PENDING",
       "owner": null,
       "startedAt": null,
       "completedAt": null,
@@ -231,5 +231,21 @@
   "e2eRunId": null,
   "e2eObservedReleaseSha": null,
   "e2eBackendDigest": null,
-  "e2eFrontendDigest": null
+  "e2eFrontendDigest": null,
+  "approvedControlSha": null,
+  "observedControlSha": null,
+  "approvedReleaseSha": null,
+  "stagingIsolation": {
+    "policyVersion": null,
+    "emailDelivery": null,
+    "cronStarted": null,
+    "privateNetworkInternal": null,
+    "backendOnlyPrivateNetwork": null,
+    "composeProject": null,
+    "hostPreflight": null,
+    "syntheticTenantIds": [],
+    "syntheticDataAttestedBy": null,
+    "providersDisabled": null,
+    "discoveryVerified": null
+  }
 }

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "preparedOn": "2026-10-02",
-  "candidateSha": "97b56ca126f14e89846ef0b2fbc836bf27952413",
-  "candidateTree": "c56b0252be254999b28cdc3552bdde39f78a477a",
+  "candidateSha": "70fdfab3522907d9d956ac260224c165774e2af6",
+  "candidateTree": "0bf8de49e2da4437115c084bf78e3484715fde7d",
   "comparisonMain": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
   "auditRootHint": "/Users/silvio/Documents/Playground/Fleetum-audit-20260909",
-  "newApplicationTestRuns": 2,
+  "newApplicationTestRuns": 3,
   "bundles": [
     {
       "id": "20261002-vehicle-pagination-count",
@@ -254,18 +254,23 @@
     "productionCertification": false
   },
   "currentLocalEvidence": {
-    "sourceCommit": "97b56ca126f14e89846ef0b2fbc836bf27952413",
-    "release": "264backend/44frontend/9website/55operations",
-    "database": "522/522,zero fail/skip,PG16temporaneo; callerDOTENV/optin assenti",
-    "browser": "Nuovo reportgate verifica7/7storico; nessun nuovo browser eseguito",
+    "sourceCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+    "release": "271backend/44frontend/9website/85operations; zero fail/skip",
+    "database": "522/522 PG16 temporaneo; backend source unchanged from freeze tested",
+    "proxy": "21 raw HTTP / 16 actual Go-template cases / local network positive-negative; cleanup PASS",
+    "browser": "7/7 real browser/API local loopback HTTPS, PG16 synthetic, global preflight, retries0; cleanup PASS. Earlier loader failure preserved.",
     "hostedCi": "NOT_RUN",
     "staging": "NOT_RUN",
-    "auditRelativeDirectory": "evidence/20261002-ci-e2e-release-binding",
+    "auditRelativeDirectory": "evidence/20261003-staging-isolation",
     "files": {
-      "tested-source-freeze.json": "2b0b53360d714d964bc5b3fa0e2ba2410d53fd3e32708348bdd2945f93026bbd",
+      "tested-source-freeze.json": "9be07bccc649b5f97a93df3a9add66306d6626e4b626cc028aa9c6c94a57e378",
       "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
       "database-result.json": "4a403a1e3e21a744f187ef998a96cfa5cd3e5149f4eba376e94dc57c92a02e06",
-      "code-commit.json": "eaf6171dd0266d6133076f9af6d3107d85a3c43decc5a02f762afb871b78e522"
+      "proxy-command-binding.json": "8994c074ec366412cc9d9aee3547974fe5901603e366d7c65752074443b75b84",
+      "code-commit.json": "fb0c78d302697fac9e7382c489bae02bf7ac2d8e799ad5aaddb61871e75ca8e1",
+      "bootstrap-commit.json": "b0b6ae2cdaf3b200d8b8cba6261d7be50b91e6ab54a3ff0f7075ab68eef2187e",
+      "browser-final/summary.json": "d0c905195d1083f1d28c378ebfa8cdeaa2195d63d7e24d59616ea6e5b79b2625",
+      "final-code-source.json": "9d3be3f63ac0e6bb2ecb114135074749098fad752f674a490ca2084f3ceb9a4d"
     }
   }
 }
