@@ -5,6 +5,7 @@
 (security_headers) {
 	header {
 		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
@@ -12,15 +13,37 @@
 	}
 }
 
+(staging_discovery) {
+	route /robots.txt {
+		header Content-Type "text/plain; charset=utf-8"
+		respond 200 {
+			body <<ROBOTS
+User-agent: *
+Disallow: /
+ROBOTS
+		}
+	}
+	@staging_sitemaps path /sitemap.xml /sitemap-*.xml
+	route @staging_sitemaps {
+		respond 404
+	}
+}
+
+(staging_errors) {
+	handle_errors {
+		import security_headers
+		respond "Staging request failed" {err.status_code}
+	}
+}
+
 staging.fleetum.it {
 	import security_headers
-	encode zstd gzip
-
-	route /api/* {
-		reverse_proxy backend:4000
-	}
-
+	import staging_errors
 	route {
+		import staging_discovery
+		encode zstd gzip
+		@api path /api/*
+		reverse_proxy @api backend:4000
 		root * /srv/fleetum
 		try_files {path} /index.html
 		file_server
@@ -29,24 +52,24 @@ staging.fleetum.it {
 
 api-staging.fleetum.it {
 	import security_headers
-	encode zstd gzip
-
-	route /api/* {
-		reverse_proxy backend:4000
+	import staging_errors
+	route {
+		import staging_discovery
+		encode zstd gzip
+		@api path /api/*
+		reverse_proxy @api backend:4000
+		respond "Fleetum Staging API" 200
 	}
-
-	respond "Fleetum Staging API" 200
 }
 
 platform-staging.fleetum.it {
 	import security_headers
-	encode zstd gzip
-
-	route /platform-api/* {
-		reverse_proxy backend:4100
-	}
-
+	import staging_errors
 	route {
+		import staging_discovery
+		encode zstd gzip
+		@platform_api path /platform-api/*
+		reverse_proxy @platform_api backend:4100
 		root * /srv/fleetum
 		try_files {path} /platform.html
 		file_server

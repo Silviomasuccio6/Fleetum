@@ -8,14 +8,15 @@ import {
 } from "../e2e/staging-release-binding.mjs";
 
 const sha = "a".repeat(40);
-const context = { repository: "silviomasuccio6/fleetum", releaseSha: sha, stagingRunId: "42" };
-const environment = { GITHUB_REPOSITORY: context.repository, E2E_RELEASE_SHA: sha, E2E_STAGING_RUN_ID: "42" };
+const context = { repository: "silviomasuccio6/fleetum", releaseSha: sha, stagingRunId: "42", controlSha: "b".repeat(40) };
+const environment = { GITHUB_REPOSITORY: context.repository, E2E_RELEASE_SHA: sha, E2E_STAGING_RUN_ID: "42", FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: context.controlSha };
 const workflow = { id: 7, path: ".github/workflows/deploy-staging.yml", name: "Deploy Staging" };
 const run = { id: 42, workflow_id: 7, status: "completed", conclusion: "success", event: "workflow_dispatch", repository: { full_name: context.repository }, head_repository: { full_name: context.repository }, head_sha: "b".repeat(40) };
-const proof = { schemaVersion: 1, repository: context.repository, releaseSha: sha, ciRunId: 21, deployRunId: 42, backendImage: `ghcr.io/silviomasuccio6/fleetum-backend@sha256:${"c".repeat(64)}`, frontendImage: `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${"d".repeat(64)}`, completed: true };
+const proof = { schemaVersion: 1, repository: context.repository, releaseSha: sha, ciRunId: 21, deployRunId: 42, backendImage: `ghcr.io/silviomasuccio6/fleetum-backend@sha256:${"c".repeat(64)}`, frontendImage: `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${"d".repeat(64)}`, completed: true, isolationPolicyVersion: 1, controlSha: context.controlSha };
 const inspect = () => [
-  { image: proof.backendImage, running: true, containerId: "e".repeat(64), startedAt: "2026-10-02T09:00:00.000000000Z", restartCount: 0, forbiddenEnv: "DO-NOT-COPY" },
-  { image: proof.frontendImage, running: true, containerId: "f".repeat(64), startedAt: "2026-10-02T09:00:00.000000000Z", restartCount: 0 }
+  { image: proof.backendImage, running: true, containerId: "e".repeat(64), startedAt: "2026-10-02T09:00:00.000000000Z", restartCount: 0, stagingMode: true, emailDisabled: true, dunningDisabled: true, retentionDisabled: true, retentionGlobalDisabled: true, privateNetworkOnly: true, privateNetworkId: "1".repeat(64), forbiddenEnv: "DO-NOT-COPY" },
+  { image: proof.frontendImage, running: true, containerId: "f".repeat(64), startedAt: "2026-10-02T09:00:00.000000000Z", restartCount: 0 },
+  { internal: true, networkId: "1".repeat(64), name: "fleetum_staging_private" }
 ];
 
 test("binding fails closed for missing, malformed, or unsafe SHA/run IDs", () => {
@@ -64,7 +65,7 @@ test("runtime continuity rejects replacement, digest changes, stopped containers
   assert.equal(verifyRuntimeContinuity(baseline, { ...baseline, releaseSha: "b".repeat(40) }).ok, false);
 });
 
-test("SSH target rejects injection and inspection command is fixed and excludes environment reads", () => {
+test("SSH target rejects injection and inspection command is fixed and emits only allowlisted safety booleans", () => {
   assert.equal(validateSshTarget("staging.example.test", "fleetum").ok, true);
   assert.equal(validateSshTarget("10.20.30.40", "fleetum_staging").ok, true);
   for (const host of ["", "-oProxyCommand=id", "host;id", "host/path", "host\nother", "999.20.30.40"]) assert.equal(validateSshTarget(host, "fleetum").ok, false);
@@ -74,8 +75,10 @@ test("SSH target rejects injection and inspection command is fixed and excludes 
   assert.match(READONLY_INSPECT_COMMAND, /\.State\.Running/);
   assert.match(READONLY_INSPECT_COMMAND, /\.State\.StartedAt/);
   assert.match(READONLY_INSPECT_COMMAND, /\.RestartCount/);
-  assert.match(READONLY_INSPECT_COMMAND, /fleetum_staging_backend fleetum_staging_caddy$/);
-  assert.doesNotMatch(READONLY_INSPECT_COMMAND, /\.Env|\b(?:compose|exec|restart|pull|up)\b|;|&&/);
+  assert.match(READONLY_INSPECT_COMMAND, /fleetum_staging_backend fleetum_staging_caddy/);
+  assert.doesNotMatch(READONLY_INSPECT_COMMAND, /json \.Config\.Env|\b(?:compose|exec|restart|pull|up)\b|;|&&/);
+  assert.match(READONLY_INSPECT_COMMAND, /FLEETUM_ENVIRONMENT=staging/);
+  assert.match(READONLY_INSPECT_COMMAND, /EMAIL_PROVIDER=disabled/);
 });
 
 const sshEnvironment = {
@@ -119,4 +122,41 @@ test("missing host trust fails before SSH and failed observation hides SSH stder
     return { status: 255, stderr: "DO-NOT-PRINT-SSH-SECRETS" };
   } }), { message: "Readonly staging container observation failed." });
   assert.equal(existsSync(keyPath), false);
+});
+
+
+test("staging release rejects legacy proof without isolation policy", () => {
+  const legacy = { ...proof }; delete legacy.isolationPolicyVersion;
+  assert.equal(verifyReleaseProof(legacy, context).ok, false);
+  assert.equal(verifyReleaseProof({ ...proof, isolationPolicyVersion: 2 }, context).ok, false);
+});
+
+test("staging runtime rejects unsafe or absent isolation flags and continuity checks policy", () => {
+  for (const field of ["stagingMode", "emailDisabled", "dunningDisabled", "retentionDisabled", "retentionGlobalDisabled"]) {
+    for (const value of [false, undefined, "true"]) {
+      const observed = inspect(); observed[0][field] = value;
+      assert.equal(verifyRuntimeSnapshot(observed, proof).ok, false, field);
+    }
+  }
+  const baseline = verifyRuntimeSnapshot(inspect(), proof).snapshot;
+  const after = structuredClone(baseline); after.isolationPolicyVersion = 0;
+  assert.equal(verifyRuntimeContinuity(baseline, after).ok, false);
+});
+
+
+test("staging runtime requires exclusively the attested internal backend network", () => {
+  for (const change of [{ privateNetworkOnly: false }, { privateNetworkId: "2".repeat(64) }, { privateNetworkId: null }]) {
+    const observed = inspect(); Object.assign(observed[0], change);
+    assert.equal(verifyRuntimeSnapshot(observed, proof).ok, false);
+  }
+  for (const change of [{ internal: false }, { name: "other_network" }, { networkId: "2".repeat(64) }]) {
+    const observed = inspect(); Object.assign(observed[2], change);
+    assert.equal(verifyRuntimeSnapshot(observed, proof).ok, false);
+  }
+});
+
+
+test("release proof and deploy run reject unapproved control revisions", () => {
+  assert.equal(verifyReleaseProof({ ...proof, controlSha: "0".repeat(40) }, context).ok, false);
+  assert.equal(verifyDeployRun({ ...run, head_sha: "0".repeat(40) }, workflow, context).ok, false);
 });

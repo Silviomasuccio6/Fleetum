@@ -15,8 +15,8 @@ import {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const validEnvironment = {
-  E2E_BASE_URL: "https://staging.fleetum.example",
-  E2E_API_URL: "https://api.staging.fleetum.example/api",
+  E2E_BASE_URL: "https://staging.fleetum.it",
+  E2E_API_URL: "https://api-staging.fleetum.it/api",
   E2E_TENANT_EMAIL: "tenant-a@example.test",
   E2E_TENANT_PASSWORD: "synthetic-password-a",
   E2E_OTHER_TENANT_EMAIL: "tenant-b@example.test",
@@ -102,6 +102,38 @@ test("configuration CLI fails closed without revealing credential values", () =>
 
   assert.equal(result.status, 1);
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(secretMarker));
+});
+
+test("configuration accepts only the canonical staging origins and exact API paths", () => {
+  assert.equal(validateE2EConfig(validEnvironment).ok, true);
+  assert.equal(validateE2EConfig({ ...validEnvironment, E2E_API_URL: "https://staging.fleetum.it/api" }).ok, true);
+  for (const E2E_BASE_URL of [
+    "https://other.example.test", "https://platform.fleetum.it", "https://staging.fleetum.it.",
+    "https://staging.fleetum.it:444", "https://staging.fleetum.it/extra", "https://staging.fleetum.it/",
+    "https://staging.fleetum.it?next=/", "https://staging.fleetum.it#fragment", "https://user:secret@staging.fleetum.it",
+    "https://staging.fleetum.it/extra/..", " https://staging.fleetum.it", "https://STAGING.fleetum.it"
+  ]) assert.equal(validateE2EConfig({ ...validEnvironment, E2E_BASE_URL }).ok, false, E2E_BASE_URL);
+  for (const E2E_API_URL of [
+    "https://other.example.test/api", "https://api-staging.fleetum.it./api", "https://api-staging.fleetum.it:444/api",
+    "https://api-staging.fleetum.it/other/api", "https://api-staging.fleetum.it/api/", "https://api-staging.fleetum.it/api?x=1",
+    "https://api-staging.fleetum.it/api#fragment", "https://api-staging.fleetum.it/%61pi", "https://api-staging.fleetum.it/x/../api",
+    "https://user:secret@api-staging.fleetum.it/api"
+  ]) assert.equal(validateE2EConfig({ ...validEnvironment, E2E_API_URL }).ok, false, E2E_API_URL);
+  assert.equal(validateE2EConfig({ ...validEnvironment, E2E_TARGET_MODE: "anything" }).ok, false);
+});
+
+test("local rehearsal requires explicit test-only loopback HTTPS and a common explicit-port origin", () => {
+  const local = { ...validEnvironment, E2E_TARGET_MODE: "local-rehearsal", NODE_ENV: "test", E2E_BASE_URL: "https://127.0.0.1:4443", E2E_API_URL: "https://127.0.0.1:4443/api" };
+  assert.equal(validateE2EConfig(local).ok, true);
+  assert.equal(validateE2EConfig({ ...local, CI: "false" }).ok, true);
+  for (const change of [
+    { E2E_TARGET_MODE: undefined }, { NODE_ENV: "production" }, { CI: "true" }, { GITHUB_ACTIONS: "true", CI: "false" },
+    { GITHUB_RUN_ID: "12", CI: "false" }, { E2E_BASE_URL: "http://127.0.0.1:4443" },
+    { E2E_BASE_URL: "https://localhost:4443" }, { E2E_BASE_URL: "https://127.0.0.1" },
+    { E2E_API_URL: "https://127.0.0.1:5555/api" }, { E2E_BASE_URL: "https://127.0.0.1:4443/other" },
+    { E2E_BASE_URL: "https://127.0.0.1:65536" }, { E2E_BASE_URL: "https://127.0.0.1:04443" },
+    { E2E_BASE_URL: "https://staging.fleetum.it", E2E_API_URL: "https://api-staging.fleetum.it/api" }
+  ]) assert.equal(validateE2EConfig({ ...local, ...change }).ok, false, JSON.stringify(change));
 });
 
 test("report gate accepts exactly seven required tests across five critical flows", () => {
@@ -203,12 +235,12 @@ test("nightly workflow fails closed and always verifies execution evidence", () 
   assert.doesNotMatch(workflow, /if:\s*env\.E2E_TENANT_EMAIL/);
   assert.match(workflow, /baseUrl:[\s\S]*?required: true/);
   assert.match(workflow, /apiUrl:[\s\S]*?required: true/);
-  assert.match(workflow, /node ops\/e2e\/validate-config\.mjs/);
+  assert.match(workflow, /node \.fleetum-control\/ops\/e2e\/validate-config\.mjs/);
   assert.match(workflow, /E2E_OTHER_TENANT_EMAIL:\s*\$\{\{ secrets\.E2E_OTHER_TENANT_EMAIL \}\}/);
   assert.match(workflow, /E2E_OTHER_TENANT_PASSWORD:\s*\$\{\{ secrets\.E2E_OTHER_TENANT_PASSWORD \}\}/);
   assert.match(workflow, /PLAYWRIGHT_JSON_OUTPUT_FILE:\s*test-results\/e2e\/e2e-results\.json/);
   assert.match(workflow, /--reporter=line,html,json/);
-  assert.match(workflow, /node ops\/e2e\/verify-report\.mjs test-results\/e2e\/e2e-results\.json/);
+  assert.match(workflow, /node \.fleetum-control\/ops\/e2e\/verify-report\.mjs test-results\/e2e\/e2e-results\.json/);
   assert.match(workflow, /E2E_MIN_EXECUTED_TESTS:\s*"7"/);
   assert.match(workflow, /if:\s*always\(\) && steps\.playwright\.outcome != 'skipped'/);
   assert.match(workflow, /releaseSha:[\s\S]*?required: true/);

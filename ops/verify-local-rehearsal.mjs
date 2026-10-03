@@ -7,17 +7,24 @@ import https from "node:https";
 import http from "node:http";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
+import { hasHostedOrCiContext } from "./e2e/validate-config.mjs";
+import { parseRehearsalOptions } from "./e2e/rehearsal-options.mjs";
 
 // Opt-in only. No existing database, env file, provider credentials or production server.
-if (!process.argv.includes("--run")) {
-  console.log("Usage: node ops/verify-local-rehearsal.mjs --run [--evidence-dir <directory>] [--source-sha <commit>]");
+let options;
+try { options = parseRehearsalOptions(process.argv.slice(2)); }
+catch (error) { console.error(error.message); process.exit(1); }
+if (!options.run) {
+  console.log("Usage: node ops/verify-local-rehearsal.mjs --run --source-sha <40-character SHA> [--evidence-dir <absolute directory>]");
   process.exit(0);
 }
+if (hasHostedOrCiContext()) {
+  console.error("Local rehearsal cannot run inside CI or hosted GitHub Actions.");
+  process.exit(1);
+}
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const option = (name) => process.argv[process.argv.indexOf(name) + 1];
-const evidence = path.resolve(process.argv.includes("--evidence-dir") ? option("--evidence-dir") : path.join(root, "output/playwright/local-rehearsal"));
-const sourceSha = process.argv.includes("--source-sha") ? option("--source-sha") : "unrecorded";
-if (sourceSha !== "unrecorded" && !/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("Invalid source SHA");
+const evidence = options.evidenceDirectory ?? path.join(root, "output/playwright/local-rehearsal");
+const sourceSha = options.sourceSha;
 const scratch = await mkdtemp(path.join(tmpdir(), "fleetum-local-rehearsal-"));
 const container = `fleetum_rehearsal_${randomBytes(6).toString("hex")}`;
 const children = new Set();
@@ -43,7 +50,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
 const password = `Synthetic-${randomBytes(18).toString("hex")}`;
 const cleanEnv = {
   PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: scratch,
-  NODE_ENV: "test", DOTENV_CONFIG_PATH: "/dev/null", CHECKPOINT_DISABLE: "1",
+  NODE_ENV: "test", E2E_TARGET_MODE: "local-rehearsal", DOTENV_CONFIG_PATH: "/dev/null", CHECKPOINT_DISABLE: "1",
   npm_config_userconfig: "/dev/null", npm_config_globalconfig: path.join(scratch, "npmrc"),
   npm_config_audit: "false", npm_config_fund: "false", DOCKER_CONFIG: path.join(scratch, "docker-config"),
   DEMO_ADMIN_PASSWORD: password, UPLOAD_DIR: path.join(scratch, "uploads"),

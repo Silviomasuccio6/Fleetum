@@ -35,6 +35,14 @@ export function captureRuntime(proof, { env = process.env, execute = spawnSync }
 
 export function runCapture({ args = process.argv.slice(2), env = process.env, output = console, execute = spawnSync } = {}) {
   try {
+    // During deploy the caller already binds checkout and digests; no completed-run
+    // proof exists yet. Observation must succeed before health checks/publishing it.
+    if (args[0] === "deploy" && args.length === 2) {
+      const snapshot = captureRuntime({ releaseSha: env.RELEASE_SHA, backendImage: env.BACKEND_IMAGE, frontendImage: env.FRONTEND_IMAGE }, { env, execute });
+      writeFileSync(args[1], `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
+      output.log("Observed staging containers satisfy isolation policy version 1.");
+      return 0;
+    }
     const [phase, proofPath, runMetadataPath, snapshotPath, baselinePath] = args;
     if (!["before", "after"].includes(phase) || args.length !== (phase === "after" ? 5 : 4)) throw new Error("Usage: capture-staging-runtime.mjs <before|after> <release-proof> <verified-run-proof> <snapshot> [baseline]");
     const proof = requireReleaseBinding(proofPath, runMetadataPath, env);

@@ -20,6 +20,7 @@ jobs:
     name: Resolve immutable staging release
     if: ${{ inputs.confirm == 'DEPLOY_STAGING' }}
     runs-on: ubuntu-latest
+    environment: staging
     timeout-minutes: 10
     permissions:
       actions: read
@@ -36,6 +37,13 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout trusted staging controls separately
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .fleetum-control
+          persist-credentials: false
+
       - name: Resolve full release SHA
         id: release
         run: |
@@ -47,6 +55,13 @@ jobs:
           fi
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "Staging release SHA: \`$RELEASE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require protected approval of workflow and candidate
+        env:
+          FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
+          RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
+        run: node .fleetum-control/ops/staging/control-policy.mjs
 
       - name: Require successful CI for the release SHA
         id: ci
@@ -83,6 +98,9 @@ jobs:
               .addRaw(`CI proof: [run ${successfulRun.id}](${successfulRun.html_url}) for \`${releaseSha}\``)
               .write();
 
+      - name: Require staging isolation capability before publishing or migrating
+        run: node .fleetum-control/ops/e2e/staging-release-binding.mjs policy-preflight
+
       - name: Download exact CI source proof
         uses: actions/download-artifact@v4
         with:
@@ -95,7 +113,7 @@ jobs:
         env:
           RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
           CI_RUN_ID: ${{ steps.ci.outputs.ci_run_id }}
-        run: node ops/ci-release-identity.mjs verify .ci-proof/ci-source.json
+        run: node .fleetum-control/ops/ci-release-identity.mjs verify .ci-proof/ci-source.json
 
   build-images:
     name: Build and publish staging images
@@ -227,6 +245,13 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout trusted staging controls separately
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .fleetum-control
+          persist-credentials: false
+
       - name: Verify deploy checkout identity
         env:
           FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
@@ -241,8 +266,10 @@ jobs:
         env:
           FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          test -n "$FLEETUM_STAGING_KNOWN_HOSTS"
           test -n "$FLEETUM_STAGING_SSH_KEY"
           test -n "$FLEETUM_STAGING_HOST"
           if ! [[ "$FLEETUM_STAGING_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[A-Za-z0-9.-]+$ ]]; then
@@ -257,7 +284,8 @@ jobs:
           fi
           chmod 600 ~/.ssh/fleetum_staging
           ssh-keygen -y -f ~/.ssh/fleetum_staging >/dev/null
-          ssh-keyscan -T 10 -H "$FLEETUM_STAGING_HOST" >> ~/.ssh/known_hosts
+          printf '%s\n' "$FLEETUM_STAGING_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Verify remote deploy target
         env:
@@ -276,7 +304,12 @@ jobs:
             echo "::error::FLEETUM_STAGING_APP_DIR must be an absolute safe path."
             exit 1
           fi
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+          if [ "$FLEETUM_STAGING_APP_DIR" != "/opt/fleetum-staging/app" ]; then
+            echo "::error::Staging app path must be the isolated canonical path."
+            exit 1
+          fi
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "sh -s '$FLEETUM_RELEASE_SHA'" < .fleetum-control/ops/staging/target-preflight.sh
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
             "mkdir -p '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA' && test -w '$FLEETUM_STAGING_APP_DIR'"
 
       - name: Upload immutable deployment manifests
@@ -293,7 +326,7 @@ jobs:
             --include 'deploy/caddy/' \
             --include 'deploy/caddy/Caddyfile.staging' \
             --exclude '*' \
-            -e "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" \
+            -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" \
             ./ "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/"
 
       - name: Pull immutable images, migrate and restart staging
@@ -316,13 +349,28 @@ jobs:
               exit 1
             fi
           done
+          if [ "$FLEETUM_STAGING_APP_DIR" != "/opt/fleetum-staging/app" ] || [ "$FLEETUM_STAGING_ENV_FILE" != "/opt/fleetum-staging/env/compose.env" ] || [ "$FLEETUM_STAGING_LOCK_FILE" != "/opt/fleetum-staging/deploy.lock" ]; then
+            echo "::error::Staging deployment paths must match the isolated canonical paths."
+            exit 1
+          fi
           LOCK_DIR="${FLEETUM_STAGING_LOCK_FILE%/*}"
 
-          printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+          printf '%s' "$GHCR_TOKEN" | ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
-            "set -eu; mkdir -p '$LOCK_DIR'; cd '$FLEETUM_STAGING_APP_DIR'; exec 9>'$FLEETUM_STAGING_LOCK_FILE'; flock -n 9; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.staging.yml' '$FLEETUM_STAGING_APP_DIR/docker-compose.staging.yml'; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_STAGING_APP_DIR/deploy/'; export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE'; docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull; docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma; docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d --no-build"
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+            "set -eu; mkdir -p '$LOCK_DIR'; cd '$FLEETUM_STAGING_APP_DIR'; exec 9>'$FLEETUM_STAGING_LOCK_FILE'; flock -n 9; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.staging.yml' '$FLEETUM_STAGING_APP_DIR/docker-compose.staging.yml'; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_STAGING_APP_DIR/deploy/'; export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE'; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend sh -c 'node dist/shared/config/env.js && npx prisma migrate deploy --schema prisma/schema.prisma'; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d --no-build"
+
+      - name: Verify observed staging isolation
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
+        run: node .fleetum-control/ops/e2e/capture-staging-runtime.mjs deploy staging-runtime-isolation.json
 
       - name: Staging health checks
         run: |
@@ -359,14 +407,16 @@ jobs:
           assert.match(frontendImage, /^ghcr\.io\/silviomasuccio6\/fleetum-frontend@sha256:[0-9a-f]{64}$/);
           writeFileSync('staging-release.json', JSON.stringify({ schemaVersion: 1, repository,
             releaseSha: process.env.RELEASE_SHA, ciRunId: process.env.CI_RUN_ID,
-            deployRunId: process.env.GITHUB_RUN_ID, backendImage, frontendImage, completed: true }, null, 2) + '\n');
+            deployRunId: process.env.GITHUB_RUN_ID, backendImage, frontendImage, completed: true, isolationPolicyVersion: 1, controlSha: process.env.GITHUB_WORKFLOW_SHA }, null, 2) + '\n');
           NODE
 
       - name: Upload staging release proof
         uses: actions/upload-artifact@v4
         with:
           name: staging-release-proof-${{ github.run_id }}
-          path: staging-release.json
+          path: |
+            staging-release.json
+            staging-runtime-isolation.json
           overwrite: true
           if-no-files-found: error
           retention-days: 14

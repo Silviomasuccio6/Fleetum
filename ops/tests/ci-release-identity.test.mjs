@@ -35,7 +35,7 @@ test("staging requires successful CI source proof and publishes a post-health de
   assert.match(ci, /source-attestation:[\s\S]*?needs: \[secret-scan, sast, verify, tenant-isolation, migration-compatibility, lighthouse\]/);
   assert.match(ci, /ci-source-proof-\$\{\{ github\.run_id \}\}/);
   assert.match(deploy, /ci-source-proof-\$\{\{ steps\.ci\.outputs\.ci_run_id \}\}/);
-  assert.match(deploy, /node ops\/ci-release-identity\.mjs verify/);
+  assert.match(deploy, /node \.fleetum-control\/ops\/ci-release-identity\.mjs verify/);
   assert.match(deploy, /\["push", "pull_request", "workflow_dispatch"\]/);
   assert.ok(deploy.indexOf("Publish staging release proof") > deploy.indexOf("https://platform-staging.fleetum.it/api/health"));
   assert.match(deploy, /staging-release-proof-\$\{\{ github\.run_id \}\}/);

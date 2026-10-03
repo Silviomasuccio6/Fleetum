@@ -1,9 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
+const baseURL = process.env.E2E_BASE_URL;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
@@ -12,9 +13,9 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL,
-    trace: "retain-on-failure",
+    trace: "off",
     screenshot: "only-on-failure",
-    video: "retain-on-failure"
+    video: "off"
   },
   projects: [
     {
