@@ -135,10 +135,10 @@ test("preflight rejects reused cookie contexts and still disposes them", async (
 
 test("Playwright bootstrap wires the preflight for both nightly and local rehearsal", () => {
   const config = readFileSync("playwright.config.ts", "utf8");
-  assert.match(config, /globalSetup:\s*["']\.\/tests\/e2e\/global-setup\.ts["']/);
+  assert.match(config, /globalSetup:\s*["']\.\/tests\/e2e\/global-setup\.mts["']/);
   assert.match(config, /trace:\s*["']off["']/);
   assert.match(config, /video:\s*["']off["']/);
-  const setup = readFileSync("tests/e2e/global-setup.ts", "utf8");
+  const setup = readFileSync("tests/e2e/global-setup.mts", "utf8");
   assert.match(setup, /runTenantPreflight/);
   assert.match(setup, /request\.newContext/);
   assert.doesNotMatch(setup, /console\.|process\.env\s*=/);
@@ -163,4 +163,17 @@ test("local rehearsal runner rejects inherited CI/hosted context before allocati
     assert.match(result.stderr, /cannot run inside CI or hosted GitHub Actions/);
     assert.equal(existsSync(evidenceDirectory), false);
   }
+});
+
+
+test("actual Playwright loader rejects production config before browser or authentication", () => {
+  const marker = "SYNTHETIC-DO-NOT-PRINT-BOOTSTRAP";
+  const result = spawnSync(process.execPath, ["node_modules/@playwright/test/cli.js", "test", "--project=chromium", "--reporter=line", "01-login.spec.ts"], {
+    encoding: "utf8", timeout: 30_000,
+    env: { PATH: process.env.PATH, NODE_ENV: "test", DOTENV_CONFIG_PATH: "/dev/null", E2E_BASE_URL: "https://fleetum.it", E2E_API_URL: "https://api.fleetum.it/api", E2E_TENANT_EMAIL: "a@example.test", E2E_TENANT_PASSWORD: marker, E2E_OTHER_TENANT_EMAIL: "b@example.test", E2E_OTHER_TENANT_PASSWORD: marker }
+  });
+  assert.equal(result.status, 1);
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.match(output, /E2E tenant preflight rejected configuration/);
+  assert.doesNotMatch(output, /ReferenceError|SYNTHETIC-DO-NOT-PRINT-BOOTSTRAP/);
 });

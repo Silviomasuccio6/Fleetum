@@ -4,7 +4,7 @@ const baseURL = process.env.E2E_BASE_URL;
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  globalSetup: "./tests/e2e/global-setup.ts",
+  globalSetup: "./tests/e2e/global-setup.mts",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
