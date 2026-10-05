@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { metrics } from "../observability/metrics.js";
 import { env } from "../../shared/config/env.js";
@@ -43,12 +44,45 @@ const assertSafeStorageKey = (key: string) => {
   return normalized;
 };
 
+const canonicalUploadRoot = (uploadDir: string) => {
+  const resolved = path.resolve(process.cwd(), uploadDir);
+  // macOS exposes these fixed system aliases. Do not resolve arbitrary upload
+  // directory symlinks; those must fail the confinement checks below.
+  for (const [alias, canonical] of [["/tmp", "/private/tmp"], ["/var", "/private/var"]]) {
+    if (resolved === alias || resolved.startsWith(`${alias}/`)) {
+      try { if (realpathSync(alias) === canonical) return `${canonical}${resolved.slice(alias.length)}`; } catch { /* root may not exist yet */ }
+    }
+  }
+  return resolved;
+};
+
 class LocalStorageProvider implements StorageProvider {
   readonly name = "local" as const;
-  private readonly rootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
-  private readonly legacyRelativePrefix = path.isAbsolute(env.UPLOAD_DIR)
-    ? null
-    : normalizeSegment(path.posix.normalize(env.UPLOAD_DIR.replace(/\\/g, "/"))).replace(/^\.\//, "");
+  private readonly rootDir = canonicalUploadRoot(env.UPLOAD_DIR);
+  // Historical database keys used uploads/<tenant>/... . Preserve that spelling
+  // when the upload root becomes absolute; it is a reserved legacy namespace.
+  private readonly legacyRelativePrefixes = [...new Set([
+    "uploads",
+    ...(path.isAbsolute(env.UPLOAD_DIR) ? [] : [
+      normalizeSegment(path.posix.normalize(env.UPLOAD_DIR.replace(/\\/g, "/"))).replace(/^\.\//, "")
+    ])
+  ])].filter((prefix) => prefix && prefix !== ".").sort((a, b) => b.length - a.length);
+
+  private assertNoSymlinks(fullPath: string) {
+    let current = path.parse(fullPath).root;
+    const segments = fullPath.slice(current.length).split(path.sep).filter(Boolean);
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      try {
+        if (lstatSync(current).isSymbolicLink()) {
+          throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+        throw error;
+      }
+    }
+  }
 
   buildKey(...segments: string[]) {
     return path.posix.join(...segments.map(normalizeSegment).filter(Boolean));
@@ -56,15 +90,24 @@ class LocalStorageProvider implements StorageProvider {
 
   resolveLocalPath(key: string) {
     const safeKey = assertSafeStorageKey(key);
-    const isLegacyKey = Boolean(
-      this.legacyRelativePrefix &&
-      (safeKey === this.legacyRelativePrefix || safeKey.startsWith(`${this.legacyRelativePrefix}/`))
+    const legacyPrefix = this.legacyRelativePrefixes.find(
+      (prefix) => safeKey === prefix || safeKey.startsWith(`${prefix}/`)
     );
-    const fullPath = isLegacyKey
-      ? path.resolve(process.cwd(), safeKey)
-      : path.resolve(this.rootDir, safeKey);
+    const rootRelativeKey = legacyPrefix ? safeKey.slice(legacyPrefix.length).replace(/^\//, "") : safeKey;
+    const fullPath = path.resolve(this.rootDir, rootRelativeKey);
     if (fullPath !== this.rootDir && !fullPath.startsWith(`${this.rootDir}${path.sep}`)) {
       throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
+    }
+    this.assertNoSymlinks(fullPath);
+    if (legacyPrefix) {
+      // Never select an alternative object by existence. A doubled-prefix
+      // object makes the historical spelling ambiguous and requires review.
+      try {
+        lstatSync(path.resolve(this.rootDir, safeKey));
+        throw new AppError("Chiave storage ambigua", 409, "AMBIGUOUS_STORAGE_KEY");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
     return fullPath;
   }

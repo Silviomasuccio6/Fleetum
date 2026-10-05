@@ -5,6 +5,8 @@ import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile, chmo
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertRestoreMoneySnapshot, buildRestoreMoneySnapshotSql } from "./fixtures/restore-recovery-money.mjs";
+import { materializeRegisteredUploads } from "./fixtures/restore-recovery-storage.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const usage = "Usage: node ops/verify-restore-recovery.mjs --source-sha <40 lowercase hex> --baseline-sha <40 lowercase hex> --evidence-dir <new absolute directory> [--git-dir <absolute Git directory>] [--docker-host unix:///absolute/local/socket]";
@@ -42,7 +44,33 @@ export function extractCompatibilityFixture(script) {
 }
 export const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
-const httpDiagnosticSteps = new Set(["import-app", "import-prisma", "listen", "ready", "ready-body", "login-a", "login-a-cookies", "login-a-csrf", "login-b", "login-b-cookies", "login-b-csrf", "read-a", "read-a-fixture", "read-b", "read-b-isolation", "write-without-csrf", "write-with-csrf", "download-owner", "download-owner-bytes", "download-other-tenant", "download-anonymous", "cleanup", "unknown"]);
+const jsonLogRows = (output) => output.split("\n").flatMap((line) => {
+  try { const value = JSON.parse(line); return value && typeof value === "object" ? [value] : []; }
+  catch { return []; }
+});
+
+export function parseMoneyReconciliation(output, registry) {
+  assert.equal(registry.length, 35);
+  const logs = jsonLogRows(output);
+  const completed = logs.filter((row) => row.msg === "Exact money reconciliation completed");
+  assert.equal(completed.length, 1); assert.equal(completed[0].checkedFields, 35); assert.equal(completed[0].mismatchCount, 0);
+  const fields = logs.filter((row) => row.msg === "Exact money reconciliation field checked");
+  assert.equal(fields.length, 35);
+  return { checkedFields: 35, mismatchCount: 0, fields: registry.map((field) => {
+    const matches = fields.filter((row) => row.model === field.model && row.field === field.legacyField);
+    assert.equal(matches.length, 1); const row = matches[0];
+    assert(Number.isSafeInteger(row.rowCount) && row.rowCount > 0); assert.equal(row.mismatchCount, 0);
+    return { fieldKey: `${field.model}.${field.legacyField}`, rowCount: row.rowCount, mismatchCount: 0 };
+  }) };
+}
+
+export function parseDualWriteReceipt(output) {
+  const completed = jsonLogRows(output).filter((row) => row.msg === "Exact money insert and update triggers verified");
+  assert.equal(completed.length, 1); assert.equal(completed[0].checkedFields, 35); assert.equal(completed[0].checkedTables, 13);
+  return { checkedFields: 35, checkedTables: 13 };
+}
+
+const httpDiagnosticSteps = new Set(["import-app", "import-prisma", "listen", "ready", "ready-body", "login-a", "login-a-cookies", "login-a-csrf", "login-b", "login-b-cookies", "login-b-csrf", "read-a", "read-a-fixture", "read-b", "read-b-isolation", "write-without-csrf", "write-with-csrf", "download-owner", "download-owner-bytes", "download-other-tenant", "download-anonymous", "download-modern-owner", "download-modern-owner-bytes", "download-modern-other-tenant", "download-modern-anonymous", "cleanup", "unknown"]);
 const httpDiagnosticErrors = new Set(["Error", "AssertionError", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "TimeoutError", "AbortError", "PrismaClientInitializationError", "PrismaClientKnownRequestError", "PrismaClientValidationError"]);
 
 // Treat subprocess diagnostics as untrusted: accept only constant labels and
@@ -138,8 +166,8 @@ export async function runRestoreRecovery(options) {
     claims: "Local synthetic restore and schema-compatibility evidence only; no production data, provider replay or down migration",
     isolation: { dockerHost, container, network, loopbackDatabase: true, internalNetwork: false, dedicatedBridge: true, containerEgressDenied: false, imagePulls: false, inheritedProviderEnvironment: false, dotenv: "/dev/null", workersStarted: false,
       limitation: "The dedicated local bridge permits container egress; application fixture blocks provider HTTP. This does not prove staging egress isolation." },
-    checks: [], steps: [], backupManifests: [], toolingHashes: {}, engineHashes: [], snapshots: {}, http: {}, cleanup: {},
-    coverage: { moneyFields: ["Vehicle.purchasePrice/purchasePriceExact", "Vehicle.monthlyFixedCost/monthlyFixedCostExact", "RentalBooking.expectedTotal/expectedTotalExact", "RentalDeposit.amountCents"], allMoneyFieldsExercised: false, productionRtoRpoMeasured: false, externalGatesPassed: false }
+    checks: [], steps: [], backupManifests: [], toolingHashes: {}, engineHashes: [], snapshots: {}, money: {}, http: {}, cleanup: {},
+    coverage: { moneyFields: [], additionalIntegerField: "RentalDeposit.amountCents", allMoneyFieldsExercised: false, productionRtoRpoMeasured: false, externalGatesPassed: false }
   };
   const children = new Set(); let interrupted = false; let containerCreated = false; let networkCreated = false;
   const kill = (child, signal = "SIGTERM") => {
@@ -211,6 +239,20 @@ export async function runRestoreRecovery(options) {
     }).sort((a, b) => a.table.localeCompare(b.table));
     return { tableCount: summary.length, sha256: sha256(JSON.stringify(summary)), tables: summary };
   }
+  let moneyRegistry;
+  async function verifyMoney(directory, name, phase) {
+    const rows = (await sql(name, buildRestoreMoneySnapshotSql(moneyRegistry), `${phase}-all-money-values`)).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const money = assertRestoreMoneySnapshot(moneyRegistry, rows, phase);
+    if (result.money.schema42) assert.equal(money.sha256, result.money.schema42.sha256);
+    const before = await snapshot(name);
+    const reconciliation = await run("npm", ["run", "money:reconcile", "-w", "backend"], `${phase}-official-money-reconciliation`, { cwd: directory, extraEnv: { ...clients.get(directory), DATABASE_URL: urlFor(name) } });
+    money.reconciliation = parseMoneyReconciliation(reconciliation.stdout.toString("utf8"), moneyRegistry);
+    const triggers = await run("npm", ["run", "money:verify-dual-write", "-w", "backend"], `${phase}-official-money-dual-write`, { cwd: directory, extraEnv: { ...clients.get(directory), DATABASE_URL: urlFor(name) } });
+    money.dualWrite = { ...parseDualWriteReceipt(triggers.stdout.toString("utf8")), insertFields: 35, updateFields: ["VehicleCost.amount"], limitation: "The official verifier checks INSERT for every field; UPDATE is exercised on VehicleCost.amount only." };
+    assert.deepEqual(await snapshot(name), before, "Official trigger verifier must clean its synthetic rows");
+    result.money[phase] = money;
+    check(`${phase}-all-35-money-fields-and-dual-write`, { checkedFields: money.checkedFields, fieldRowPairs: money.checkedRows, checkedTables: money.dualWrite.checkedTables });
+  }
   const preservedQuery = `SELECT jsonb_build_object(
     'tenants',(SELECT jsonb_agg(jsonb_build_object('id',id,'name',name) ORDER BY id) FROM "Tenant"),
     'vehicles',(SELECT jsonb_agg(jsonb_build_object('id',id,'tenantId',"tenantId",'plate',plate,'purchasePrice',"purchasePrice",'monthlyFixedCost',"monthlyFixedCost",'purchasePriceExact',"purchasePriceExact",'monthlyFixedCostExact',"monthlyFixedCostExact") ORDER BY id) FROM "Vehicle"),
@@ -236,17 +278,18 @@ export async function runRestoreRecovery(options) {
       await verifyBackupBundle({ dumpPath, manifest, uploadRoot: destination });
     }
   };
-  async function smoke(directory, name, uploads, label, manifest) {
+  async function smoke(directory, name, uploads, label, manifest, { uploadMode = "relative", includeModern = false } = {}) {
     // Both archive directories and source trees were allocated by this runner.
     // The old app resolves its legacy key against cwd, while the current app
     // recognizes the same 'uploads/' prefix. Never rewrite keys in the database.
     if (![baselineDirectory, sourceDirectory].includes(directory) || path.dirname(uploads) !== scratch || ![uploadDirectory, path.join(scratch, "uploads-first"), path.join(scratch, "uploads-second")].includes(uploads)) throw new Error("Refusing synthetic uploads outside owned archive/task trees");
-    const destination = path.join(directory, "uploads"); const source = path.join(uploads, "uploads");
-    await noSymlinkParents(directory); await noSymlinkParents(destination); await noSymlinkParents(source);
-    if (!(await lstat(directory)).isDirectory() || !(await lstat(source)).isDirectory()) throw new Error("Synthetic upload source and archive must be regular task-owned directories");
-    await rm(destination, { recursive: true, force: true }); await cp(source, destination, { recursive: true });
-    await verifyBackupBundle({ dumpPath: path.join(options.evidenceDirectory, manifest.dump.file), manifest, uploadRoot: directory });
-    const response = await run(process.execPath, ["--import", "tsx", "restore-recovery-http.mjs"], label, { cwd: directory, extraEnv: { ...clients.get(directory), DATABASE_URL: urlFor(name), UPLOAD_DIR: "uploads", SYNTHETIC_UPLOAD_TREE: directory }, timeoutMs: 45000, allowFailure: true });
+    assert(["relative", "absolute"].includes(uploadMode));
+    const destination = path.join(directory, "uploads");
+    await noSymlinkParents(directory); await noSymlinkParents(destination); await noSymlinkParents(uploads);
+    if (!(await lstat(directory)).isDirectory() || !(await lstat(uploads)).isDirectory()) throw new Error("Synthetic upload source and archive must be regular task-owned directories");
+    await rm(destination, { recursive: true, force: true });
+    const materialized = await materializeRegisteredUploads({ manifest, uploadTree: uploads, destination });
+    const response = await run(process.execPath, ["--import", "tsx", "restore-recovery-http.mjs"], label, { cwd: directory, extraEnv: { ...clients.get(directory), DATABASE_URL: urlFor(name), UPLOAD_DIR: uploadMode === "absolute" ? destination : "uploads", SYNTHETIC_UPLOAD_TREE: uploads, SYNTHETIC_INCLUDE_MODERN_FILES: includeModern ? "true" : "false" }, timeoutMs: 45000, allowFailure: true });
     const failure = parseHttpFailure(Buffer.concat([response.stdout, response.stderr]).toString("utf8"));
     if (response.code !== 0 || failure) {
       const diagnostic = failure ?? { stepLabel: "unknown", errorName: "Error" };
@@ -256,7 +299,7 @@ export async function runRestoreRecovery(options) {
     }
     const line = response.stdout.toString("utf8").split("\n").find((value) => value.startsWith("FLEETUM_RESTORE_HTTP_RESULT "));
     if (!line) throw new Error("HTTP compatibility fixture produced no result");
-    result.http[label] = JSON.parse(line.slice("FLEETUM_RESTORE_HTTP_RESULT ".length)); check(label, result.http[label]);
+    result.http[label] = { ...JSON.parse(line.slice("FLEETUM_RESTORE_HTTP_RESULT ".length)), uploadMode, materializedFiles: materialized.fileCount }; check(label, result.http[label]);
   }
   try {
     await mkdir(options.evidenceDirectory, { recursive: true, mode: 0o700 });
@@ -278,6 +321,7 @@ export async function runRestoreRecovery(options) {
       await run("tar", ["-xf", archiveFile, "-C", directory], `${label}-archive-extract`);
       result[`${label}LockfileSha256`] = sha256(await readFile(path.join(directory, "package-lock.json")));
       await cp(path.join(root, "ops/fixtures/restore-recovery-http.mjs"), path.join(directory, "restore-recovery-http.mjs"));
+      await cp(path.join(root, "ops/fixtures/restore-recovery-money.mjs"), path.join(directory, "restore-recovery-money.mjs"));
     }
     const inventory = async (directory) => (await readdir(path.join(directory, "backend/prisma/migrations"))).filter((name) => /^\d/.test(name)).sort();
     const baselineMigrations = await inventory(baselineDirectory); const sourceMigrations = await inventory(sourceDirectory);
@@ -287,7 +331,7 @@ export async function runRestoreRecovery(options) {
     const compatibilityFixture = extractCompatibilityFixture(await readFile(path.join(sourceDirectory, "ops/verify-migration-compatibility.sh"), "utf8"));
     await writeFile(path.join(baselineDirectory, "compat-fixture.mjs"), compatibilityFixture);
     await cp(path.join(root, "ops/fixtures/restore-recovery-seed.mjs"), path.join(baselineDirectory, "restore-recovery-seed.mjs"));
-    for (const file of ["ops/verify-restore-recovery.mjs", "ops/restore-db-test.sh", "ops/fixtures/restore-recovery-seed.mjs", "ops/fixtures/restore-recovery-http.mjs"]) result.toolingHashes[file] = sha256(await readFile(path.join(root, file)));
+    for (const file of ["ops/verify-restore-recovery.mjs", "ops/restore-db-test.sh", "ops/fixtures/restore-recovery-seed.mjs", "ops/fixtures/restore-recovery-http.mjs", "ops/fixtures/restore-recovery-money.mjs", "ops/fixtures/restore-recovery-storage.mjs"]) result.toolingHashes[file] = sha256(await readFile(path.join(root, file)));
     result.toolingHashes.compatibilityFixture = sha256(compatibilityFixture);
     await docker(["info", "--format", "{{.ServerVersion}}"], "local-docker-info");
     const image = JSON.parse((await docker(["image", "inspect", "postgres:16-alpine", "--format", "{{json .}}"], "preexisting-postgres16-image")).stdout.toString("utf8"));
@@ -321,22 +365,35 @@ export async function runRestoreRecovery(options) {
     databaseUrl = `postgresql://${dbUser}:${password}@${binding}/${dbName}?schema=public`;
     result.postgresVersion = await sql(dbName, "SHOW server_version;", "postgres-version"); assert.match(result.postgresVersion, /^16\./);
     await installAndGenerate(baselineDirectory, "baseline"); await installAndGenerate(sourceDirectory, "source");
+    for (const directory of [baselineDirectory, sourceDirectory]) {
+      const receipt = await run(process.execPath, ["--import", "tsx", "--input-type=module", "-e", "import { EXACT_NUMERIC_FIELDS } from './backend/src/domain/money/exact-money-fields.ts'; console.log(JSON.stringify(EXACT_NUMERIC_FIELDS));"], "official-money-registry", { cwd: directory });
+      const registry = JSON.parse(receipt.stdout.toString("utf8"));
+      if (moneyRegistry) assert.deepEqual(registry, moneyRegistry); else moneyRegistry = registry;
+    }
+    result.coverage.moneyFields = moneyRegistry.map((field) => `${field.model}.${field.legacyField}`);
+    result.moneyRegistrySha256 = sha256(JSON.stringify(moneyRegistry));
+    const matrixRoot = path.join(scratch, "storage-matrix"); await mkdir(matrixRoot);
+    const matrix = await run(process.execPath, [path.join(root, "ops/fixtures/restore-recovery-storage.mjs"), "--source-root", sourceDirectory, "--owned-root", matrixRoot], "current-source-eight-layout-storage-matrix");
+    result.storageMatrix = JSON.parse(matrix.stdout.toString("utf8")); assert.equal(result.storageMatrix.success, true);
+    check("current-source-eight-layout-storage-matrix", { combinations: result.storageMatrix.cases.length });
     await migrate(baselineDirectory, dbName, "baseline-42-migrations");
     assert.equal(Number(await sql(dbName, 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL;', "baseline-applied-count")), 42);
     await run("npm", ["run", "prisma:seed", "-w", "backend"], "historical-synthetic-demo-seed", { cwd: baselineDirectory, extraEnv: { ...clients.get(baselineDirectory), DATABASE_URL: databaseUrl } });
-    for (const fixture of ["compat-fixture.mjs", "restore-recovery-seed.mjs"]) await run(process.execPath, [fixture], fixture, { cwd: baselineDirectory, extraEnv: { ...clients.get(baselineDirectory), DATABASE_URL: databaseUrl } });
+    for (const fixture of ["compat-fixture.mjs", "restore-recovery-seed.mjs"]) await run(process.execPath, ["--import", "tsx", fixture], fixture, { cwd: baselineDirectory, extraEnv: { ...clients.get(baselineDirectory), DATABASE_URL: databaseUrl } });
+    await verifyMoney(baselineDirectory, dbName, "schema42");
     result.snapshots.baseline42 = await snapshot(dbName);
     const beforeMigration = await sql(dbName, preservedQuery, "baseline-money-tenant-file-projection");
     const beforeJson = JSON.parse(beforeMigration);
     assert.equal(beforeJson.tenants.length, 2); assert.equal(beforeJson.files.length, 2);
     assert.equal(beforeJson.vehicles.find((item) => item.id === "compat_vehicle").purchasePriceExact, 1234.56);
-    assert.equal(beforeJson.booking[0].expectedTotalExact, 240.12);
+    assert.equal(beforeJson.booking.find((item) => item.id === "compat_booking").expectedTotalExact, 240.12);
     check("historical-two-tenant-exact-money-registered-file-fixture");
     const backupUploads = path.join(options.evidenceDirectory, "uploads"); await cp(uploadDirectory, backupUploads, { recursive: true });
     const dump42 = path.join(options.evidenceDirectory, "synthetic-schema42.sql"); const manifest42 = await manifestFor(dbName, dump42, backupUploads, 42);
     await migrate(sourceDirectory, dbName, "source-42-to-48-migrations");
     assert.equal(Number(await sql(dbName, 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL;', "source-applied-count")), 48);
     assert.equal(await sql(dbName, preservedQuery, "migrated-money-tenant-file-projection"), beforeMigration);
+    await verifyMoney(sourceDirectory, dbName, "schema48");
     await verifyBackupBundle({ dumpPath: dump42, uploadRoot: uploadDirectory, manifest: manifest42 });
     check("42-to-48-preserves-money-tenants-and-upload-registration");
     await sql(dbName, `UPDATE "EmailQueue" SET "deduplicationKey"='synthetic-restore-pending-dedup', "processingToken"='synthetic-worker-lease', "processingStartedAt"='2026-01-09 10:00:00', "leaseExpiresAt"='2026-01-09 10:05:00' WHERE id='restore_pending_email';
@@ -344,10 +401,18 @@ export async function runRestoreRecovery(options) {
     const stateQuery = `SELECT jsonb_build_object('suspended',(SELECT status FROM "User" WHERE id='restore_suspended_user'),'revoked',(SELECT "revokedAt" FROM "RefreshSession" WHERE id='restore_revoked_session'),'pending',(SELECT jsonb_build_object('status',status,'deduplicationKey',"deduplicationKey",'processingToken',"processingToken",'processingStartedAt',"processingStartedAt",'leaseExpiresAt',"leaseExpiresAt") FROM "EmailQueue" WHERE id='restore_pending_email'),'cursor',(SELECT to_jsonb(c) FROM "ScheduledReportCursor" c WHERE "tenantId"='restore_tenant_b'))::text;`;
     const expectedStates = await sql(dbName, stateQuery, "auth-worker-report-state-before-smoke");
     assert.equal(JSON.parse(expectedStates).suspended, "SUSPENDED"); assert(JSON.parse(expectedStates).revoked); assert.equal(JSON.parse(expectedStates).pending.status, "PENDING");
-    result.coverage.storageLayout = "Historical relative keys uploads/<tenant>/... preserved; this does not prove old-app compatibility with modern storage-key formats";
+    result.coverage.storageLayout = "Current source: modern tenants/<tenant>/... and historical uploads/<tenant>/... under relative and absolute roots. Historical app: legacy relative keys only; modern-key fallback is not proven or approved.";
     await smoke(baselineDirectory, dbName, uploadDirectory, "historical-app-on-schema48", manifest42);
     assert.equal(await sql(dbName, stateQuery, "historical-app-keeps-suspended-revoked-pending-cursor-state"), expectedStates);
     check("historical-app-keeps-suspended-revoked-pending-lease-dedup-cursor-state");
+    for (const [suffix, tenantId] of [["a", "demo_tenant"], ["b", "restore_tenant_b"]]) {
+      const key = `tenants/${tenantId}/vehicle-booklets/restore-${suffix}-modern.pdf`;
+      const bytes = await readFile(path.join(uploadDirectory, `uploads/${tenantId}/vehicle-booklets/restore-${suffix}.pdf`));
+      await mkdir(path.dirname(path.join(uploadDirectory, key)), { recursive: true }); await writeFile(path.join(uploadDirectory, key), bytes, { flag: "wx" });
+      await sql(dbName, `INSERT INTO "VehicleBooklet" SELECT (jsonb_populate_record(NULL::"VehicleBooklet", to_jsonb(b) || jsonb_build_object('id','restore_booklet_${suffix}_modern','vehicleId','restore_money_${suffix}_zero_Vehicle','filePath','${key}','fileName','restore-${suffix}-modern.pdf'))).* FROM "VehicleBooklet" b WHERE id='restore_booklet_${suffix}';
+        INSERT INTO "StoredFileObject" SELECT (jsonb_populate_record(NULL::"StoredFileObject", to_jsonb(f) || jsonb_build_object('id','restore_file_${suffix}_modern','storageKey','${key}','resourceId','restore_booklet_${suffix}_modern','originalName','restore-${suffix}-modern.pdf'))).* FROM "StoredFileObject" f WHERE id='restore_file_${suffix}';`, `register-synthetic-modern-file-${suffix}`);
+    }
+    await cp(uploadDirectory, backupUploads, { recursive: true });
     // Snapshot before each restored app starts, since login/audits legitimately add rows.
     result.snapshots.migrated48 = await snapshot(dbName);
     const dump48 = path.join(options.evidenceDirectory, "synthetic-schema48.sql"); const manifest48 = await manifestFor(dbName, dump48, backupUploads, 48);
@@ -356,7 +421,8 @@ export async function runRestoreRecovery(options) {
       await restore(dump48, manifest48, name, backupUploads, uploads);
       result.snapshots[suffix] = await snapshot(name); assert.deepEqual(result.snapshots[suffix], result.snapshots.migrated48);
       check(`restore-${suffix}-canonical-all-tables-and-files-match`);
-      await smoke(sourceDirectory, name, uploads, `source-app-after-${suffix}-restore`, manifest48);
+      await verifyMoney(sourceDirectory, name, `${suffix}-restore`);
+      for (const uploadMode of ["relative", "absolute"]) await smoke(sourceDirectory, name, uploads, `source-app-after-${suffix}-restore-${uploadMode}`, manifest48, { uploadMode, includeModern: true });
       assert.equal(await sql(name, stateQuery, `${suffix}-restored-auth-worker-report-state`), expectedStates);
       check(`${suffix}-restore-keeps-suspended-revoked-pending-lease-dedup-cursor-state`);
     }
@@ -406,6 +472,7 @@ export async function runRestoreRecovery(options) {
     } finally {
       await sql(lockDb, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name='${lockApplication}' AND datname='${lockDb}';`, "terminate-owned-synthetic-lock"); await holder.completion;
     }
+    result.coverage.allMoneyFieldsExercised = true;
     result.success = true;
   } catch (error) {
     result.failure = error.message; process.exitCode = 1;

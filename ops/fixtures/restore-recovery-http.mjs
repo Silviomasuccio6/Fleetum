@@ -85,6 +85,18 @@ try {
   stepLabel = "download-anonymous";
   const anonymous = await request("/uploads/vehicle-booklets/restore_booklet_a/file");
   assert.equal(anonymous.status, 401, "anonymous-download-status"); checks.push("anonymous-file-denied");
+  if (process.env.SYNTHETIC_INCLUDE_MODERN_FILES === "true") {
+    const route = "/uploads/vehicle-booklets/restore_booklet_a_modern/file";
+    stepLabel = "download-modern-owner";
+    const modern = await request(route, { headers: a }); assert.equal(modern.status, 200);
+    stepLabel = "download-modern-owner-bytes";
+    const expectedModern = await readFile(path.join(process.env.SYNTHETIC_UPLOAD_TREE, "tenants/demo_tenant/vehicle-booklets/restore-a-modern.pdf"));
+    assert.equal(createHash("sha256").update(Buffer.from(await modern.arrayBuffer())).digest("hex"), createHash("sha256").update(expectedModern).digest("hex")); checks.push("modern-owner-file-download");
+    stepLabel = "download-modern-other-tenant";
+    assert.equal((await request(route, { headers: b })).status, 404); checks.push("modern-other-tenant-file-denied");
+    stepLabel = "download-modern-anonymous";
+    assert.equal((await request(route)).status, 401); checks.push("modern-anonymous-file-denied");
+  }
   console.log(`FLEETUM_RESTORE_HTTP_RESULT ${JSON.stringify({ checks, providerCalls: 0, workersStarted: false })}`);
 } catch (error) { reportFailure(error); }
 finally {

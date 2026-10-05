@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { EXACT_NUMERIC_FIELDS } from "./backend/src/domain/money/exact-money-fields.ts";
+import { seedRestoreMoney } from "./restore-recovery-money.mjs";
 
 // Extends the historical compatibility fixture; never uses customer data.
 const prisma = new PrismaClient();
@@ -40,6 +42,8 @@ try {
   await prisma.vehicle.create({ data: { id: "restore_vehicle_b", tenantId: tenant.id, siteId: "restore_site_b", plate: "RESTOREB", brand: "Synthetic", model: "Tenant B" } });
   await prisma.vehicle.update({ where: { id: "compat_vehicle" }, data: { purchasePrice: 1234.56, monthlyFixedCost: 12.34 } });
   await prisma.rentalBooking.update({ where: { id: "compat_booking" }, data: { expectedTotal: 240.12 } });
+  const moneyCoverage = await seedRestoreMoney(prisma, EXACT_NUMERIC_FIELDS);
+  console.log(`FLEETUM_RESTORE_MONEY_SEED ${JSON.stringify(moneyCoverage)}`);
 
   for (const [suffix, tenantId, vehicleId] of [["a", "demo_tenant", "compat_vehicle"], ["b", tenant.id, "restore_vehicle_b"]]) {
     // Historical storage keys included the relative upload-directory prefix.
