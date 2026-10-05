@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "preparedOn": "2026-10-05",
-  "candidateSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
-  "candidateTree": "601334fb1bb051abe9f0caabddc7f00027f28021",
+  "candidateSha": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+  "candidateTree": "2fa16975b0b50800d16a6aff0926293cf4d9656b",
   "comparisonMain": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
   "auditRootHint": "/Users/silvio/Documents/Playground/Fleetum-audit-20260909",
-  "newApplicationTestRuns": 4,
+  "newApplicationTestRuns": 3,
   "bundles": [
     {
       "id": "20261002-vehicle-pagination-count",
@@ -309,6 +309,56 @@
         "storage-tempalias-red.log": "a241481b15610ecd4c393965a5354557569465ee3478e2e36ab2304b7c617770",
         "tested-source-freeze.json": "24e3ff1c8b5069f7c2852ca194ab8f614c45813ace6d8d773cad8aeb4876ee9b"
       }
+    },
+    {
+      "id": "20261005-application-failure-recovery",
+      "sourceCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+      "auditRelativeDirectory": "evidence/20261005-application-failure-recovery",
+      "manifest": "SHA256SUMS.json",
+      "manifestSHA256": "c541f859ec3610de91098d89a52c4756008bc0f7a7f29df54e6bebcdb4e96ef7",
+      "verifiedArtifactCount": 39,
+      "verification": "VERIFIED_CONTENT_ONLY",
+      "artifacts": {
+        "README.md": "49d63dae7c250e46e7e14df06e18eced2e55a79c20c1a5bf5688805f6cd3b307",
+        "agent-receipts.json": "3250995166d757369b4a4ab50cf7dac7d747ab979e3e0de5c8ebd61eae9d01e3",
+        "baseline-source.json": "151ff8daef9f73b1987f76fcc3f1b1043fc20927585a10c5baa82d2e8037eb2b",
+        "candidate.diff": "c32ed8a3e91459907782b262c81e15ff8123e10fea902672f652647a125b1dc5",
+        "candidate.json": "0ee12c7b7f7ae5c707a3709aa6a43802f43b45c07648e70e4de9d6e680b7c3f6",
+        "candidate.py": "f1f1e4945af5d2ba12dcaba3a8a65151e87df20ff569c9122d9f1da49503fb40",
+        "cleanup.json": "74add0150fd48e12daa0f243087da5b75c239b01f0da97ae17cbc4e0fab0ede2",
+        "client-green.log": "d609ce3c31a92c2bf39a4664e41d6e83c91edae3a97aec71b6758cea5be08dd4",
+        "code-commit.json": "bf251e95aa744923db500bf5fe328df7dce91539cd6eae8b272305728c40fe30",
+        "commands.txt": "a5c00e74da86cafd2473915544c4ee7e0f6790be6300006a5914a215724736da",
+        "files.json": "5eb04a26892e99809d47ba86dd13b33893910eaf7135544c4b48a523174f1e62",
+        "followup-green.log": "3de15c9509df17cfb6f61073d346a26bbd9f43b30419fa0a086bc461b67be506",
+        "followup-red.log": "735eb90aa2e3139a9b5e4ec05fac01040091dbe180579f3714ef1bcd789dfd47",
+        "guard.json": "7c6ff30c4ea8d01fbcd2de343438dd180328f7d6240a4726fbe0e12781345683",
+        "initial-candidate.diff": "559cce6da972257b704c5b223d9acd3bbbf5f57e1486ca70c8f6837b70e3c12b",
+        "initial-candidate.json": "233d23f7bda8da3d7b3f06a55678db438409abd68961d884f61e39e20b634756",
+        "initial-tested-source-freeze.json": "736f1b461cf927d9abfd7a3b9a9e7c8d7e5193b0ee829c9d303b620cdd974ca4",
+        "ops-preliminary.log": "64e2ee03fdbc1e8e2ac5905b12149592632eed6c3871ae16837e56f61e81b3fb",
+        "option-red-pinned.log": "d5f97c62239fe1c4e5d82e0ef23dbed1316e7526b39b129d3d86c3f8b3284291",
+        "option-red.log": "14a0177cca2720ed8c97fe5d07c8ecf08b8031df347410bc382f27570de2c772",
+        "promote.py": "1da641211d17c6adddb56261d1ff43a53f8634b564e54bab22a63c1a5589f696",
+        "rehearsal-final/result.json": "90602a116478fbb633f43350d99679497587da33908050dfac86d67ca35c9d79",
+        "rehearsal-final/synthetic-schema42.sql.manifest.json": "8808c16be0ca760c7ebfa6aa77fbb17080a0ed631fd55234a240a0e25416f574",
+        "rehearsal-final/synthetic-schema48.sql.manifest.json": "442a99006008051b1295fce09993e4354efaa7eb6849fc8b378674f423f482fb",
+        "rehearsal-final-summary.json": "7cb1c2576eefe1778339cbfd2e0201877dca5e00c0fe29135d8f8ab4a43cf519",
+        "rehearsal-final.log": "50dc61181aadcc3b928da2d98700a39d74689426df7770974b0bd153fbdb1711",
+        "rehearsal-initial/result.json": "0d704d6db884b400c2b89194fa8ecf1a7e44642b53f2039c0f9171df5edafc3b",
+        "rehearsal-initial/synthetic-schema42.sql.manifest.json": "5655cbf32bb195d1e00510c7cf29995453f637aadf2f7654d0f09fcdc04abb6d",
+        "rehearsal-initial/synthetic-schema48.sql.manifest.json": "26808e0479879b91da4a37180b809233f95fb79be18290da889d0d7f83f618b2",
+        "rehearsal-initial-summary.json": "2eb3c9cac99390fd1d5c80199daf884d4d2d1148e0003309900e9602a6d1cd1e",
+        "rehearsal-initial.log": "5acccdc85cc576e516245394f1ceaff12db2576ec140f0b97b7365697e94622a",
+        "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
+        "release-source.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
+        "release.log": "5fe4bb396806abc9e3c221b8f48c1efa4b479a8078553987314c66c019c7efd1",
+        "run-recovery.py": "38c0fe8495d2ee20221e0703f18028b07f75e34d0abf2fcc0148cae531f7280f",
+        "run-release.py": "beb38acc41851bc83d6a9f12b6bb793e5e23753375c3b4537d40ba6aa3b9bf5e",
+        "security-review.md": "ac169b3a44fe8b89ef550f86d0940d6517689c499d4cbcd0fa642ff59f7da85a",
+        "targeted-green.log": "b30d8f2be6b43daaf1e3d2f64b53045491407c034f3a64ef1437847d9129eda8",
+        "tested-source-freeze.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f"
+      }
     }
   ],
   "inheritedLocalEvidence": [
@@ -400,6 +450,58 @@
         "security-review.md": "b29788baca656fc430edb66bd01a7de4009c03aa839b9ccc1a32989a68e2055f"
       },
       "result": "HISTORICAL_LOCAL_EVIDENCE"
+    },
+    {
+      "sourceCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+      "applicationArchiveCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+      "baselineArchiveCommit": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
+      "release": "308backend/44frontend/9website/182operations;543tests, zero failure/skip; lint/build/13prerender/audit high-critical PASS. Executed on bfb110ce; only final delta is synthetic booklet fixture in runner, followed by182ops and30recovery/57HTTP. Application/backend/frontend/site/lock/schema/workflows unchanged; release-equivalence.json binds both commits.",
+      "database": "NEW522/522 PG16 synthetic database/HTTP security gate; zero failure/skip, full source freeze before/after.",
+      "money": {
+        "checkedFields": 35,
+        "checkedTables": 13,
+        "fieldRowPairs": 206,
+        "phases": [
+          "schema42",
+          "schema48",
+          "first-restore",
+          "second-restore"
+        ],
+        "snapshotHash": "12ff50996480c837bb1969338ec594997555472b11136fe381e3dd9d9bf761b5",
+        "mismatchCount": 0,
+        "officialDualWriteInsertFields": 35,
+        "officialDualWriteUpdateFields": [
+          "VehicleCost.amount"
+        ],
+        "subscriptionNull": "Fixture preparation only, then tenant A decimal/B zero persisted",
+        "maintenanceAttachments": "Monetary metadata only, no new registered file bytes"
+      },
+      "recovery": "NEW30/30 scenarios +57HTTP; two restores67tables/4files identical; schema42→48. Historical app legacyrelative only; current app modern/legacy withrelative/absoluteroots. Matrix8combinations repeatedrestore.",
+      "migrationCompatibility": "Historical main app on schema48 ready/login/business read/CSRF/tenant legacydownload PASS as part of currentrecovery; not approved fallback.",
+      "browser": "NOT_RERUN;7/7 October3 historical separately preserved. Current57 HTTP assertions are loopback fixtures.",
+      "restoreDurationMs": 107725,
+      "cleanup": "Own container/network inventory empty, scratch removed",
+      "hostedCi": "NOT_RUN",
+      "staging": "NOT_RUN",
+      "approvedRollback": false,
+      "approvedRtoRpo": false,
+      "externalGatesPassed": 0,
+      "coverageLimit": "Representative stored monetary values, not all calculations/magnitudes; official UPDATE verifier one field only. Flatlegacy/inventory and mountlive excluded; S3mock only; symlink concurrentTOCTOU unresolved. Historicalapp modernkeys unsupported by proof. No approveddigest/client fallback, stack healthfailure or approvedRTO/RPO; PG bridge permits container egress.",
+      "auditRelativeDirectory": "evidence/20261005-money-storage-compatibility",
+      "files": {
+        "code-commit.json": "5d5c628dd02fb8f25a20aedae6cc97f343110118bdfc794d32ac4a65972d048d",
+        "tested-source-freeze.json": "24e3ff1c8b5069f7c2852ca194ab8f614c45813ace6d8d773cad8aeb4876ee9b",
+        "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
+        "release-source.json": "01bfc254c0f9b24dd35cfe7381f60d663019fb863f6239607677f36040db5c2c",
+        "release-equivalence.json": "01aabec082938548bada219382592a960f3a701185221ce1cc6b17b09341b157",
+        "ops-final.log": "da0cee6ff714bdb44dcaa730bec90c0afccdb88d17ae1965390a54a10eebce8b",
+        "rehearsal-final/result.json": "ec5ea23b50754e21a518ee8ee10ad655a8b8a33e9d674cce6b47ef23e1edb18b",
+        "rehearsal-final-summary.json": "2fdbefce5f8cb2d0fbf3bc6f1d88529c73b0b2196d834434066728d6cbdc94f3",
+        "database-result.json": "4a403a1e3e21a744f187ef998a96cfa5cd3e5149f4eba376e94dc57c92a02e06",
+        "cleanup.json": "6754566deb0afdb847862779eeab4a0f75ed57e306f2bf768239e5c4f2f030c2",
+        "security-review.md": "a7d7971b81b10821ba88f51166ee5ded82cf5d8f96d9d9113fc3e3856798fccd"
+      },
+      "result": "HISTORICAL_LOCAL_EVIDENCE"
     }
   ],
   "findingRegistry": {
@@ -433,11 +535,68 @@
     "productionCertification": false
   },
   "currentLocalEvidence": {
-    "sourceCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
-    "applicationArchiveCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+    "sourceCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+    "applicationArchiveCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+    "reserveApplicationArchiveCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
     "baselineArchiveCommit": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
-    "release": "308backend/44frontend/9website/182operations;543tests, zero failure/skip; lint/build/13prerender/audit high-critical PASS. Executed on bfb110ce; only final delta is synthetic booklet fixture in runner, followed by182ops and30recovery/57HTTP. Application/backend/frontend/site/lock/schema/workflows unchanged; release-equivalence.json binds both commits.",
-    "database": "NEW522/522 PG16 synthetic database/HTTP security gate; zero failure/skip, full source freeze before/after.",
+    "release": "NEW598/598:308backend,44frontend,9website,237operations;0failure/skip. Lint/build/13prerender/productionaudit high-critical PASS. Exactcandidate frozen before/after.",
+    "database": "FullPG522/522 INHERITEDfrom9bd57ff2, NOT_RERUN; application/schema/lock equivalence enforced. NEWtemporaryPG16.13 restore+faultrecovery46checks,153HTTP; no realDB.",
+    "applicationRecovery": {
+      "scenarios": [
+        {
+          "mode": "startup-rejected",
+          "success": true,
+          "recoveryMs": 1648.1182499999995,
+          "acknowledgedRecordLoss": 0,
+          "tablesPreserved": 67,
+          "registeredUploadsPreserved": 4
+        },
+        {
+          "mode": "database-unready",
+          "success": true,
+          "recoveryMs": 1917.2547079999931,
+          "acknowledgedRecordLoss": 0,
+          "tablesPreserved": 67,
+          "registeredUploadsPreserved": 4
+        },
+        {
+          "mode": "pause-before-import",
+          "success": true,
+          "recoveryMs": 1325.762875000015,
+          "acknowledgedRecordLoss": 0,
+          "tablesPreserved": 67,
+          "registeredUploadsPreserved": 4
+        },
+        {
+          "mode": "client-artifact-mismatch",
+          "success": true,
+          "recoveryMs": 1287.6283750000002,
+          "acknowledgedRecordLoss": 0,
+          "tablesPreserved": 67,
+          "registeredUploadsPreserved": 4
+        }
+      ],
+      "localBudgetMs": 30000,
+      "readinessMaxAgeMs": 1000,
+      "trustedBundle": {
+        "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+        "schemaVersion": 48,
+        "backend": {
+          "sha256": "73a6304a7255141d51b4d6f59cd5483e3c6ae14c34ba0769d5801ccca4fbbf9c",
+          "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a"
+        },
+        "frontend": {
+          "sha256": "032efbd79e09266895181342e23bbdb0104b2141e5a1c0de215e86db5595dacf",
+          "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a"
+        }
+      },
+      "backendArtifactFiles": 188,
+      "frontendArtifactFiles": 148,
+      "distinctPreviousProductionRelease": false,
+      "approvedFallback": false,
+      "approvedExternalRtoRpo": false,
+      "deterministicCrossBuildFrontendProven": false
+    },
     "money": {
       "checkedFields": 35,
       "checkedTables": 13,
@@ -446,41 +605,39 @@
         "schema42",
         "schema48",
         "first-restore",
-        "second-restore"
+        "second-restore",
+        "after-application-recovery"
       ],
       "snapshotHash": "12ff50996480c837bb1969338ec594997555472b11136fe381e3dd9d9bf761b5",
       "mismatchCount": 0,
       "officialDualWriteInsertFields": 35,
       "officialDualWriteUpdateFields": [
         "VehicleCost.amount"
-      ],
-      "subscriptionNull": "Fixture preparation only, then tenant A decimal/B zero persisted",
-      "maintenanceAttachments": "Monetary metadata only, no new registered file bytes"
+      ]
     },
-    "recovery": "NEW30/30 scenarios +57HTTP; two restores67tables/4files identical; schema42→48. Historical app legacyrelative only; current app modern/legacy withrelative/absoluteroots. Matrix8combinations repeatedrestore.",
-    "migrationCompatibility": "Historical main app on schema48 ready/login/business read/CSRF/tenant legacydownload PASS as part of currentrecovery; not approved fallback.",
-    "browser": "NOT_RERUN;7/7 October3 historical separately preserved. Current57 HTTP assertions are loopback fixtures.",
-    "restoreDurationMs": 107725,
-    "cleanup": "Own container/network inventory empty, scratch removed",
+    "recovery": "NEW46/46 checks+153HTTP;4applicationfaults,2database restores67tables/4files and8layoutmatrix. NoautoDBrestoreafterappfailure.",
+    "browser": "NOT_RERUN; historical7/7 separately preserved; frontendJS/CSS/page byteHTTP is notbrowser/E2E. Platform readiness, notPlatformlogin.",
+    "restoreDurationMs": 180926,
+    "cleanup": {
+      "container": "removed-and-verified",
+      "network": "removed-and-verified",
+      "scratch": "removed",
+      "childrenStopped": true,
+      "gatewayClosed": true
+    },
     "hostedCi": "NOT_RUN",
     "staging": "NOT_RUN",
-    "approvedRollback": false,
-    "approvedRtoRpo": false,
     "externalGatesPassed": 0,
-    "coverageLimit": "Representative stored monetary values, not all calculations/magnitudes; official UPDATE verifier one field only. Flatlegacy/inventory and mountlive excluded; S3mock only; symlink concurrentTOCTOU unresolved. Historicalapp modernkeys unsupported by proof. No approveddigest/client fallback, stack healthfailure or approvedRTO/RPO; PG bridge permits container egress.",
-    "auditRelativeDirectory": "evidence/20261005-money-storage-compatibility",
+    "auditRelativeDirectory": "evidence/20261005-application-failure-recovery",
     "files": {
-      "code-commit.json": "5d5c628dd02fb8f25a20aedae6cc97f343110118bdfc794d32ac4a65972d048d",
-      "tested-source-freeze.json": "24e3ff1c8b5069f7c2852ca194ab8f614c45813ace6d8d773cad8aeb4876ee9b",
+      "code-commit.json": "bf251e95aa744923db500bf5fe328df7dce91539cd6eae8b272305728c40fe30",
+      "tested-source-freeze.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
       "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
-      "release-source.json": "01bfc254c0f9b24dd35cfe7381f60d663019fb863f6239607677f36040db5c2c",
-      "release-equivalence.json": "01aabec082938548bada219382592a960f3a701185221ce1cc6b17b09341b157",
-      "ops-final.log": "da0cee6ff714bdb44dcaa730bec90c0afccdb88d17ae1965390a54a10eebce8b",
-      "rehearsal-final/result.json": "ec5ea23b50754e21a518ee8ee10ad655a8b8a33e9d674cce6b47ef23e1edb18b",
-      "rehearsal-final-summary.json": "2fdbefce5f8cb2d0fbf3bc6f1d88529c73b0b2196d834434066728d6cbdc94f3",
-      "database-result.json": "4a403a1e3e21a744f187ef998a96cfa5cd3e5149f4eba376e94dc57c92a02e06",
-      "cleanup.json": "6754566deb0afdb847862779eeab4a0f75ed57e306f2bf768239e5c4f2f030c2",
-      "security-review.md": "a7d7971b81b10821ba88f51166ee5ded82cf5d8f96d9d9113fc3e3856798fccd"
+      "release-source.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
+      "rehearsal-initial/result.json": "0d704d6db884b400c2b89194fa8ecf1a7e44642b53f2039c0f9171df5edafc3b",
+      "rehearsal-final/result.json": "90602a116478fbb633f43350d99679497587da33908050dfac86d67ca35c9d79",
+      "cleanup.json": "74add0150fd48e12daa0f243087da5b75c239b01f0da97ae17cbc4e0fab0ede2",
+      "security-review.md": "ac169b3a44fe8b89ef550f86d0940d6517689c499d4cbcd0fa642ff59f7da85a"
     }
   }
 }

@@ -1,26 +1,20 @@
-# Fleetum — revisione denaro/storage, 5 ottobre 2026
+# Fleetum — recupero applicativo verificato localmente,5ottobre2026
 
-**Tranche locale pronta per revisione.** Candidato codice `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`, tree `601334fb1bb051abe9f0caabddc7f00027f28021`, branch `codex/verify-money-storage-compatibility`, ref `codex/money-storage-source-candidate`. Il successivo commit documentale resta distinto.
+**Pronto per revisione locale.** Candidato `b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c`, tree `2fa16975b0b50800d16a6aff0926293cf4d9656b`, branch `codex/verify-application-failure-recovery`, ref `codex/application-recovery-source-candidate`. Documento di chiusura eHEAD separati. Correzioni in11file ops/fixture/test; backend/frontend/schema/dipendenze/workflow production invariati. Non integrato redesign.
 
-Corretto il mapping dei file storici con root upload assoluta; prefissi duplicati e symlink vengono rifiutati. La firma grafica PDF e l'inventario ora usano lo stesso resolver/provider. Chiavi e bytes esistenti non vengono riscritti. Nessuna migrazione o dipendenza nuova, schema48 invariato. Prima dell'adozione serve inventario dei mount e dei symlink live; nessuna produzione verificata.
+**Release598/598** (308backend/44frontend/9website/237operations), lint/build/13prerender/auditPASS; **recovery46/46+153HTTP**. Quattro guasti reali locali: config invalida, health200/dbunready, startupSIGKILL, client errato conAPIpronta. Riserva9bd security-equivalente, mantenimento in manutenzione fino a verifiche della coppia/ready/dati. Riapertura1.3–1.9s;67tabelle e4upload invariati. Denaro35campi/13tabelle/206coppie in5fasi, due restore e8layout. PostgreSQL16.13 tmpfs sintetico; processi/gateway/container/network/scratch rimossi. Prima provaFAILconservata, causa/verificatore corretto e run finale distinto.
 
-**Recovery30/30 +57HTTP**,35campi/13tabelle/206coppie in4fasi con hash identico,8combinazioni storage e due ripristini di67tabelle/4file;107725ms. **Nuovo gatePG522/522**, operations182/182, zero failure/skip. Release308/44/9/182,543test, lint/build/13prerender/audit PASS: eseguita su bfb110ce; il solo delta finale corregge la fixture del runner. Sorgenti applicativi equivalenti; operations e recovery rieseguiti sul candidato finale. Vedere release-equivalence.json.
+FullPG522/522 è ereditato, non nuovo run. Browser7/7 storico; nessun nuovo browser/Platformlogin. ImmaginiOCI e release precedente distinta non testate; hash frontend differisce tra build indipendenti: prova sulla coppia concreta congelata dentro il run. Budget30s nonSLAapprovato. Backend reserve invariato e tutte le appfix preservate per confronto imposto.
 
-App corrente archivio `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`, baseline storica db1f231d. La vecchia app è provata soltanto con chiavi legacy relative e precede i fix sicurezza: **non è fallback approvato**. Il verificatore ufficiale prova35INSERT, UPDATE solo VehicleCost.amount. Null subscription solo nella preparazione; attachment monetari nuovi metadata senza file. Valori rappresentativi, non tutti i calcoli commerciali.
+**0/19gate esterni PASS.** Reviewer/owner, control/versioni/digest effettivi e budget/approvazioni restano da definire. CIhosted, staging, provider, storage/mountlive e osservabilità live da verificare previa autorizzazione distinta. Finding originali37 invariati:26corretti,2parziali,4redesign,5marketing. Nessun push/PR/dispatch/SSH/merge/deploy/main/env reale/email/pagamento.
 
-Browser7/7 e proxy21HTTP/16template restano prove storiche; nessun nuovo browser, CI hosted, SSH, provider o staging. S3mock, inventario fakePrisma e PG bridge non provano provider/live o denyegress. Nessun merge/deploy/main/env reale/email/pagamento.
-
-**0/19gate esterni PASS**; owner, autorizzazioni e budget vuoti. G04/G12/G14 ancora PENDING: restano inventario legacy/mount live, versioni/digest app-client approvati, healthfailure/restart stack, RTO/RPO/lock e reconcile sandbox. Finding37:26risolti/2parziali/4redesign/5marketing; conteggio originale invariato.
-
-- [Runbook denaro/storage](../money-storage-compatibility-20261005.md), [recovery precedente](../restore-recovery-20261005.md), [isolamento](../staging-isolation-20261003.md).
+- [Nuovo runbook](../application-failure-recovery-20261005.md), [denaro/storage](../money-storage-compatibility-20261005.md), [restore](../restore-recovery-20261005.md).
 - [Registro](gate-register.json), [record pendente](execution-record.template.json), [evidenze](evidence-index.json).
 - [Migrazioni](migration-inventory.json), [sorgenti](inspected-source.json), [freeze](package-hashes.json).
-
-Il verificatore controlla coerenza/hash, non autenticità o sufficienza della prova:
 
 ```sh
 python3 docs/deployment/staging-validation-package-20261002/validate-package.py \
   --source-root . --audit-root /Users/silvio/Documents/Playground/Fleetum-audit-20260909
 ```
 
-**Prossimo passaggio:** revisione del candidato e piano concreto del fallback applicazione/client e guasto controllato, con versioni e soglie da definire prima di qualunque futura dispatch. Le attività esterne richiedono autorizzazione distinta; non usare merge main per avviare CI.
+Il validator controlla coerenza/hash, non autenticità/sufficienza di prove. **Prossimo passo:** revisione umana integrata e definizione di release/digest/owner/budget per eventuale staging separato. Non usare merge main per avviare CI.

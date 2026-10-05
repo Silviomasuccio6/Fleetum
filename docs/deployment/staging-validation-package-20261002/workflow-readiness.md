@@ -144,3 +144,8 @@ Memoria consultata solo per orientare la scelta delle regole; le conclusioni tec
 ## Aggiornamento locale denaro/storage — 5 ottobre 2026
 
 Candidato `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`; dettagli nel [runbook](../money-storage-compatibility-20261005.md) e currentLocalEvidence. Chiusi i gap della precedente fixture limitata a4campi/root relativa:35campi/13tabelle/206coppie in4fasi,8layout,30recovery/57HTTP,522PG. Provider/PDF/inventario backend modificati, frontend e workflowproduction invariati. Zero gate esterni PASS. Review storiche sopra restano datate; nuova prova non conferma host/CI/provider live né fallback moderno.
+
+
+## Aggiornamento locale guasto e recupero — 5 ottobre 2026
+
+Candidato `b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c`; [runbook](../application-failure-recovery-20261005.md). NEWrelease598test e recovery46/153HTTP;4guasti1.3–1.9s,67tabelle/4file/35campi in5fasi. Nessuna modifica ai workflow/application UI. FullPG522 e browser7 sono storici. Riserva9bd mantiene appfix; non distinctpreviousrelease né immaginiOCI. Buildfrontend non deterministico tra run; ogni pair concreto congelato/hash prima/dopo. Budget30s/readiness1s locali, non autorizzazioni o SLA esterni. Tutti19gate esterni PENDING.

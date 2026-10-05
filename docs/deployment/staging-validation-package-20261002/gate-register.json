@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+  "candidateSha": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
   "preparedOn": "2026-10-05",
   "mode": "PREPARATION_ONLY",
   "productionAuthorized": false,
@@ -25,7 +25,7 @@
       "requiredForProductionDecision": true,
       "status": "PENDING",
       "scenario": "Riesaminare diff dall’ultimo rilascio approvato, report finali e limiti; congelare lo SHA completo. Separare parent dei test, manifest dei file e commit documentale.",
-      "acceptance": "Reviewer assegnato firma candidato9bd57ff2f935a3a56205f381b41d35bfc982dd9a, provenance commitsbf215f69/70fdfab3 e rischi residui; 154 artefatti storici e manifest sorgente corrente verificati. Baseline staging modifica backendbootstrap/env/email; produzione resta disattivata senza flagstaging, UI/schema invariati.",
+      "acceptance": "Reviewer assegnato firma candidatob5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c, provenance commitsbf215f69/70fdfab3 e rischi residui; 154 artefatti storici e manifest sorgente corrente verificati. Baseline staging modifica backendbootstrap/env/email; produzione resta disattivata senza flagstaging, UI/schema invariati.",
       "failureMeans": "SHA diverso, review mancante o prove senza identità bloccano la dispatch; una modifica invalida il binding e richiede nuovo candidato/gate pertinenti.",
       "requiredEvidence": [
         "sha candidato/tree",
@@ -52,7 +52,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidato9bd57ff2f935a3a56205f381b41d35bfc982dd9a con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
+      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidatob5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
       "acceptance": "Percorso CI sul commit realmente checkoutato e non su merge commit diverso; guardie DB attive con dotenv/devnull su PG temporaneo; E2E sullo stesso candidato e release osservata. Controlli YAML/fixtures/PR da review prima di qualunque esecuzione hosted.",
       "failureMeans": "Verde head_sha senza prova checkout, test DB non eseguiti o E2E senza binding lasciano il gate bloccato.",
       "requiredEvidence": [
@@ -80,7 +80,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "Baseline isolamento implementata localmente in 9bd57ff2f935a3a56205f381b41d35bfc982dd9a: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
+      "scenario": "Baseline isolamento implementata localmente in b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
       "acceptance": "Policy version1 e controlSHA approvati, nessuna chiave provider, 0cron e email disabled; project fleetum-staging, target filesystem reale dedicato senza symlink/orfani/ownership ambiguo, backend solo rete internal, tenantIDs sintetici distinti, robots/header/sitemap effettivi. Stato dati/host e protezioni indipendentemente attestati prima avvio.",
       "failureMeans": "Placeholder nell’esempio o parola “staging” non sono prova. Destinatario reale, cron attivo all’avvio, dominio arbitrario, directory condivisa o indice pubblico bloccano l’avvio.",
       "requiredEvidence": [
@@ -155,7 +155,8 @@
       "sourceRefs": [
         "migration-inventory.json",
         "../restore-recovery-20261005.md",
-        "../money-storage-compatibility-20261005.md"
+        "../money-storage-compatibility-20261005.md",
+        "../application-failure-recovery-20261005.md"
       ],
       "domainScenarioGroups": [
         "DG-14"
@@ -168,7 +169,7 @@
         "externalGatePassed": false,
         "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
       },
-      "localEvidence": "Tranche5ottobre:35campi/13tabelle/206coppie in4fasi,8layout rel/abs,30recovery+57HTTP,522PG; candidato9bd57ff2f935a3a56205f381b41d35bfc982dd9a. Evidenza preparatoria sintetica; status esterno ancora PENDING. Baseline vecchia sololegacyrelativo; inventario live, fallback digest/client, healthfailure e soglie restano aperti."
+      "localEvidence": "Tranche5ottobre: quattro guasti applicativi reali su compiledapp/client pin;46controlli/153HTTP,67tabelle/4file,35campi5fasi. Budget locale30s/readiness1s; riapertura1.3–1.9s e zero perdita record sintetici. Riserva9bd security-equivalente, non precedente release distinta/OCI. Nessuna approvazione esterna; gate restaPENDING. Candidatob5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c."
     },
     {
       "id": "G05",
@@ -489,7 +490,8 @@
         "migration-inventory.json",
         "workflow-readiness.md",
         "../restore-recovery-20261005.md",
-        "../money-storage-compatibility-20261005.md"
+        "../money-storage-compatibility-20261005.md",
+        "../application-failure-recovery-20261005.md"
       ],
       "domainScenarioGroups": [
         "DG-14"
@@ -502,7 +504,7 @@
         "externalGatePassed": false,
         "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
       },
-      "localEvidence": "Tranche5ottobre:35campi/13tabelle/206coppie in4fasi,8layout rel/abs,30recovery+57HTTP,522PG; candidato9bd57ff2f935a3a56205f381b41d35bfc982dd9a. Evidenza preparatoria sintetica; status esterno ancora PENDING. Baseline vecchia sololegacyrelativo; inventario live, fallback digest/client, healthfailure e soglie restano aperti."
+      "localEvidence": "Tranche5ottobre: quattro guasti applicativi reali su compiledapp/client pin;46controlli/153HTTP,67tabelle/4file,35campi5fasi. Budget locale30s/readiness1s; riapertura1.3–1.9s e zero perdita record sintetici. Riserva9bd security-equivalente, non precedente release distinta/OCI. Nessuna approvazione esterna; gate restaPENDING. Candidatob5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c."
     },
     {
       "id": "G15",

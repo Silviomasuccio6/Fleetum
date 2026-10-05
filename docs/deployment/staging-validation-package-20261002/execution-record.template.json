@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+  "candidateSha": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
   "environment": "STAGING_SYNTHETIC",
   "preparedOn": "2026-10-05",
   "observedReleaseSha": null,
