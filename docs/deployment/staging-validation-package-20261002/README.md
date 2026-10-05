@@ -1,56 +1,26 @@
-# Fleetum — pacchetto di revisione aggiornato, 5 ottobre 2026
+# Fleetum — revisione denaro/storage, 5 ottobre 2026
 
-**Pronto per revisione locale; nessuna dispatch o produzione autorizzata.**
-Candidato sorgente `579d7171bc90f17a50489eee0ffe1b31521383d0`, tree `38c90293528e59e4956f212230f05d41028c1a8f`, branch `codex/verify-restore-rollback`.
-Usare il ref `codex/restore-recovery-source-candidate`; il successivo commit
-documentale è distinto e registrato nel rapporto esterno.
+**Tranche locale pronta per revisione.** Candidato codice `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`, tree `601334fb1bb051abe9f0caabddc7f00027f28021`, branch `codex/verify-money-storage-compatibility`, ref `codex/money-storage-source-candidate`. Il successivo commit documentale resta distinto.
 
-La tranche aggiunge un runner ripetibile per backup/ripristino su PostgreSQL16
-temporaneo con dati sintetici. Corregge due falsi positivi degli strumenti: SQL
-della compatibilità non inoltrato a Docker e restore che poteva eliminare un
-target o dichiarare successo dopo errore. I percorsi dotenv sono rifiutati prima
-di Prisma senza leggere contenuti; il restore richiede un target nuovo esplicito.
+Corretto il mapping dei file storici con root upload assoluta; prefissi duplicati e symlink vengono rifiutati. La firma grafica PDF e l'inventario ora usano lo stesso resolver/provider. Chiavi e bytes esistenti non vengono riscritti. Nessuna migrazione o dipendenza nuova, schema48 invariato. Prima dell'adozione serve inventario dei mount e dei symlink live; nessuna produzione verificata.
 
-**Release finale 271/44/9/143**, zero failure/skip, lint/build/13prerender/audit
-high-critical PASS. **Recovery 23/23 scenari e 27 asserzioni HTTP**: schema 42→48,
-app storica su DB48, due ripristini con tutte le 67 tabelle e 2 file sintetici identici,
-isolamento tenant/CSRF/download; target esistente, SQL errato, dump/file
-manomessi o mancanti, duplicati deposito e timeout lock/statement rifiutati.
-Durata 106248 ms; cleanup proprio verificato. Compatibilità base finale PASS 27 s.
+**Recovery30/30 +57HTTP**,35campi/13tabelle/206coppie in4fasi con hash identico,8combinazioni storage e due ripristini di67tabelle/4file;107725ms. **Nuovo gatePG522/522**, operations182/182, zero failure/skip. Release308/44/9/182,543test, lint/build/13prerender/audit PASS: eseguita su bfb110ce; il solo delta finale corregge la fixture del runner. Sorgenti applicativi equivalenti; operations e recovery rieseguiti sul candidato finale. Vedere release-equivalence.json.
 
-Il tooling sopra è legato al candidato attuale. Gli archivi applicativi provati
-sono `70fdfab3522907d9d956ac260224c165774e2af6` e baseline `db1f231dc8cb699f1a5ce4215a0278c93212d16d`; backend/frontend/schema/lockfile
-e workflow production sono invariati rispetto al candidato precedente. La
-baseline storica main precede i fix di sicurezza e **non è fallback approvato**.
+App corrente archivio `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`, baseline storica db1f231d. La vecchia app è provata soltanto con chiavi legacy relative e precede i fix sicurezza: **non è fallback approvato**. Il verificatore ufficiale prova35INSERT, UPDATE solo VehicleCost.amount. Null subscription solo nella preparazione; attachment monetari nuovi metadata senza file. Valori rappresentativi, non tutti i calcoli commerciali.
 
-Ereditati e separati: PG 522/522, browser 7/7 e proxy 21 HTTP/16 template del 3 ottobre,
-senza dichiararli nuovi run. Isolamento email/cron, allowlist, noindex e pinCI/E2E
-restano nel codice; nessuna nuova prova hosted CI, SSH, provider o staging reale.
-Tutti i 19 gate esterni rimangono pendenti: **0/19 PASS**; owner, autorizzazioni e
-budget restano vuoti. G04/G12/G14 ricevono prove preparatorie, non un PASS.
+Browser7/7 e proxy21HTTP/16template restano prove storiche; nessun nuovo browser, CI hosted, SSH, provider o staging. S3mock, inventario fakePrisma e PG bridge non provano provider/live o denyegress. Nessun merge/deploy/main/env reale/email/pagamento.
 
-- [Runbook recovery](../restore-recovery-20261005.md), [isolamento](../staging-isolation-20261003.md), [CI/E2E](../ci-e2e-release-binding-20261002.md).
+**0/19gate esterni PASS**; owner, autorizzazioni e budget vuoti. G04/G12/G14 ancora PENDING: restano inventario legacy/mount live, versioni/digest app-client approvati, healthfailure/restart stack, RTO/RPO/lock e reconcile sandbox. Finding37:26risolti/2parziali/4redesign/5marketing; conteggio originale invariato.
+
+- [Runbook denaro/storage](../money-storage-compatibility-20261005.md), [recovery precedente](../restore-recovery-20261005.md), [isolamento](../staging-isolation-20261003.md).
 - [Registro](gate-register.json), [record pendente](execution-record.template.json), [evidenze](evidence-index.json).
 - [Migrazioni](migration-inventory.json), [sorgenti](inspected-source.json), [freeze](package-hashes.json).
 
-Limiti del recovery: fixture monetaria: 4 campi, non 35; chiavi storiche relative
-`uploads/...`, non mapping al percorso assoluto staging o app storica su chiavi
-moderne; bridge PG con egress container non bloccato, non rete internal staging.
-Restano digest app/client precedenti approvati, health failure/restart stack,
-RTO/RPO e budget lock, reconcile sandbox e decisioni legacy/privacy. Schema 48,
-zero nuove migrazioni/dipendenze. Finding 37 invariati: 26 risolti/2 parziali/4 redesign/5 marketing;
-INT01..06 corretti nel codice. Redesign e campagne restano separati.
-
-Il verificatore controlla coerenza/hash e attestazioni obbligatorie, non autenticità
-o sufficienza delle prove:
+Il verificatore controlla coerenza/hash, non autenticità o sufficienza della prova:
 
 ```sh
 python3 docs/deployment/staging-validation-package-20261002/validate-package.py \
   --source-root . --audit-root /Users/silvio/Documents/Playground/Fleetum-audit-20260909
 ```
 
-**Prossima azione locale:** completare la riconciliazione dei 35 campi monetari e
-la matrice layout legacy/percorso assoluto su fixture sintetiche. Per chiudere i
-gate esterni servono successivamente reviewer, operatori, soglie/versioni
-approvate e autorizzazione distinta. Nessun merge/main/deploy automatico,
-nessun down SQL o replay di effetti esterni.
+**Prossimo passaggio:** revisione del candidato e piano concreto del fallback applicazione/client e guasto controllato, con versioni e soglie da definire prima di qualunque futura dispatch. Le attività esterne richiedono autorizzazione distinta; non usare merge main per avviare CI.

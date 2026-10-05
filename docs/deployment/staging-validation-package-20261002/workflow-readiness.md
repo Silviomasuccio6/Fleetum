@@ -139,3 +139,8 @@ I file applicativi/config/test non sono stati editati. Hash calcolati sul conten
 | `ops/verify-migration-compatibility.sh` | `159e234287a65526be7e5cd36918cfc4983f146fac66e9f25b8bf9bea41044a5` |
 
 Memoria consultata solo per orientare la scelta delle regole; le conclusioni tecniche sopra sono basate sui file attuali. Nessuna conclusione sullo stato reale produzione deriva da ricordi o da un vecchio deploy.
+
+
+## Aggiornamento locale denaro/storage — 5 ottobre 2026
+
+Candidato `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`; dettagli nel [runbook](../money-storage-compatibility-20261005.md) e currentLocalEvidence. Chiusi i gap della precedente fixture limitata a4campi/root relativa:35campi/13tabelle/206coppie in4fasi,8layout,30recovery/57HTTP,522PG. Provider/PDF/inventario backend modificati, frontend e workflowproduction invariati. Zero gate esterni PASS. Review storiche sopra restano datate; nuova prova non conferma host/CI/provider live né fallback moderno.
