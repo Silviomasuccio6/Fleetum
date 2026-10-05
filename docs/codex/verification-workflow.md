@@ -28,6 +28,15 @@ Avvia un container PostgreSQL 16 temporaneo su una porta locale casuale, applica
 
 Il comando non usa il database locale o di produzione. Richiede Docker in esecuzione.
 
+## Restore e compatibilità sintetici
+
+Il runner `verify:restore-recovery` richiede SHA completi di candidato e baseline
+storica e una directory di evidenze nuova. Vedere
+[runbook restore](../deployment/restore-recovery-20261005.md) per il comando e i limiti.
+Avvia soltanto PostgreSQL16 temporaneo con dati sintetici e tiene fermi i worker.
+Non identifica la release live, non approva un fallback e non sostituisce G04/G14
+su stack e storage staging, budget RTO/RPO e digest precedenti approvati.
+
 ## Verifica release
 
 ```bash

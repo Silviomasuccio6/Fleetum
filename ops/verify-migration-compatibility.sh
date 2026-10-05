@@ -2,26 +2,33 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Prisma CLI discovers dotenv files independently of Node's DOTENV_CONFIG_PATH.
+# Check filenames only, including dangling links, before any tool or allocation.
+for DOTENV_FILE in "$ROOT_DIR/.env" "$ROOT_DIR/backend/.env" \
+  "$ROOT_DIR/backend/prisma/.env" "$ROOT_DIR/prisma/.env"; do
+  if [[ -e "$DOTENV_FILE" || -L "$DOTENV_FILE" ]]; then
+    echo "ERROR: dotenv filename present: $DOTENV_FILE; use an isolated checkout without dotenv files." >&2
+    exit 1
+  fi
+done
+
 PREVIOUS_RELEASE_REF="${PREVIOUS_RELEASE_REF:-origin/main}"
 CONTAINER_NAME="fleetum_migration_compat_${$}"
 DB_USER="fleetum_compat"
 DB_NAME="fleetum_compat"
 DB_PASSWORD="fleetum_compat_local"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fleetum-migration-compat.XXXXXX")"
-PREVIOUS_DIR="$WORK_DIR/previous"
-UPLOAD_DIR="$WORK_DIR/uploads"
-STARTED_AT="$(date +%s)"
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   rm -rf -- "$WORK_DIR"
 }
 
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
 cd "$ROOT_DIR"
+
+# Never read a local real dotenv file during this synthetic gate.
+export DOTENV_CONFIG_PATH=/dev/null
+export NODE_ENV=test
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "ERROR: Docker is required for the isolated migration compatibility gate." >&2
@@ -60,6 +67,27 @@ if [ -z "$CHANGED_MIGRATIONS" ]; then
   echo "[migration-compat] No migration delta between $PREVIOUS_RELEASE_SHA and $CURRENT_RELEASE_SHA; gate not required."
   exit 0
 fi
+
+# Inspect only names in the pinned historical tree before extracting contents.
+# NUL delimiters preserve quoted/newline filenames; pipefail rejects Git errors.
+git ls-tree -r --name-only -z "$PREVIOUS_RELEASE_SHA" | while IFS= read -r -d '' PREVIOUS_FILENAME; do
+  case "${PREVIOUS_FILENAME##*/}" in
+    .env*.example) ;;
+    .env*)
+      echo "ERROR: dotenv filename tracked in previous release; archive refused." >&2
+      exit 1
+      ;;
+  esac
+done
+
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fleetum-migration-compat.XXXXXX")"
+PREVIOUS_DIR="$WORK_DIR/previous"
+UPLOAD_DIR="$WORK_DIR/uploads"
+STARTED_AT="$(date +%s)"
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "[migration-compat] Previous release: $PREVIOUS_RELEASE_SHA"
 echo "[migration-compat] Candidate release: $CURRENT_RELEASE_SHA"
@@ -111,6 +139,7 @@ echo "[migration-compat] Applying the previous release migrations and synthetic 
     PATH="$PATH" \
     HOME="${HOME:-$WORK_DIR}" \
     NODE_ENV=test \
+    DOTENV_CONFIG_PATH=/dev/null \
     DATABASE_URL="$DATABASE_URL" \
     DEMO_ADMIN_PASSWORD='CompatOnly-2026!' \
     npm run prisma:seed -w backend
@@ -274,7 +303,7 @@ FIXTURE
 echo "[migration-compat] Applying candidate migrations over historical synthetic data"
 DATABASE_URL="$DATABASE_URL" npx prisma migrate deploy --schema backend/prisma/schema.prisma
 
-docker exec "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" <<'SQL' >/dev/null
+docker exec -i "$CONTAINER_NAME" psql -X -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" <<'SQL' >/dev/null
 DO $$
 BEGIN
   IF to_regclass('public."OauthFlow"') IS NULL THEN
@@ -414,6 +443,7 @@ echo "[migration-compat] Starting the previous application against the migrated 
     PATH="$PATH" \
     HOME="${HOME:-$WORK_DIR}" \
     NODE_ENV=test \
+    DOTENV_CONFIG_PATH=/dev/null \
     DATABASE_URL="$DATABASE_URL" \
     UPLOAD_DIR="$UPLOAD_DIR" \
     BILLING_DUNNING_CRON_ENABLED=false \
