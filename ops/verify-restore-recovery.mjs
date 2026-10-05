@@ -6,10 +6,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertRestoreMoneySnapshot, buildRestoreMoneySnapshotSql } from "./fixtures/restore-recovery-money.mjs";
+import { exerciseApplicationRecovery } from "./recovery/exercise-application-recovery.mjs";
 import { materializeRegisteredUploads } from "./fixtures/restore-recovery-storage.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const usage = "Usage: node ops/verify-restore-recovery.mjs --source-sha <40 lowercase hex> --baseline-sha <40 lowercase hex> --evidence-dir <new absolute directory> [--git-dir <absolute Git directory>] [--docker-host unix:///absolute/local/socket]";
+const usage = "Usage: node ops/verify-restore-recovery.mjs --source-sha <40 lowercase hex> --baseline-sha <40 lowercase hex> --evidence-dir <new absolute directory> [--git-dir <absolute Git directory>] [--docker-host unix:///absolute/local/socket] [--application-recovery --recovery-source-sha <40 lowercase hex>]";
 const canonicalAbsolute = (value) => /^\/[A-Za-z0-9._/-]+$/.test(value) && value !== "/" && !value.endsWith("/") && path.posix.normalize(value) === value;
 
 // Validation is pure and completes before any directory, process or Docker allocation.
@@ -17,9 +18,13 @@ export function parseRestoreRecoveryOptions(args) {
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) throw new Error("Invalid restore rehearsal arguments");
   if (args.length === 1 && args[0] === "--help") return { help: true };
   const options = {}; const seen = new Set();
-  const fields = { "--source-sha": "sourceSha", "--baseline-sha": "baselineSha", "--evidence-dir": "evidenceDirectory", "--git-dir": "gitDirectory", "--docker-host": "dockerHost" };
+  const fields = { "--recovery-source-sha": "recoverySourceSha", "--source-sha": "sourceSha", "--baseline-sha": "baselineSha", "--evidence-dir": "evidenceDirectory", "--git-dir": "gitDirectory", "--docker-host": "dockerHost" };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    if (flag === "--application-recovery") {
+      if (seen.has(flag)) throw new Error("Duplicate application recovery option");
+      seen.add(flag); options.applicationRecovery = true; continue;
+    }
     if (!Object.hasOwn(fields, flag)) throw new Error("Unsupported restore rehearsal option or positional argument");
     if (seen.has(flag)) throw new Error(`Duplicate restore rehearsal option: ${flag}`);
     seen.add(flag);
@@ -34,6 +39,8 @@ export function parseRestoreRecoveryOptions(args) {
   }
   for (const field of ["sourceSha", "baselineSha", "evidenceDirectory"]) if (!options[field]) throw new Error("--source-sha, --baseline-sha and --evidence-dir are required");
   if (options.sourceSha === options.baselineSha) throw new Error("Source and historical baseline must be different commits");
+  if (Boolean(options.applicationRecovery) !== Boolean(options.recoverySourceSha)) throw new Error("Application recovery requires an explicit pinned recovery source and opt-in");
+  if (options.recoverySourceSha === options.baselineSha) throw new Error("Historical migration baseline is not an approved application recovery source");
   return options;
 }
 
@@ -146,6 +153,7 @@ export async function runRestoreRecovery(options) {
   const dbUser = "fleetum_restore"; const dbName = `fleetum_restore_${id}_source`;
   const password = randomBytes(24).toString("hex"); const loginPassword = `Synthetic-${randomBytes(24).toString("hex")}`;
   const baselineDirectory = path.join(scratch, "baseline"); const sourceDirectory = path.join(scratch, "source");
+  const reserveDirectory = path.join(scratch, "reserve");
   const uploadDirectory = path.join(scratch, "upload-tree");
   const env = {
     PATH: process.env.PATH, HOME: path.join(scratch, "home"), TMPDIR: scratch,
@@ -309,11 +317,20 @@ export async function runRestoreRecovery(options) {
       assert.equal((await git(["rev-parse", "--verify", `${sha}^{commit}`], `${label}-commit-identity`)).stdout.toString("utf8").trim(), sha);
     }
     await git(["merge-base", "--is-ancestor", options.baselineSha, options.sourceSha], "historical-baseline-ancestor");
+    if (options.applicationRecovery) {
+      assert.equal((await git(["rev-parse", "--verify", `${options.recoverySourceSha}^{commit}`], "reserve-commit-identity")).stdout.toString("utf8").trim(), options.recoverySourceSha);
+      await git(["merge-base", "--is-ancestor", options.recoverySourceSha, options.sourceSha], "pinned-reserve-ancestor");
+      const applicationPaths = ["backend/src", "backend/prisma", "backend/package.json", "backend/tsconfig.json", "frontend", "packages", "package.json", "package-lock.json"];
+      const changes = (await git(["diff", "--name-only", options.recoverySourceSha, options.sourceSha, "--", ...applicationPaths], "reserve-current-application-equivalence")).stdout.toString("utf8").trim();
+      assert.equal(changes, "", "Reserve must preserve all current application/security fixes");
+      result.reserve = { sourceSha: options.recoverySourceSha, applicationPaths, applicationMatchesCurrentSource: true, distinctPreviousProductionRelease: false, approvedFallback: false };
+      check("pinned-reserve-preserves-current-application-and-security-fixes");
+    }
     const diff = (await git(["diff", "--name-status", options.baselineSha, options.sourceSha, "--", "backend/prisma/migrations"], "immutable-migration-history")).stdout.toString("utf8").trim().split("\n").filter(Boolean);
     if (!diff.length || diff.some((line) => !/^A\tbackend\/prisma\/migrations\/[A-Za-z0-9_]+\/migration\.sql$/.test(line))) throw new Error("Existing migration history must be immutable and the delta additive");
     result.migrationDelta = diff.map((line) => line.split("\t")[1]); check("additive-immutable-migration-history", { addedMigrations: diff.length });
     await cp(path.join(originalHome, ".npm/_cacache"), path.join(env.npm_config_cache, "_cacache"), { recursive: true });
-    for (const [label, sha, directory] of [["baseline", options.baselineSha, baselineDirectory], ["source", options.sourceSha, sourceDirectory]]) {
+    for (const [label, sha, directory] of [["baseline", options.baselineSha, baselineDirectory], ["source", options.sourceSha, sourceDirectory], ...(options.applicationRecovery ? [["reserve", options.recoverySourceSha, reserveDirectory]] : [])]) {
       const archivedPaths = (await git(["ls-tree", "-r", "--name-only", sha], `${label}-archive-dotenv-path-guard`)).stdout.toString("utf8").trim().split("\n");
       assertArchiveHasNoRuntimeDotenv(archivedPaths); check(`${label}-archive-has-no-runtime-dotenv`);
       const archive = (await git(["archive", "--format=tar", sha], `${label}-git-archive`)).stdout;
@@ -331,7 +348,7 @@ export async function runRestoreRecovery(options) {
     const compatibilityFixture = extractCompatibilityFixture(await readFile(path.join(sourceDirectory, "ops/verify-migration-compatibility.sh"), "utf8"));
     await writeFile(path.join(baselineDirectory, "compat-fixture.mjs"), compatibilityFixture);
     await cp(path.join(root, "ops/fixtures/restore-recovery-seed.mjs"), path.join(baselineDirectory, "restore-recovery-seed.mjs"));
-    for (const file of ["ops/verify-restore-recovery.mjs", "ops/restore-db-test.sh", "ops/fixtures/restore-recovery-seed.mjs", "ops/fixtures/restore-recovery-http.mjs", "ops/fixtures/restore-recovery-money.mjs", "ops/fixtures/restore-recovery-storage.mjs"]) result.toolingHashes[file] = sha256(await readFile(path.join(root, file)));
+    for (const file of ["ops/verify-restore-recovery.mjs", "ops/restore-db-test.sh", "ops/fixtures/restore-recovery-seed.mjs", "ops/fixtures/restore-recovery-http.mjs", "ops/fixtures/restore-recovery-money.mjs", "ops/fixtures/restore-recovery-storage.mjs", ...(options.applicationRecovery ? ["ops/recovery/exercise-application-recovery.mjs", "ops/recovery/application-recovery-policy.mjs", "ops/fixtures/application-recovery-server.mjs"] : [])]) result.toolingHashes[file] = sha256(await readFile(path.join(root, file)));
     result.toolingHashes.compatibilityFixture = sha256(compatibilityFixture);
     await docker(["info", "--format", "{{.ServerVersion}}"], "local-docker-info");
     const image = JSON.parse((await docker(["image", "inspect", "postgres:16-alpine", "--format", "{{json .}}"], "preexisting-postgres16-image")).stdout.toString("utf8"));
@@ -426,7 +443,35 @@ export async function runRestoreRecovery(options) {
       assert.equal(await sql(name, stateQuery, `${suffix}-restored-auth-worker-report-state`), expectedStates);
       check(`${suffix}-restore-keeps-suspended-revoked-pending-lease-dedup-cursor-state`);
     }
-    const first = `fleetum_restore_${id}_first`; const existingBefore = await snapshot(first);
+    const first = `fleetum_restore_${id}_first`;
+    if (options.applicationRecovery) {
+      await installAndGenerate(reserveDirectory, "reserve");
+      await run("npm", ["run", "build", "-w", "backend"], "reserve-exact-source-backend-build", { cwd: reserveDirectory, extraEnv: { ...clients.get(reserveDirectory), DATABASE_URL: urlFor(first) } });
+      await run("npm", ["run", "build", "-w", "frontend"], "reserve-exact-source-frontend-build", { cwd: reserveDirectory, extraEnv: { VITE_API_BASE_URL: "/api", VITE_PLATFORM_API_BASE_URL: "/platform-api" } });
+      const registered = await materializeRegisteredUploads({ manifest: manifest48, uploadTree: backupUploads, destination: path.join(reserveDirectory, "uploads") });
+      const verifyReserveFiles = async () => {
+        for (const file of registered.files) {
+          const actual = await readFile(path.join(reserveDirectory, "uploads", file.targetKey));
+          assert.equal(sha256(actual), file.sha256); assert.equal(actual.length, file.sizeBytes);
+        }
+      };
+      const runHttpSmoke = async (base, label) => {
+        const response = await run(process.execPath, ["restore-recovery-http.mjs"], `application-${label}`, { cwd: reserveDirectory, extraEnv: { DATABASE_URL: urlFor(first), SYNTHETIC_APPLICATION_RECOVERY: "true", SYNTHETIC_HTTP_BASE: `${base}/api`, SYNTHETIC_WRITE_NOTE: `Synthetic recovery ${label}`, SYNTHETIC_UPLOAD_TREE: backupUploads, SYNTHETIC_INCLUDE_MODERN_FILES: "true" }, timeoutMs: 30000, allowFailure: true });
+        const failure = parseHttpFailure(Buffer.concat([response.stdout, response.stderr]).toString("utf8"));
+        if (response.code !== 0 || failure) { result.http[`application-${label}`] = { success: false, exitCode: response.code, diagnostic: failure }; throw new Error(`Application HTTP smoke failed at ${failure?.stepLabel ?? "unknown"}: ${failure?.errorName ?? "Error"}`); }
+        const line = response.stdout.toString("utf8").split("\n").find((value) => value.startsWith("FLEETUM_RESTORE_HTTP_RESULT ")); assert(line);
+        result.http[`application-${label}`] = { ...JSON.parse(line.slice("FLEETUM_RESTORE_HTTP_RESULT ".length)), uploadMode: "absolute", materializedFiles: registered.fileCount, existingCompiledApplication: true }; check(`application-${label}`, result.http[`application-${label}`]);
+      };
+      // The budget is a fixed local test bound, selected before observation; it is not an externally approved SLA.
+      result.applicationRecovery = await exerciseApplicationRecovery({ archiveRoot: reserveDirectory, sourceSha: options.recoverySourceSha, env: { ...env, ...clients.get(reserveDirectory), DATABASE_URL: urlFor(first), UPLOAD_DIR: path.join(reserveDirectory, "uploads") }, snapshot: () => snapshot(first), runHttpSmoke, budgetMs: 30000 });
+      assert.equal(result.applicationRecovery.success, true);
+      for (const scenario of result.applicationRecovery.scenarios) check(`application-recovery-${scenario.mode}`, { recoveryMs: scenario.recoveryMs, acknowledgedDataLoss: scenario.acknowledgedDataLoss });
+      await verifyReserveFiles(); await verifyBackupBundle({ dumpPath: dump48, uploadRoot: backupUploads, manifest: manifest48 });
+      await verifyMoney(sourceDirectory, first, "after-application-recovery");
+      assert.equal(await sql(first, stateQuery, "recovery-keeps-suspended-revoked-pending-cursor-state"), expectedStates);
+      check("application-recovery-preserves-money-registered-files-auth-and-worker-states");
+    }
+    const existingBefore = await snapshot(first);
     const existing = await run("bash", [path.join(root, "ops/restore-db-test.sh"), dump48, container, first, dbUser], "existing-target-refusal", { allowFailure: true });
     assert.notEqual(existing.code, 0); assert.deepEqual(await snapshot(first), existingBefore); check("existing-target-refused-with-all-tables-unchanged");
     const sqlErrorFile = path.join(scratch, "synthetic-sql-error.sql");

@@ -142,3 +142,12 @@ test("seed persists six same-tenant relation clusters and checks null subscripti
 });
 
 const planTenant = (id) => id.includes("_b_") ? "restore_tenant_b" : "demo_tenant";
+
+
+test("post-application-recovery verifies every monetary pair with the unchanged oracle", () => {
+  const rows = snapshot(); const report = requireApi().assertRestoreMoneySnapshot(EXACT_NUMERIC_FIELDS, rows, "after-application-recovery");
+  assert.equal(report.checkedFields, 35); assert.equal(report.checkedRows, 206);
+  assert.equal(report.sha256, requireApi().assertRestoreMoneySnapshot(EXACT_NUMERIC_FIELDS, rows, "schema48").sha256);
+  rows[1].rows[0].exactValue = "0.00";
+  assert.throws(() => requireApi().assertRestoreMoneySnapshot(EXACT_NUMERIC_FIELDS, rows, "after-application-recovery"));
+});

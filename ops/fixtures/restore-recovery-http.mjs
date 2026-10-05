@@ -30,13 +30,24 @@ const reportFailure = (error) => {
   process.exitCode = 1;
 };
 try {
-  const { createApp } = await import("./backend/src/app.ts");
-  stepLabel = "import-prisma";
-  ({ prisma } = await import("./backend/src/infrastructure/database/prisma/client.ts"));
-  stepLabel = "listen";
-  server = createApp().listen(0, "127.0.0.1");
-  await new Promise((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); });
-  const base = `http://127.0.0.1:${server.address().port}/api`;
+  let base;
+  if (process.env.SYNTHETIC_HTTP_BASE !== undefined) {
+    assert.equal(process.env.SYNTHETIC_APPLICATION_RECOVERY, "true");
+    const external = loopback(process.env.SYNTHETIC_HTTP_BASE);
+    assert(external.port && external.pathname === "/api" && !external.username && !external.password && !external.search && !external.hash);
+    assert.equal(external.href, process.env.SYNTHETIC_HTTP_BASE);
+    assert(!external.href.includes("?") && !external.href.includes("#"));
+    base = external.href;
+  } else {
+    assert.notEqual(process.env.SYNTHETIC_APPLICATION_RECOVERY, "true");
+    const { createApp } = await import("./backend/src/app.ts");
+    stepLabel = "import-prisma";
+    ({ prisma } = await import("./backend/src/infrastructure/database/prisma/client.ts"));
+    stepLabel = "listen";
+    server = createApp().listen(0, "127.0.0.1");
+    await new Promise((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); });
+    base = `http://127.0.0.1:${server.address().port}/api`;
+  }
   const request = async (route, options) => {
     status = undefined;
     const response = await fetch(`${base}${route}`, { ...options, signal: AbortSignal.timeout(10000) });
@@ -67,7 +78,9 @@ try {
   assert.equal(otherVehicles.status, 200, "tenant-b-read-status"); stepLabel = "read-b-isolation";
   assert.doesNotMatch(JSON.stringify(await otherVehicles.json()), /COMPAT26/, "tenant-a-fixture-not-visible-to-b"); checks.push("tenant-read-isolation");
   // A harmless update to an existing synthetic site exercises cookie auth + CSRF.
-  const body = JSON.stringify({ notes: "Synthetic restore HTTP write" });
+  const note = process.env.SYNTHETIC_WRITE_NOTE ?? "Synthetic restore HTTP write";
+  assert(note === "Synthetic restore HTTP write" || /^Synthetic recovery (before|after)-(startup-rejected|database-unready|pause-before-import|client-artifact-mismatch)$/.test(note));
+  const body = JSON.stringify({ notes: note });
   stepLabel = "write-without-csrf";
   const denied = await request("/master-data/sites/compat_site", { method: "PATCH", headers: { cookie: a.cookie, "content-type": "application/json" }, body });
   assert.equal(denied.status, 403, "missing-csrf-status"); checks.push("csrf-missing-denied");

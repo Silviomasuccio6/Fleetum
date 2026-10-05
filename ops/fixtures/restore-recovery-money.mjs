@@ -121,7 +121,7 @@ export function buildRestoreMoneySnapshotSql(fields) {
 
 export function assertRestoreMoneySnapshot(fields, snapshots, phase) {
   const plan = buildRestoreMoneyPlan(fields);
-  assert.match(phase, /^(?:schema42|schema48|first-restore|second-restore)$/);
+  assert.match(phase, /^(?:schema42|schema48|first-restore|second-restore|after-application-recovery)$/);
   assert(Array.isArray(snapshots)); assert.equal(snapshots.length, 35, "Money snapshot must contain every audited field");
   const canonical = []; const summaries = []; const seen = new Set();
   for (const projection of plan.projections) {
