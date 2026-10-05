@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "70fdfab3522907d9d956ac260224c165774e2af6",
-  "preparedOn": "2026-10-03",
+  "candidateSha": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+  "preparedOn": "2026-10-05",
   "mode": "PREPARATION_ONLY",
   "productionAuthorized": false,
   "stagingDispatchAuthorized": false,
@@ -25,7 +25,7 @@
       "requiredForProductionDecision": true,
       "status": "PENDING",
       "scenario": "Riesaminare diff dall’ultimo rilascio approvato, report finali e limiti; congelare lo SHA completo. Separare parent dei test, manifest dei file e commit documentale.",
-      "acceptance": "Reviewer assegnato firma candidato70fdfab3522907d9d956ac260224c165774e2af6, provenance commitsbf215f69/70fdfab3 e rischi residui; 154 artefatti storici e manifest sorgente corrente verificati. Baseline staging modifica backendbootstrap/env/email; produzione resta disattivata senza flagstaging, UI/schema invariati.",
+      "acceptance": "Reviewer assegnato firma candidato579d7171bc90f17a50489eee0ffe1b31521383d0, provenance commitsbf215f69/70fdfab3 e rischi residui; 154 artefatti storici e manifest sorgente corrente verificati. Baseline staging modifica backendbootstrap/env/email; produzione resta disattivata senza flagstaging, UI/schema invariati.",
       "failureMeans": "SHA diverso, review mancante o prove senza identità bloccano la dispatch; una modifica invalida il binding e richiede nuovo candidato/gate pertinenti.",
       "requiredEvidence": [
         "sha candidato/tree",
@@ -52,7 +52,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidato70fdfab3522907d9d956ac260224c165774e2af6 con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
+      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidato579d7171bc90f17a50489eee0ffe1b31521383d0 con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
       "acceptance": "Percorso CI sul commit realmente checkoutato e non su merge commit diverso; guardie DB attive con dotenv/devnull su PG temporaneo; E2E sullo stesso candidato e release osservata. Controlli YAML/fixtures/PR da review prima di qualunque esecuzione hosted.",
       "failureMeans": "Verde head_sha senza prova checkout, test DB non eseguiti o E2E senza binding lasciano il gate bloccato.",
       "requiredEvidence": [
@@ -80,7 +80,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "Baseline isolamento implementata localmente in 70fdfab3522907d9d956ac260224c165774e2af6: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
+      "scenario": "Baseline isolamento implementata localmente in 579d7171bc90f17a50489eee0ffe1b31521383d0: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
       "acceptance": "Policy version1 e controlSHA approvati, nessuna chiave provider, 0cron e email disabled; project fleetum-staging, target filesystem reale dedicato senza symlink/orfani/ownership ambiguo, backend solo rete internal, tenantIDs sintetici distinti, robots/header/sitemap effettivi. Stato dati/host e protezioni indipendentemente attestati prima avvio.",
       "failureMeans": "Placeholder nell’esempio o parola “staging” non sono prova. Destinatario reale, cron attivo all’avvio, dominio arbitrario, directory condivisa o indice pubblico bloccano l’avvio.",
       "requiredEvidence": [
@@ -153,11 +153,20 @@
         "piano prerelease e prova fallback sintetica prima dispatch"
       ],
       "sourceRefs": [
-        "migration-inventory.json"
+        "migration-inventory.json",
+        "../restore-recovery-20261005.md"
       ],
       "domainScenarioGroups": [
         "DG-14"
-      ]
+      ],
+      "localPreparationEvidence": {
+        "sourceCommit": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+        "applicationArchiveCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+        "report": "../../../../Fleetum-audit-20260909/RESTORE_RECOVERY_20261005.md",
+        "status": "LOCAL_SYNTHETIC_EVIDENCE_ONLY",
+        "externalGatePassed": false,
+        "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
+      }
     },
     {
       "id": "G05",
@@ -400,11 +409,20 @@
         "cleanup preview approvata senza cancellazione"
       ],
       "sourceRefs": [
-        "domain-scenarios.md"
+        "domain-scenarios.md",
+        "../restore-recovery-20261005.md"
       ],
       "domainScenarioGroups": [
         "DG-09"
-      ]
+      ],
+      "localPreparationEvidence": {
+        "sourceCommit": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+        "applicationArchiveCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+        "report": "../../../../Fleetum-audit-20260909/RESTORE_RECOVERY_20261005.md",
+        "status": "LOCAL_SYNTHETIC_EVIDENCE_ONLY",
+        "externalGatePassed": false,
+        "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
+      }
     },
     {
       "id": "G13",
@@ -465,11 +483,20 @@
       ],
       "sourceRefs": [
         "migration-inventory.json",
-        "workflow-readiness.md"
+        "workflow-readiness.md",
+        "../restore-recovery-20261005.md"
       ],
       "domainScenarioGroups": [
         "DG-14"
-      ]
+      ],
+      "localPreparationEvidence": {
+        "sourceCommit": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+        "applicationArchiveCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+        "report": "../../../../Fleetum-audit-20260909/RESTORE_RECOVERY_20261005.md",
+        "status": "LOCAL_SYNTHETIC_EVIDENCE_ONLY",
+        "externalGatePassed": false,
+        "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
+      }
     },
     {
       "id": "G15",

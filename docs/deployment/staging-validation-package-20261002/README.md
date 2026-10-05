@@ -1,40 +1,56 @@
-# Fleetum — pacchetto staging aggiornato, 3 ottobre 2026
+# Fleetum — pacchetto di revisione aggiornato, 5 ottobre 2026
 
 **Pronto per revisione locale; nessuna dispatch o produzione autorizzata.**
-Candidato sorgente `70fdfab3522907d9d956ac260224c165774e2af6`, tree `0bf8de49e2da4437115c084bf78e3484715fde7d`, branch `codex/fix-staging-isolation`.
-Il commit documentale finale è distinto e registrato nel rapporto esterno; usare il ref
-`codex/staging-isolation-source-candidate` per il sorgente esatto, non implicitamente HEAD documentale.
+Candidato sorgente `579d7171bc90f17a50489eee0ffe1b31521383d0`, tree `38c90293528e59e4956f212230f05d41028c1a8f`, branch `codex/verify-restore-rollback`.
+Usare il ref `codex/restore-recovery-source-candidate`; il successivo commit
+documentale è distinto e registrato nel rapporto esterno.
 
-CI/E2E della tranche precedente restano validi nel codice. La baseline staging ora blocca
-email/provider e cinque cron, valida prima di Prisma, fissa progetto/rete/path, osserva
-policy/internal membership, limita target, autentica due tenant distinti e applica noindex
-anche a robots/sitemap/errori. Controlli SSH presi da checkout trusted separato e pin protetti
-workflow/release obbligatori; preflight metadata rifiuta symlink/ownership/orfani. Trace/video off.
+La tranche aggiunge un runner ripetibile per backup/ripristino su PostgreSQL16
+temporaneo con dati sintetici. Corregge due falsi positivi degli strumenti: SQL
+della compatibilità non inoltrato a Docker e restore che poteva eliminare un
+target o dichiarare successo dopo errore. I percorsi dotenv sono rifiutati prima
+di Prisma senza leggere contenuti; il restore richiede un target nuovo esplicito.
 
-Release locale **271/44/9/85**, PostgreSQL **522/522**, proxy locale **21HTTP/16template** PASS.
-Browser/API locale **7/7**, preflight reale e retries0 sul candidato corretto; primo erroreloader conservato.
-Queste prove non sono hosted CI o staging reale. G01 e G02 sono **PENDING** review/esecuzione,
-non PASS. Nessun gate esterno è stato eseguito: **0/19 PASS**, owner e autorizzazioni restano vuoti.
-Le chiavi provider anche sandbox e i custom path precedenti non sono ammessi nella baseline;
-reset/inviti che richiedono consegna email necessitano di una futura prova sandbox/sink approvata.
+**Release finale 271/44/9/143**, zero failure/skip, lint/build/13prerender/audit
+high-critical PASS. **Recovery 23/23 scenari e 27 asserzioni HTTP**: schema 42→48,
+app storica su DB48, due ripristini con tutte le 67 tabelle e 2 file sintetici identici,
+isolamento tenant/CSRF/download; target esistente, SQL errato, dump/file
+manomessi o mancanti, duplicati deposito e timeout lock/statement rifiutati.
+Durata 106248 ms; cleanup proprio verificato. Compatibilità base finale PASS 27 s.
 
-- [Runbook isolamento](../staging-isolation-20261003.md) e [CI/E2E](../ci-e2e-release-binding-20261002.md).
-- [Registro](gate-register.json), [record pendente](execution-record.template.json), [prove](evidence-index.json).
+Il tooling sopra è legato al candidato attuale. Gli archivi applicativi provati
+sono `70fdfab3522907d9d956ac260224c165774e2af6` e baseline `db1f231dc8cb699f1a5ce4215a0278c93212d16d`; backend/frontend/schema/lockfile
+e workflow production sono invariati rispetto al candidato precedente. La
+baseline storica main precede i fix di sicurezza e **non è fallback approvato**.
+
+Ereditati e separati: PG 522/522, browser 7/7 e proxy 21 HTTP/16 template del 3 ottobre,
+senza dichiararli nuovi run. Isolamento email/cron, allowlist, noindex e pinCI/E2E
+restano nel codice; nessuna nuova prova hosted CI, SSH, provider o staging reale.
+Tutti i 19 gate esterni rimangono pendenti: **0/19 PASS**; owner, autorizzazioni e
+budget restano vuoti. G04/G12/G14 ricevono prove preparatorie, non un PASS.
+
+- [Runbook recovery](../restore-recovery-20261005.md), [isolamento](../staging-isolation-20261003.md), [CI/E2E](../ci-e2e-release-binding-20261002.md).
+- [Registro](gate-register.json), [record pendente](execution-record.template.json), [evidenze](evidence-index.json).
 - [Migrazioni](migration-inventory.json), [sorgenti](inspected-source.json), [freeze](package-hashes.json).
 
-I report workflow/scenari storici restano consultabili; i gap di codice chiusi sono superati dai
-runbook correnti. Restano host/storage/dati/egress/routing e protezioni reali, provider sandbox,
-restore/migrazioni/carico e decisioni legacy/privacy. Schema48, zero nuove migrazioni/dipendenze;
-main/VPS live non equivalenti. Finding37 invariati26risolti/2parziali/4redesign/5marketing; INT01..06
-corretti nel codice. Redesign e campagne separati.
+Limiti del recovery: fixture monetaria: 4 campi, non 35; chiavi storiche relative
+`uploads/...`, non mapping al percorso assoluto staging o app storica su chiavi
+moderne; bridge PG con egress container non bloccato, non rete internal staging.
+Restano digest app/client precedenti approvati, health failure/restart stack,
+RTO/RPO e budget lock, reconcile sandbox e decisioni legacy/privacy. Schema 48,
+zero nuove migrazioni/dipendenze. Finding 37 invariati: 26 risolti/2 parziali/4 redesign/5 marketing;
+INT01..06 corretti nel codice. Redesign e campagne restano separati.
 
-Il verificatore controlla coerenza/hash e attestazioni obbligatorie, non autenticità o sufficienza:
+Il verificatore controlla coerenza/hash e attestazioni obbligatorie, non autenticità
+o sufficienza delle prove:
 
 ```sh
 python3 docs/deployment/staging-validation-package-20261002/validate-package.py \
   --source-root . --audit-root /Users/silvio/Documents/Playground/Fleetum-audit-20260909
 ```
 
-**Prossima azione:** review del candidato esatto e preparazione del collaudo restore/migrazioni
-con soglie e responsabilità definite. Attività esterne richiedono autorizzazione successiva.
-Nessun merge/main/deploy automatico; rollback per revert riesaminato, senza downSQL o side effect.
+**Prossima azione locale:** completare la riconciliazione dei 35 campi monetari e
+la matrice layout legacy/percorso assoluto su fixture sintetiche. Per chiudere i
+gate esterni servono successivamente reviewer, operatori, soglie/versioni
+approvate e autorizzazione distinta. Nessun merge/main/deploy automatico,
+nessun down SQL o replay di effetti esterni.

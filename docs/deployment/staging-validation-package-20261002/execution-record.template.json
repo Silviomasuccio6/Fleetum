@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "70fdfab3522907d9d956ac260224c165774e2af6",
+  "candidateSha": "579d7171bc90f17a50489eee0ffe1b31521383d0",
   "environment": "STAGING_SYNTHETIC",
-  "preparedOn": "2026-10-02",
+  "preparedOn": "2026-10-05",
   "observedReleaseSha": null,
   "backendDigest": null,
   "frontendDigest": null,
@@ -74,7 +74,7 @@
       "completedAt": null,
       "evidence": [],
       "decision": null,
-      "notes": "Non eseguito in questa preparazione."
+      "notes": "Prove locali sintetiche del 5 ottobre disponibili; il gate esterno non è stato eseguito e rimane PENDING."
     },
     {
       "id": "G05",
@@ -154,7 +154,7 @@
       "completedAt": null,
       "evidence": [],
       "decision": null,
-      "notes": "Non eseguito in questa preparazione."
+      "notes": "Prove locali sintetiche del 5 ottobre disponibili; il gate esterno non è stato eseguito e rimane PENDING."
     },
     {
       "id": "G13",
@@ -174,7 +174,7 @@
       "completedAt": null,
       "evidence": [],
       "decision": null,
-      "notes": "Non eseguito in questa preparazione."
+      "notes": "Prove locali sintetiche del 5 ottobre disponibili; il gate esterno non è stato eseguito e rimane PENDING."
     },
     {
       "id": "G15",
