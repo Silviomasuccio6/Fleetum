@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "preparedOn": "2026-10-05",
-  "candidateSha": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
-  "candidateTree": "2fa16975b0b50800d16a6aff0926293cf4d9656b",
+  "preparedOn": "2026-10-06",
+  "candidateSha": "add3438cc17e23a29a45aad71282e296f45072a1",
+  "candidateTree": "c213e764e6e52ebe34a9bdd3e3566010916d0905",
   "comparisonMain": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
   "auditRootHint": "/Users/silvio/Documents/Playground/Fleetum-audit-20260909",
-  "newApplicationTestRuns": 3,
+  "newApplicationTestRuns": 5,
   "bundles": [
     {
       "id": "20261002-vehicle-pagination-count",
@@ -359,6 +359,70 @@
         "targeted-green.log": "b30d8f2be6b43daaf1e3d2f64b53045491407c034f3a64ef1437847d9129eda8",
         "tested-source-freeze.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f"
       }
+    },
+    {
+      "id": "20261006-account-security-review",
+      "sourceCommit": "add3438cc17e23a29a45aad71282e296f45072a1",
+      "auditRelativeDirectory": "evidence/20261006-account-security-review",
+      "manifest": "SHA256SUMS.json",
+      "manifestSHA256": "62b15e9058d17d208f1b839bedf04797b7f651a128020dafa79cb7bab40af57f",
+      "verifiedArtifactCount": 53,
+      "verification": "VERIFIED_CONTENT_ONLY",
+      "artifacts": {
+        "README.md": "b12f6b8eb68d4405e8cb57e934bd47dbf99dd0862b22cab38d6ebb2fdc3ab70b",
+        "baseline-source.json": "7f4638d8c7941569a225f4f728e4135250af92befef4c06c0701795c5cee649b",
+        "candidate.diff": "26f852595aee398a693e4fb64e2c55b1dc80ab5819a1e70d2994b7718c0e5a38",
+        "candidate.json": "56fbdefa54c6c40064ac6816e14611296ca9a4ef3a4a11d229c83cb9721de5e8",
+        "candidate.py": "2e204242653ac6316d34d46c6b3f6d0dae64a2f0fa2310bbed71144c22d689db",
+        "cleanup.json": "4df986dd0198f5d0d550d32599c6a7641d80786e6ab70ca03c8d3f6fd7011ab3",
+        "code-commit.json": "db4e7acca2318cfdf7854345c24ead5568fb77a95ca9e3e9935b5cb25669280d",
+        "commands.txt": "351d0f654d844c93fcc496d4cdc33e683af23d60454db3c1ca98e9da0ea32a17",
+        "credential-only-candidate.diff": "678a7f382ec6558ae7193bea4c7ffea2f9120cc406e0fc7c5d30d112e8921a3b",
+        "credential-only-candidate.json": "7431a509f5c09efa968e65c61b2ec3992ecb4eac52f8831a7c2e4a631b17ca07",
+        "credential-only-database-result.json": "bbf5b1acae1030162ff67a349b72d274618a53d6066a977d0019812a41dbf8ff",
+        "credential-only-database.log": "6276d78abfbf183d76a60c8a14073febbf20f8564ed56b91eff7fdc6fbdced0c",
+        "credential-only-tested-source-freeze.json": "2638cd772c26fe12d38005d6241a3b792c57c53a39cfc0be4930359a126e5cdf",
+        "database-result.json": "bbf5b1acae1030162ff67a349b72d274618a53d6066a977d0019812a41dbf8ff",
+        "database.log": "a8b09392b200a30b98d3f6fd6cc8e6ba9a97935c247593328c83ed13506fe01a",
+        "dependency-advisory.json": "63ca55c2662a2ef42f20153ae4b62444afc2b418c58768b67e1dc8c439bd2f59",
+        "dependency-audit-before-retry.json": "3e1184089978c2694e60e92e537fb1d39b65782136a9ad8f35f4cc16d072c153",
+        "dependency-audit-before.json": "3e1184089978c2694e60e92e537fb1d39b65782136a9ad8f35f4cc16d072c153",
+        "dependency-blocked-release-result.json": "cf6eed38ccc8a4d36d4c60c49280748e80ade00d7930a92ebc5ed26ff7a051a7",
+        "dependency-blocked-release-source.json": "2638cd772c26fe12d38005d6241a3b792c57c53a39cfc0be4930359a126e5cdf",
+        "dependency-blocked-release.log": "925c772fce8aa896d2c2937efea92775f3faf978535d462e0d51333c8269c282",
+        "dependency-runtime.json": "4988631dbeba191809c814046dbfb46deea33e359648cb61138afa39498fbd68",
+        "files.json": "5570dddc780e3fb0e06b4fdd6e89d11375ea8e1268dd138efe79fd63a4c18558",
+        "guard.json": "9fd3236ccafff61499a62a9558f44030a032135d0638a2d21e9a605e31a61a1e",
+        "historical-reset-link-red.log": "a629863395fe3ce20c4b54e88b2a015e9ada099ca50f7c76774f2226ffb3f344",
+        "invitation-green.log": "3cc2a8948ecad7e7129c1a56e724878fab2c4ef3789eaaafa71b86a24c93990b",
+        "invitation-red.log": "ffea694fa4d74d42f32fdbd9440477d99cf6cbbdcf36e1c5e4f6f1d34d8b8790",
+        "invitation-reset-green-regression.log": "1838df52f3c4d8c4cb975b69f0f50b6a7deae5f825e8c88fc1e22b7606fad838",
+        "postgres-test-syntax.log": "0c7f4e5023e5b1feec5ba5f49a002285b2ddd26382d700c48fefb11610cfe837",
+        "preliminary-candidate.diff": "fe6fa3776bac4a77fc7aee24cdb9a1ae7281688066efca70111a3888e8d2c397",
+        "preliminary-candidate.json": "b4c9848e3e6f5b623f6bdfea398ff2917c98dd590c34db05f11bb7945c30a258",
+        "preliminary-database-result.json": "ae8ea789f0e04c6e6f3068701af8a575ba169ef87b724a9fc122c617bdef7a3b",
+        "preliminary-database.log": "632850a8c485af1fcd55ff312d094577f2d23a561a89cdc9338339925a80a44b",
+        "preliminary-tested-source-freeze.json": "4cc6802a224361b6e54858a5c9c7dd7a0279b35246836b7ad5b7810ed99f9ffa",
+        "profile-green.log": "30f9caf9679ea8f88501764b627385aaa0ef70ef48a1ee183f9aebe66f74cb3b",
+        "profile-red.log": "e55e4a5d8b1f28bd894c1dfd8ba6441426d14b1359d9d6f43a5908074c201311",
+        "promote.py": "526221ed421263367d05d68fe6824b92a061d1bcf3f943094e65250da402d5c4",
+        "proxy-green.log": "46406c581268f6fcd7007f64d3fbc54ea9465038bf05b9078d90d22c03bd9c25",
+        "proxy-install-update.log": "f44c4ed1a9fc1d11e559b25f9821753a9f9e3d3f8bee57e0ea7ac4d4abe6cb5d",
+        "proxy-integrity.json": "73ce96d4f4d4abb3763a0efb4b244a5c43be870c377594f904ab70f078eadf52",
+        "proxy-lock-delta.json": "92b8ccb058fb630b5c28f7b01b2debb3a051226456c6a085dea3e034b48d5a1f",
+        "proxy-lock-update.log": "117b6c224e334a4b9f4e4ca4460f1f21a5647fa1786d15c4ddf8c8ad5d3fbc1e",
+        "proxy-metadata.json": "7e6476be5272bb027e467ca4d58c9bdb3e50dad045c8ac859349b3ea9cf4efbc",
+        "proxy-pack.json": "2a9780b3d88b45d0287826eb00237787e06170b7081379709af12fad6db26aeb",
+        "proxy-red.log": "4db2aa86f2659127e96f615ac0a5e40eadfe2e98ccd529297a7d796fe5d967e7",
+        "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
+        "release-source.json": "907dafd81d254c3f36eaf79ce44ef0f53361c875e11d16052ab0b6677a4567a0",
+        "release.log": "740069ebb8047185c7ee13e310f64eefaa61bbfab9995ebedc60bc379194590b",
+        "run-database.py": "0e841c4a4061f1d93fcd85b58c8501e759d82bf9f6927d658fe769f36f2ed3f1",
+        "run-release.py": "98b95f3d60436501b8d760e9b77aeb9979e8e036696ebb9c82eda9ab7e55c2cd",
+        "security-review.md": "ac38c007db8eb6362a320517ea7b64ace3a9386ba28e4c6fb5c9f37999be1ca2",
+        "test-summary.json": "52ae0a4f9eac4a2ee0477cc36a2af80eed864997c1d7513327d8d5eaedcec68b",
+        "tested-source-freeze.json": "907dafd81d254c3f36eaf79ce44ef0f53361c875e11d16052ab0b6677a4567a0"
+      }
     }
   ],
   "inheritedLocalEvidence": [
@@ -502,6 +566,114 @@
         "security-review.md": "a7d7971b81b10821ba88f51166ee5ded82cf5d8f96d9d9113fc3e3856798fccd"
       },
       "result": "HISTORICAL_LOCAL_EVIDENCE"
+    },
+    {
+      "sourceCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+      "applicationArchiveCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+      "reserveApplicationArchiveCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+      "baselineArchiveCommit": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
+      "release": "NEW598/598:308backend,44frontend,9website,237operations;0failure/skip. Lint/build/13prerender/productionaudit high-critical PASS. Exactcandidate frozen before/after.",
+      "database": "FullPG522/522 INHERITEDfrom9bd57ff2, NOT_RERUN; application/schema/lock equivalence enforced. NEWtemporaryPG16.13 restore+faultrecovery46checks,153HTTP; no realDB.",
+      "applicationRecovery": {
+        "scenarios": [
+          {
+            "mode": "startup-rejected",
+            "success": true,
+            "recoveryMs": 1648.1182499999995,
+            "acknowledgedRecordLoss": 0,
+            "tablesPreserved": 67,
+            "registeredUploadsPreserved": 4
+          },
+          {
+            "mode": "database-unready",
+            "success": true,
+            "recoveryMs": 1917.2547079999931,
+            "acknowledgedRecordLoss": 0,
+            "tablesPreserved": 67,
+            "registeredUploadsPreserved": 4
+          },
+          {
+            "mode": "pause-before-import",
+            "success": true,
+            "recoveryMs": 1325.762875000015,
+            "acknowledgedRecordLoss": 0,
+            "tablesPreserved": 67,
+            "registeredUploadsPreserved": 4
+          },
+          {
+            "mode": "client-artifact-mismatch",
+            "success": true,
+            "recoveryMs": 1287.6283750000002,
+            "acknowledgedRecordLoss": 0,
+            "tablesPreserved": 67,
+            "registeredUploadsPreserved": 4
+          }
+        ],
+        "localBudgetMs": 30000,
+        "readinessMaxAgeMs": 1000,
+        "trustedBundle": {
+          "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+          "schemaVersion": 48,
+          "backend": {
+            "sha256": "73a6304a7255141d51b4d6f59cd5483e3c6ae14c34ba0769d5801ccca4fbbf9c",
+            "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a"
+          },
+          "frontend": {
+            "sha256": "032efbd79e09266895181342e23bbdb0104b2141e5a1c0de215e86db5595dacf",
+            "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a"
+          }
+        },
+        "backendArtifactFiles": 188,
+        "frontendArtifactFiles": 148,
+        "distinctPreviousProductionRelease": false,
+        "approvedFallback": false,
+        "approvedExternalRtoRpo": false,
+        "deterministicCrossBuildFrontendProven": false
+      },
+      "money": {
+        "checkedFields": 35,
+        "checkedTables": 13,
+        "fieldRowPairs": 206,
+        "phases": [
+          "schema42",
+          "schema48",
+          "first-restore",
+          "second-restore",
+          "after-application-recovery"
+        ],
+        "snapshotHash": "12ff50996480c837bb1969338ec594997555472b11136fe381e3dd9d9bf761b5",
+        "mismatchCount": 0,
+        "officialDualWriteInsertFields": 35,
+        "officialDualWriteUpdateFields": [
+          "VehicleCost.amount"
+        ]
+      },
+      "recovery": "NEW46/46 checks+153HTTP;4applicationfaults,2database restores67tables/4files and8layoutmatrix. NoautoDBrestoreafterappfailure.",
+      "browser": "NOT_RERUN; historical7/7 separately preserved; frontendJS/CSS/page byteHTTP is notbrowser/E2E. Platform readiness, notPlatformlogin.",
+      "restoreDurationMs": 180926,
+      "cleanup": {
+        "container": "removed-and-verified",
+        "network": "removed-and-verified",
+        "scratch": "removed",
+        "childrenStopped": true,
+        "gatewayClosed": true
+      },
+      "hostedCi": "NOT_RUN",
+      "staging": "NOT_RUN",
+      "externalGatesPassed": 0,
+      "auditRelativeDirectory": "evidence/20261005-application-failure-recovery",
+      "files": {
+        "code-commit.json": "bf251e95aa744923db500bf5fe328df7dce91539cd6eae8b272305728c40fe30",
+        "tested-source-freeze.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
+        "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
+        "release-source.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
+        "rehearsal-initial/result.json": "0d704d6db884b400c2b89194fa8ecf1a7e44642b53f2039c0f9171df5edafc3b",
+        "rehearsal-final/result.json": "90602a116478fbb633f43350d99679497587da33908050dfac86d67ca35c9d79",
+        "cleanup.json": "74add0150fd48e12daa0f243087da5b75c239b01f0da97ae17cbc4e0fab0ede2",
+        "security-review.md": "ac169b3a44fe8b89ef550f86d0940d6517689c499d4cbcd0fa642ff59f7da85a"
+      },
+      "result": "HISTORICAL_LOCAL_EVIDENCE",
+      "securityEquivalenceToCurrentCandidate": false
     }
   ],
   "findingRegistry": {
@@ -532,112 +704,86 @@
       "INT-05",
       "INT-06"
     ],
-    "productionCertification": false
+    "productionCertification": false,
+    "reviewFindingsCodeFixed": [
+      "REV-01",
+      "REV-02",
+      "REV-03"
+    ],
+    "reviewDecisionsOpen": [
+      "PlatformlogoutSLA",
+      "CSPeffectiveheaders",
+      "OAuthUIauthoritativeidentity",
+      "Nextstagingrouting",
+      "currentsecurityfallbackpair"
+    ]
   },
   "currentLocalEvidence": {
-    "sourceCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
-    "applicationArchiveCommit": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
-    "reserveApplicationArchiveCommit": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
+    "sourceCommit": "add3438cc17e23a29a45aad71282e296f45072a1",
+    "release": "NEW624/624:334backend/44frontend/9website/237operations;0fail/skip;lint/build/13prerender/auditPASS. Exactsource frozen before/after.",
+    "database": "NEW540/540:522existing+18credentialtransitions;0fail/skip. TemporaryPG16,48existingmigrations; callerDotenv/optin/databaseURL absent; owned cleanup. First538/538 candidatec1ca saved separately.",
+    "credentialSecurity": {
+      "reviewFindingIds": [
+        "REV-01",
+        "REV-02",
+        "REV-03"
+      ],
+      "unitInvitation": 9,
+      "unitProfile": 14,
+      "newPostgreSQLTests": 18,
+      "preflightBarrier": true,
+      "bothProfileRefreshLockOrders": true,
+      "realPostgreSQLWaiterObserved": true,
+      "foreignTenantPreserved": true,
+      "jwtSignerSynthetic": true,
+      "postgresAuditFailureTested": false,
+      "pendingResetInvalidationScope": "tokens present during transaction"
+    },
+    "findingCommits": [
+      "c03bd422aa843eb73c2f7d7636ea839c378bcac7",
+      "e8b2173367c06485954b0deba67c7436e7e5e7fa",
+      "add3438cc17e23a29a45aad71282e296f45072a1"
+    ],
+    "review": "Independent static review no blocker including final lock/waiter/barrier tests; runtime evidence by root.",
+    "browser": "NOT_RERUN;7historical. No newHTTPS/Platformlogin or email/provider.",
+    "applicationRecovery": "NOT_RERUN. Prior46checks/153HTTP historical;b533/9bd do not include REV01/02,notcurrent fallback.",
+    "approvedFallback": false,
+    "reserveApplicationArchiveCommit": null,
     "baselineArchiveCommit": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
-    "release": "NEW598/598:308backend,44frontend,9website,237operations;0failure/skip. Lint/build/13prerender/productionaudit high-critical PASS. Exactcandidate frozen before/after.",
-    "database": "FullPG522/522 INHERITEDfrom9bd57ff2, NOT_RERUN; application/schema/lock equivalence enforced. NEWtemporaryPG16.13 restore+faultrecovery46checks,153HTTP; no realDB.",
-    "applicationRecovery": {
-      "scenarios": [
-        {
-          "mode": "startup-rejected",
-          "success": true,
-          "recoveryMs": 1648.1182499999995,
-          "acknowledgedRecordLoss": 0,
-          "tablesPreserved": 67,
-          "registeredUploadsPreserved": 4
-        },
-        {
-          "mode": "database-unready",
-          "success": true,
-          "recoveryMs": 1917.2547079999931,
-          "acknowledgedRecordLoss": 0,
-          "tablesPreserved": 67,
-          "registeredUploadsPreserved": 4
-        },
-        {
-          "mode": "pause-before-import",
-          "success": true,
-          "recoveryMs": 1325.762875000015,
-          "acknowledgedRecordLoss": 0,
-          "tablesPreserved": 67,
-          "registeredUploadsPreserved": 4
-        },
-        {
-          "mode": "client-artifact-mismatch",
-          "success": true,
-          "recoveryMs": 1287.6283750000002,
-          "acknowledgedRecordLoss": 0,
-          "tablesPreserved": 67,
-          "registeredUploadsPreserved": 4
-        }
-      ],
-      "localBudgetMs": 30000,
-      "readinessMaxAgeMs": 1000,
-      "trustedBundle": {
-        "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a",
-        "schemaVersion": 48,
-        "backend": {
-          "sha256": "73a6304a7255141d51b4d6f59cd5483e3c6ae14c34ba0769d5801ccca4fbbf9c",
-          "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a"
-        },
-        "frontend": {
-          "sha256": "032efbd79e09266895181342e23bbdb0104b2141e5a1c0de215e86db5595dacf",
-          "sourceSha": "9bd57ff2f935a3a56205f381b41d35bfc982dd9a"
-        }
-      },
-      "backendArtifactFiles": 188,
-      "frontendArtifactFiles": 148,
-      "distinctPreviousProductionRelease": false,
-      "approvedFallback": false,
-      "approvedExternalRtoRpo": false,
-      "deterministicCrossBuildFrontendProven": false
-    },
-    "money": {
-      "checkedFields": 35,
-      "checkedTables": 13,
-      "fieldRowPairs": 206,
-      "phases": [
-        "schema42",
-        "schema48",
-        "first-restore",
-        "second-restore",
-        "after-application-recovery"
-      ],
-      "snapshotHash": "12ff50996480c837bb1969338ec594997555472b11136fe381e3dd9d9bf761b5",
-      "mismatchCount": 0,
-      "officialDualWriteInsertFields": 35,
-      "officialDualWriteUpdateFields": [
-        "VehicleCost.amount"
-      ]
-    },
-    "recovery": "NEW46/46 checks+153HTTP;4applicationfaults,2database restores67tables/4files and8layoutmatrix. NoautoDBrestoreafterappfailure.",
-    "browser": "NOT_RERUN; historical7/7 separately preserved; frontendJS/CSS/page byteHTTP is notbrowser/E2E. Platform readiness, notPlatformlogin.",
-    "restoreDurationMs": 180926,
     "cleanup": {
-      "container": "removed-and-verified",
-      "network": "removed-and-verified",
-      "scratch": "removed",
-      "childrenStopped": true,
-      "gatewayClosed": true
+      "databaseRunnerCleanupReported": true,
+      "databaseRunnerExit": 0,
+      "ownedTemporaryDatabaseNameFilter": "^/fleetum_verify_db_[0-9]+$",
+      "observedRemainingContainers": [],
+      "dockerListExit": 0,
+      "checkMode": "read-only after final database run",
+      "productionTouched": false
     },
     "hostedCi": "NOT_RUN",
     "staging": "NOT_RUN",
     "externalGatesPassed": 0,
-    "auditRelativeDirectory": "evidence/20261005-application-failure-recovery",
+    "auditRelativeDirectory": "evidence/20261006-account-security-review",
     "files": {
-      "code-commit.json": "bf251e95aa744923db500bf5fe328df7dce91539cd6eae8b272305728c40fe30",
-      "tested-source-freeze.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
+      "code-commit.json": "db4e7acca2318cfdf7854345c24ead5568fb77a95ca9e3e9935b5cb25669280d",
+      "tested-source-freeze.json": "907dafd81d254c3f36eaf79ce44ef0f53361c875e11d16052ab0b6677a4567a0",
+      "database-result.json": "bbf5b1acae1030162ff67a349b72d274618a53d6066a977d0019812a41dbf8ff",
       "release-result.json": "57d2fe67e5be18652216249cc68633520cbcffc2b9e291ba8457af8a957fedc6",
-      "release-source.json": "5636479c35be861eec7b2253816a140999d145597c3211e62289951bedfa502f",
-      "rehearsal-initial/result.json": "0d704d6db884b400c2b89194fa8ecf1a7e44642b53f2039c0f9171df5edafc3b",
-      "rehearsal-final/result.json": "90602a116478fbb633f43350d99679497587da33908050dfac86d67ca35c9d79",
-      "cleanup.json": "74add0150fd48e12daa0f243087da5b75c239b01f0da97ae17cbc4e0fab0ede2",
-      "security-review.md": "ac169b3a44fe8b89ef550f86d0940d6517689c499d4cbcd0fa642ff59f7da85a"
+      "release-source.json": "907dafd81d254c3f36eaf79ce44ef0f53361c875e11d16052ab0b6677a4567a0",
+      "test-summary.json": "52ae0a4f9eac4a2ee0477cc36a2af80eed864997c1d7513327d8d5eaedcec68b",
+      "security-review.md": "ac38c007db8eb6362a320517ea7b64ace3a9386ba28e4c6fb5c9f37999be1ca2",
+      "cleanup.json": "4df986dd0198f5d0d550d32599c6a7641d80786e6ab70ca03c8d3f6fd7011ab3",
+      "credential-only-database.log": "6276d78abfbf183d76a60c8a14073febbf20f8564ed56b91eff7fdc6fbdced0c",
+      "credential-only-database-result.json": "bbf5b1acae1030162ff67a349b72d274618a53d6066a977d0019812a41dbf8ff",
+      "credential-only-candidate.json": "7431a509f5c09efa968e65c61b2ec3992ecb4eac52f8831a7c2e4a631b17ca07",
+      "credential-only-candidate.diff": "678a7f382ec6558ae7193bea4c7ffea2f9120cc406e0fc7c5d30d112e8921a3b",
+      "credential-only-tested-source-freeze.json": "2638cd772c26fe12d38005d6241a3b792c57c53a39cfc0be4930359a126e5cdf",
+      "dependency-blocked-release.log": "925c772fce8aa896d2c2937efea92775f3faf978535d462e0d51333c8269c282",
+      "dependency-blocked-release-result.json": "cf6eed38ccc8a4d36d4c60c49280748e80ade00d7930a92ebc5ed26ff7a051a7",
+      "dependency-blocked-release-source.json": "2638cd772c26fe12d38005d6241a3b792c57c53a39cfc0be4930359a126e5cdf",
+      "dependency-audit-before.json": "3e1184089978c2694e60e92e537fb1d39b65782136a9ad8f35f4cc16d072c153",
+      "dependency-audit-before-retry.json": "3e1184089978c2694e60e92e537fb1d39b65782136a9ad8f35f4cc16d072c153",
+      "dependency-advisory.json": "63ca55c2662a2ef42f20153ae4b62444afc2b418c58768b67e1dc8c439bd2f59",
+      "dependency-runtime.json": "4988631dbeba191809c814046dbfb46deea33e359648cb61138afa39498fbd68"
     }
   }
 }

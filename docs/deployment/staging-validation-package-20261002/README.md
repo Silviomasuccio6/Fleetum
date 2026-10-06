@@ -1,20 +1,19 @@
-# Fleetum — recupero applicativo verificato localmente,5ottobre2026
+# Fleetum — revisione integrata e credenziali,6ottobre2026
 
-**Pronto per revisione locale.** Candidato `b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c`, tree `2fa16975b0b50800d16a6aff0926293cf4d9656b`, branch `codex/verify-application-failure-recovery`, ref `codex/application-recovery-source-candidate`. Documento di chiusura eHEAD separati. Correzioni in11file ops/fixture/test; backend/frontend/schema/dipendenze/workflow production invariati. Non integrato redesign.
+**Pronto per revisione locale.** Candidato `add3438cc17e23a29a45aad71282e296f45072a1`, tree `c213e764e6e52ebe34a9bdd3e3566010916d0905`, branch `codex/fix-invite-activation-security-20261006`, ref `codex/invite-profile-security-source-candidate`. HEAD documentale distinto. Due vulnerabilità High e una dipendenza Critical corrette: invito soloINVITED monouso e cambio password conCAS tenant/stato/hash precedente; invalidazione reset e revoca atomiche. Contratto logoutAllDevicesfalse conservato. Zero migrazioni/UI/productionworkflow nuove; override proxy-addr2.0.8 e unica voce lock aggiornata, nessuna nuova dipendenza.
 
-**Release598/598** (308backend/44frontend/9website/237operations), lint/build/13prerender/auditPASS; **recovery46/46+153HTTP**. Quattro guasti reali locali: config invalida, health200/dbunready, startupSIGKILL, client errato conAPIpronta. Riserva9bd security-equivalente, mantenimento in manutenzione fino a verifiche della coppia/ready/dati. Riapertura1.3–1.9s;67tabelle e4upload invariati. Denaro35campi/13tabelle/206coppie in5fasi, due restore e8layout. PostgreSQL16.13 tmpfs sintetico; processi/gateway/container/network/scratch rimossi. Prima provaFAILconservata, causa/verificatore corretto e run finale distinto.
+**Release624/624**(334backend/44frontend/9website/237ops), lint/build/13prerender/auditPASS; **PostgreSQL540/540**(522regressioni+18nuoveprove), zero fail/skip. Barriere reali ai preflight e PIDwaiterPostgreSQL per entrambi ordini password/refresh; replaynegato, tenantB invariato, rollbackvero. PrimaPG538PASS conservata. SignerJWTstub, auditfailureunit soltanto; niente nuovaauthHTTPS/browser. PG16temporaneo, dotenvdevnull, cleanenv ecleanup.
 
-FullPG522/522 è ereditato, non nuovo run. Browser7/7 storico; nessun nuovo browser/Platformlogin. ImmaginiOCI e release precedente distinta non testate; hash frontend differisce tra build indipendenti: prova sulla coppia concreta congelata dentro il run. Budget30s nonSLAapprovato. Backend reserve invariato e tutte le appfix preservate per confronto imposto.
+**0/19gate esterni PASS.** Reviewer/owner, target/control/digest, workload e soglie non approvati. [Scheda decisioni](../staging-decision-packet-20261006.md) con proposte chiaramente non approvate, recoverylock e inputprecisi. [Rapporto integrato](../../verification/integrated-security-review-20261006.md). Vecchia riserva9bd e candidatob533 precedono nuovi fix: NON fallbackequivalenteattuale. Recovery46/153HTTP e browser7 precedenti sono storico, NON rieseguiti. Buildtestfrontend nonartefattorelease; serve pairproductionimmutabile.
 
-**0/19gate esterni PASS.** Reviewer/owner, control/versioni/digest effettivi e budget/approvazioni restano da definire. CIhosted, staging, provider, storage/mountlive e osservabilità live da verificare previa autorizzazione distinta. Finding originali37 invariati:26corretti,2parziali,4redesign,5marketing. Nessun push/PR/dispatch/SSH/merge/deploy/main/env reale/email/pagamento.
+Registrooriginale37:26nelcodice/2parziali/4redesign/5marketing; INT01..06 eREV01/02 corretti nelcandidato, senza certificazione produzione. Nuove decisioniPlatform/CSP/callbackUI/Next/fallback documentate. Nessun push/PR/merge/dispatch/SSH/deploy/provider/envreale/email/pagamento.
 
-- [Nuovo runbook](../application-failure-recovery-20261005.md), [denaro/storage](../money-storage-compatibility-20261005.md), [restore](../restore-recovery-20261005.md).
-- [Registro](gate-register.json), [record pendente](execution-record.template.json), [evidenze](evidence-index.json).
-- [Migrazioni](migration-inventory.json), [sorgenti](inspected-source.json), [freeze](package-hashes.json).
+- [Registro](gate-register.json),[record pending](execution-record.template.json),[evidenze](evidence-index.json).
+- [Migrazioni](migration-inventory.json),[sorgenti](inspected-source.json),[freeze](package-hashes.json).
+- Runbook recupero precedente: [application-failure-recovery](../application-failure-recovery-20261005.md), storico da rieseguire sul nuovo pair.
 
 ```sh
-python3 docs/deployment/staging-validation-package-20261002/validate-package.py \
-  --source-root . --audit-root /Users/silvio/Documents/Playground/Fleetum-audit-20260909
+python3 docs/deployment/staging-validation-package-20261002/validate-package.py --source-root . --audit-root /Users/silvio/Documents/Playground/Fleetum-audit-20260909
 ```
 
-Il validator controlla coerenza/hash, non autenticità/sufficienza di prove. **Prossimo passo:** revisione umana integrata e definizione di release/digest/owner/budget per eventuale staging separato. Non usare merge main per avviare CI.
+Il validator prova coerenza ehash, non autentica le evidenze né assegna approvazioni. Non merge/pushmain per avviareCI: può avviare produzione. Prima di attività esterne definire e approvare i perimetri della scheda.

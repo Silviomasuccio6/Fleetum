@@ -1,5 +1,5 @@
 {
-  "candidateSha": "b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c",
+  "candidateSha": "add3438cc17e23a29a45aad71282e296f45072a1",
   "scope": "Sorgenti e .example pubblici; nessun env reale",
   "sha256": {
     ".github/workflows/ci.yml": "86fa88d273ad8d5995ffef871d735e810272a6a38ddf2024601953b314fddc51",
@@ -53,7 +53,7 @@
     "ops/verify-local-rehearsal.mjs": "b99feb45dbe959132dd8fdc4608c279ff3e985961df8c51e64f3ffafadeb62f3",
     "ops/verify-migration-compatibility.sh": "88f6445baedeb6a2a361094989e83e7e5ccbcccb715b7b3ed7d954d95663788d",
     "ops/verify-restore-recovery.mjs": "33e55dba5203dd8a59c2da97ceb831f3886e352f58e4ad30a27740e394f21975",
-    "package.json": "c4d0f9ef0a12f8e19a525fc2527218fa6a84de88656aa552e81fa49f13d6a595",
+    "package.json": "b1779ffd3aed6c052df79bfda22f7ca76ba71900ead4d9b3656c4ff38471b708",
     "playwright.config.ts": "a8c73797ba481dab2d458c053b0f1f8bb9d041a1b1ee65ec8fa44efa044b3324",
     "tests/e2e/global-setup.mts": "0486e7455aa60f016942346d0ea9131f75929ed049dca0f5895853b63ed94113",
     "ops/tests/restore-recovery-storage.test.mjs": "d71e7027675def61859107a09a6721dc7f88f8710a15e45c9d9f2f379c2198f0",
@@ -75,6 +75,15 @@
     "docs/deployment/application-failure-recovery-20261005.md": "7a4740230c3cc54cdd699eb22c694768f7002ee29367a35861108a0f05d66e15",
     "ops/tests/application-recovery-option.test.mjs": "7abc2325d1800e4cf9466cff62d79b2844cd3d20f09379b06fede22c07de286f",
     "ops/fixtures/application-recovery-server.mjs": "985b3c395b243faf8c95e473eff967f25d95891399c1281e9e7e31af76c64d2e",
-    "ops/tests/application-recovery-policy.test.mjs": "4526af65f64ab6d610508df6411ff96b8691a19f09183a45c61f46e84f3e2330"
+    "ops/tests/application-recovery-policy.test.mjs": "4526af65f64ab6d610508df6411ff96b8691a19f09183a45c61f46e84f3e2330",
+    "docs/verification/integrated-security-review-20261006.md": "4772bbe1d8c08cc1bc1d63fda9e0b5024f12cd143157f63b0703bb14d2c4dcbe",
+    "docs/deployment/staging-decision-packet-20261006.md": "5893171a3f871845369b724dedf7039acc5f8bfbc1cd7c4af3c4b55ab922ef38",
+    "backend/tests/auth-invitation-security.test.ts": "fe12cad05adfbc9bb8ef3a5398002e5634e17c291cbaefcf78af9611e9ea4b06",
+    "package-lock.json": "f89cd846dde3239ab84202b55e2d46268deee2c5f5b28038773f5727870f9eb6",
+    "backend/src/application/usecases/auth/manage-profile-usecase.ts": "d562dd5463e6787d7f182a687183f7f069ded92b9912c8abef2bca12f0947933",
+    "backend/src/application/usecases/auth/accept-invite-usecase.ts": "694fc4d1a468a5044912dbb4a8db8e2f3c3916742263851b85b47fcc9a21c3b8",
+    "backend/tests/profile-password-security.test.ts": "41b3d54e1870d94a706f4781f708b498f1c2e562f5f722ba34c79becbaefeb35",
+    "backend/tests/proxy-trust-subnet-security.test.ts": "1f1c37dae5e1e96d30b60dd30a33d1f89ebda3082e7c29f2a1f73a82c23528ce",
+    "backend/tests/security/account-credential-transitions.test.ts": "6bcc5dba30ab4aaefdf68bb5bc763b813961f9fed6797ff6afc77b711d852efa"
   }
 }

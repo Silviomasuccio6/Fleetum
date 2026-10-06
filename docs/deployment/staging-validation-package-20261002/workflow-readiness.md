@@ -149,3 +149,8 @@ Candidato `9bd57ff2f935a3a56205f381b41d35bfc982dd9a`; dettagli nel [runbook](../
 ## Aggiornamento locale guasto e recupero — 5 ottobre 2026
 
 Candidato `b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c`; [runbook](../application-failure-recovery-20261005.md). NEWrelease598test e recovery46/153HTTP;4guasti1.3–1.9s,67tabelle/4file/35campi in5fasi. Nessuna modifica ai workflow/application UI. FullPG522 e browser7 sono storici. Riserva9bd mantiene appfix; non distinctpreviousrelease né immaginiOCI. Buildfrontend non deterministico tra run; ogni pair concreto congelato/hash prima/dopo. Budget30s/readiness1s locali, non autorizzazioni o SLA esterni. Tutti19gate esterni PENDING.
+
+
+## Revisione e credenziali — 6 ottobre 2026
+
+Candidato `add3438cc17e23a29a45aad71282e296f45072a1`. REV01/02 corretti; nuovoPG540/540 e release624/624. [Decisioni](../staging-decision-packet-20261006.md). Prove di recovery5ottobre storiche e riserva9bd/b533 non equivalente ai nuovi fix. Nessun nuovo provider/browser/hostedCI/staging/HTTPS/Platformlogin. Nuovo pairsecurityequivalente e budget/operatori/digest da definire;0/19gateesterni PASS. Le nuove proposte nelpacket NON compilano il recordbudgetapprovato. Nessun workflow modificato qui.
