@@ -159,3 +159,8 @@ Candidato `add3438cc17e23a29a45aad71282e296f45072a1`. REV01/02 corretti; nuovoPG
 ## Sicurezza client/Platform — 7 ottobre 2026
 
 Candidato `dabbb8862cbce2c48bfafa0413781b35fb582348`; PostgreSQL 552, release696, build production e browser/Caddy locali. [Rapporto](../../verification/client-platform-security-20261007.md). Nessun nuovo workflow, provider, CI hosted o staging reale; 0/19 esterni PASS. CSP script e storage bearer restano aperti, nuova riserva e recovery del nuovo pair necessari.
+
+
+## Production build recovery — 7 ottobre 2026
+
+Candidato tooling `ecb8816f27222cb4e5411f94083a2059da81a213`; applicazione e riserva `dabbb8862cbce2c48bfafa0413781b35fb582348` equivalenti. Recovery 49 checks / 169 HTTP, release 715 test, build production e runtime fixture test. Revoca Platform e stack immagini caricati attestati localmente; recupero sito Next e fallback OCI distinto non coperti. [Rapporto](../../verification/production-build-recovery-20261007.md). Nessun nuovo workflow, hosted CI, provider o staging reale; 0/19 gate esterni PASS.

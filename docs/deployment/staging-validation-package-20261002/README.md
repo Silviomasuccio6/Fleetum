@@ -1,15 +1,20 @@
-# Fleetum — sicurezza client/Platform, 7 ottobre 2026
+# Fleetum — production build recovery, 7 ottobre 2026
 
-Candidato `dabbb8862cbce2c48bfafa0413781b35fb582348`, tree `cef82dfa74ff1e024fb95132a718c1f8794bfac8`, branch `codex/fix-client-platform-security-20261007`, ref `codex/client-platform-security-source-candidate`. HEAD documentale distinto. [Rapporto](../../verification/client-platform-security-20261007.md).
+Candidato tooling `ecb8816f27222cb4e5411f94083a2059da81a213`, tree `d7c959e3b45101ffafde4a33f8f93b460e4f25e3`, branch `codex/verify-production-recovery-20261007`, ref `codex/production-recovery-source-candidate`.
+Applicazione/riserva `dabbb8862cbce2c48bfafa0413781b35fb582348`; 557 percorsi app equivalenti; zero dipendenze/migrazioni nuove.
+HEAD documentale successivo distinto. [Rapporto](../../verification/production-build-recovery-20261007.md).
 
-PostgreSQL **552/552**, release **696/696** (348/93/9/246), zero failure/skip; build production, lint/prerender/audit PASS. Callback da auth/me, revoca Platform persistente con retry e guardie contro risposte obsolete, routing Next/SPA staging e CSP basale cumulativa. Browser/API sintetici e Caddy locale attestati separatamente.
+Recovery **49 checks / 169 HTTP**, 4 guasti e 2 restore;
+release **715/715** (348/93/9/265), zero failure/skip.
+Compilazione backend/frontend production, subprocessi fixture test, revoca Platform persistente con sibling ammesso,
+manifest dist e identità native Sharp/librsvg realmente caricati. Next nativo è inventariato; recupero sito Next non coperto.
 
-**0/19 gate esterni PASS**. Storage bearer client e CSP script/produzione restano aperti; privacy/legacy, riserva aggiornata, recupero sul nuovo pair e target/operatori/budget/autorizzazioni pendenti. Nessun push/merge/deploy/provider/env reale. Registro originale di 37 finding: 26/2/4/5, redesign e marketing separati.
+**0/19 gate esterni PASS**, nessun owner, budget, SLA/RTO/RPO o autorizzazione inventati.
+Riserva della stessa applicazione, nessuna release precedente distinta/OCI approvata.
+Nessuna nuova prova browser/E2E, provider, hosted CI o staging esterno; nessun push/merge/deploy/env reale.
+Registro originale 37 finding stabile: 26/2/4/5; redesign e marketing restano separati.
 
-[Registro](gate-register.json), [record](execution-record.template.json), [evidenze](evidence-index.json), [migrazioni](migration-inventory.json), [sorgenti](inspected-source.json). La [scheda del 6 ottobre](../staging-decision-packet-20261006.md) è storica per l'identità candidato: il presente README/registro e il rapporto 7 ottobre prevalgono. Le soglie allora proposte restano non approvate. I precedenti recovery/browser tenant non sono nuove prove di questo SHA.
-
-```sh
-python3 docs/deployment/staging-validation-package-20261002/validate-package.py --source-root . --audit-root /Users/silvio/Documents/Playground/Fleetum-audit-20260909
-```
-
-Il validator controlla coerenza/hash; non autentica evidenze né assegna owner o approvazioni. Nessun merge main per avviare CI.
+[Registro](gate-register.json), [record](execution-record.template.json), [evidenze](evidence-index.json),
+[migrazioni](migration-inventory.json), [sorgenti](inspected-source.json).
+I report precedenti restano storici per le rispettive identità; il presente README e il nuovo rapporto descrivono questa tranche.
+Il validator controlla coerenza/hash e non autentica prove, assegna owner o autorizza deploy. Nessun merge main per avviare CI.
