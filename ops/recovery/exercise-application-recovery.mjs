@@ -6,10 +6,45 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRecoveryPolicy, transitionRecovery } from "./application-recovery-policy.mjs";
+import { versionAtLeast } from "../fixtures/restore-recovery-security.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const nativeLimits = ["This receipt covers the loaded local host image stack, not a deployed container or live production.", "Dist artifact manifests do not cover node_modules or native dependencies."];
+const missingNextLimit = "Next is not installed in this archive; its native image runtime is not covered.";
+const linkedLibraryLimit = "The runtime did not enumerate a separate loaded libvips shared library; its linked librsvg identity is limited to the loaded runtime version and addon hash.";
+
+// Retain only bounded version/byte identities and fixed coverage limits. A
+// listening process without patched loaded-native evidence cannot reopen.
+export function validateNativeImageRuntimeReceipt(value, expected) {
+  const invalid = () => { throw new Error("Missing or invalid patched native image runtime receipt"); };
+  if (value?.format !== "fleetum-native-image-runtime-v1" || value.localOnly !== true || !Array.isArray(value.runtimes) || value.runtimes.length !== 2 || JSON.stringify(value.limits) !== JSON.stringify(nativeLimits)) invalid();
+  const runtimes = [];
+  for (const name of ["backend", "Next"]) {
+    const matching = value.runtimes.filter((item) => item?.name === name);
+    if (matching.length !== 1) invalid();
+    const runtime = matching[0];
+    if (name === "Next" && runtime.status === "not-installed") {
+      if (JSON.stringify(runtime.limits) !== JSON.stringify([missingNextLimit])) invalid();
+      runtimes.push({ name, status: "not-installed", limits: [missingNextLimit] }); continue;
+    }
+    if (runtime.status !== "verified" || !versionAtLeast(runtime.versions?.sharp, [0, 35, 5]) || !versionAtLeast(runtime.versions?.rsvg, [2, 63, 2]) || runtime.syntheticSvg?.width !== 10 || runtime.syntheticSvg?.height !== 5 || runtime.syntheticSvg?.format !== "png" || !Array.isArray(runtime.binaries) || !runtime.binaries.length) invalid();
+    const binaries = runtime.binaries.map((binary) => {
+      const file = binary?.file;
+      if (typeof file !== "string" || path.posix.normalize(file) !== file || file.split("/").some((part) => part === "." || part === "..") || !/^(?:[A-Za-z0-9@._-]+\/)*node_modules\/(?:@img\/sharp[^/]*|sharp)\/[A-Za-z0-9@._/-]+\.(?:node|dylib|so(?:\.\d+)*)$/.test(file) || !/^[a-f0-9]{64}$/.test(binary.sha256 ?? "") || !Number.isSafeInteger(binary.sizeBytes) || binary.sizeBytes < 1) invalid();
+      return { file, sha256: binary.sha256, sizeBytes: binary.sizeBytes };
+    }).sort((a, b) => a.file.localeCompare(b.file));
+    if (new Set(binaries.map((item) => item.file)).size !== binaries.length || !binaries.some((item) => item.file.endsWith(".node"))) invalid();
+    const limits = binaries.some((item) => /vips/i.test(item.file) && !item.file.endsWith(".node")) ? [] : [linkedLibraryLimit];
+    if (JSON.stringify(runtime.limits) !== JSON.stringify(limits)) invalid();
+    runtimes.push({ name, status: "verified", versions: { sharp: runtime.versions.sharp, rsvg: runtime.versions.rsvg }, syntheticSvg: { width: 10, height: 5, format: "png" }, binaries, limits });
+  }
+  const receipt = { format: "fleetum-native-image-runtime-v1", localOnly: true, runtimes, limits: [...nativeLimits] };
+  if (expected && JSON.stringify(receipt) !== JSON.stringify(expected)) throw new Error("Native image runtime changed before traffic reopening");
+  return receipt;
+}
 
 export async function finalizeApplicationRecovery(actions) {
   const failures = [];
@@ -34,13 +69,15 @@ export async function artifactInventory(directory) {
   await walk(); assert(files.length > 0); return { count: files.length, sha256: digest(JSON.stringify(files)), files };
 }
 
-export async function exerciseApplicationRecovery({ archiveRoot, sourceSha, env, snapshot, runHttpSmoke, budgetMs = 30000 }) {
+export async function exerciseApplicationRecovery({ archiveRoot, sourceSha, buildNodeEnv = "test", env, snapshot, runHttpSmoke, budgetMs = 30000 }) {
+  assert.equal(env?.NODE_ENV, "test", "Application recovery fixtures require NODE_ENV=test");
+  assert(["test", "production"].includes(buildNodeEnv), "Unknown application build mode");
   assert(/^\/private\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/reserve$/.test(archiveRoot));
   assert(/^[a-f0-9]{40}$/.test(sourceSha)); assert.equal(budgetMs, 30000);
   const backendDir = path.join(archiveRoot, "backend/dist"); const frontendDir = path.join(archiveRoot, "frontend/dist");
   const backend = await artifactInventory(backendDir); const frontend = await artifactInventory(frontendDir);
   const bundle = { sourceSha, schemaVersion: 48, backend: { sha256: backend.sha256, sourceSha }, frontend: { sha256: frontend.sha256, sourceSha } };
-  const result = { success: false, trustedBundle: bundle, backendFiles: backend.count, frontendFiles: frontend.count, artifactInventories: { backend, frontend }, localBudgetMs: budgetMs, approvedExternalRtoRpo: false, previousProductionReleaseApproved: false, claims: "Recovery of a pinned tested local application/client pair after synthetic process/configuration faults; not rollback to a distinct previous production release or OCI images", scenarios: [], cleanup: {} };
+  const result = { success: false, trustedBundle: bundle, buildNodeEnv, fixtureNodeEnv: env.NODE_ENV, backendFiles: backend.count, frontendFiles: frontend.count, artifactInventories: { backend, frontend }, localBudgetMs: budgetMs, approvedExternalRtoRpo: false, previousProductionReleaseApproved: false, claims: "Recovery of a pinned tested local application/client pair after synthetic process/configuration faults; not rollback to a distinct previous production release or OCI images; production build mode does not exercise production runtime behavior", scenarios: [], cleanup: {} };
   const children = new Set(); let active; let serving = false; let upstream = null; let generation = 0;
   const abortController = new AbortController();
   const stopOwned = async (owned, signal = "SIGTERM") => {
@@ -78,7 +115,15 @@ export async function exerciseApplicationRecovery({ archiveRoot, sourceSha, env,
     while (performance.now() < deadline) {
       abortController.signal.throwIfAborted(); if (owned.error) throw new Error(owned.error);
       const value = owned.receipts.find((item) => item.phase === phase);
-      if (value) { assert.equal(value.generation, owned.processGeneration); assert.equal(value.sourceSha, sourceSha); return value; }
+      if (value) {
+        assert.equal(value.generation, owned.processGeneration); assert.equal(value.sourceSha, sourceSha);
+        if (phase === "listening") {
+          const nativeImageRuntime = validateNativeImageRuntimeReceipt(value.nativeImageRuntime, result.nativeImageRuntime);
+          result.nativeImageRuntime ??= nativeImageRuntime;
+          return { ...value, nativeImageRuntime };
+        }
+        return value;
+      }
       if (owned.child.exitCode !== null || owned.child.signalCode !== null) throw new Error("Owned application exited before required phase");
       await pause(25);
     }
@@ -146,7 +191,7 @@ export async function exerciseApplicationRecovery({ archiveRoot, sourceSha, env,
       const page = await request(`${base}/`); assert.equal(page.status, 200); assert.equal(digest(Buffer.from(await page.arrayBuffer())), frontend.files.find((f) => f.path === "index.html").sha256);
       const script = frontend.files.find((f) => f.path.startsWith("assets/") && f.path.endsWith(".js")); assert(script); const js = await request(`${base}/${script.path}`); assert.equal(js.status, 200); assert.equal(digest(Buffer.from(await js.arrayBuffer())), script.sha256); const style = frontend.files.find((f) => f.path.startsWith("assets/") && f.path.endsWith(".css")); assert(style); const css = await request(`${base}/${style.path}`); assert.equal(css.status, 200); assert.equal(css.headers.get("content-type"), "text/css"); assert.equal(digest(Buffer.from(await css.arrayBuffer())), style.sha256); checks.push("frontend-page-javascript-and-css-restored-byte-for-byte");
       await runHttpSmoke(base, `after-${mode}`); checks.push("real-cookie-csrf-tenant-business-and-modern-legacy-downloads-recovered");
-      result.scenarios.push({ mode, success: true, checks, recoveryMs: state.rtoMs, acknowledgedDataLoss: state.rpoAcknowledgedRecordsLost, dataLossScope: "all synthetic database records present at failure; registered local upload byte inventory preserved", registeredUploadsPreserved: uploadBefore.count, uploadBeforeSha256: uploadBefore.sha256, uploadAfterSha256: uploadAfter.sha256, tablesPreserved: before.tableCount, recordsPreserved: dataProof(before).count, beforeSha256: before.sha256, afterSha256: after.sha256, generation: state.generation, frontendAndBackendSameTrustedSource: true });
+      result.scenarios.push({ mode, success: true, checks, recoveryMs: state.rtoMs, acknowledgedDataLoss: state.rpoAcknowledgedRecordsLost, dataLossScope: "all synthetic database records present at failure; registered local upload byte inventory preserved", registeredUploadsPreserved: uploadBefore.count, uploadBeforeSha256: uploadBefore.sha256, uploadAfterSha256: uploadAfter.sha256, tablesPreserved: before.tableCount, recordsPreserved: dataProof(before).count, beforeSha256: before.sha256, afterSha256: after.sha256, generation: state.generation, frontendAndBackendSameTrustedSource: true, patchedNativeRuntimeMatchesTrustedPair: true });
       serving = false; await stopOwned(recovered); active = null; upstream = null;
     }
     result.success = true; return result;

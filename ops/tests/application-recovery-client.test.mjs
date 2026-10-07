@@ -5,7 +5,57 @@ import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { artifactInventory } from "../recovery/exercise-application-recovery.mjs";
+import { artifactInventory, exerciseApplicationRecovery, validateNativeImageRuntimeReceipt } from "../recovery/exercise-application-recovery.mjs";
+
+const nativeReceipt = {
+  format: "fleetum-native-image-runtime-v1", localOnly: true,
+  runtimes: [
+    { name: "backend", status: "verified", versions: { sharp: "0.35.5", rsvg: "2.63.2" }, syntheticSvg: { width: 10, height: 5, format: "png" }, binaries: [
+      { file: "node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node", sha256: "a".repeat(64), sizeBytes: 123 },
+      { file: "node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.dylib", sha256: "b".repeat(64), sizeBytes: 456 },
+    ], limits: [] },
+    { name: "Next", status: "not-installed", limits: ["Next is not installed in this archive; its native image runtime is not covered."] },
+  ],
+  limits: ["This receipt covers the loaded local host image stack, not a deployed container or live production.", "Dist artifact manifests do not cover node_modules or native dependencies."],
+};
+
+test("native readiness evidence requires patched versions, canonical binary identities and explicit missing-Next coverage", () => {
+  assert.deepEqual(validateNativeImageRuntimeReceipt(nativeReceipt), nativeReceipt);
+  const tainted = structuredClone(nativeReceipt); tainted.token = "synthetic-token-must-not-be-recorded";
+  tainted.runtimes[0].secret = "synthetic-secret-must-not-be-recorded";
+  assert.deepEqual(validateNativeImageRuntimeReceipt(tainted), nativeReceipt);
+  const invalidValues = [undefined, { ...nativeReceipt, runtimes: [] }];
+  for (const change of [
+    (value) => { value.runtimes[0].versions.sharp = "0.35.4"; },
+    (value) => { value.runtimes[0].versions.rsvg = "2.63.1"; },
+    (value) => { value.runtimes[0].status = "failed"; },
+    (value) => { value.runtimes[0].syntheticSvg.width = 20; },
+    (value) => { value.runtimes[0].binaries = []; },
+    (value) => { value.runtimes[0].binaries[0].file = "../node_modules/sharp/native.node"; },
+    (value) => { value.runtimes[0].binaries[0].file = "/private/tmp/node_modules/sharp/native.node"; },
+    (value) => { value.runtimes[0].binaries[0].sha256 = "not-a-digest"; },
+    (value) => { value.runtimes[0].binaries[0].sizeBytes = 0; },
+    (value) => { value.runtimes[1].limits = []; },
+    (value) => { value.runtimes[1].status = "verified"; },
+  ]) { const value = structuredClone(nativeReceipt); change(value); invalidValues.push(value); }
+  for (const value of invalidValues) assert.throws(() => validateNativeImageRuntimeReceipt(value), /Missing or invalid patched native image runtime receipt/);
+});
+
+test("recovery cannot reopen traffic with a different native version or binary hash than the trusted pair", () => {
+  const trusted = validateNativeImageRuntimeReceipt(nativeReceipt);
+  assert.deepEqual(validateNativeImageRuntimeReceipt(structuredClone(nativeReceipt), trusted), trusted);
+  for (const change of [
+    (value) => { value.runtimes[0].versions.sharp = "0.35.6"; },
+    (value) => { value.runtimes[0].binaries[0].sha256 = "c".repeat(64); },
+  ]) { const changed = structuredClone(nativeReceipt); change(changed); assert.throws(() => validateNativeImageRuntimeReceipt(changed, trusted), /Native image runtime changed before traffic reopening/); }
+});
+
+test("production-built recovery still refuses non-test fixture environments before reading artifacts or starting a child", async () => {
+  for (const nodeEnv of [undefined, "production", "development"]) {
+    await assert.rejects(exerciseApplicationRecovery({ archiveRoot: "/private/tmp/fleetum-restore-recovery-synthetic/reserve", sourceSha: "a".repeat(40), buildNodeEnv: "production", env: { NODE_ENV: nodeEnv } }), { name: "AssertionError", message: /Application recovery fixtures require NODE_ENV=test/ });
+  }
+  await assert.rejects(exerciseApplicationRecovery({ buildNodeEnv: "development", env: { NODE_ENV: "test" } }), { name: "AssertionError", message: /Unknown application build mode/ });
+});
 
 const fixtureUrl = new URL("../fixtures/restore-recovery-http.mjs", import.meta.url).href;
 const rejectedDiagnostic = 'FLEETUM_RESTORE_HTTP_FAILURE {"stepLabel":"import-app","errorName":"AssertionError"}\n';

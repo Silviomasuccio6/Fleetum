@@ -4,6 +4,7 @@ import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { inspectNativeImageRuntimes, PLATFORM_SYNTHETIC_ADMIN_EMAIL, PLATFORM_SYNTHETIC_JWT_SECRET } from "./restore-recovery-security.mjs";
 
 const MARKER = "FLEETUM_APPLICATION_SERVER";
 const MODES = new Set(["trusted", "startup-rejected", "database-unready", "pause-before-import"]);
@@ -77,7 +78,7 @@ async function assertOwnedPaths(config) {
   }
 }
 
-function isolateApplicationEnvironment(config) {
+export function buildServerEnvironment(config) {
   const database = new URL(config.databaseUrl);
   if (config.mode === "database-unready") {
     database.port = "1";
@@ -91,7 +92,7 @@ function isolateApplicationEnvironment(config) {
     HOME: path.join(path.dirname(config.archiveRoot), "home"), TMPDIR: path.dirname(config.archiveRoot),
     FLEETUM_ENVIRONMENT: "production", STORAGE_PROVIDER: "local",
     JWT_SECRET: config.mode === "startup-rejected" ? "short" : "synthetic-restore-jwt-only-000000000000000000000000",
-    PLATFORM_JWT_SECRET: "synthetic-restore-platform-jwt-only-000000000000000000000000000000000000000000000000000000000000",
+    PLATFORM_JWT_SECRET: PLATFORM_SYNTHETIC_JWT_SECRET, PLATFORM_ADMIN_EMAIL: PLATFORM_SYNTHETIC_ADMIN_EMAIL,
     RESEND_API_KEY: "re_ci_placeholder", RESEND_FROM: "Synthetic restore <restore@example.invalid>",
     APP_URL: "http://127.0.0.1:5173", BACKEND_PUBLIC_URL: "http://127.0.0.1:4000",
     CORS_ORIGIN: "http://127.0.0.1:5173", PLATFORM_CORS_ORIGIN: "http://127.0.0.1:5174",
@@ -100,6 +101,11 @@ function isolateApplicationEnvironment(config) {
     PRISMA_HIDE_UPDATE_MESSAGE: "1", CHECKPOINT_DISABLE: "1",
     ...config.engineEnvironment
   };
+  return cleanEnvironment;
+}
+
+function isolateApplicationEnvironment(config) {
+  const cleanEnvironment = buildServerEnvironment(config);
   for (const name of Object.keys(process.env)) delete process.env[name];
   Object.assign(process.env, cleanEnvironment);
   process.chdir(config.archiveRoot);
@@ -178,10 +184,11 @@ async function runServer(config, emit) {
       }
       const { createApp, createPlatformApp } = await import(pathToFileURL(path.join(config.archiveRoot, "backend/dist/app.js")).href);
       ({ prisma } = await import(pathToFileURL(path.join(config.archiveRoot, "backend/dist/infrastructure/database/prisma/client.js")).href));
+      const nativeImageRuntime = await inspectNativeImageRuntimes(config.archiveRoot);
       const api = listen(createApp()); servers.push(api.server);
       const platform = listen(createPlatformApp()); servers.push(platform.server);
       const [apiPort, platformPort] = await Promise.all([api.listening, platform.listening]);
-      await publish({ phase: "listening", apiPort, platformPort, generation: config.generation, sourceSha: config.sourceSha });
+      await publish({ phase: "listening", apiPort, platformPort, generation: config.generation, sourceSha: config.sourceSha, nativeImageRuntime });
       return;
     }
     throw new Error("Ready file already exists");

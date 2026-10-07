@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, access, symlink } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { assertArchiveHasNoRuntimeDotenv, extractCompatibilityFixture, parseHttpFailure, parseRestoreRecoveryOptions, safeHttpFailure, sha256, verifyBackupBundle } from "../verify-restore-recovery.mjs";
+import { assertArchiveHasNoRuntimeDotenv, extractCompatibilityFixture, parseHttpFailure, parseRestoreRecoveryOptions, parseRestoreSecurityReceipt, runRestoreRecoverySecurityFixture, safeHttpFailure, sha256, verifyBackupBundle } from "../verify-restore-recovery.mjs";
 
 const source = "a".repeat(40); const baseline = "b".repeat(40);
 const valid = ["--source-sha", source, "--baseline-sha", baseline, "--evidence-dir", "/private/tmp/fleetum-synthetic-restore-test"];
@@ -29,6 +29,17 @@ test("CLI refuses remote endpoints, Docker contexts and noncanonical filesystem 
   assert.throws(() => parseRestoreRecoveryOptions([...valid, "--context", "production"]));
 });
 
+test("production build without application recovery fails before allocating an evidence directory", async () => {
+  const scratch = await mkdtemp("/private/tmp/fleetum-production-cli-test-");
+  try {
+    const evidence = path.join(scratch, "must-not-be-created");
+    const command = spawnSync(process.execPath, [new URL("../verify-restore-recovery.mjs", import.meta.url).pathname, ...valid.slice(0, 4), "--evidence-dir", evidence, "--production-build"], { encoding: "utf8", env: { PATH: path.dirname(process.execPath) }, timeout: 2000 });
+    assert.equal(command.error, undefined); assert.equal(command.status, 1);
+    assert.match(command.stderr, /Production build requires explicit application recovery/);
+    await assert.rejects(access(evidence), { code: "ENOENT" });
+  } finally { await rm(scratch, { recursive: true, force: true }); }
+});
+
 test("the source compatibility fixture is reused without running the full gate", async () => {
   const script = await readFile(new URL("../verify-migration-compatibility.sh", import.meta.url), "utf8");
   const fixture = extractCompatibilityFixture(script);
@@ -51,6 +62,46 @@ test("HTTP failure diagnostics retain only constant step names and numerical com
   assert.deepEqual(parseHttpFailure(`ignored log\nFLEETUM_RESTORE_HTTP_FAILURE ${JSON.stringify({ ...diagnostic, message: secret })}\n`), diagnostic);
   assert.deepEqual(parseHttpFailure("FLEETUM_RESTORE_HTTP_FAILURE malformed\n"), { stepLabel: "unknown", errorName: "SyntaxError" });
   assert.equal(parseHttpFailure("other log output"), null);
+});
+
+const seededSecurity = { format: "fleetum-restore-security-v1", phase: "seed", localOnly: true, revocationRecords: 1, siblingRevocationRecords: 0, expiresAt: "2026-10-07T12:00:00.000Z", sha256: "c".repeat(64) };
+const securityOutput = (value) => `FLEETUM_RESTORE_SECURITY_JSON ${JSON.stringify(value)}\n`;
+
+test("security receipts preserve only the canonical seeded event proof and reject missing or malformed evidence", () => {
+  const secret = "synthetic-bearer-must-not-be-recorded";
+  assert.deepEqual(parseRestoreSecurityReceipt(securityOutput({ ...seededSecurity, token: secret, error: secret }), "seed"), seededSecurity);
+  for (const output of ["", "FLEETUM_RESTORE_SECURITY_JSON malformed\n", securityOutput(seededSecurity).repeat(2), securityOutput({ ...seededSecurity, phase: "check" }), securityOutput({ ...seededSecurity, revocationRecords: 0 }), securityOutput({ ...seededSecurity, siblingRevocationRecords: 1 }), securityOutput({ ...seededSecurity, sha256: secret }), securityOutput({ ...seededSecurity, expiresAt: "2026-02-30T12:00:00.000Z" })]) {
+    assert.throws(() => parseRestoreSecurityReceipt(output, "seed"), { message: "Security fixture returned an invalid receipt" });
+  }
+  assert.throws(() => parseRestoreSecurityReceipt(securityOutput(seededSecurity), "production"), /Invalid security fixture phase/);
+});
+
+test("security seed and both restore checks use guarded test environments and require the same event identity", async () => {
+  const directory = "/private/tmp/fleetum-restore-recovery-synthetic/source";
+  const calls = [];
+  let output = seededSecurity;
+  const run = async (command, args, label, details) => { calls.push({ command, args, label, ...details }); return { stdout: Buffer.from(securityOutput(output)) }; };
+  const shared = { run, directory, engines: { PRISMA_SCHEMA_ENGINE_BINARY: `${directory}/schema-engine-darwin`, NODE_ENV: "production", DOTENV_CONFIG_PATH: "/private/tmp/must-not-load.env" }, databaseUrl: "postgresql://fleetum_restore:synthetic@127.0.0.1:49152/fleetum_restore_synthetic_source" };
+  const seed = await runRestoreRecoverySecurityFixture({ ...shared, phase: "seed", label: "security-seed" });
+  assert.deepEqual(seed, seededSecurity);
+  output = { ...seededSecurity, phase: "check" };
+  for (const suffix of ["first", "second"]) {
+    const databaseUrl = shared.databaseUrl.replace("_source", `_${suffix}`);
+    assert.deepEqual(await runRestoreRecoverySecurityFixture({ ...shared, databaseUrl, phase: "check", label: `security-${suffix}`, expectedReceipt: seed }), output);
+  }
+  assert.deepEqual(calls.map((call) => call.args), ["seed", "check", "check"].map((phase) => ["--import", "tsx", "restore-recovery-security.mjs", phase, directory]));
+  for (const call of calls) {
+    assert.equal(call.command, process.execPath); assert.equal(call.cwd, directory);
+    assert.equal(call.extraEnv.NODE_ENV, "test"); assert.equal(call.extraEnv.DOTENV_CONFIG_PATH, "/dev/null");
+  }
+  assert(calls[1].extraEnv.DATABASE_URL.endsWith("_first")); assert(calls[2].extraEnv.DATABASE_URL.endsWith("_second"));
+  for (const changed of [{ sha256: "d".repeat(64) }, { expiresAt: "2026-10-08T12:00:00.000Z" }]) {
+    output = { ...seededSecurity, phase: "check", ...changed };
+    await assert.rejects(runRestoreRecoverySecurityFixture({ ...shared, phase: "check", label: "security-mismatch", expectedReceipt: seed }), /differs from the pre-backup seeded event/);
+  }
+  const before = calls.length;
+  await assert.rejects(runRestoreRecoverySecurityFixture({ ...shared, phase: "check", label: "security-missing" }), /requires the pre-backup seeded event identity/);
+  assert.equal(calls.length, before);
 });
 
 test("backup bundle verifies exact SQL bytes and each registered upload", async () => {

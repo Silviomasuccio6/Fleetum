@@ -5,6 +5,13 @@ import http from "node:http";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+// Only bounded fixture receipts may enter recovery evidence. Discard raw app,
+// driver and dependency logs before any import can include credentials/headers.
+const writeReceipt = process.stdout.write.bind(process.stdout);
+const discard = (_chunk, encoding, callback) => { if (typeof encoding === "function") encoding(); else if (typeof callback === "function") callback(); return true; };
+process.stdout.write = discard; process.stderr.write = discard;
 
 // Imported before application modules, including provider SDK construction.
 const realFetch = globalThis.fetch;
@@ -26,10 +33,19 @@ const reportFailure = (error) => {
   const safeNames = new Set(["Error", "AssertionError", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "TimeoutError", "AbortError", "PrismaClientInitializationError", "PrismaClientKnownRequestError", "PrismaClientValidationError"]);
   const diagnostic = { stepLabel, errorName: safeNames.has(error?.name) ? error.name : "Error" };
   for (const [key, value] of [["actual", error?.actual], ["expected", error?.expected], ["status", status]]) if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 2147483647) diagnostic[key] = value;
-  console.log(`FLEETUM_RESTORE_HTTP_FAILURE ${JSON.stringify(diagnostic)}`);
+  writeReceipt(`FLEETUM_RESTORE_HTTP_FAILURE ${JSON.stringify(diagnostic)}\n`);
   process.exitCode = 1;
 };
 try {
+  let platformBase; let securityConfig; let securityFixture;
+  if (process.env.SYNTHETIC_PLATFORM_SECURITY !== undefined || process.env.SYNTHETIC_PLATFORM_HTTP_BASE !== undefined) {
+    stepLabel = "platform-session-revocation";
+    // The historical baseline never imports the current-only helper or service.
+    securityFixture = await import("./restore-recovery-security.mjs");
+    platformBase = securityFixture.parsePlatformHttpBase(process.env);
+    securityConfig = securityFixture.parseSecurityConfig({ argv: ["check", process.cwd()], env: process.env });
+    stepLabel = "import-app";
+  }
   let base;
   if (process.env.SYNTHETIC_HTTP_BASE !== undefined) {
     assert.equal(process.env.SYNTHETIC_APPLICATION_RECOVERY, "true");
@@ -110,7 +126,25 @@ try {
     stepLabel = "download-modern-anonymous";
     assert.equal((await request(route)).status, 401); checks.push("modern-anonymous-file-denied");
   }
-  console.log(`FLEETUM_RESTORE_HTTP_RESULT ${JSON.stringify({ checks, providerCalls: 0, workersStarted: false })}`);
+  if (platformBase) {
+    stepLabel = "platform-session-revocation";
+    if (!prisma) {
+      const relative = process.env.SYNTHETIC_APPLICATION_RECOVERY === "true" ? "backend/dist/infrastructure/database/prisma/client.js" : "backend/src/infrastructure/database/prisma/client.ts";
+      ({ prisma } = await import(pathToFileURL(path.join(securityConfig.archiveRoot, relative)).href));
+    }
+    const persisted = await securityFixture.assertRestoreSecurityState(prisma);
+    const pair = securityFixture.platformFixtureTokens(persisted.expiresAt);
+    status = undefined;
+    const replay = await fetch(`${platformBase}/overview`, { headers: { authorization: `Bearer ${pair.revoked}` }, signal: AbortSignal.timeout(10000) });
+    status = replay.status; assert.equal(replay.status, 401, "revoked-platform-bearer-status");
+    assert.equal((await replay.json()).error, "PLATFORM_SESSION_REVOKED", "durable-platform-revocation-code");
+    checks.push("platform-revoked-valid-bearer-denied");
+    status = undefined;
+    const independent = await fetch(`${platformBase}/overview`, { headers: { authorization: `Bearer ${pair.sibling}` }, signal: AbortSignal.timeout(10000) });
+    status = independent.status; assert.equal(independent.status, 200, "independent-platform-bearer-status");
+    await independent.body?.cancel(); checks.push("platform-independent-bearer-authorized");
+  }
+  writeReceipt(`FLEETUM_RESTORE_HTTP_RESULT ${JSON.stringify({ checks, providerCalls: 0, workersStarted: false })}\n`);
 } catch (error) { reportFailure(error); }
 finally {
   try {

@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseServerConfig } from "../fixtures/application-recovery-server.mjs";
+import { buildServerEnvironment, parseServerConfig } from "../fixtures/application-recovery-server.mjs";
+import { PLATFORM_SYNTHETIC_ADMIN_EMAIL, PLATFORM_SYNTHETIC_JWT_SECRET } from "../fixtures/restore-recovery-security.mjs";
 
 const archiveRoot = "/private/tmp/fleetum-restore-recovery-abcdef/source";
 const generation = "90a7c1b9-30e5-45f8-a5b2-c2df63a74f8e";
@@ -18,6 +19,14 @@ const valid = () => ({
     LOCAL_READY_FILE: `${archiveRoot}/recovery-state/${generation}.json`,
     UPLOAD_DIR: `${archiveRoot}/uploads`
   }
+});
+
+test("clean wrapper environment always shares the producer's synthetic Platform identity and stays in test", () => {
+  const input = valid(); input.env.PLATFORM_JWT_SECRET = "synthetic-caller-override-trap"; input.env.PLATFORM_ADMIN_EMAIL = "synthetic-caller-trap@example.invalid"; input.env.STRIPE_SECRET_KEY = "synthetic-provider-trap";
+  const clean = buildServerEnvironment(parseServerConfig(input));
+  assert.equal(clean.NODE_ENV, "test"); assert.equal(clean.DOTENV_CONFIG_PATH, "/dev/null");
+  assert(clean.PLATFORM_JWT_SECRET === PLATFORM_SYNTHETIC_JWT_SECRET); assert.equal(clean.PLATFORM_ADMIN_EMAIL, PLATFORM_SYNTHETIC_ADMIN_EMAIL);
+  assert.equal(clean.STRIPE_SECRET_KEY, undefined); assert(!Object.values(clean).some(value => typeof value === "string" && value.includes("override-trap")));
 });
 
 test("pure guard accepts an explicitly owned archive and a restored synthetic database", () => {
