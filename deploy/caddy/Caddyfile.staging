@@ -9,7 +9,11 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Baseline only: Next export inline hydration scripts still need build-linked hashes.
+		# Append so stricter upstream policies (Helmet) also remain enforced.
+		+Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
 		-Server
+		defer
 	}
 }
 
@@ -42,11 +46,56 @@ staging.fleetum.it {
 	route {
 		import staging_discovery
 		encode zstd gzip
-		@api path /api/*
-		reverse_proxy @api backend:4000
-		root * /srv/fleetum
-		try_files {path} /index.html
-		file_server
+		handle /api/* {
+			reverse_proxy backend:4000
+		}
+
+		@legacy_software_autonoleggio path /software-autonoleggio /software-autonoleggio/*
+		redir @legacy_software_autonoleggio /prodotto 308
+
+		@legacy_software_rent_a_car path /software-rent-a-car /software-rent-a-car/*
+		redir @legacy_software_rent_a_car /soluzioni 308
+
+		@legacy_contracts path /contratti-noleggio-digitali /contratti-noleggio-digitali/*
+		redir @legacy_contracts /contratti-digitali 308
+
+		@legacy_profitability path /report-redditivita-veicolo /report-redditivita-veicolo/*
+		redir @legacy_profitability /gestionale-flotta 308
+
+		@website_assets path /_next/*
+		handle @website_assets {
+			root * /srv/fleetum-website
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		handle /brand/* {
+			root * /srv/fleetum
+			header Cache-Control "public, max-age=86400"
+			file_server
+		}
+
+		handle /assets/* {
+			root * /srv/fleetum
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		@marketing {
+			path / /accesso /accesso/* /booking-noleggi /booking-noleggi/* /chi-siamo /chi-siamo/* /come-funziona /come-funziona/* /contratti-digitali /contratti-digitali/* /cookie /cookie/* /demo /demo/* /dpa /dpa/* /gestionale-flotta /gestionale-flotta/* /moduli /moduli/* /prezzi /prezzi/* /privacy /privacy/* /prodotto /prodotto/* /scadenze-manutenzione /scadenze-manutenzione/* /sicurezza /sicurezza/* /soluzioni /soluzioni/* /termini /termini/* /tour /tour/* /llms.txt
+		}
+		handle @marketing {
+			root * /srv/fleetum-website
+			try_files {path} {path}/index.html /404.html
+			file_server
+		}
+
+		# Authenticated tenant routes retain the SPA shell, as in production.
+		handle {
+			root * /srv/fleetum
+			try_files {path} /spa.html
+			file_server
+		}
 	}
 }
 
