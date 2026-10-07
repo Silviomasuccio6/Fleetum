@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { PlatformSessionService, platformSessionService } from "../../../application/services/platform-session-service.js";
 import { PlatformAdminService } from "../../../application/services/platform-admin-service.js";
 import { InvoiceService } from "../../../application/services/invoice-service.js";
 import { PlatformConsoleService } from "../../../application/services/platform-console-service.js";
@@ -49,7 +50,8 @@ export class PlatformAdminController {
   constructor(
     private readonly service: PlatformAdminService,
     private readonly invoiceService: InvoiceService,
-    private readonly consoleService: PlatformConsoleService
+    private readonly consoleService: PlatformConsoleService,
+    private readonly sessions: PlatformSessionService = platformSessionService
   ) {}
 
   login = async (req: Request, res: Response) => {
@@ -65,6 +67,14 @@ export class PlatformAdminController {
       res.json({ ...safeResult, trustedDevice: { expiresAt: _trustedDevice.expiresAt.toISOString() } });
       return;
     }
+    res.json(result);
+  };
+
+  logout = async (req: Request, res: Response) => {
+    const token = req.headers.authorization?.slice(7);
+    if (!token) throw new AppError("Token platform mancante", 401, "UNAUTHORIZED");
+    const result = await this.sessions.logout(token);
+    res.setHeader("Cache-Control", "no-store");
     res.json(result);
   };
 

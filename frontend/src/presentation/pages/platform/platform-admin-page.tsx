@@ -987,7 +987,7 @@ export const PlatformAdminPage = () => {
 
   const handlePlatformAuthError = (err: unknown) => {
     if (!isPlatformAuthError(err)) return false;
-    platformAdminUseCases.logout();
+    if (!platformAdminUseCases.clearSessionForAuthError(err)) return true;
     snackbar.error("Sessione platform scaduta o non valida. Effettua di nuovo il login.");
     navigate("/login", { replace: true });
     return true;
