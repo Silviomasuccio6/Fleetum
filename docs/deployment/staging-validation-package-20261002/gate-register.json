@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateSha": "add3438cc17e23a29a45aad71282e296f45072a1",
-  "preparedOn": "2026-10-06",
+  "candidateSha": "dabbb8862cbce2c48bfafa0413781b35fb582348",
+  "preparedOn": "2026-10-07",
   "mode": "PREPARATION_ONLY",
   "productionAuthorized": false,
   "stagingDispatchAuthorized": false,
@@ -25,7 +25,7 @@
       "requiredForProductionDecision": true,
       "status": "PENDING",
       "scenario": "Riesaminare diff dall’ultimo rilascio approvato, report finali e limiti; congelare lo SHA completo. Separare parent dei test, manifest dei file e commit documentale.",
-      "acceptance": "Reviewer assegnato firma candidatoadd3438cc17e23a29a45aad71282e296f45072a1, provenance commitsbf215f69/70fdfab3 e rischi residui; 154 artefatti storici e manifest sorgente corrente verificati. Baseline staging modifica backendbootstrap/env/email; produzione resta disattivata senza flagstaging, UI/schema invariati.",
+      "acceptance": "Reviewer umano assegnato firma candidato dabbb8862cbce2c48bfafa0413781b35fb582348, report client/Platform del 7 ottobre, limiti e provenienza. Prove locali PostgreSQL 552 / release 696, sorgenti ed evidenze verificate. Nessuna autorizzazione alla produzione implicita.",
       "failureMeans": "SHA diverso, review mancante o prove senza identità bloccano la dispatch; una modifica invalida il binding e richiede nuovo candidato/gate pertinenti.",
       "requiredEvidence": [
         "sha candidato/tree",
@@ -53,7 +53,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidatoadd3438cc17e23a29a45aad71282e296f45072a1 con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
+      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidatodabbb8862cbce2c48bfafa0413781b35fb582348 con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
       "acceptance": "Percorso CI sul commit realmente checkoutato e non su merge commit diverso; guardie DB attive con dotenv/devnull su PG temporaneo; E2E sullo stesso candidato e release osservata. Controlli YAML/fixtures/PR da review prima di qualunque esecuzione hosted.",
       "failureMeans": "Verde head_sha senza prova checkout, test DB non eseguiti o E2E senza binding lasciano il gate bloccato.",
       "requiredEvidence": [
@@ -81,7 +81,7 @@
       "blocksStagingDispatch": true,
       "requiredForProductionDecision": true,
       "status": "PENDING",
-      "scenario": "Baseline isolamento implementata localmente in add3438cc17e23a29a45aad71282e296f45072a1: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
+      "scenario": "Baseline isolamento implementata localmente in dabbb8862cbce2c48bfafa0413781b35fb582348: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
       "acceptance": "Policy version1 e controlSHA approvati, nessuna chiave provider, 0cron e email disabled; project fleetum-staging, target filesystem reale dedicato senza symlink/orfani/ownership ambiguo, backend solo rete internal, tenantIDs sintetici distinti, robots/header/sitemap effettivi. Stato dati/host e protezioni indipendentemente attestati prima avvio.",
       "failureMeans": "Placeholder nell’esempio o parola “staging” non sono prova. Destinatario reale, cron attivo all’avvio, dominio arbitrario, directory condivisa o indice pubblico bloccano l’avvio.",
       "requiredEvidence": [

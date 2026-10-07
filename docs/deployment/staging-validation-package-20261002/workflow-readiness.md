@@ -154,3 +154,8 @@ Candidato `b5332ca5d9100c82cc4c6ffb5ba4c2f8e86a650c`; [runbook](../application-f
 ## Revisione e credenziali — 6 ottobre 2026
 
 Candidato `add3438cc17e23a29a45aad71282e296f45072a1`. REV01/02 corretti; nuovoPG540/540 e release624/624. [Decisioni](../staging-decision-packet-20261006.md). Prove di recovery5ottobre storiche e riserva9bd/b533 non equivalente ai nuovi fix. Nessun nuovo provider/browser/hostedCI/staging/HTTPS/Platformlogin. Nuovo pairsecurityequivalente e budget/operatori/digest da definire;0/19gateesterni PASS. Le nuove proposte nelpacket NON compilano il recordbudgetapprovato. Nessun workflow modificato qui.
+
+
+## Sicurezza client/Platform — 7 ottobre 2026
+
+Candidato `dabbb8862cbce2c48bfafa0413781b35fb582348`; PostgreSQL 552, release696, build production e browser/Caddy locali. [Rapporto](../../verification/client-platform-security-20261007.md). Nessun nuovo workflow, provider, CI hosted o staging reale; 0/19 esterni PASS. CSP script e storage bearer restano aperti, nuova riserva e recovery del nuovo pair necessari.
