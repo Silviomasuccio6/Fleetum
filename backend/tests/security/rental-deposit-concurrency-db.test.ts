@@ -28,6 +28,8 @@ const cleanup = async () => {
   await prisma.rentalCustomerPaymentProfile.deleteMany({ where: { tenantId } });
   await prisma.rentalBooking.deleteMany({ where: { tenantId } });
   await prisma.rentalCustomer.deleteMany({ where: { tenantId } });
+  // The real persistence adapter atomically writes transition audits even with a no-op external audit repository.
+  await prisma.auditLog.deleteMany({ where: { tenantId } });
   await prisma.user.deleteMany({ where: { tenantId } });
   await prisma.vehicle.deleteMany({ where: { tenantId } });
   await prisma.site.deleteMany({ where: { tenantId } });
