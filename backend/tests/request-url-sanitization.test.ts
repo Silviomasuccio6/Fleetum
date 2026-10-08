@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import type { NextFunction, Request, Response } from "express";
@@ -7,7 +8,11 @@ import { sanitizeRequestUrl } from "../src/infrastructure/logging/sanitize-reque
 import { errorHandler } from "../src/interfaces/http/middlewares/error-handler.js";
 import { requestContext } from "../src/interfaces/http/middlewares/request-context.js";
 
-const contractToken = "ZXlKMFpXNWhiblJKWkNJNkltUmxiVzhpZlE.signature987654321ABCDEFGHIJ";
+// Derive a realistic, deterministic fixture; no reusable credential is stored in source.
+const contractToken = [
+  Buffer.from(JSON.stringify({ tenantId: "synthetic-tenant", contractId: "synthetic-contract" })).toString("base64url"),
+  createHash("sha256").update("fleetum synthetic contract logging fixture").digest("base64url")
+].join(".");
 const contractTokenFragments = [
   contractToken,
   encodeURIComponent(contractToken),

@@ -1,8 +1,8 @@
 {
   "candidateSha": "dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600",
-  "scope": "Sorgenti e .example pubblici; nessun env reale",
+  "scope": "Sorgenti e .example pubblici; nessun env reale. candidateSha conserva il pin applicativo storico; le impronte descrivono i file ispezionati, inclusa la correzione CI successiva.",
   "sha256": {
-    ".github/workflows/ci.yml": "86fa88d273ad8d5995ffef871d735e810272a6a38ddf2024601953b314fddc51",
+    ".github/workflows/ci.yml": "1b366b14b8ef74e3250a1dee7f4118cc18d3edfbfbbd6f22276a9a10d2f6b9e9",
     ".github/workflows/deploy-production.yml": "be3bc67d308417e4c95ecb8393f34d44a4b92386f124a00d80a10890dab18e3a",
     ".github/workflows/deploy-staging.yml": "b6584cc530011c8b93e91569875dae07d40527aa76819b288dddf6075649d9e2",
     ".github/workflows/e2e-nightly.yml": "9318112f3d9bfa5c87e62911a3e1e5f40bdaaf7594dd7c7a32d7550f4c569e7e",
@@ -33,7 +33,7 @@
     "ops/e2e/tenant-preflight.mjs": "9ab1f0c07b6286e9d340e098858d884d5b0648f1355a7e97df4dd5d659a3b0e2",
     "ops/e2e/validate-config.mjs": "d93a1faad575ee2d138a27801b1d734c72550a275118ee42366bc0e7ba78d3b6",
     "ops/e2e/verify-report.mjs": "74ca60f8f6f751b1204a9b7cca987e4a929c4b64b21bd87b758a8ed5cb2a4158",
-    "ops/fixtures/restore-recovery-http.mjs": "c7039d1612c790d99b36009cbd67d220ae58b8b09fb0c2066949e84c749ed825",
+    "ops/fixtures/restore-recovery-http.mjs": "8c98dd4fff0251643240837d30f756b2412301d108e33de35941c7cbbeb60453",
     "ops/fixtures/restore-recovery-seed.mjs": "9be54e3c26be12c9e5dc44c095bbafcdaa2136b4c4608761df3b783adabe5621",
     "ops/preflight-release.sh": "35a856bd859d80d2f67d8f369ed8853dbad456a291ca63fbcdec8e28cea6b3eb",
     "ops/restore-db-test.sh": "71eb79aad0432135ef552812b4166da87571ff95c27ad9b9ded3839fc3e6d580",
@@ -52,7 +52,7 @@
     "ops/verify-database.sh": "c5ac0126f9e0e7f937b16d46158b6f0441b63200e98a92e2226b34504d934207",
     "ops/verify-local-rehearsal.mjs": "b99feb45dbe959132dd8fdc4608c279ff3e985961df8c51e64f3ffafadeb62f3",
     "ops/verify-migration-compatibility.sh": "88f6445baedeb6a2a361094989e83e7e5ccbcccb715b7b3ed7d954d95663788d",
-    "ops/verify-restore-recovery.mjs": "2871de7624738073c9a65e92969110a3cddddd5012c324b963d91da086356ccc",
+    "ops/verify-restore-recovery.mjs": "f480c8455a91979fc19dc0a373bfb3002e40215b30f719080b77078cf8e98c91",
     "package.json": "4dd332933c4c7c1454f80778b8a52154df0842f3e8766a673a27173a9b83037b",
     "playwright.config.ts": "a8c73797ba481dab2d458c053b0f1f8bb9d041a1b1ee65ec8fa44efa044b3324",
     "tests/e2e/global-setup.mts": "0486e7455aa60f016942346d0ea9131f75929ed049dca0f5895853b63ed94113",
@@ -128,5 +128,15 @@
     "frontend/src/presentation/pages/bookings/rental-bookings-page.tsx": "dee98277dd035a589a12d4966fde25ecbae697806ad064a041da968a6bc1bacc",
     "frontend/src/application/usecases/rental-bookings-usecases.ts": "5a660505949e270b2db568b5c0576809db6b025a56583b4508b808529ab6ee7b",
     "backend/tests/privacy-data-export.test.ts": "59429739e0b8199e0122b1599afef29cf8f24de3804cd0ab78acde6cb1854312"
+  },
+  "ciRemediation": {
+    "parentSourceSha": "8faa9f710b1cfbf72849d04989decfae98ce644d",
+    "date": "2026-10-09",
+    "applicationPinUnchanged": true,
+    "description": "Solo ambiente dei test CI, fixture sintetiche e configurazione scanner. Lo SHA completo della nuova revisione e le prove hosted sono nel rapporto di pubblicazione esterno; nessuna approvazione staging/produzione.",
+    "preExistingMetadataAlignment": [
+      "ops/fixtures/restore-recovery-http.mjs",
+      "ops/verify-restore-recovery.mjs"
+    ]
   }
 }

@@ -140,6 +140,7 @@ jobs:
       - name: Backend tests
         env:
           NODE_ENV: test
+          DOTENV_CONFIG_PATH: /dev/null
         run: npm run test -w backend
 
       - name: Frontend tests
