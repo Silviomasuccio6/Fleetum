@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import { buildServerEnvironment, parseServerConfig } from "../fixtures/application-recovery-server.mjs";
 import { PLATFORM_SYNTHETIC_ADMIN_EMAIL, PLATFORM_SYNTHETIC_JWT_SECRET } from "../fixtures/restore-recovery-security.mjs";
 
-const archiveRoot = "/private/tmp/fleetum-restore-recovery-abcdef/source";
+const scratchParent = process.platform === "linux" ? "/tmp" : "/private/tmp";
+const otherScratchParent = process.platform === "linux" ? "/private/tmp" : "/tmp";
+const archiveRoot = path.join(scratchParent, "fleetum-restore-recovery-abcdef/source");
 const generation = "90a7c1b9-30e5-45f8-a5b2-c2df63a74f8e";
 const sourceSha = "70fdfab3522907d9d956ac260224c165774e2af6";
 const databaseUrl = "postgresql://fleetum_restore:0123456789abcdef0123456789abcdef@127.0.0.1:54339/fleetum_restore_0123456789abcdef0123456789abcdef_first?schema=public";
@@ -80,7 +82,7 @@ test("only a full SHA, generation UUID and explicit archive arguments are accept
 });
 
 test("archive, uploads and ready file must remain within the owned scratch tree", () => {
-  for (const value of [".", "/tmp/fleetum-restore-recovery-abcdef/source", "/private/tmp/other/source", "/private/tmp/fleetum-restore-recovery-abcdef", `${archiveRoot}/../source`, `${archiveRoot}/nested`]) {
+  for (const value of [".", `${otherScratchParent}/fleetum-restore-recovery-abcdef/source`, "/private/tmp/other/source", `${scratchParent}/fleetum-restore-recovery-abcdef`, `${archiveRoot}/../source`, `${archiveRoot}/nested`]) {
     const input = valid(); input.argv[0] = value;
     assert.throws(() => parseServerConfig(input));
   }
@@ -132,11 +134,12 @@ test("guard failures never echo an untrusted path, credential or argument", () =
 });
 
 test("an existing generation file is preserved and rejected before any application import", async () => {
-  const scratch = await mkdtemp("/private/tmp/fleetum-restore-recovery-guard-");
+  const scratch = await mkdtemp(path.join(scratchParent, "fleetum-restore-recovery-guard-"));
   const directory = path.join(scratch, "reserve");
   const input = valid(); input.argv[0] = directory;
   input.env.UPLOAD_DIR = `${directory}/uploads`;
   input.env.LOCAL_READY_FILE = `${directory}/recovery-state/${generation}.json`;
+  assert.equal(parseServerConfig(input).readyFile, input.env.LOCAL_READY_FILE);
   const privateContents = "synthetic-private-existing-ready-file\n";
   try {
     await Promise.all([

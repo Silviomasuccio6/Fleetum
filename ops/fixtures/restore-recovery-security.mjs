@@ -15,7 +15,12 @@ const MARKER = "FLEETUM_RESTORE_SECURITY_JSON";
 const guard = (condition, message) => { if (!condition) throw new Error(message); };
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 const canonical = value => typeof value === "string" && path.isAbsolute(value) && path.normalize(value) === value;
-const ownedArchive = value => canonical(value) && /^\/private\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/(source|reserve)$/.test(value);
+// Keep the Darwin rehearsal boundary; Linux fixtures use only /tmp, never an
+// inherited TMPDIR or an arbitrary caller-selected scratch parent.
+const OWNED_ARCHIVE = process.platform === "linux"
+  ? /^\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/(source|reserve)$/
+  : /^\/private\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/(source|reserve)$/;
+const ownedArchive = value => canonical(value) && OWNED_ARCHIVE.test(value);
 
 // Importing this module is pure: no application, dependency, socket, DB, env
 // file or process environment is touched until the explicit CLI is guarded.

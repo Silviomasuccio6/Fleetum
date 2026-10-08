@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 
 const script = await readFile(
@@ -142,6 +142,12 @@ if (tool === "mktemp") {
   process.stderr.write(result.stderr);
   process.exit(result.status);
 }
+if (tool === "tar") {
+  // The mocked archive intentionally fails without emitting an archive. Drain
+  // its stdin without letting GNU/BSD tar's empty-input policy mask exit 97.
+  readFileSync(0);
+  process.exit(0);
+}
 if (tool !== "git") process.exit(96);
 if (argv[0] === "rev-parse") {
   process.stdout.write((argv[1] === "HEAD" ? "b" : "a").repeat(40) + "\n");
@@ -176,7 +182,7 @@ const runHistoricalFixture = async (t, files, treeFailure = false) => {
   const helper = join(operations, "verify-migration-compatibility.sh");
   await copyFile(new URL("../verify-migration-compatibility.sh", import.meta.url), helper);
   await writeFile(filesPath, JSON.stringify(files));
-  for (const tool of ["docker", "git", "npm", "npx", "mktemp"]) {
+  for (const tool of ["docker", "git", "npm", "npx", "mktemp", "tar"]) {
     await writeFile(join(bin, tool), historicalTool, { mode: 0o700 });
   }
   const result = spawnSync("/bin/bash", [helper], {
@@ -191,7 +197,7 @@ const runHistoricalFixture = async (t, files, treeFailure = false) => {
     }
   });
   assert.equal(result.error, undefined);
-  return { result, calls: (await readFile(log, "utf8")).trim().split("\n").map(JSON.parse) };
+  return { root, result, calls: (await readFile(log, "utf8")).trim().split("\n").map(JSON.parse) };
 };
 
 const assertHistoricalReadBoundary = (calls) => {
@@ -200,6 +206,8 @@ const assertHistoricalReadBoundary = (calls) => {
     "an unsafe historical tree must fail before allocation or dependency/Prisma tools");
   assert(!calls.some((call) => call.tool === "git" && call.argv[0] === "archive"),
     "historical dotenv content must never reach git archive");
+  assert(!calls.some((call) => call.tool === "tar"),
+    "an unsafe historical tree must never reach archive extraction");
 };
 
 for (const filename of [".env", "backend/.env.production", "backend/prisma/.env", "prisma/.env.local", "nested/.env.staging", ".environment", '.env"quoted', ".env\nnewline"]) {
@@ -212,10 +220,18 @@ for (const filename of [".env", "backend/.env.production", "backend/prisma/.env"
 }
 
 test("historical dotenv example filenames may reach the archive boundary", async (t) => {
-  const { result, calls } = await runHistoricalFixture(t, [".env.example", "backend/.env.test.example", "nested/ordinary.txt"]);
+  const { root, result, calls } = await runHistoricalFixture(t, [".env.example", "backend/.env.test.example", "nested/ordinary.txt"]);
   assert.equal(result.status, 97, result.stderr);
-  assert(calls.some((call) => call.tool === "git" && call.argv[0] === "archive"),
+  assert.deepEqual(calls.filter((call) => call.tool === "git" && call.argv[0] === "archive"),
+    [{ tool: "git", argv: ["archive", "a".repeat(40)] }],
     "example templates must not be rejected as dotenv configuration");
+  const extraction = calls.filter((call) => call.tool === "tar");
+  assert.equal(extraction.length, 1, "the pinned archive must reach the extraction pipeline exactly once");
+  assert.deepEqual(extraction[0].argv.slice(0, 2), ["-x", "-C"]);
+  assert.equal(extraction[0].argv.length, 3);
+  assert.equal(dirname(dirname(extraction[0].argv[2])), join(root, "gate-temp"));
+  assert(extraction[0].argv[2].startsWith(`${join(root, "gate-temp", "fleetum-migration-compat.")}`));
+  assert.equal(basename(extraction[0].argv[2]), "previous");
   assert(!calls.some((call) => ["npm", "npx"].includes(call.tool)));
 });
 

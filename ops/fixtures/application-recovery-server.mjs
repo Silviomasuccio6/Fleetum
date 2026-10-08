@@ -10,6 +10,11 @@ const MARKER = "FLEETUM_APPLICATION_SERVER";
 const MODES = new Set(["trusted", "startup-rejected", "database-unready", "pause-before-import"]);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SAFE_ERROR_NAMES = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "AbortError", "PrismaClientInitializationError", "PrismaClientKnownRequestError", "PrismaClientValidationError"]);
+// Keep the Darwin rehearsal boundary; Linux fixtures use only /tmp, never an
+// inherited TMPDIR or an arbitrary caller-selected scratch parent.
+const OWNED_ARCHIVE = process.platform === "linux"
+  ? /^\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/(source|baseline|reserve)$/
+  : /^\/private\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/(source|baseline|reserve)$/;
 
 const requireGuard = (condition, message) => { if (!condition) throw new Error(message); };
 const canonical = (value) => typeof value === "string" && path.isAbsolute(value) && path.normalize(value) === value;
@@ -21,7 +26,7 @@ export function parseServerConfig({ argv, env } = {}) {
   requireGuard(Array.isArray(argv) && argv.length === 2, "Expected explicit archive and source SHA");
   requireGuard(env && typeof env === "object", "Expected an explicit test environment");
   const [archiveRoot, sourceSha] = argv;
-  requireGuard(canonical(archiveRoot) && /^\/private\/tmp\/fleetum-restore-recovery-[A-Za-z0-9-]+\/(source|baseline|reserve)$/.test(archiveRoot), "Archive must be an owned recovery scratch child");
+  requireGuard(canonical(archiveRoot) && OWNED_ARCHIVE.test(archiveRoot), "Archive must be an owned recovery scratch child");
   requireGuard(typeof sourceSha === "string" && /^[a-f0-9]{40}$/.test(sourceSha), "Expected a full source SHA");
   requireGuard(env.NODE_ENV === "test", "NODE_ENV must be test");
   requireGuard(env.DOTENV_CONFIG_PATH === "/dev/null", "Dotenv must use /dev/null");

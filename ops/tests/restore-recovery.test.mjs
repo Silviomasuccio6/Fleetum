@@ -6,6 +6,7 @@ import test from "node:test";
 import { assertArchiveHasNoRuntimeDotenv, extractCompatibilityFixture, parseHttpFailure, parseRestoreRecoveryOptions, parseRestoreSecurityReceipt, runRestoreRecoverySecurityFixture, safeHttpFailure, sha256, verifyBackupBundle } from "../verify-restore-recovery.mjs";
 
 const source = "a".repeat(40); const baseline = "b".repeat(40);
+const scratchParent = process.platform === "linux" ? "/tmp" : "/private/tmp";
 const valid = ["--source-sha", source, "--baseline-sha", baseline, "--evidence-dir", "/private/tmp/fleetum-synthetic-restore-test"];
 
 test("restore CLI binds distinct full commits and a fresh absolute evidence destination", () => {
@@ -15,7 +16,7 @@ test("restore CLI binds distinct full commits and a fresh absolute evidence dest
 
 test("unsupported, duplicate and incomplete CLI inputs fail before any allocation", async () => {
   for (const args of [[], ["--source-sha"], [...valid, "--bad"], [...valid, "extra"], [...valid, "--source-sha", source], [...valid, "--git-dir"], ["--help", "extra"], ["--source-sha", "abc", ...valid.slice(2)], ["--source-sha", source.toUpperCase(), ...valid.slice(2)], ["--source-sha", baseline, ...valid.slice(2)]]) assert.throws(() => parseRestoreRecoveryOptions(args));
-  const scratch = await mkdtemp("/private/tmp/fleetum-restore-cli-test-");
+  const scratch = await mkdtemp(path.join(scratchParent, "fleetum-restore-cli-test-"));
   try {
     const evidence = path.join(scratch, "must-not-be-created");
     const command = spawnSync(process.execPath, [new URL("../verify-restore-recovery.mjs", import.meta.url).pathname, ...valid.slice(0, 4), "--evidence-dir", evidence, "--docker-host", "tcp://remote.invalid:2375"], { encoding: "utf8", env: { PATH: process.env.PATH } });
@@ -30,7 +31,7 @@ test("CLI refuses remote endpoints, Docker contexts and noncanonical filesystem 
 });
 
 test("production build without application recovery fails before allocating an evidence directory", async () => {
-  const scratch = await mkdtemp("/private/tmp/fleetum-production-cli-test-");
+  const scratch = await mkdtemp(path.join(scratchParent, "fleetum-production-cli-test-"));
   try {
     const evidence = path.join(scratch, "must-not-be-created");
     const command = spawnSync(process.execPath, [new URL("../verify-restore-recovery.mjs", import.meta.url).pathname, ...valid.slice(0, 4), "--evidence-dir", evidence, "--production-build"], { encoding: "utf8", env: { PATH: path.dirname(process.execPath) }, timeout: 2000 });
@@ -105,7 +106,7 @@ test("security seed and both restore checks use guarded test environments and re
 });
 
 test("backup bundle verifies exact SQL bytes and each registered upload", async () => {
-  const scratch = await mkdtemp("/private/tmp/fleetum-backup-integrity-test-");
+  const scratch = await mkdtemp(path.join(scratchParent, "fleetum-backup-integrity-test-"));
   try {
     const dumpPath = path.join(scratch, "backup.sql"); const uploadRoot = path.join(scratch, "uploads");
     const sql = Buffer.from("CREATE TABLE synthetic_fixture (id integer);\n"); const file = Buffer.from("synthetic document bytes");

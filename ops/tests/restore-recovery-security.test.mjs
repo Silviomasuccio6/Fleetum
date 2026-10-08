@@ -10,7 +10,9 @@ import {
   seedRestoreSecurity, versionAtLeast
 } from "../fixtures/restore-recovery-security.mjs";
 
-const archiveRoot = "/private/tmp/fleetum-restore-recovery-security-test/source";
+const scratchParent = process.platform === "linux" ? "/tmp" : "/private/tmp";
+const otherScratchParent = process.platform === "linux" ? "/private/tmp" : "/tmp";
+const archiveRoot = path.join(scratchParent, "fleetum-restore-recovery-security-test/source");
 const databaseUrl = "postgresql://fleetum_restore:synthetic-only@127.0.0.1:54339/fleetum_restore_0123456789abcdef0123456789abcdef_source?schema=public";
 const valid = () => ({ argv: ["seed", archiveRoot], env: { NODE_ENV: "test", DOTENV_CONFIG_PATH: "/dev/null", DATABASE_URL: databaseUrl } });
 const now = new Date("2026-10-07T10:00:00.000Z");
@@ -25,6 +27,7 @@ const database = (rows = [], migrationCount = 48) => ({
 
 test("security seed is limited to current source schema48 and a guarded synthetic database", () => {
   assert.equal(parseSecurityConfig(valid()).mode, "seed");
+  const wrongScratchParent = valid(); wrongScratchParent.argv[1] = `${otherScratchParent}/fleetum-restore-recovery-security-test/source`; assert.throws(() => parseSecurityConfig(wrongScratchParent));
   for (const value of ["baseline", "reserve"]) { const input = valid(); input.argv[1] = archiveRoot.replace("source", value); assert.throws(() => parseSecurityConfig(input)); }
   for (const [key, value] of [["NODE_ENV", "production"], ["DOTENV_CONFIG_PATH", ".env"], ["NODE_OPTIONS", "--import unsafe"], ["DATABASE_URL", databaseUrl.replace("127.0.0.1", "example.invalid")], ["DATABASE_URL", databaseUrl.replace("_source?", "_production?")]]) {
     const input = valid(); input.env[key] = value; assert.throws(() => parseSecurityConfig(input));
@@ -68,7 +71,7 @@ test("snapshot receipt remains identical after independent restore and refuses r
 });
 
 test("missing native packages never manufacture backend or Next coverage", async () => {
-  const scratch = await mkdtemp("/private/tmp/fleetum-restore-recovery-native-");
+  const scratch = await mkdtemp(path.join(scratchParent, "fleetum-restore-recovery-native-"));
   const root = path.join(scratch, "reserve");
   try { await mkdir(path.join(root, "backend"), { recursive: true }); await writeFile(path.join(root, "backend/package.json"), "{}\n"); await assert.rejects(inspectNativeImageRuntimes(root)); }
   finally { await rm(scratch, { recursive: true, force: true }); }
@@ -81,7 +84,7 @@ test("native minimum rejects missing, malformed and vulnerable loaded versions",
 });
 
 test("loaded native receipt hashes actual archive binary bytes and marks missing shared-library enumeration", async () => {
-  const scratch = await mkdtemp("/private/tmp/fleetum-restore-recovery-native-hash-"); const root = path.join(scratch, "reserve");
+  const scratch = await mkdtemp(path.join(scratchParent, "fleetum-restore-recovery-native-hash-")); const root = path.join(scratch, "reserve");
   const addon = path.join(root, "node_modules/@img/sharp-synthetic/lib/sharp.node");
   try {
     await mkdir(path.dirname(addon), { recursive: true }); await writeFile(addon, "synthetic native unit fixture bytes");

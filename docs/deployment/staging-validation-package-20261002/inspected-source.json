@@ -41,10 +41,10 @@
     "ops/staging/target-preflight.sh": "9c0fb473bb1de04983637c7f6601aafa37599a0475bde781c32f32e9bc163221",
     "ops/tests/ci-release-identity.test.mjs": "35aad50301b52efdaa0183dd6a87872c10f177e94e1abdf28222edb1070733e4",
     "ops/tests/e2e-gates.test.mjs": "8070b165a6ca6bd7b0e0635c78994a27d7305d922f7c99189d839d0cf1bc7e53",
-    "ops/tests/migration-compatibility-gate.test.mjs": "9141b73dd3c5b7cec4245a26460ef8c4b2bd88a28a944f80c1e75f2dd750c0b2",
+    "ops/tests/migration-compatibility-gate.test.mjs": "8245f1349768095963e990e4c2d641d9aad18baed8711d07a5ce208411147577",
     "ops/tests/rehearsal-options.test.mjs": "3d27dc56021b2f4ed519fde54e4994780fd8e4c17e2d0ee4f93830aa121063d2",
     "ops/tests/restore-db-test.test.mjs": "a24435bda4ef0c79dcb0adbf04960318fc29c71c549a904ebd1b4669ee3cc4cb",
-    "ops/tests/restore-recovery.test.mjs": "875c547daa210a66778554d7dea2bccd26c3c587f1b715401830f53b85485cff",
+    "ops/tests/restore-recovery.test.mjs": "b7e277613af02f6f41c2ec5437528f2ce0ab2994b5a4d04139dd3ea763b50653",
     "ops/tests/staging-control.test.mjs": "6494162b65e067ed406dfb9b951de70662d677d1413876e77c8cdef28297ac9a",
     "ops/tests/staging-isolation.test.mjs": "7ddce58df6714cb05b5c9509aad477f1672bd7a2de1f0dc2010ec623025a65eb",
     "ops/tests/staging-release-binding.test.mjs": "4c456bba0234e0e9b252c5e5546e9181feb919aea6137ecc5286ed605f74b7b1",
@@ -68,13 +68,13 @@
     "ops/tests/restore-recovery-evidence.test.mjs": "5c6b60f53f80c0a286ae3e7c809ae2e3fe467684a47f7a43e0273d2f9f383a2c",
     "backend/src/infrastructure/storage/storage-provider.ts": "45d6ef2f96ad935e7f46c7c77f16aa8f02126f0f74f9090624f6569e943d5a86",
     "backend/tests/local-storage-compatibility.test.ts": "5a8a55dc49948aa10309202da6b13848851651b514857ec72d7877be94d403a8",
-    "ops/tests/application-recovery-server.test.mjs": "5e9067eea7ab06ff5578eb52b0705fdaef8cfa088aebbfb002fc6d977377e3f4",
+    "ops/tests/application-recovery-server.test.mjs": "051f6cf2a5baec470e05cb13666c0212a672e2383c57fb0b0bd8cbede1f0ef7d",
     "ops/recovery/exercise-application-recovery.mjs": "e0093214ad0c2b701b5b8213228925ab89857196950c75b8bf0fc3e9454c6f0e",
     "ops/tests/application-recovery-client.test.mjs": "07cd6fb2c9a681f321fba04fbd44322d523e768d7e79f74b50c3d0b8b097fe44",
     "ops/recovery/application-recovery-policy.mjs": "a084955b0f49d624a5f38d492af584804240a19298b78b0a1128913c0bc34cc3",
     "docs/deployment/application-failure-recovery-20261005.md": "7a4740230c3cc54cdd699eb22c694768f7002ee29367a35861108a0f05d66e15",
     "ops/tests/application-recovery-option.test.mjs": "7c583f5b4c8c33243454cea3a209150f079e1caead4df3fdc0cf307610af01b3",
-    "ops/fixtures/application-recovery-server.mjs": "74ca88cc2e18fe0eb6e505febbbd7d28595d8cf193d817115b37ef743e0b642d",
+    "ops/fixtures/application-recovery-server.mjs": "01a06c7ed46b0c09953988ab875ad3276ed1baefc87623a1c582442924ee99ed",
     "ops/tests/application-recovery-policy.test.mjs": "4526af65f64ab6d610508df6411ff96b8691a19f09183a45c61f46e84f3e2330",
     "docs/verification/integrated-security-review-20261006.md": "4772bbe1d8c08cc1bc1d63fda9e0b5024f12cd143157f63b0703bb14d2c4dcbe",
     "docs/deployment/staging-decision-packet-20261006.md": "5893171a3f871845369b724dedf7039acc5f8bfbc1cd7c4af3c4b55ab922ef38",
@@ -104,8 +104,8 @@
     "backend/src/application/services/platform-session-service.ts": "cdc211b28ea3d4aa141af60c98534b8a507328582b91624c5441fa8d2ef9512a",
     "frontend/src/presentation/components/layout/platform-admin-layout.tsx": "b1f957f6ef82b3e3fccca519d6980139f88bb3949261371d416dc75191ae3ccb",
     "docs/verification/production-build-recovery-20261007.md": "bed3c9f04c6c0fa93036e52205929bbdc02b51f3cb688f30bfb305d42655a88c",
-    "ops/fixtures/restore-recovery-security.mjs": "7e234768f2f4433ec095600c229cd7ef643869cab74a6987f2b65c81f4587686",
-    "ops/tests/restore-recovery-security.test.mjs": "023f9cacd888569ee59156786e1364a7f03eef7034d2727884732ad0d4cd678e",
+    "ops/fixtures/restore-recovery-security.mjs": "4ae07977672733723b99df24e45a643ec6297d058dc4e76f213a5dcc274535bc",
+    "ops/tests/restore-recovery-security.test.mjs": "d64b5190a9380ddc18f7cb42da232859692441ef8d08a4fa5b49d41ab8a5bd59",
     "docs/deployment/production-build-recovery-20261007.md": "51784133a24687ea4cf6497d6cc0922d4a18e00a38953dc2a6a235327c5b910d",
     "backend/src/interfaces/http/routes/uploads-routes.ts": "a35c884763188b1a4b4d7fa32830eb6f2a30e4f532ab3f1da68c33ff04331926",
     "backend/tests/security/privacy-subject-races.postgres.test.ts": "ee196457c2aaf0ff61ff78593baacf9b750243c51ba69d5759547e3dd9d5553a",
@@ -138,5 +138,18 @@
       "ops/fixtures/restore-recovery-http.mjs",
       "ops/verify-restore-recovery.mjs"
     ]
+  },
+  "linuxTestPortability": {
+    "parentSourceSha": "3e431a0b46fea65f0e1614c73451c5fcdc653cc2",
+    "date": "2026-10-09",
+    "files": [
+      "ops/fixtures/application-recovery-server.mjs",
+      "ops/fixtures/restore-recovery-security.mjs",
+      "ops/tests/application-recovery-server.test.mjs",
+      "ops/tests/migration-compatibility-gate.test.mjs",
+      "ops/tests/restore-recovery-security.test.mjs",
+      "ops/tests/restore-recovery.test.mjs"
+    ],
+    "scope": "Fixture e test sintetici: /tmp con prefisso owned solo su Linux, confine Darwin invariato; directory temporanee canonicali nei test e mock tar deterministico. Runner reale, app, schema, dipendenze e provider invariati; nessuna autorizzazione staging/produzione."
   }
 }
