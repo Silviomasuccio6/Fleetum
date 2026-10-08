@@ -1,20 +1,9 @@
-# Fleetum — production build recovery, 7 ottobre 2026
+# Fleetum — privacy e storico, 8 ottobre2026
 
-Candidato tooling `ecb8816f27222cb4e5411f94083a2059da81a213`, tree `d7c959e3b45101ffafde4a33f8f93b460e4f25e3`, branch `codex/verify-production-recovery-20261007`, ref `codex/production-recovery-source-candidate`.
-Applicazione/riserva `dabbb8862cbce2c48bfafa0413781b35fb582348`; 557 percorsi app equivalenti; zero dipendenze/migrazioni nuove.
-HEAD documentale successivo distinto. [Rapporto](../../verification/production-build-recovery-20261007.md).
+Candidato `dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600`, tree `2d50f467364c83c7cc8d57e40490760d1a62b159`, branch `codex/fix-privacy-history-20261008`, ref `codex/privacy-history-source-candidate`; HEAD documentale distinto. [Rapporto](../../verification/privacy-history-security-20261008.md).
 
-Recovery **49 checks / 169 HTTP**, 4 guasti e 2 restore;
-release **715/715** (348/93/9/265), zero failure/skip.
-Compilazione backend/frontend production, subprocessi fixture test, revoca Platform persistente con sibling ammesso,
-manifest dist e identità native Sharp/librsvg realmente caricati. Next nativo è inventariato; recupero sito Next non coperto.
+PostgreSQL **564/564**, release **766/766** (372/107/9/278), browser compilato/API sintetiche **4/4**. Zero fail/skip, lint/build/prerender/audit PASS. Export per soggetto, upload/edit cliente serializzati con erasure, pricing storico preservato, cron paginato e audit dipendenze fail-closed.
 
-**0/19 gate esterni PASS**, nessun owner, budget, SLA/RTO/RPO o autorizzazione inventati.
-Riserva della stessa applicazione, nessuna release precedente distinta/OCI approvata.
-Nessuna nuova prova browser/E2E, provider, hosted CI o staging esterno; nessun push/merge/deploy/env reale.
-Registro originale 37 finding stabile: 26/2/4/5; redesign e marketing restano separati.
+**0/19 gate esterni PASS**. BE-03/SEC-10 parziali; registro originale37 invariato26/2/4/5. Nuova UI rinviata. Nuova riserva/recovery da verificare perché l'applicazione è cambiata; risultati7 ottobre storici. Nessun push/merge/deploy/provider/env reale. Browser API simulate, nessuna attestazione staging o produzione.
 
-[Registro](gate-register.json), [record](execution-record.template.json), [evidenze](evidence-index.json),
-[migrazioni](migration-inventory.json), [sorgenti](inspected-source.json).
-I report precedenti restano storici per le rispettive identità; il presente README e il nuovo rapporto descrivono questa tranche.
-Il validator controlla coerenza/hash e non autentica prove, assegna owner o autorizza deploy. Nessun merge main per avviare CI.
+[Registro](gate-register.json), [record](execution-record.template.json), [evidenze](evidence-index.json), [migrazioni](migration-inventory.json), [sorgenti](inspected-source.json). Il validator controlla coerenza/hash; non assegna owner o autorizzazioni. Nessun merge main per avviare CI.

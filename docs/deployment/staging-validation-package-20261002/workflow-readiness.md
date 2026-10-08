@@ -164,3 +164,8 @@ Candidato `dabbb8862cbce2c48bfafa0413781b35fb582348`; PostgreSQL 552, release696
 ## Production build recovery — 7 ottobre 2026
 
 Candidato tooling `ecb8816f27222cb4e5411f94083a2059da81a213`; applicazione e riserva `dabbb8862cbce2c48bfafa0413781b35fb582348` equivalenti. Recovery 49 checks / 169 HTTP, release 715 test, build production e runtime fixture test. Revoca Platform e stack immagini caricati attestati localmente; recupero sito Next e fallback OCI distinto non coperti. [Rapporto](../../verification/production-build-recovery-20261007.md). Nessun nuovo workflow, hosted CI, provider o staging reale; 0/19 gate esterni PASS.
+
+
+## Privacy e storico — 8 ottobre2026
+
+Candidato `dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600`. PostgreSQL 564, release 766, Chromium/API sintetiche 4; [rapporto](../../verification/privacy-history-security-20261008.md). 0/19 esterni, BE-03/SEC-10 parziali. Recovery precedente storico; aggiornare riserva per i nuovi fix prima dell’installazione. Nessun workflow/provider/produzione modificato.

@@ -1,5 +1,5 @@
 {
-  "candidateSha": "ecb8816f27222cb4e5411f94083a2059da81a213",
+  "candidateSha": "dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600",
   "scope": "Sorgenti e .example pubblici; nessun env reale",
   "sha256": {
     ".github/workflows/ci.yml": "86fa88d273ad8d5995ffef871d735e810272a6a38ddf2024601953b314fddc51",
@@ -106,6 +106,27 @@
     "docs/verification/production-build-recovery-20261007.md": "bed3c9f04c6c0fa93036e52205929bbdc02b51f3cb688f30bfb305d42655a88c",
     "ops/fixtures/restore-recovery-security.mjs": "7e234768f2f4433ec095600c229cd7ef643869cab74a6987f2b65c81f4587686",
     "ops/tests/restore-recovery-security.test.mjs": "023f9cacd888569ee59156786e1364a7f03eef7034d2727884732ad0d4cd678e",
-    "docs/deployment/production-build-recovery-20261007.md": "51784133a24687ea4cf6497d6cc0922d4a18e00a38953dc2a6a235327c5b910d"
+    "docs/deployment/production-build-recovery-20261007.md": "51784133a24687ea4cf6497d6cc0922d4a18e00a38953dc2a6a235327c5b910d",
+    "backend/src/interfaces/http/routes/uploads-routes.ts": "a35c884763188b1a4b4d7fa32830eb6f2a30e4f532ab3f1da68c33ff04331926",
+    "backend/tests/security/privacy-subject-races.postgres.test.ts": "ee196457c2aaf0ff61ff78593baacf9b750243c51ba69d5759547e3dd9d5553a",
+    "backend/tests/privacy-customer-update.test.ts": "8465ce27e23ad51ec02a82df993de673c52ad883c1b194d9beef53f939b3a4a0",
+    "backend/src/application/services/rental-pricing-operations.ts": "b8cde03852c47fb142ce1083f1490f94118dfb43187e2ac08fa940cfc5534ac0",
+    "backend/src/infrastructure/cron/privacy-retention-cron.ts": "b4eab3033c0c63ec607c07447d3a453414adf40246431bac1660f29d522ee84a",
+    "backend/tests/rental-customer-update-fence.test.ts": "7f54451011a1c0d679354283d2e537f6fc17e248e306c2e97c7a1ca43f646f2d",
+    "backend/src/interfaces/http/validators/rental-bookings-validators.ts": "abdf90b8353589165aa7dfd308299c83413ea9a0167c31c20a9d14c094fad29a",
+    "ops/tests/audit-production-dependencies.test.mjs": "9aad39d141353177ff9c2f58a19b9330cf2c8692d9b5a72ce0e527e913853000",
+    "backend/tests/security/rental-pricing-preserve.postgres.test.ts": "585f2205ffac7412b2118a4ed92eef985121445e2374426beaba469f61d26497",
+    "backend/src/interfaces/http/controllers/rental-bookings-controller.ts": "8dc5878af4911b4f38951eb78f259b21bedc87297217913d54432dc6c6953ad5",
+    "backend/src/application/services/privacy-compliance-service.ts": "4af9d634e8329f3252f291c45e38baa729479cdb4e5d363408d32ad90c062bfa",
+    "backend/src/infrastructure/repositories/rental-customer-tenant-scope.ts": "b65f2951caa0feb24f366cb68ad0ca5081dba0ab04e2cd22ec1999b2371832bd",
+    "frontend/tests/rental-booking-pricing-edit.test.ts": "26c52373b4450b421d16b21422b30a47f45c029c5ca7d749892ff56988029c76",
+    "ops/audit-production-dependencies.mjs": "a2066d585f9b9689652253bbb0bc229e5b940a18ca0ee70a4f6fde3a3df786f2",
+    "backend/tests/rental-booking-pricing-operations.test.ts": "b8dd3a2b5e539a0a8b2b74d395fad2384c01faad2c9ba19d2bf8df5146f250f2",
+    "backend/tests/privacy-retention-cron.test.ts": "a2ca1f30ae7fad41995634490b332ebce081b104c19b63f5539faa0bf7302941",
+    "backend/tests/privacy-anonymization.test.ts": "ff10ee254befc5934031043198fa6fd99a51402aa35051f5d082bc7e8cb0cf49",
+    "docs/verification/privacy-history-security-20261008.md": "4892bd5a13aee33d6f629278f7be75517f6e7b4c4106ba9beec15e9658760e98",
+    "frontend/src/presentation/pages/bookings/rental-bookings-page.tsx": "dee98277dd035a589a12d4966fde25ecbae697806ad064a041da968a6bc1bacc",
+    "frontend/src/application/usecases/rental-bookings-usecases.ts": "5a660505949e270b2db568b5c0576809db6b025a56583b4508b808529ab6ee7b",
+    "backend/tests/privacy-data-export.test.ts": "59429739e0b8199e0122b1599afef29cf8f24de3804cd0ab78acde6cb1854312"
   }
 }
