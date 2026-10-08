@@ -37,6 +37,14 @@ const reportFailure = (error) => {
   process.exitCode = 1;
 };
 try {
+  let privacyFixture; let privacyConfig; let privacyReceipt;
+  if (process.env.SYNTHETIC_PRIVACY_HISTORY !== undefined) {
+    stepLabel = "privacy-history-config";
+    privacyFixture = await import("./restore-recovery-privacy-history.mjs");
+    privacyConfig = privacyFixture.parsePrivacyHistoryConfig({ argv: ["check", process.cwd()], env: process.env });
+    await privacyFixture.validatePrivacyHistoryRuntime(privacyConfig);
+    stepLabel = "import-app";
+  }
   let platformBase; let securityConfig; let securityFixture;
   if (process.env.SYNTHETIC_PLATFORM_SECURITY !== undefined || process.env.SYNTHETIC_PLATFORM_HTTP_BASE !== undefined) {
     stepLabel = "platform-session-revocation";
@@ -144,7 +152,16 @@ try {
     status = independent.status; assert.equal(independent.status, 200, "independent-platform-bearer-status");
     await independent.body?.cancel(); checks.push("platform-independent-bearer-authorized");
   }
-  writeReceipt(`FLEETUM_RESTORE_HTTP_RESULT ${JSON.stringify({ checks, providerCalls: 0, workersStarted: false })}\n`);
+  if (privacyFixture) {
+    stepLabel = "privacy-history-state";
+    if (!prisma) {
+      const relative = process.env.SYNTHETIC_APPLICATION_RECOVERY === "true" ? "backend/dist/infrastructure/database/prisma/client.js" : "backend/src/infrastructure/database/prisma/client.ts";
+      ({ prisma } = await import(pathToFileURL(path.join(privacyConfig.archiveRoot, relative)).href));
+    }
+    privacyReceipt = await privacyFixture.probeRestorePrivacyHistory({ request, prisma, headers: a, otherHeaders: b, setStep: value => { stepLabel = value; status = undefined; } });
+    checks.push(...privacyReceipt.checks);
+  }
+  writeReceipt(`FLEETUM_RESTORE_HTTP_RESULT ${JSON.stringify({ checks, providerCalls: 0, workersStarted: false, ...(privacyReceipt ? { privacyHistory: privacyReceipt.privacyHistory } : {}) })}\n`);
 } catch (error) { reportFailure(error); }
 finally {
   try {

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { assertRestoreMoneySnapshot, buildRestoreMoneySnapshotSql } from "./fixtures/restore-recovery-money.mjs";
 import { exerciseApplicationRecovery } from "./recovery/exercise-application-recovery.mjs";
 import { materializeRegisteredUploads } from "./fixtures/restore-recovery-storage.mjs";
+import { PRIVACY_HISTORY_HTTP_CHECKS } from "./fixtures/restore-recovery-privacy-history.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const usage = "Usage: node ops/verify-restore-recovery.mjs --source-sha <40 lowercase hex> --baseline-sha <40 lowercase hex> --evidence-dir <new absolute directory> [--git-dir <absolute Git directory>] [--docker-host unix:///absolute/local/socket] [--application-recovery --recovery-source-sha <40 lowercase hex> [--production-build]]";
@@ -78,6 +79,35 @@ export async function runRestoreRecoverySecurityFixture({ run, directory, engine
   return security;
 }
 
+function boundedPrivacyHistoryReceipt(value, phase) {
+  if (value?.format !== "fleetum-restore-privacy-history-v1" || value.phase !== phase || value.localOnly !== true || value.schemaMigrations !== 48 || value.fixtureRows !== 26 || value.erasedCustomers !== 1 || value.tombstonedFiles !== 1 || value.activeFilesAdded !== 0 || value.frozenSnapshots !== 1 || value.legacySnapshots !== 1 || !/^[a-f0-9]{64}$/.test(value.sha256 ?? "")) throw new Error("Privacy/history fixture returned an invalid receipt");
+  return { format: value.format, phase, localOnly: true, schemaMigrations: 48, fixtureRows: 26, erasedCustomers: 1, tombstonedFiles: 1, activeFilesAdded: 0, frozenSnapshots: 1, legacySnapshots: 1, sha256: value.sha256 };
+}
+
+export function parseRestorePrivacyHistoryReceipt(output, phase) {
+  if (!["seed", "check"].includes(phase)) throw new Error("Invalid privacy/history fixture phase");
+  const marker = "FLEETUM_RESTORE_PRIVACY_HISTORY_JSON "; const rows = output.split("\n").filter(line => line.startsWith(marker));
+  let value; try { if (rows.length === 1) value = JSON.parse(rows[0].slice(marker.length)); } catch { /* Untrusted receipt. */ }
+  return boundedPrivacyHistoryReceipt(value, phase);
+}
+
+export async function runRestoreRecoveryPrivacyHistoryFixture({ run, directory, engines = {}, databaseUrl, phase, label, expectedReceipt }) {
+  if (!["seed", "check"].includes(phase)) throw new Error("Invalid privacy/history fixture phase");
+  if (phase === "check") boundedPrivacyHistoryReceipt(expectedReceipt, "seed");
+  const response = await run(process.execPath, ["--import", "tsx", "restore-recovery-privacy-history.mjs", phase, directory], label, { cwd: directory, extraEnv: { ...engines, DATABASE_URL: databaseUrl, NODE_ENV: "test", DOTENV_CONFIG_PATH: "/dev/null", SYNTHETIC_PRIVACY_HISTORY: "true" } });
+  const receipt = parseRestorePrivacyHistoryReceipt(response.stdout.toString("utf8"), phase);
+  if (phase === "check" && receipt.sha256 !== expectedReceipt.sha256) throw new Error("Restored privacy/history rows differ from the pre-backup seed");
+  return receipt;
+}
+
+export function parseRestorePrivacyHistoryHttpReceipt(value) {
+  const safe = boundedPrivacyHistoryReceipt(value?.privacyHistory, "check");
+  if (!Array.isArray(value.checks) || PRIVACY_HISTORY_HTTP_CHECKS.some(name => value.checks.filter(check => check === name).length !== 1) || value.providerCalls !== 0 || value.workersStarted !== false || value.privacyHistory.communicationCount !== 1 || value.privacyHistory.historicalQuoteTotal !== 250 || value.privacyHistory.legacyQuoteUnavailable !== true || value.privacyHistory.unchanged !== true || value.privacyHistory.exportAuditDelta !== 1) throw new Error("HTTP privacy/history proof is incomplete");
+  const allowedChecks = new Set(["ready", "two-tenant-login", "business-read", "tenant-read-isolation", "csrf-missing-denied", "csrf-safe-write", "owner-file-download", "other-tenant-file-denied", "anonymous-file-denied", "modern-owner-file-download", "modern-other-tenant-file-denied", "modern-anonymous-file-denied", "platform-revoked-valid-bearer-denied", "platform-independent-bearer-authorized", ...PRIVACY_HISTORY_HTTP_CHECKS]);
+  if (value.checks.some(check => !allowedChecks.has(check))) throw new Error("HTTP receipt contains an unknown check");
+  return { checks: [...value.checks], providerCalls: 0, workersStarted: false, privacyHistory: { ...safe, communicationCount: 1, historicalQuoteTotal: 250, legacyQuoteUnavailable: true, unchanged: true, exportAuditDelta: 1 } };
+}
+
 export function extractCompatibilityFixture(script) {
   const match = script.match(/cat > "\$PREVIOUS_DIR\/compat-fixture\.mjs" <<'FIXTURE'\n([\s\S]*?)\nFIXTURE(?:\n|$)/);
   if (!match) throw new Error("The source commit has no recognizable historical compatibility fixture");
@@ -111,7 +141,7 @@ export function parseDualWriteReceipt(output) {
   return { checkedFields: 35, checkedTables: 13 };
 }
 
-const httpDiagnosticSteps = new Set(["import-app", "import-prisma", "listen", "ready", "ready-body", "login-a", "login-a-cookies", "login-a-csrf", "login-b", "login-b-cookies", "login-b-csrf", "read-a", "read-a-fixture", "read-b", "read-b-isolation", "write-without-csrf", "write-with-csrf", "download-owner", "download-owner-bytes", "download-other-tenant", "download-anonymous", "download-modern-owner", "download-modern-owner-bytes", "download-modern-other-tenant", "download-modern-anonymous", "platform-session-revocation", "cleanup", "unknown"]);
+const httpDiagnosticSteps = new Set(["import-app", "import-prisma", "listen", "ready", "ready-body", "login-a", "login-a-cookies", "login-a-csrf", "login-b", "login-b-cookies", "login-b-csrf", "read-a", "read-a-fixture", "read-b", "read-b-isolation", "write-without-csrf", "write-with-csrf", "download-owner", "download-owner-bytes", "download-other-tenant", "download-anonymous", "download-modern-owner", "download-modern-owner-bytes", "download-modern-other-tenant", "download-modern-anonymous", "platform-session-revocation", "privacy-history-config", "privacy-history-state", "privacy-export-owner", "privacy-export-other-tenant", "privacy-export-anonymous", "privacy-erased-late-edit", "privacy-active-sibling", "pricing-frozen-noop", "pricing-legacy-noop", "pricing-other-tenant", "privacy-history-unchanged", "cleanup", "unknown"]);
 const httpDiagnosticErrors = new Set(["Error", "AssertionError", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "TimeoutError", "AbortError", "PrismaClientInitializationError", "PrismaClientKnownRequestError", "PrismaClientValidationError"]);
 
 // Treat subprocess diagnostics as untrusted: accept only constant labels and
@@ -209,7 +239,7 @@ export async function runRestoreRecovery(options) {
     claims: "Local synthetic restore and schema-compatibility evidence only; no production data, provider replay or down migration",
     isolation: { dockerHost, container, network, loopbackDatabase: true, internalNetwork: false, dedicatedBridge: true, containerEgressDenied: false, imagePulls: false, inheritedProviderEnvironment: false, dotenv: "/dev/null", fixtureNodeEnv: env.NODE_ENV, workersStarted: false,
       limitation: "The dedicated local bridge permits container egress; application fixture blocks provider HTTP. This does not prove staging egress isolation." },
-    checks: [], steps: [], backupManifests: [], toolingHashes: {}, engineHashes: [], snapshots: {}, money: {}, http: {}, cleanup: {},
+    checks: [], steps: [], backupManifests: [], toolingHashes: {}, engineHashes: [], snapshots: {}, money: {}, privacyHistory: {}, http: {}, cleanup: {},
     coverage: { moneyFields: [], additionalIntegerField: "RentalDeposit.amountCents", allMoneyFieldsExercised: false, productionRtoRpoMeasured: false, externalGatesPassed: false }
   };
   const children = new Set(); let interrupted = false; let containerCreated = false; let networkCreated = false;
@@ -332,7 +362,7 @@ export async function runRestoreRecovery(options) {
     if (!(await lstat(directory)).isDirectory() || !(await lstat(uploads)).isDirectory()) throw new Error("Synthetic upload source and archive must be regular task-owned directories");
     await rm(destination, { recursive: true, force: true });
     const materialized = await materializeRegisteredUploads({ manifest, uploadTree: uploads, destination });
-    const response = await run(process.execPath, ["--import", "tsx", "restore-recovery-http.mjs"], label, { cwd: directory, extraEnv: { ...clients.get(directory), DATABASE_URL: urlFor(name), UPLOAD_DIR: uploadMode === "absolute" ? destination : "uploads", SYNTHETIC_UPLOAD_TREE: uploads, SYNTHETIC_INCLUDE_MODERN_FILES: includeModern ? "true" : "false" }, timeoutMs: 45000, allowFailure: true });
+    const response = await run(process.execPath, ["--import", "tsx", "restore-recovery-http.mjs"], label, { cwd: directory, extraEnv: { ...clients.get(directory), DATABASE_URL: urlFor(name), UPLOAD_DIR: uploadMode === "absolute" ? destination : "uploads", SYNTHETIC_UPLOAD_TREE: uploads, SYNTHETIC_INCLUDE_MODERN_FILES: includeModern ? "true" : "false", SYNTHETIC_PRIVACY_HISTORY: includeModern ? "true" : undefined }, timeoutMs: 45000, allowFailure: true });
     const failure = parseHttpFailure(Buffer.concat([response.stdout, response.stderr]).toString("utf8"));
     if (response.code !== 0 || failure) {
       const diagnostic = failure ?? { stepLabel: "unknown", errorName: "Error" };
@@ -342,7 +372,10 @@ export async function runRestoreRecovery(options) {
     }
     const line = response.stdout.toString("utf8").split("\n").find((value) => value.startsWith("FLEETUM_RESTORE_HTTP_RESULT "));
     if (!line) throw new Error("HTTP compatibility fixture produced no result");
-    result.http[label] = { ...JSON.parse(line.slice("FLEETUM_RESTORE_HTTP_RESULT ".length)), uploadMode, materializedFiles: materialized.fileCount }; check(label, result.http[label]);
+    const receipt = JSON.parse(line.slice("FLEETUM_RESTORE_HTTP_RESULT ".length));
+    const safeReceipt = includeModern ? parseRestorePrivacyHistoryHttpReceipt(receipt) : receipt;
+    if (includeModern) assert.equal(safeReceipt.privacyHistory.sha256, result.privacyHistory.seed.sha256, "HTTP probe must preserve pre-backup privacy/history state");
+    result.http[label] = { ...safeReceipt, uploadMode, materializedFiles: materialized.fileCount }; check(label, result.http[label]);
   }
   try {
     await mkdir(options.evidenceDirectory, { recursive: true, mode: 0o700 });
@@ -374,6 +407,7 @@ export async function runRestoreRecovery(options) {
       result[`${label}LockfileSha256`] = sha256(await readFile(path.join(directory, "package-lock.json")));
       await cp(path.join(root, "ops/fixtures/restore-recovery-http.mjs"), path.join(directory, "restore-recovery-http.mjs"));
       await cp(path.join(root, "ops/fixtures/restore-recovery-money.mjs"), path.join(directory, "restore-recovery-money.mjs"));
+      if (label !== "baseline") await cp(path.join(root, "ops/fixtures/restore-recovery-privacy-history.mjs"), path.join(directory, "restore-recovery-privacy-history.mjs"));
       if (options.applicationRecovery && label !== "baseline") await cp(path.join(root, "ops/fixtures/restore-recovery-security.mjs"), path.join(directory, "restore-recovery-security.mjs"));
     }
     const inventory = async (directory) => (await readdir(path.join(directory, "backend/prisma/migrations"))).filter((name) => /^\d/.test(name)).sort();
@@ -384,7 +418,7 @@ export async function runRestoreRecovery(options) {
     const compatibilityFixture = extractCompatibilityFixture(await readFile(path.join(sourceDirectory, "ops/verify-migration-compatibility.sh"), "utf8"));
     await writeFile(path.join(baselineDirectory, "compat-fixture.mjs"), compatibilityFixture);
     await cp(path.join(root, "ops/fixtures/restore-recovery-seed.mjs"), path.join(baselineDirectory, "restore-recovery-seed.mjs"));
-    for (const file of ["ops/verify-restore-recovery.mjs", "ops/restore-db-test.sh", "ops/fixtures/restore-recovery-seed.mjs", "ops/fixtures/restore-recovery-http.mjs", "ops/fixtures/restore-recovery-money.mjs", "ops/fixtures/restore-recovery-storage.mjs", ...(options.applicationRecovery ? ["ops/recovery/exercise-application-recovery.mjs", "ops/recovery/application-recovery-policy.mjs", "ops/fixtures/application-recovery-server.mjs", "ops/fixtures/restore-recovery-security.mjs"] : [])]) result.toolingHashes[file] = sha256(await readFile(path.join(root, file)));
+    for (const file of ["ops/verify-restore-recovery.mjs", "ops/restore-db-test.sh", "ops/fixtures/restore-recovery-seed.mjs", "ops/fixtures/restore-recovery-http.mjs", "ops/fixtures/restore-recovery-privacy-history.mjs", "ops/fixtures/restore-recovery-money.mjs", "ops/fixtures/restore-recovery-storage.mjs", ...(options.applicationRecovery ? ["ops/recovery/exercise-application-recovery.mjs", "ops/recovery/application-recovery-policy.mjs", "ops/fixtures/application-recovery-server.mjs", "ops/fixtures/restore-recovery-security.mjs"] : [])]) result.toolingHashes[file] = sha256(await readFile(path.join(root, file)));
     result.toolingHashes.compatibilityFixture = sha256(compatibilityFixture);
     await docker(["info", "--format", "{{.ServerVersion}}"], "local-docker-info");
     const image = JSON.parse((await docker(["image", "inspect", "postgres:16-alpine", "--format", "{{json .}}"], "preexisting-postgres16-image")).stdout.toString("utf8"));
@@ -470,6 +504,9 @@ export async function runRestoreRecovery(options) {
       result.platformSessionSecurity = { seed: await runRestoreRecoverySecurityFixture({ run, directory: sourceDirectory, engines: clients.get(sourceDirectory), databaseUrl, phase: "seed", label: "platform-session-revocation-seed-before-backup48" }) };
       check("platform-session-revocation-seeded-before-backup48", result.platformSessionSecurity.seed);
     }
+    result.privacyHistory.seed = await runRestoreRecoveryPrivacyHistoryFixture({ run, directory: sourceDirectory, engines: clients.get(sourceDirectory), databaseUrl, phase: "seed", label: "privacy-history-seed-before-backup48" });
+    result.privacyHistory.limits = ["Current-schema48 synthetic durability and HTTP behavior only; erasure concurrency is covered separately, not repeated by this drill.", "The four source HTTP probes use the TypeScript application after restore; compiled HTTP probes run only before/after the four application faults.", "Export audits and login records are retained as legitimate effects; fixture hashes exclude those records.", "The erased stored object is a tombstone with no attachment relation or added live file bytes."];
+    check("privacy-history-seeded-before-backup48", result.privacyHistory.seed);
     // Snapshot before each restored app starts, since login/audits legitimately add rows.
     result.snapshots.migrated48 = await snapshot(dbName);
     const dump48 = path.join(options.evidenceDirectory, "synthetic-schema48.sql"); const manifest48 = await manifestFor(dbName, dump48, backupUploads, 48);
@@ -483,6 +520,8 @@ export async function runRestoreRecovery(options) {
         check(`platform-session-revocation-preserved-after-${suffix}-restore`, security);
       }
       check(`restore-${suffix}-canonical-all-tables-and-files-match`);
+      const privacy = await runRestoreRecoveryPrivacyHistoryFixture({ run, directory: sourceDirectory, engines: clients.get(sourceDirectory), databaseUrl: urlFor(name), phase: "check", label: `privacy-history-check-${suffix}-restore`, expectedReceipt: result.privacyHistory.seed });
+      result.privacyHistory[`${suffix}Restore`] = privacy; check(`privacy-history-preserved-after-${suffix}-restore`, privacy);
       await verifyMoney(sourceDirectory, name, `${suffix}-restore`);
       for (const uploadMode of ["relative", "absolute"]) await smoke(sourceDirectory, name, uploads, `source-app-after-${suffix}-restore-${uploadMode}`, manifest48, { uploadMode, includeModern: true });
       assert.equal(await sql(name, stateQuery, `${suffix}-restored-auth-worker-report-state`), expectedStates);
@@ -500,13 +539,14 @@ export async function runRestoreRecovery(options) {
         }
       };
       const runHttpSmoke = async (base, label) => {
-        const response = await run(process.execPath, ["restore-recovery-http.mjs"], `application-${label}`, { cwd: reserveDirectory, extraEnv: { ...clients.get(reserveDirectory), DATABASE_URL: urlFor(first), SYNTHETIC_APPLICATION_RECOVERY: "true", SYNTHETIC_HTTP_BASE: `${base}/api`, SYNTHETIC_PLATFORM_SECURITY: "true", SYNTHETIC_PLATFORM_HTTP_BASE: `${base}/platform-api`, SYNTHETIC_WRITE_NOTE: `Synthetic recovery ${label}`, SYNTHETIC_UPLOAD_TREE: backupUploads, SYNTHETIC_INCLUDE_MODERN_FILES: "true" }, timeoutMs: 30000, allowFailure: true });
+        const response = await run(process.execPath, ["restore-recovery-http.mjs"], `application-${label}`, { cwd: reserveDirectory, extraEnv: { ...clients.get(reserveDirectory), DATABASE_URL: urlFor(first), SYNTHETIC_APPLICATION_RECOVERY: "true", SYNTHETIC_HTTP_BASE: `${base}/api`, SYNTHETIC_PLATFORM_SECURITY: "true", SYNTHETIC_PLATFORM_HTTP_BASE: `${base}/platform-api`, SYNTHETIC_PRIVACY_HISTORY: "true", SYNTHETIC_WRITE_NOTE: `Synthetic recovery ${label}`, SYNTHETIC_UPLOAD_TREE: backupUploads, SYNTHETIC_INCLUDE_MODERN_FILES: "true" }, timeoutMs: 30000, allowFailure: true });
         const failure = parseHttpFailure(Buffer.concat([response.stdout, response.stderr]).toString("utf8"));
         if (response.code !== 0 || failure) { result.http[`application-${label}`] = { success: false, exitCode: response.code, diagnostic: failure }; throw new Error(`Application HTTP smoke failed at ${failure?.stepLabel ?? "unknown"}: ${failure?.errorName ?? "Error"}`); }
         const line = response.stdout.toString("utf8").split("\n").find((value) => value.startsWith("FLEETUM_RESTORE_HTTP_RESULT ")); assert(line);
         const receipt = JSON.parse(line.slice("FLEETUM_RESTORE_HTTP_RESULT ".length));
         for (const name of ["platform-revoked-valid-bearer-denied", "platform-independent-bearer-authorized"]) assert(receipt.checks?.includes(name), "Compiled HTTP fixture must verify persisted Platform session revocation and an independent valid bearer");
-        result.http[`application-${label}`] = { ...receipt, uploadMode: "absolute", materializedFiles: registered.fileCount, existingCompiledApplication: true }; check(`application-${label}`, result.http[`application-${label}`]);
+        const safeReceipt = parseRestorePrivacyHistoryHttpReceipt(receipt); assert.equal(safeReceipt.privacyHistory.sha256, result.privacyHistory.seed.sha256, "Compiled probe must preserve pre-backup privacy/history state");
+        result.http[`application-${label}`] = { ...safeReceipt, uploadMode: "absolute", materializedFiles: registered.fileCount, existingCompiledApplication: true }; check(`application-${label}`, result.http[`application-${label}`]);
       };
       // The budget is a fixed local test bound, selected before observation; it is not an externally approved SLA.
       result.applicationRecovery = await exerciseApplicationRecovery({ archiveRoot: reserveDirectory, sourceSha: options.recoverySourceSha, buildNodeEnv: result.applicationBuild.nodeEnv, env: { ...env, ...clients.get(reserveDirectory), DATABASE_URL: urlFor(first), UPLOAD_DIR: path.join(reserveDirectory, "uploads") }, snapshot: () => snapshot(first), runHttpSmoke, budgetMs: 30000 });
