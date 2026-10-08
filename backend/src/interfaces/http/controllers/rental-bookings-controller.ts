@@ -5,6 +5,7 @@ import { EmailQueueService } from "../../../infrastructure/email/email-queue-ser
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
 import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockOwnedRentalCustomer } from "../../../infrastructure/repositories/rental-customer-tenant-scope.js";
 import {
   scanBufferForThreats,
   validateImageBufferMagic,
@@ -40,6 +41,7 @@ import {
   restoreRentalPricingTermsSnapshot,
   toSafeNonNegativeInt
 } from "../../../application/services/rental-pricing-service.js";
+import { buildRentalPricingOperationalUpdate } from "../../../application/services/rental-pricing-operations.js";
 import { TenantProfileService } from "../../../application/services/tenant-profile-service.js";
 import {
   bookingContractEmailSchema,
@@ -2110,8 +2112,59 @@ export class RentalBookingsController {
   updatePricing = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
-    const booking = await this.getBookingOrThrow(tenantId, req.params.id);
     const payload = rentalBookingPricingUpdateSchema.parse(req.body);
+    // The operational path does not even hydrate mutable pricing relations.
+    const booking = payload.preserveTerms === true
+      ? await prisma.rentalBooking.findFirst({
+          where: { ...ownedBookingWhere(tenantId), id: req.params.id, deletedAt: null }
+        })
+      : await this.getBookingOrThrow(tenantId, req.params.id);
+    if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+
+    if (payload.preserveTerms === true) {
+      const result = await prisma.$transaction(async (tx) => {
+        // Share the existing mutation lock order with explicit repricing/close.
+        await this.lockBookingMutation(tx, tenantId, booking.id);
+        await this.lockBookingSchedule(tx, tenantId, booking.vehicleId);
+        await lockOwnedVehicle(tx, tenantId, booking.vehicleId, true);
+        await tx.$queryRaw`
+          SELECT "id" FROM "RentalBooking"
+          WHERE "id" = ${booking.id} AND "tenantId" = ${tenantId} FOR UPDATE
+        `;
+        const locked = await tx.rentalBooking.findFirst({
+          where: { ...ownedBookingWhere(tenantId), id: booking.id, deletedAt: null }
+        });
+        if (!locked) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+        if (locked.vehicleId !== booking.vehicleId || locked.updatedAt.getTime() !== booking.updatedAt.getTime()) {
+          throw new AppError("La prenotazione e' cambiata. Riprova.", 409, "BOOKING_CHANGED");
+        }
+        const existingSnapshot = await tx.rentalBookingPricingSnapshot.findFirst({
+          where: { tenantId, bookingId: booking.id, deletedAt: null }
+        });
+        if (!existingSnapshot) throw new AppError(
+          "Pricing storico non disponibile. Seleziona esplicitamente un listino per definirlo.",
+          409, "PRICING_SNAPSHOT_REQUIRED"
+        );
+        const operation = buildRentalPricingOperationalUpdate({
+          snapshot: existingSnapshot, pickupAt: locked.pickupAt, returnAt: locked.returnAt, patch: payload
+        });
+        const changed = Object.keys(operation.data).length > 0;
+        const snapshot = changed
+          ? await tx.rentalBookingPricingSnapshot.update({ where: { id: existingSnapshot.id }, data: operation.data })
+          : existingSnapshot;
+        if (Object.keys(operation.bookingData).length > 0) await tx.rentalBooking.update({
+          where: { id: booking.id }, data: operation.bookingData
+        });
+        if (changed) await tx.rentalBookingNote.create({ data: {
+          tenantId, bookingId: booking.id, userId, type: "SYSTEM",
+          message: "Km e note pricing aggiornati mantenendo le condizioni concordate"
+        } });
+        return { snapshot, quote: operation.quote };
+      });
+      res.json({ bookingId: booking.id, bookingCode: booking.code, quote: result.quote,
+        snapshot: await this.hydratePricingSnapshot(tenantId, result.snapshot) });
+      return;
+    }
 
     const setup = await this.resolvePricingSelection({
       tenantId,
@@ -3588,107 +3641,110 @@ export class RentalBookingsController {
   updateCustomer = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const payload = rentalCustomerUpdateSchema.parse(req.body);
-    const customer = await this.getCustomerOrThrow(tenantId, req.params.customerId);
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockOwnedRentalCustomer(tx, tenantId, req.params.customerId);
+      const customer = await this.getCustomerOrThrow(tenantId, req.params.customerId, tx);
 
-    const customerType = this.normalizeCustomerType(payload.customerType ?? customer.customerType);
-    const merged = {
-      customerType,
-      firstName: payload.firstName ?? customer.firstName,
-      lastName: payload.lastName ?? customer.lastName,
-      drivingLicenseNumber: payload.drivingLicenseNumber ?? customer.drivingLicenseNumber,
-      email: payload.email ?? customer.email,
-      phone: payload.phone ?? customer.phone,
-      companyName: payload.companyName ?? customer.companyName,
-      companyVatNumber: payload.companyVatNumber ?? customer.companyVatNumber,
-      companySdi: payload.companySdi ?? customer.companySdi
-    };
-
-    this.assertCustomerBusinessRules(merged);
-
-    const hasAnyDefined = (...values: unknown[]) => values.some((value) => value !== undefined);
-    const residenceTouched = hasAnyDefined(
-      payload.residenceAddress,
-      payload.residenceCountry,
-      payload.residenceRegion,
-      payload.residenceProvince,
-      payload.residenceMunicipalityCode,
-      payload.residenceCity,
-      payload.residencePostalCode,
-      payload.residenceStreetAddress
-    );
-    const companyAddressTouched = hasAnyDefined(
-      payload.companyLegalAddress,
-      payload.companyCountry,
-      payload.companyRegion,
-      payload.companyProvince,
-      payload.companyMunicipalityCode,
-      payload.companyCity,
-      payload.companyPostalCode,
-      payload.companyStreetAddress
-    );
-    const residenceAddress = residenceTouched
-      ? this.composeStructuredAddress({
-          streetAddress: payload.residenceStreetAddress ?? customer.residenceStreetAddress,
-          postalCode: payload.residencePostalCode ?? customer.residencePostalCode,
-          city: payload.residenceCity ?? customer.residenceCity,
-          province: payload.residenceProvince ?? customer.residenceProvince,
-          country: payload.residenceCountry ?? customer.residenceCountry,
-          fallback: payload.residenceAddress ?? customer.residenceAddress
-        })
-      : undefined;
-    const companyLegalAddress = companyAddressTouched
-      ? this.composeStructuredAddress({
-          streetAddress: payload.companyStreetAddress ?? customer.companyStreetAddress,
-          postalCode: payload.companyPostalCode ?? customer.companyPostalCode,
-          city: payload.companyCity ?? customer.companyCity,
-          province: payload.companyProvince ?? customer.companyProvince,
-          country: payload.companyCountry ?? customer.companyCountry,
-          fallback: payload.companyLegalAddress ?? customer.companyLegalAddress
-        })
-      : undefined;
-
-    const updated = await prisma.rentalCustomer.update({
-      where: { id: customer.id },
-      data: withDefined({
-        ...payload,
+      const customerType = this.normalizeCustomerType(payload.customerType ?? customer.customerType);
+      const merged = {
         customerType,
-        firstName: payload.firstName !== undefined ? normalizeText(payload.firstName) : undefined,
-        lastName: payload.lastName !== undefined ? normalizeText(payload.lastName) : undefined,
-        drivingLicenseNumber:
-          payload.drivingLicenseNumber !== undefined ? normalizeText(payload.drivingLicenseNumber).toUpperCase() : undefined,
-        birthCountry: payload.birthCountry !== undefined ? this.normalizeCountryCode(payload.birthCountry) : undefined,
-        birthProvince: payload.birthProvince !== undefined ? this.normalizeUpperText(payload.birthProvince) : undefined,
-        birthMunicipalityCode:
-          payload.birthMunicipalityCode !== undefined ? this.normalizeNullableText(payload.birthMunicipalityCode) : undefined,
-        birthCity: payload.birthCity !== undefined ? this.normalizeNullableText(payload.birthCity) : undefined,
-        nationalityCountry:
-          payload.nationalityCountry !== undefined ? this.normalizeCountryCode(payload.nationalityCountry) : undefined,
-        residenceAddress,
-        residenceCountry: payload.residenceCountry !== undefined ? this.normalizeCountryCode(payload.residenceCountry) : undefined,
-        residenceRegion: payload.residenceRegion !== undefined ? this.normalizeNullableText(payload.residenceRegion) : undefined,
-        residenceProvince:
-          payload.residenceProvince !== undefined ? this.normalizeUpperText(payload.residenceProvince) : undefined,
-        residenceMunicipalityCode:
-          payload.residenceMunicipalityCode !== undefined ? this.normalizeNullableText(payload.residenceMunicipalityCode) : undefined,
-        residenceCity: payload.residenceCity !== undefined ? this.normalizeNullableText(payload.residenceCity) : undefined,
-        residencePostalCode:
-          payload.residencePostalCode !== undefined ? this.normalizeNullableText(payload.residencePostalCode) : undefined,
-        residenceStreetAddress:
-          payload.residenceStreetAddress !== undefined ? this.normalizeNullableText(payload.residenceStreetAddress) : undefined,
-        companyVatNumber:
-          payload.companyVatNumber !== undefined ? this.normalizeVatNumber(payload.companyVatNumber) || null : undefined,
-        companyLegalAddress,
-        companyCountry: payload.companyCountry !== undefined ? this.normalizeCountryCode(payload.companyCountry) : undefined,
-        companyRegion: payload.companyRegion !== undefined ? this.normalizeNullableText(payload.companyRegion) : undefined,
-        companyProvince: payload.companyProvince !== undefined ? this.normalizeUpperText(payload.companyProvince) : undefined,
-        companyMunicipalityCode:
-          payload.companyMunicipalityCode !== undefined ? this.normalizeNullableText(payload.companyMunicipalityCode) : undefined,
-        companyCity: payload.companyCity !== undefined ? this.normalizeNullableText(payload.companyCity) : undefined,
-        companyPostalCode: payload.companyPostalCode !== undefined ? this.normalizeNullableText(payload.companyPostalCode) : undefined,
-        companyStreetAddress:
-          payload.companyStreetAddress !== undefined ? this.normalizeNullableText(payload.companyStreetAddress) : undefined,
-        companySdi: payload.companySdi !== undefined ? normalizeText(payload.companySdi).toUpperCase() || null : undefined
-      })
+        firstName: payload.firstName ?? customer.firstName,
+        lastName: payload.lastName ?? customer.lastName,
+        drivingLicenseNumber: payload.drivingLicenseNumber ?? customer.drivingLicenseNumber,
+        email: payload.email ?? customer.email,
+        phone: payload.phone ?? customer.phone,
+        companyName: payload.companyName ?? customer.companyName,
+        companyVatNumber: payload.companyVatNumber ?? customer.companyVatNumber,
+        companySdi: payload.companySdi ?? customer.companySdi
+      };
+
+      this.assertCustomerBusinessRules(merged);
+
+      const hasAnyDefined = (...values: unknown[]) => values.some((value) => value !== undefined);
+      const residenceTouched = hasAnyDefined(
+        payload.residenceAddress,
+        payload.residenceCountry,
+        payload.residenceRegion,
+        payload.residenceProvince,
+        payload.residenceMunicipalityCode,
+        payload.residenceCity,
+        payload.residencePostalCode,
+        payload.residenceStreetAddress
+      );
+      const companyAddressTouched = hasAnyDefined(
+        payload.companyLegalAddress,
+        payload.companyCountry,
+        payload.companyRegion,
+        payload.companyProvince,
+        payload.companyMunicipalityCode,
+        payload.companyCity,
+        payload.companyPostalCode,
+        payload.companyStreetAddress
+      );
+      const residenceAddress = residenceTouched
+        ? this.composeStructuredAddress({
+            streetAddress: payload.residenceStreetAddress ?? customer.residenceStreetAddress,
+            postalCode: payload.residencePostalCode ?? customer.residencePostalCode,
+            city: payload.residenceCity ?? customer.residenceCity,
+            province: payload.residenceProvince ?? customer.residenceProvince,
+            country: payload.residenceCountry ?? customer.residenceCountry,
+            fallback: payload.residenceAddress ?? customer.residenceAddress
+          })
+        : undefined;
+      const companyLegalAddress = companyAddressTouched
+        ? this.composeStructuredAddress({
+            streetAddress: payload.companyStreetAddress ?? customer.companyStreetAddress,
+            postalCode: payload.companyPostalCode ?? customer.companyPostalCode,
+            city: payload.companyCity ?? customer.companyCity,
+            province: payload.companyProvince ?? customer.companyProvince,
+            country: payload.companyCountry ?? customer.companyCountry,
+            fallback: payload.companyLegalAddress ?? customer.companyLegalAddress
+          })
+        : undefined;
+
+      return tx.rentalCustomer.update({
+        where: { id: customer.id },
+        data: withDefined({
+          ...payload,
+          customerType,
+          firstName: payload.firstName !== undefined ? normalizeText(payload.firstName) : undefined,
+          lastName: payload.lastName !== undefined ? normalizeText(payload.lastName) : undefined,
+          drivingLicenseNumber:
+            payload.drivingLicenseNumber !== undefined ? normalizeText(payload.drivingLicenseNumber).toUpperCase() : undefined,
+          birthCountry: payload.birthCountry !== undefined ? this.normalizeCountryCode(payload.birthCountry) : undefined,
+          birthProvince: payload.birthProvince !== undefined ? this.normalizeUpperText(payload.birthProvince) : undefined,
+          birthMunicipalityCode:
+            payload.birthMunicipalityCode !== undefined ? this.normalizeNullableText(payload.birthMunicipalityCode) : undefined,
+          birthCity: payload.birthCity !== undefined ? this.normalizeNullableText(payload.birthCity) : undefined,
+          nationalityCountry:
+            payload.nationalityCountry !== undefined ? this.normalizeCountryCode(payload.nationalityCountry) : undefined,
+          residenceAddress,
+          residenceCountry: payload.residenceCountry !== undefined ? this.normalizeCountryCode(payload.residenceCountry) : undefined,
+          residenceRegion: payload.residenceRegion !== undefined ? this.normalizeNullableText(payload.residenceRegion) : undefined,
+          residenceProvince:
+            payload.residenceProvince !== undefined ? this.normalizeUpperText(payload.residenceProvince) : undefined,
+          residenceMunicipalityCode:
+            payload.residenceMunicipalityCode !== undefined ? this.normalizeNullableText(payload.residenceMunicipalityCode) : undefined,
+          residenceCity: payload.residenceCity !== undefined ? this.normalizeNullableText(payload.residenceCity) : undefined,
+          residencePostalCode:
+            payload.residencePostalCode !== undefined ? this.normalizeNullableText(payload.residencePostalCode) : undefined,
+          residenceStreetAddress:
+            payload.residenceStreetAddress !== undefined ? this.normalizeNullableText(payload.residenceStreetAddress) : undefined,
+          companyVatNumber:
+            payload.companyVatNumber !== undefined ? this.normalizeVatNumber(payload.companyVatNumber) || null : undefined,
+          companyLegalAddress,
+          companyCountry: payload.companyCountry !== undefined ? this.normalizeCountryCode(payload.companyCountry) : undefined,
+          companyRegion: payload.companyRegion !== undefined ? this.normalizeNullableText(payload.companyRegion) : undefined,
+          companyProvince: payload.companyProvince !== undefined ? this.normalizeUpperText(payload.companyProvince) : undefined,
+          companyMunicipalityCode:
+            payload.companyMunicipalityCode !== undefined ? this.normalizeNullableText(payload.companyMunicipalityCode) : undefined,
+          companyCity: payload.companyCity !== undefined ? this.normalizeNullableText(payload.companyCity) : undefined,
+          companyPostalCode: payload.companyPostalCode !== undefined ? this.normalizeNullableText(payload.companyPostalCode) : undefined,
+          companyStreetAddress:
+            payload.companyStreetAddress !== undefined ? this.normalizeNullableText(payload.companyStreetAddress) : undefined,
+          companySdi: payload.companySdi !== undefined ? normalizeText(payload.companySdi).toUpperCase() || null : undefined
+        })
+      });
     });
     res.json(updated);
   };

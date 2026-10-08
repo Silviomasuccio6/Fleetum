@@ -672,18 +672,24 @@ export const rentalBookingsUseCases = {
   updateBookingPricing: (
     bookingId: string,
     input: {
+      preserveTerms?: false;
       priceListId: string;
       pricePackageId?: string;
       extraKmPolicyId?: string;
       estimatedKm?: number;
       actualKm?: number;
       notes?: string;
+    } | {
+      preserveTerms: true;
+      estimatedKm?: number | null;
+      actualKm?: number | null;
+      notes?: string;
     }
   ) =>
     httpClient.patch<{
       bookingId: string;
       bookingCode: string;
-      quote: RentalPricingQuote;
+      quote: RentalPricingQuote | null;
       snapshot: unknown;
     }>(`/rental-bookings/${bookingId}/pricing`, input),
   listCustomers: (params: Record<string, string | number | undefined>) =>

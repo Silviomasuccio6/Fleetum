@@ -70,13 +70,15 @@ test("customer erasure clears every RentalCustomer field marked as PII", async (
   };
 
   (prisma.rentalCustomer as any).findFirst = async () => persistedCustomer;
-  (prisma.rentalCustomerAttachment as any).findMany = async () => [];
+  (prisma.rentalCustomerAttachment as any).findMany = async () => {
+    assert.fail("Attachment discovery must occur under the subject lock inside the transaction");
+  };
   (prisma as any).$transaction = async (callback: any) =>
     callback({
       $queryRaw: async () => [{ id: "tenant_a" }],
       rentalBooking: { updateMany: async () => ({ count: 2 }) },
       bookingContract: { updateMany: async () => ({ count: 1 }) },
-      rentalCustomerAttachment: { deleteMany: async () => ({ count: 0 }) },
+      rentalCustomerAttachment: { findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
       rentalCustomer: {
         update: async (input: { data: Record<string, unknown> }) => {
           Object.assign(persistedCustomer, input.data);

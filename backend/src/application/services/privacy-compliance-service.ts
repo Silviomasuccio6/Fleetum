@@ -14,6 +14,7 @@ import {
 } from "./rental-customer-data-export-inventory.js";
 import { buildRentalCustomerAnonymizationData } from "./rental-customer-pii.js";
 import { ownedVehicleWhere } from "../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockOwnedRentalCustomer } from "../../infrastructure/repositories/rental-customer-tenant-scope.js";
 
 const retentionDefaults = {
   expiredTokenRetentionDays: 30,
@@ -556,13 +557,19 @@ export class PrivacyComplianceService {
       ...rentalExtraCharges.map((charge) => charge.id)
     ]));
     const contractDeliveries = bookings.flatMap((booking) => booking.contract?.deliveries ?? []);
-    const communicationRecipients = Array.from(new Set([
-      profile.email,
-      ...bookings.map((booking) => booking.customerEmail),
-      ...contractDeliveries.map((delivery) => delivery.recipient)
-    ].filter((value): value is string => Boolean(value))));
-    const emailFilter = communicationRecipients.length
-      ? { tenantId: input.tenantId, recipient: { in: communicationRecipients } }
+    // A shared email address does not establish ownership of a queued message.
+    // Export only contract queue receipts whose complete reference chain belongs
+    // to this subject. The related delivery already carries the document copy;
+    // raw queue payloads and credential messages never enter the export.
+    const contractMailReferences = bookings.flatMap((booking) =>
+      booking.contract?.deliveries.map((delivery) => ({ AND: [
+        { meta: { path: ["bookingId"], equals: booking.id } },
+        { meta: { path: ["contractId"], equals: booking.contract!.id } },
+        { meta: { path: ["contractDeliveryId"], equals: delivery.id } }
+      ] })) ?? []
+    );
+    const emailFilter: Prisma.EmailQueueWhereInput | null = contractMailReferences.length
+      ? { tenantId: input.tenantId, type: "BOOKING_CONTRACT", OR: contractMailReferences }
       : null;
 
     const [consents, emailQueue, auditTrail, storedFiles] = await Promise.all([
@@ -598,13 +605,10 @@ export class PrivacyComplianceService {
               id: true,
               type: true,
               recipient: true,
-              subject: true,
-              body: true,
               status: true,
               attempts: true,
               maxAttempts: true,
               nextAttemptAt: true,
-              lastError: true,
               createdAt: true,
               updatedAt: true
             },
@@ -688,7 +692,9 @@ export class PrivacyComplianceService {
         rawProviderPayloads: "Excluded to prevent disclosure of provider secrets and unrelated payload data.",
         reusableProviderIdentifiers: "Stripe customer, payment method, setup intent and payment intent identifiers are excluded.",
         storageLocations: "Provider buckets, storage keys and newly generated signed URLs are excluded; file metadata remains included.",
-        embeddedAttachments: "Binary and Base64 attachments are not embedded in this JSON export."
+        embeddedAttachments: "Binary and Base64 attachments are not embedded in this JSON export.",
+        unlinkedCommunications: "Address-only, ambiguous and unrelated queued messages are excluded; only verified booking/contract/delivery references are included.",
+        queuedCredentialPayloads: "Credential messages and raw queue subject, body, metadata and error text are excluded; linked contract delivery copies remain included."
       }
     };
   }
@@ -708,28 +714,19 @@ export class PrivacyComplianceService {
       throw new AppError("Base decisionale/privacy richiesta", 422, "PRIVACY_LEGAL_BASIS_REQUIRED");
     }
 
-    const customer = await prisma.rentalCustomer.findFirst({
-      where: { tenantId: input.tenantId, id: input.customerId },
-      select: { id: true, deletedAt: true }
-    });
-    if (!customer) throw new AppError("Cliente non trovato", 404, "CUSTOMER_NOT_FOUND");
-
     const label = anonymizedLabel(input.customerId);
     const now = new Date();
 
-    const attachments = input.deleteAttachments !== false
-      ? await prisma.rentalCustomerAttachment.findMany({
-          where: { tenantId: input.tenantId, customerId: input.customerId },
-          select: { id: true, filePath: true }
-        })
-      : [];
-
     const result = await prisma.$transaction(async (tx) => {
-      // Take the parent lock before bookings and the audit FK, matching notice dispatch.
-      const tenantRows = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "Tenant" WHERE "id" = ${input.tenantId} FOR KEY SHARE
-      `;
-      if (!tenantRows.length) throw new AppError("Cliente non trovato", 404, "CUSTOMER_NOT_FOUND");
+      await lockOwnedRentalCustomer(tx, input.tenantId, input.customerId, true);
+      // Discover exactly the relationships to be removed while holding the
+      // same subject lock used by attachment uploads, never before the commit.
+      const attachments = input.deleteAttachments !== false
+        ? await tx.rentalCustomerAttachment.findMany({
+            where: { tenantId: input.tenantId, customerId: input.customerId },
+            select: { id: true, filePath: true }
+          })
+        : [];
 
       const bookingUpdate = await tx.rentalBooking.updateMany({
         where: { tenantId: input.tenantId, customerId: input.customerId },
@@ -760,10 +757,6 @@ export class PrivacyComplianceService {
         await tx.storedFileObject.updateMany({
           where: {
             tenantId: input.tenantId,
-            provider: storageProvider.name,
-            ...(storageProvider.name === "local"
-              ? { OR: [{ bucket: this.currentStorageBucket }, { bucket: null }] }
-              : { bucket: this.currentStorageBucket }),
             storageKey: { in: attachments.map((attachment) => attachment.filePath) },
             deletedAt: null
           },
@@ -797,11 +790,12 @@ export class PrivacyComplianceService {
       return {
         bookingsUpdated: bookingUpdate.count,
         contractsUpdated: contractUpdate.count,
-        attachmentsDeleted: attachmentDelete.count
+        attachmentsDeleted: attachmentDelete.count,
+        attachments
       };
     });
 
-    for (const attachment of attachments) {
+    for (const attachment of result.attachments) {
       await deleteRetiredPhysicalObject({
         key: attachment.filePath,
         resourceType: "RentalCustomerAttachment"
@@ -812,7 +806,9 @@ export class PrivacyComplianceService {
       anonymized: true,
       customerId: input.customerId,
       label,
-      ...result
+      bookingsUpdated: result.bookingsUpdated,
+      contractsUpdated: result.contractsUpdated,
+      attachmentsDeleted: result.attachmentsDeleted
     };
   }
 

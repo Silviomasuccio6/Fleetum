@@ -120,6 +120,9 @@ type BookingFormState = {
   estimatedKm: string;
   actualKm: string;
   pricingNotes: string;
+  pricingTermsChanged: boolean;
+  pricingSnapshotChanged: { estimatedKm: boolean; actualKm: boolean; notes: boolean };
+  expectedTotalChanged: boolean;
   reason: string;
   internalNotes: string;
 };
@@ -442,6 +445,9 @@ const buildBookingFormForCell = (input?: { vehicleId: string; date: Date }): Boo
     estimatedKm: "",
     actualKm: "",
     pricingNotes: "",
+    pricingTermsChanged: false,
+    pricingSnapshotChanged: { estimatedKm: false, actualKm: false, notes: false },
+    expectedTotalChanged: false,
     reason: "",
     internalNotes: ""
   };
@@ -550,6 +556,8 @@ export const RentalBookingsPage = () => {
   const [extraPolicies, setExtraPolicies] = useState<RentalExtraKmPolicy[]>([]);
   const [pricingQuote, setPricingQuote] = useState<RentalPricingQuote | null>(null);
   const [pricingLoading, setPricingLoading] = useState(false);
+  const bookingPricingModalRef = useRef({ version: 0, open: false });
+  const pricingRulesRequestRef = useRef(0);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateEditor, setTemplateEditor] = useState<TemplateFormState>(() => defaultTemplateEditor());
@@ -578,6 +586,7 @@ export const RentalBookingsPage = () => {
   const paymentSetupStatus = searchParams.get("payment_setup") ?? searchParams.get("rental_payment");
 
   const forceCloseBookingModal = useCallback(() => {
+    bookingPricingModalRef.current = { version: bookingPricingModalRef.current.version + 1, open: false };
     setBookingModalOpen(false);
     setBookingCloseConfirmOpen(false);
     setBookingFormDirty(false);
@@ -759,16 +768,26 @@ export const RentalBookingsPage = () => {
   };
 
   const loadPricingRules = async (listId: string, preferredPackageId?: string, preferredPolicyId?: string) => {
+    const modalVersion = bookingPricingModalRef.current.version;
+    const requestVersion = ++pricingRulesRequestRef.current;
+    const isCurrent = () => bookingPricingModalRef.current.open &&
+      bookingPricingModalRef.current.version === modalVersion && pricingRulesRequestRef.current === requestVersion;
     if (!listId) {
       setPricePackages([]);
       setExtraPolicies([]);
       return;
     }
 
-    const [pkgRes, policyRes] = await Promise.all([
+    const result = await Promise.all([
       rentalBookingsUseCases.listPricePackages(listId),
       rentalBookingsUseCases.listExtraKmPolicies({ priceListId: listId })
-    ]);
+    ]).catch((error: unknown) => {
+      if (isCurrent()) setError((error as Error).message);
+      return null;
+    });
+    if (!result) return;
+    const [pkgRes, policyRes] = result;
+    if (!isCurrent()) return;
 
     const activePackages = (pkgRes.data ?? []).filter((pkg) => pkg.isActive);
     const activePolicies = (policyRes.data ?? []).filter((policy) => policy.isActive);
@@ -776,6 +795,7 @@ export const RentalBookingsPage = () => {
     setExtraPolicies(activePolicies);
 
     setBookingForm((current) => {
+      if (current.priceListId !== listId || (current.mode === "edit" && !current.pricingTermsChanged)) return current;
       const selectedPackageId =
         preferredPackageId && activePackages.some((pkg) => pkg.id === preferredPackageId)
           ? preferredPackageId
@@ -800,27 +820,31 @@ export const RentalBookingsPage = () => {
   };
 
   const loadBookingPricingSnapshot = async (bookingId: string) => {
+    const modalVersion = bookingPricingModalRef.current.version;
+    const isCurrent = () => bookingPricingModalRef.current.open && bookingPricingModalRef.current.version === modalVersion;
     try {
       const payload = await rentalBookingsUseCases.getBookingPricing(bookingId);
+      if (!isCurrent()) return;
       if (!payload.snapshot) {
-        setPricingQuote(null);
         return;
       }
 
-      setBookingForm((current) => ({
-        ...current,
-        priceListId: payload.snapshot?.priceListId ?? current.priceListId,
-        pricePackageId: payload.snapshot?.pricePackageId ?? "",
-        extraKmPolicyId: payload.snapshot?.extraKmPolicyId ?? "",
-        estimatedKm: payload.snapshot?.estimatedKm != null ? String(payload.snapshot.estimatedKm) : "",
-        actualKm: payload.snapshot?.actualKm != null ? String(payload.snapshot.actualKm) : "",
-        pricingNotes: payload.snapshot?.notes ?? "",
-        expectedTotal: payload.snapshot?.expectedTotal != null ? String(payload.snapshot.expectedTotal) : current.expectedTotal
-      }));
-
-      if (payload.snapshot?.priceListId) {
-        await loadPricingRules(payload.snapshot.priceListId, payload.snapshot.pricePackageId ?? undefined, payload.snapshot.extraKmPolicyId ?? undefined);
-      }
+      setBookingForm((current) => {
+        if (current.mode !== "edit" || current.bookingId !== bookingId || current.pricingTermsChanged) return current;
+        return {
+          ...current,
+          priceListId: payload.snapshot?.priceListId ?? "",
+          pricePackageId: payload.snapshot?.pricePackageId ?? "",
+          extraKmPolicyId: payload.snapshot?.extraKmPolicyId ?? "",
+          ...(current.pricingSnapshotChanged.estimatedKm ? {} : {
+            estimatedKm: payload.snapshot?.estimatedKm != null ? String(payload.snapshot.estimatedKm) : ""
+          }),
+          ...(current.pricingSnapshotChanged.actualKm ? {} : {
+            actualKm: payload.snapshot?.actualKm != null ? String(payload.snapshot.actualKm) : ""
+          }),
+          ...(current.pricingSnapshotChanged.notes ? {} : { pricingNotes: payload.snapshot?.notes ?? "" })
+        };
+      });
     } catch {
       // Best effort: se non esiste snapshot non blocchiamo l'operativita.
     }
@@ -894,6 +918,7 @@ export const RentalBookingsPage = () => {
       bookingSelectionMountedRef.current = false;
       detailRequestVersionRef.current += 1;
       contractRequestVersionRef.current += 1;
+      bookingPricingModalRef.current = { version: bookingPricingModalRef.current.version + 1, open: false };
     };
   }, []);
 
@@ -947,6 +972,12 @@ export const RentalBookingsPage = () => {
 
   useEffect(() => {
     if (!bookingModalOpen) return;
+    if (bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged) {
+      pricingRulesRequestRef.current += 1;
+      setPricePackages([]);
+      setExtraPolicies([]);
+      return;
+    }
     if (!bookingForm.priceListId) {
       setPricePackages([]);
       setExtraPolicies([]);
@@ -954,19 +985,21 @@ export const RentalBookingsPage = () => {
       return;
     }
     void loadPricingRules(bookingForm.priceListId);
-  }, [bookingModalOpen, bookingForm.priceListId]);
+  }, [bookingModalOpen, bookingForm.mode, bookingForm.pricingTermsChanged, bookingForm.priceListId]);
 
   useEffect(() => {
     if (!bookingModalOpen) return;
+    if (bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged) return;
     const compatiblePolicies = extraPolicies.filter((policy) => !policy.packageId || policy.packageId === bookingForm.pricePackageId);
     if (compatiblePolicies.some((policy) => policy.id === bookingForm.extraKmPolicyId)) return;
     const nextPolicyId = compatiblePolicies.find((policy) => policy.isDefault)?.id ?? compatiblePolicies[0]?.id ?? "";
     setBookingForm((current) => ({ ...current, extraKmPolicyId: nextPolicyId }));
-  }, [bookingModalOpen, bookingForm.pricePackageId, bookingForm.extraKmPolicyId, extraPolicies]);
+  }, [bookingModalOpen, bookingForm.mode, bookingForm.pricingTermsChanged, bookingForm.pricePackageId, bookingForm.extraKmPolicyId, extraPolicies]);
 
   useEffect(() => {
-    if (!bookingModalOpen || !bookingForm.priceListId) {
+    if (!bookingModalOpen || !bookingForm.priceListId || (bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged)) {
       setPricingQuote(null);
+      setPricingLoading(false);
       return;
     }
     const pickupAt = new Date(bookingForm.pickupAt);
@@ -976,6 +1009,9 @@ export const RentalBookingsPage = () => {
       return;
     }
 
+    const modalVersion = bookingPricingModalRef.current.version;
+    let cancelled = false;
+    const isCurrent = () => !cancelled && bookingPricingModalRef.current.open && bookingPricingModalRef.current.version === modalVersion;
     const timer = window.setTimeout(async () => {
       setPricingLoading(true);
       try {
@@ -988,22 +1024,26 @@ export const RentalBookingsPage = () => {
           estimatedKm: bookingForm.estimatedKm ? Number(bookingForm.estimatedKm) : undefined,
           actualKm: bookingForm.actualKm ? Number(bookingForm.actualKm) : undefined
         });
+        if (!isCurrent()) return;
         setPricingQuote(response.quote);
         setBookingForm((current) => ({
           ...current,
           expectedTotal: response.quote.pricing.expectedTotal.toFixed(2)
         }));
       } catch (e) {
+        if (!isCurrent()) return;
         setPricingQuote(null);
         setError((e as Error).message);
       } finally {
-        setPricingLoading(false);
+        if (isCurrent()) setPricingLoading(false);
       }
     }, 250);
 
-    return () => window.clearTimeout(timer);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [
     bookingModalOpen,
+    bookingForm.mode,
+    bookingForm.pricingTermsChanged,
     bookingForm.priceListId,
     bookingForm.pricePackageId,
     bookingForm.extraKmPolicyId,
@@ -1123,6 +1163,7 @@ export const RentalBookingsPage = () => {
   };
 
   const openCreateModalFromCell = (input?: { vehicleId: string; date: Date }) => {
+    bookingPricingModalRef.current = { version: bookingPricingModalRef.current.version + 1, open: true };
     bookingCreateRequestRef.current = globalThis.crypto.randomUUID();
     const nextForm = buildBookingFormForCell(input);
     const defaultPriceListId = priceLists[0]?.id ?? "";
@@ -1148,13 +1189,11 @@ export const RentalBookingsPage = () => {
     setBookingModalOpen(true);
     setError(null);
     setSuccess(null);
-    if (defaultPriceListId) {
-      void loadPricingRules(defaultPriceListId);
-    }
   };
 
   const openEditModal = () => {
     if (!selectedBooking) return;
+    bookingPricingModalRef.current = { version: bookingPricingModalRef.current.version + 1, open: true };
     setBookingForm({
       mode: "edit",
       bookingId: selectedBooking.id,
@@ -1175,6 +1214,9 @@ export const RentalBookingsPage = () => {
       estimatedKm: "",
       actualKm: "",
       pricingNotes: "",
+      pricingTermsChanged: false,
+      pricingSnapshotChanged: { estimatedKm: false, actualKm: false, notes: false },
+      expectedTotalChanged: false,
       reason: selectedBooking.reason ?? "",
       internalNotes: selectedBooking.internalNotes ?? ""
     });
@@ -1325,12 +1367,17 @@ export const RentalBookingsPage = () => {
         returnKm: bookingForm.returnKm ? Number(bookingForm.returnKm) : undefined,
         pickupLocation: bookingForm.pickupLocation || undefined,
         returnLocation: bookingForm.returnLocation || undefined,
-        expectedTotal: bookingForm.expectedTotal ? Number(bookingForm.expectedTotal) : undefined,
+        ...(bookingForm.mode === "create" || bookingForm.expectedTotalChanged
+          ? { expectedTotal: bookingForm.expectedTotal ? Number(bookingForm.expectedTotal) : undefined }
+          : {}),
         reason: bookingForm.reason || undefined,
         internalNotes: bookingForm.internalNotes || undefined
       };
       if (!payload.vehicleId || !payload.customerId) {
         throw new Error("Seleziona veicolo e cliente.");
+      }
+      if (bookingForm.mode === "edit" && bookingForm.pricingTermsChanged && !bookingForm.priceListId) {
+        throw new Error("Seleziona un listino per modificare le condizioni economiche.");
       }
       if (Number.isNaN(new Date(payload.pickupAt).getTime()) || Number.isNaN(new Date(payload.returnAt).getTime())) {
         throw new Error("Date prenotazione non valide.");
@@ -1366,7 +1413,7 @@ export const RentalBookingsPage = () => {
         setSuccess("Prenotazione aggiornata.");
       }
 
-      if (targetBookingId && bookingForm.priceListId) {
+      if (targetBookingId && bookingForm.priceListId && (bookingForm.mode === "create" || bookingForm.pricingTermsChanged)) {
         const pricing = await rentalBookingsUseCases.updateBookingPricing(targetBookingId, {
           priceListId: bookingForm.priceListId,
           pricePackageId: bookingForm.pricePackageId || undefined,
@@ -1376,6 +1423,17 @@ export const RentalBookingsPage = () => {
           notes: bookingForm.pricingNotes || undefined
         });
         setPricingQuote(pricing.quote);
+      } else if (targetBookingId && bookingForm.mode === "edit" && Object.values(bookingForm.pricingSnapshotChanged).some(Boolean)) {
+        await rentalBookingsUseCases.updateBookingPricing(targetBookingId, {
+          preserveTerms: true,
+          ...(bookingForm.pricingSnapshotChanged.estimatedKm ? {
+            estimatedKm: bookingForm.estimatedKm ? Number(bookingForm.estimatedKm) : null
+          } : {}),
+          ...(bookingForm.pricingSnapshotChanged.actualKm ? {
+            actualKm: bookingForm.actualKm ? Number(bookingForm.actualKm) : null
+          } : {}),
+          ...(bookingForm.pricingSnapshotChanged.notes ? { notes: bookingForm.pricingNotes } : {})
+        });
       }
 
       if (bookingForm.mode === "create") bookingCreateRequestRef.current = null;
@@ -2955,24 +3013,39 @@ export const RentalBookingsPage = () => {
                       <Label>Listino noleggio</Label>
                       <Select
                         value={bookingForm.priceListId}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, priceListId: e.target.value }))}
+                        onChange={(e) => {
+                          setPricingQuote(null);
+                          setBookingForm((s) => ({ ...s, priceListId: e.target.value, pricingTermsChanged: true }));
+                        }}
                       >
                         <option value="">Seleziona listino...</option>
-                        {priceLists.map((list) => (
+                        {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.priceListId ? (
+                          <option value={bookingForm.priceListId}>Listino concordato · condizioni salvate</option>
+                        ) : null}
+                        {priceLists.filter((list) => bookingForm.mode !== "edit" || bookingForm.pricingTermsChanged || list.id !== bookingForm.priceListId).map((list) => (
                           <option key={list.id} value={list.id}>
                             {list.name} · {list.baseRateAmount.toFixed(2)}€/{list.baseRateUnit.toLowerCase()}
                           </option>
                         ))}
                       </Select>
+                      {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => {
+                          markBookingFormDirty();
+                          setBookingForm((s) => ({ ...s, pricingTermsChanged: true }));
+                        }}>Modifica condizioni economiche</Button>
+                      ) : null}
                     </div>
                     <div className="space-y-1">
                       <Label>Pacchetto km</Label>
                       <Select
                         value={bookingForm.pricePackageId}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pricePackageId: e.target.value }))}
+                        onChange={(e) => setBookingForm((s) => ({ ...s, pricePackageId: e.target.value, pricingTermsChanged: true }))}
                         disabled={!bookingForm.priceListId || pricePackages.length === 0}
                       >
                         <option value="">Nessun pacchetto</option>
+                        {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.pricePackageId ? (
+                          <option value={bookingForm.pricePackageId}>Pacchetto concordato · condizioni salvate</option>
+                        ) : null}
                         {pricePackages.map((pkg) => (
                           <option key={pkg.id} value={pkg.id}>
                             {pkg.name} · {pkg.type === "UNLIMITED" ? "illimitati" : `${pkg.kmIncluded ?? 0}km`}
@@ -2984,10 +3057,13 @@ export const RentalBookingsPage = () => {
                       <Label>Tariffario km extra</Label>
                       <Select
                         value={bookingForm.extraKmPolicyId}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, extraKmPolicyId: e.target.value }))}
+                        onChange={(e) => setBookingForm((s) => ({ ...s, extraKmPolicyId: e.target.value, pricingTermsChanged: true }))}
                         disabled={!bookingForm.priceListId || compatiblePolicyOptions.length === 0}
                       >
                         <option value="">Nessuna policy</option>
+                        {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.extraKmPolicyId ? (
+                          <option value={bookingForm.extraKmPolicyId}>Tariffario concordato · condizioni salvate</option>
+                        ) : null}
                         {compatiblePolicyOptions.map((policy) => (
                           <option key={policy.id} value={policy.id}>
                             {policy.name}
@@ -3004,7 +3080,8 @@ export const RentalBookingsPage = () => {
                         type="number"
                         min="0"
                         value={bookingForm.estimatedKm}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, estimatedKm: e.target.value }))}
+                        onChange={(e) => setBookingForm((s) => ({ ...s, estimatedKm: e.target.value,
+                          pricingSnapshotChanged: { ...s.pricingSnapshotChanged, estimatedKm: true } }))}
                         placeholder="Es. 320"
                       />
                     </div>
@@ -3014,7 +3091,8 @@ export const RentalBookingsPage = () => {
                         type="number"
                         min="0"
                         value={bookingForm.actualKm}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, actualKm: e.target.value }))}
+                        onChange={(e) => setBookingForm((s) => ({ ...s, actualKm: e.target.value,
+                          pricingSnapshotChanged: { ...s.pricingSnapshotChanged, actualKm: true } }))}
                         placeholder="Compila in chiusura"
                       />
                     </div>
@@ -3025,7 +3103,7 @@ export const RentalBookingsPage = () => {
                         step="0.01"
                         min="0"
                         value={bookingForm.expectedTotal}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, expectedTotal: e.target.value }))}
+                        onChange={(e) => setBookingForm((s) => ({ ...s, expectedTotal: e.target.value, expectedTotalChanged: true }))}
                         readOnly={Boolean(pricingQuote)}
                       />
                     </div>
@@ -3091,19 +3169,24 @@ export const RentalBookingsPage = () => {
                       <Label>Note pricing</Label>
                       <Input
                         value={bookingForm.pricingNotes}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pricingNotes: e.target.value }))}
+                        onChange={(e) => setBookingForm((s) => ({ ...s, pricingNotes: e.target.value,
+                          pricingSnapshotChanged: { ...s.pricingSnapshotChanged, notes: true } }))}
                         placeholder="Annotazioni economiche (sconti manuali, accordi, ecc.)"
                       />
                     </div>
                     <div className="space-y-1 md:col-span-3">
                       <div className="rounded-lg border bg-muted/20 p-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Preview pricing live</p>
+                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                            {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? "Condizioni economiche salvate" : "Preview pricing live"}
+                          </p>
                           {pricingLoading ? <FleetumInlineLoader label="Calcolo" /> : null}
                         </div>
                         {!pricingQuote ? (
                           <p className="mt-2 text-xs text-muted-foreground">
-                            Seleziona listino/pacchetto e inserisci date per vedere il totale previsto e il consuntivo km extra.
+                            {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged
+                              ? "Le modifiche operative mantengono i prezzi concordati. Per applicare il listino corrente, scegli Modifica condizioni economiche."
+                              : "Seleziona listino/pacchetto e inserisci date per vedere il totale previsto e il consuntivo km extra."}
                           </p>
                         ) : (
                           <div className="mt-2 grid gap-2 md:grid-cols-3">

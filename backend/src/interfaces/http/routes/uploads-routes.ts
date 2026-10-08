@@ -6,6 +6,7 @@ import { computeVehicleRevisionDueAt } from "../../../application/services/vehic
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { lockOwnedStoppage, ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
 import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockOwnedRentalCustomer } from "../../../infrastructure/repositories/rental-customer-tenant-scope.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
 import {
@@ -705,18 +706,33 @@ export const uploadsRoutes = () => {
         resourceType: "RentalCustomerAttachment",
         resourceId: customerId,
         files,
-        commit: async (tx, uploads) => tx.rentalCustomerAttachment.createMany({
-          data: uploads.map((upload) => ({
-            tenantId,
-            customerId,
-            bookingId,
-            category,
-            filePath: upload.key,
-            fileName: upload.file.originalname || upload.file.filename,
-            mimeType: upload.file.mimetype,
-            sizeBytes: upload.file.size
-          }))
-        })
+        commit: async (tx, uploads) => {
+          await lockOwnedRentalCustomer(tx, tenantId, customerId);
+          // The middleware precheck predates the physical write. Revalidate
+          // the optional relation in the same transaction as the attachment.
+          if (bookingId) {
+            const currentBooking = await tx.rentalBooking.findFirst({
+              where: { id: bookingId, tenantId, deletedAt: null },
+              select: { customerId: true }
+            });
+            if (!currentBooking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+            if (currentBooking.customerId && currentBooking.customerId !== customerId) {
+              throw new AppError("La prenotazione selezionata appartiene a un altro cliente", 400, "BOOKING_CUSTOMER_MISMATCH");
+            }
+          }
+          return tx.rentalCustomerAttachment.createMany({
+            data: uploads.map((upload) => ({
+              tenantId,
+              customerId,
+              bookingId,
+              category,
+              filePath: upload.key,
+              fileName: upload.file.originalname || upload.file.filename,
+              mimeType: upload.file.mimetype,
+              sizeBytes: upload.file.size
+            }))
+          });
+        }
       });
 
       await auditFileEvent({
