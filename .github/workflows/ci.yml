@@ -202,7 +202,7 @@ jobs:
       NODE_ENV: test
       RUN_TENANT_ISOLATION_TESTS: "1"
       DOTENV_CONFIG_PATH: /dev/null
-      DATABASE_URL: postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public
+      DATABASE_URL: postgresql://fleetum:fleetum_dev@127.0.0.1:5433/fleetum_ci?schema=public
       JWT_SECRET: test-jwt-secret-for-ci-only-0000000000000000
       PLATFORM_JWT_SECRET: test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000
       PLATFORM_ADMIN_PASSWORD_HASH: $2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde
@@ -211,7 +211,6 @@ jobs:
       RESEND_API_KEY: re_ci_placeholder
       RESEND_FROM: Fleetum <onboarding@resend.dev>
       STORAGE_PROVIDER: local
-      UPLOAD_DIR: uploads-test
 
     steps:
       - name: Checkout
@@ -235,6 +234,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare temporary tenant uploads
+        id: tenant-storage
+        run: |
+          set -euo pipefail
+          CI_UPLOAD_DIRECTORY="$(mktemp -d /tmp/fleetum-ci-uploads.XXXXXXXX)"
+          printf 'directory=%s\n' "$CI_UPLOAD_DIRECTORY" >> "$GITHUB_OUTPUT"
+          printf 'UPLOAD_DIR=%s\n' "$CI_UPLOAD_DIRECTORY" >> "$GITHUB_ENV"
+
       - name: Generate Prisma client
         run: npx prisma generate --schema backend/prisma/schema.prisma
 
@@ -249,6 +256,17 @@ jobs:
 
       - name: Run black-box tenant isolation tests
         run: npm run test:tenant-isolation -w backend
+
+      - name: Remove temporary tenant uploads
+        if: always()
+        env:
+          CI_UPLOAD_DIRECTORY: ${{ steps.tenant-storage.outputs.directory }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CI_UPLOAD_DIRECTORY" ]]; then exit 0; fi
+          [[ "$CI_UPLOAD_DIRECTORY" =~ ^/tmp/fleetum-ci-uploads\.[A-Za-z0-9]{8}$ ]]
+          [[ ! -L "$CI_UPLOAD_DIRECTORY" ]]
+          rm -rf -- "$CI_UPLOAD_DIRECTORY"
 
   migration-compatibility:
     name: Previous Release / Migrated Schema

@@ -2,7 +2,7 @@
   "candidateSha": "dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600",
   "scope": "Sorgenti e .example pubblici; nessun env reale. candidateSha conserva il pin applicativo storico; le impronte descrivono i file ispezionati, inclusa la correzione CI successiva.",
   "sha256": {
-    ".github/workflows/ci.yml": "1b366b14b8ef74e3250a1dee7f4118cc18d3edfbfbbd6f22276a9a10d2f6b9e9",
+    ".github/workflows/ci.yml": "bdfaba93132fd1809ffde697dca494028f53166ba618271fd90476b0731fc134",
     ".github/workflows/deploy-production.yml": "be3bc67d308417e4c95ecb8393f34d44a4b92386f124a00d80a10890dab18e3a",
     ".github/workflows/deploy-staging.yml": "b6584cc530011c8b93e91569875dae07d40527aa76819b288dddf6075649d9e2",
     ".github/workflows/e2e-nightly.yml": "9318112f3d9bfa5c87e62911a3e1e5f40bdaaf7594dd7c7a32d7550f4c569e7e",
@@ -151,5 +151,13 @@
       "ops/tests/restore-recovery.test.mjs"
     ],
     "scope": "Fixture e test sintetici: /tmp con prefisso owned solo su Linux, confine Darwin invariato; directory temporanee canonicali nei test e mock tar deterministico. Runner reale, app, schema, dipendenze e provider invariati; nessuna autorizzazione staging/produzione."
+  },
+  "tenantCiEnvironment": {
+    "parentSourceSha": "4540c8f01e5feba097bc0cbd4557d3aba47dc41d",
+    "date": "2026-10-09",
+    "files": [
+      ".github/workflows/ci.yml"
+    ],
+    "scope": "Solo ambiente hosted PostgreSQL sintetico: loopback 127.0.0.1 e upload temporanei owned /tmp con cleanup vincolato al path generato. Guardie dei test, applicazione, schema, dipendenze e provider invariati; nessuna promozione dei gate staging/produzione."
   }
 }
