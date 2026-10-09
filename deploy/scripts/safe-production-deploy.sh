@@ -55,6 +55,38 @@ current_container_image() {
   docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true
 }
 
+current_container_digest() {
+  local container_name="$1"
+  local repository="$2"
+  local image_id repo_digests digest digest_hash candidate_digest="" digest_image_id
+
+  if [ "$DRY_RUN" = "true" ]; then
+    printf '%s@sha256:<dry-run-digest>\n' "$repository"
+    return 0
+  fi
+
+  # Inspect the immutable image ID used by the container, never its original tag.
+  image_id="$(docker inspect --format '{{.Image}}' "$container_name" 2>/dev/null)" || return 1
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  repo_digests="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image_id" 2>/dev/null)" || return 1
+  while IFS= read -r digest; do
+    case "$digest" in
+      "$repository"@sha256:*)
+        digest_hash="${digest#"$repository"@sha256:}"
+        [[ "$digest_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+        if [ -n "$candidate_digest" ] && [ "$candidate_digest" != "$digest" ]; then
+          return 1
+        fi
+        candidate_digest="$digest"
+        ;;
+    esac
+  done <<< "$repo_digests"
+  [ -n "$candidate_digest" ] || return 1
+  digest_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_digest" 2>/dev/null)" || return 1
+  [ "$digest_image_id" = "$image_id" ] || return 1
+  printf '%s\n' "$candidate_digest"
+}
+
 disk_available_kib() {
   df -Pk "$APP_DIR" | awk 'NR == 2 { print $4 }'
 }
@@ -322,10 +354,8 @@ ensure_minimum_disk_space() {
 
 save_current_release() {
   local current_backend current_frontend state_tmp
-  current_backend="$(current_container_image fleetum_backend)"
-  current_frontend="$(current_container_image fleetum_caddy)"
-
-  if [ -z "$current_backend" ] || [ -z "$current_frontend" ]; then
+  if ! current_backend="$(current_container_digest fleetum_backend ghcr.io/silviomasuccio6/fleetum-backend)" ||
+    ! current_frontend="$(current_container_digest fleetum_caddy ghcr.io/silviomasuccio6/fleetum-frontend)"; then
     log "ERROR: cannot determine the currently deployed immutable images; refusing an unsafe deploy"
     return 1
   fi

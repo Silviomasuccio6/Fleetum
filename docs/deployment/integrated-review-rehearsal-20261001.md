@@ -29,7 +29,7 @@ Chromium Playwright già disponibili. Non installa automaticamente servizi/provi
 Eseguire dalla root della copia isolata senza file `.env` reali:
 
 ```sh
-node ops/verify-local-rehearsal.mjs --run --evidence-dir output/playwright/local-rehearsal --source-sha <SHA-base>
+node ops/verify-local-rehearsal.mjs --run --source-sha "$(git rev-parse HEAD)"
 ```
 
 Il runner non eredita i segreti della shell e disabilita dotenv. Fissa Docker al
@@ -49,9 +49,15 @@ con escalation temporizzata. Un'interruzione non produce un esito positivo.
 
 `summary.json`, log, report JSON e `ops/e2e/verify-report.mjs` distinguono una prova
 eseguita da una suite saltata. Il gate richiede tutti i sei casi critici e zero skip,
-fallimenti ed errori runner. `--source-sha` identifica la base dichiarata, non prova
-da solo che i file modificati corrispondano a un commit: usare manifest e diff delle
-evidenze. Non riprodurre gli script di sincronizzazione/commit sul checkout chiuso.
+fallimenti ed errori runner. Nelle prove storiche qui descritte `--source-sha`
+identificava la base dichiarata: usare manifest e diff per l'identità dei file testati.
+Dal 9 ottobre 2026 il runner richiede invece lo SHA esatto di HEAD e un checkout
+pulito, inclusi i file non ignorati non tracciati, prima di allocare risorse.
+Registra HEAD, tree e stato iniziale in `summary.sourceProof`; questa verifica
+iniziale non attesta l'assenza di modifiche durante l'esecuzione. L'opzione
+facoltativa `--evidence-dir` accetta soltanto un percorso assoluto; omettendola
+si usa la cartella locale predefinita. Non riprodurre gli script storici di
+sincronizzazione/commit sul checkout chiuso.
 
 ## Copertura e gate
 

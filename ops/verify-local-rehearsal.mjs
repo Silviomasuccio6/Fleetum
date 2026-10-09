@@ -9,6 +9,7 @@ import net from "node:net";
 import { randomBytes } from "node:crypto";
 import { hasHostedOrCiContext } from "./e2e/validate-config.mjs";
 import { parseRehearsalOptions } from "./e2e/rehearsal-options.mjs";
+import { verifyRehearsalSourceProof } from "./e2e/rehearsal-source-proof.mjs";
 
 // Opt-in only. No existing database, env file, provider credentials or production server.
 let options;
@@ -23,8 +24,11 @@ if (hasHostedOrCiContext()) {
   process.exit(1);
 }
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let sourceProof;
+try { sourceProof = verifyRehearsalSourceProof(root, options.sourceSha); }
+catch (error) { console.error(error.message); process.exit(1); }
 const evidence = options.evidenceDirectory ?? path.join(root, "output/playwright/local-rehearsal");
-const sourceSha = options.sourceSha;
+const sourceSha = sourceProof.head;
 const scratch = await mkdtemp(path.join(tmpdir(), "fleetum-local-rehearsal-"));
 const container = `fleetum_rehearsal_${randomBytes(6).toString("hex")}`;
 const children = new Set();
@@ -196,7 +200,7 @@ try {
   } catch { cleanupResult = "check-cleanup-log"; }
   finally { await rm(scratch, { recursive: true, force: true }); }
   for (const timer of hardStops) clearTimeout(timer);
-  await writeFile(path.join(evidence, "summary.json"), JSON.stringify({ success, sourceSha, cleanup: cleanupResult,
+  await writeFile(path.join(evidence, "summary.json"), JSON.stringify({ success, sourceSha, sourceProof, cleanup: cleanupResult,
     environment: "loopback HTTPS / local Docker Unix socket / PostgreSQL 16 / two synthetic tenants / no cron / simulated email / external HTTP blocked",
     interrupted, blockedBrowserRequests,
     externalGates: "Hosted CI, real staging, provider sandbox, storage, proxy, load and retention remain separate", logs }, null, 2));

@@ -83,6 +83,59 @@ type CompensationCandidate = {
   sizeBytes: number;
 };
 
+type UploadCommitProof = {
+  id: string;
+  storageKey: string;
+  checksumSha256: string;
+  sizeBytes: number;
+};
+
+const isSerializationRollback = (error: unknown) =>
+  typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
+
+const recoverCompletedUploadCommit = async (input: {
+  tenantId: string;
+  resourceType: string;
+  objects: UploadCommitProof[];
+}) => {
+  // A rejected COMMIT response is not proof of rollback. These unique metadata
+  // IDs were created in the same transaction as the domain links and quota check.
+  // Only a complete matching durable receipt can acknowledge that transaction.
+  try {
+    if (input.objects.length > 0) {
+      const committed = await prisma.storedFileObject.findMany({
+        where: {
+          tenantId: input.tenantId,
+          provider: storageProvider.name,
+          bucket: storageBucket(),
+          resourceType: input.resourceType,
+          id: { in: input.objects.map((object) => object.id) },
+          storageKey: { in: input.objects.map((object) => object.storageKey) },
+          deletedAt: null
+        },
+        select: { id: true, storageKey: true, checksumSha256: true, sizeBytes: true }
+      });
+      if (committed.length === input.objects.length && input.objects.every((object) =>
+        committed.some((row) => row.id === object.id && row.storageKey === object.storageKey &&
+          row.checksumSha256 === object.checksumSha256 && row.sizeBytes === object.sizeBytes)
+      )) {
+        logger.warn(
+          { objectCount: input.objects.length, resourceType: input.resourceType },
+          "Upload commit recovered from durable metadata"
+        );
+        return;
+      }
+    }
+  } catch {
+    // An unavailable or incomplete receipt must never authorize deletion.
+  }
+  logger.error(
+    { objectCount: input.objects.length, resourceType: input.resourceType },
+    "Upload commit outcome unknown; physical objects retained for reconciliation"
+  );
+  throw new AppError("Esito upload da verificare; i file sono stati conservati", 503, "UPLOAD_COMMIT_UNCERTAIN");
+};
+
 const recordFailedCompensationObjects = async (input: {
   tenantId: string;
   resourceType: string;
@@ -194,6 +247,7 @@ export const persistNewUploadedFiles = async <T>(input: {
     throw failed.reason;
   }
 
+  const completed: { value?: { result: T; uploads: PersistedUpload[] } } = {};
   try {
     const transactionResult = await prisma.$transaction(async (tx) => {
       const uploads: PersistedUpload[] = [];
@@ -225,13 +279,22 @@ export const persistNewUploadedFiles = async <T>(input: {
       }
       const result = await input.commit(tx, uploads);
       await assertTenantStorageQuota(tx, input.tenantId);
-      return {
-        result,
-        uploads
-      };
+      completed.value = { result, uploads };
+      return completed.value;
     }, { isolationLevel: "Serializable" });
     return transactionResult;
   } catch (error) {
+    if (completed.value && !isSerializationRollback(error)) {
+      await recoverCompletedUploadCommit({
+        tenantId: input.tenantId,
+        resourceType: input.resourceType,
+        objects: completed.value.uploads.map((upload) => ({
+          id: upload.storedFileObject.id, storageKey: upload.key,
+          checksumSha256: upload.checksumSha256, sizeBytes: upload.file.size
+        }))
+      });
+      return completed.value;
+    }
     const cleanup = await cleanupPhysicalObjects(written.map((upload) => upload.key), input.resourceType);
     await recordFailedCompensationObjects({
       tenantId: input.tenantId,
@@ -278,6 +341,7 @@ export const persistNewBuffer = async (input: {
   }
 
   const checksumSha256 = crypto.createHash("sha256").update(input.buffer).digest("hex");
+  const completed: { value?: { id: string } } = {};
   try {
     const storedFileObject = await prisma.$transaction(async (tx) => {
       const stored = await tx.storedFileObject.create({
@@ -297,10 +361,19 @@ export const persistNewBuffer = async (input: {
         select: { id: true }
       });
       await assertTenantStorageQuota(tx, input.tenantId);
+      completed.value = stored;
       return stored;
     }, { isolationLevel: "Serializable" });
     return { key, checksumSha256, storedFileObjectId: storedFileObject.id };
   } catch (error) {
+    if (completed.value && !isSerializationRollback(error)) {
+      await recoverCompletedUploadCommit({
+        tenantId: input.tenantId,
+        resourceType: input.resourceType,
+        objects: [{ id: completed.value.id, storageKey: key, checksumSha256, sizeBytes: input.buffer.length }]
+      });
+      return { key, checksumSha256, storedFileObjectId: completed.value.id };
+    }
     const cleanup = await cleanupPhysicalObjects([key], input.resourceType);
     await recordFailedCompensationObjects({
       tenantId: input.tenantId,

@@ -1,10 +1,10 @@
 {
   "candidateSha": "dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600",
-  "scope": "Sorgenti e .example pubblici; nessun env reale. candidateSha conserva il pin applicativo storico; le impronte descrivono i file ispezionati, inclusa la correzione CI successiva.",
+  "scope": "Sorgenti e .example pubblici; nessun env reale. candidateSha conserva il pin applicativo storico; le impronte descrivono i file correnti ispezionati, comprese le correzioni CI e della revisione cumulativa successive. Nessuna attestazione staging/produzione.",
   "sha256": {
     ".github/workflows/ci.yml": "bdfaba93132fd1809ffde697dca494028f53166ba618271fd90476b0731fc134",
     ".github/workflows/deploy-production.yml": "be3bc67d308417e4c95ecb8393f34d44a4b92386f124a00d80a10890dab18e3a",
-    ".github/workflows/deploy-staging.yml": "b6584cc530011c8b93e91569875dae07d40527aa76819b288dddf6075649d9e2",
+    ".github/workflows/deploy-staging.yml": "966317e69127c943cea7bcdb17b78da4b160a74f97cf183ddcdb62346a9b30e6",
     ".github/workflows/e2e-nightly.yml": "9318112f3d9bfa5c87e62911a3e1e5f40bdaaf7594dd7c7a32d7550f4c569e7e",
     "backend/package.json": "bbbbd6d33005dd2f617fc2ec0545232c3d65aa607fff8729c3b2bea2cfb71ec8",
     "backend/src/infrastructure/cron/cron-bootstrap.ts": "6e3651021786a2a11332ab2fa5b1973c36ab08dd6345280b470ae26506fa2d98",
@@ -50,7 +50,7 @@
     "ops/tests/staging-release-binding.test.mjs": "4c456bba0234e0e9b252c5e5546e9181feb919aea6137ecc5286ed605f74b7b1",
     "ops/tests/tenant-preflight.test.mjs": "f156dbade7d43946f12283daa5dd4e17056cc6becb5d8cfc92516d48bf36471b",
     "ops/verify-database.sh": "c5ac0126f9e0e7f937b16d46158b6f0441b63200e98a92e2226b34504d934207",
-    "ops/verify-local-rehearsal.mjs": "b99feb45dbe959132dd8fdc4608c279ff3e985961df8c51e64f3ffafadeb62f3",
+    "ops/verify-local-rehearsal.mjs": "2cddd884cca289ba02883a99c4bd10569e60da0f13f244985e57b72ef24e003a",
     "ops/verify-migration-compatibility.sh": "88f6445baedeb6a2a361094989e83e7e5ccbcccb715b7b3ed7d954d95663788d",
     "ops/verify-restore-recovery.mjs": "f480c8455a91979fc19dc0a373bfb3002e40215b30f719080b77078cf8e98c91",
     "package.json": "4dd332933c4c7c1454f80778b8a52154df0842f3e8766a673a27173a9b83037b",
@@ -127,7 +127,25 @@
     "docs/verification/privacy-history-security-20261008.md": "4892bd5a13aee33d6f629278f7be75517f6e7b4c4106ba9beec15e9658760e98",
     "frontend/src/presentation/pages/bookings/rental-bookings-page.tsx": "dee98277dd035a589a12d4966fde25ecbae697806ad064a041da968a6bc1bacc",
     "frontend/src/application/usecases/rental-bookings-usecases.ts": "5a660505949e270b2db568b5c0576809db6b025a56583b4508b808529ab6ee7b",
-    "backend/tests/privacy-data-export.test.ts": "59429739e0b8199e0122b1599afef29cf8f24de3804cd0ab78acde6cb1854312"
+    "backend/tests/privacy-data-export.test.ts": "59429739e0b8199e0122b1599afef29cf8f24de3804cd0ab78acde6cb1854312",
+    "backend/.env.example": "9832e2122216bdfc7302032c18ed17a012d60dfb9d861b3c2e2d110f5caac5a2",
+    "backend/src/app.ts": "07551001777a2d771f85192140423871747a76348c1621c1cbc193dd140c93d3",
+    "backend/src/infrastructure/storage/upload-persistence.ts": "36d0fc5a368eeda48033f766025bd6745e9210e8082d09df311b08435b85ddd5",
+    "backend/tests/security/upload-commit-recovery.postgres.test.ts": "0001ef173709e5f531e94b61d1a48f83d95131300729b74a71e3f8ace45052cc",
+    "backend/tests/social-oauth-correlation.test.ts": "b95b781d76cdf9530fcaf7a9f2ce19064150bbed2dc51eefdab4731ff560b832",
+    "backend/tests/upload-persistence-security.test.ts": "5da6a989ffd613ca3ed139151330c3c6d126ffec953982d1e1dacb2e2d272c83",
+    "deploy/env/backend.env.production.example": "bc9f31b67a7f69870d2a0f2369b4f6b4189b32d22181b9995c11e1d3b674fcaa",
+    "deploy/scripts/rollback-production.sh": "804825dad6bec4b4ef7344a431fb99779786f95ab25414e3dbbc8f3d11b8f93c",
+    "deploy/scripts/safe-production-deploy.sh": "14808536878640975e7cea3a921129a613f284a6d5a4ec1f2fb41670973a5038",
+    "docs/deployment/integrated-review-rehearsal-20261001.md": "fa82e76d590815765e4b36d1b16d6be06e5bb1049936690657551fde5a30f515",
+    "docs/verification/cumulative-pr-security-review-20261009.md": "4afb1647f1b159f66a8d7eac8ad6c5bdbe98ba09d8a28d34204909c1153135a7",
+    "frontend/src/presentation/pages/legal/legal-pages.tsx": "934fadaf272354290afb410642f8a7948730fad8a014e7b94d21912720f529b2",
+    "frontend/tests/demo-request-consent.test.ts": "e1cf28baaee2f49e34a4daf9d98225650406bc9545e85741c921cd7c02cc671f",
+    "ops/e2e/rehearsal-source-proof.mjs": "db9a31efe7d9453ccaf3219cf24f4f260d6aae0b808df6be4c9ce6b82a7aebd9",
+    "ops/tests/deploy-safety.test.mjs": "5ea22f6664b22f6f236187db66b3273435cb469046368ebdd49e68634f51104b",
+    "ops/tests/rehearsal-source-proof.test.mjs": "b1a3e1e584556b05b2e5c3547572872dcdf5644adaab6384d08da7062742acfb",
+    "ops/tests/staging-release.test.mjs": "2f35fcc11faad103c6a07d9fcd4ef8fa04eab818c7ad92500620f2341898b854",
+    ".gitleaks.toml": "8aca184a74028632759b72a6b3d986e15f05e61194f093c4872ed9165729514c"
   },
   "ciRemediation": {
     "parentSourceSha": "8faa9f710b1cfbf72849d04989decfae98ce644d",
@@ -159,5 +177,26 @@
       ".github/workflows/ci.yml"
     ],
     "scope": "Solo ambiente hosted PostgreSQL sintetico: loopback 127.0.0.1 e upload temporanei owned /tmp con cleanup vincolato al path generato. Guardie dei test, applicazione, schema, dipendenze e provider invariati; nessuna promozione dei gate staging/produzione."
+  },
+  "cumulativePrReviewRemediation": {
+    "parentSourceSha": "f8716ca4e65b6e410b44b05e665253733016117e",
+    "baseSourceSha": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
+    "date": "2026-10-09",
+    "initialPaths": 332,
+    "method": "Per-file differentiated source/diff/structure review; historical evidence hash verification is separate. New changed bytes are identified by current sha256 entries.",
+    "findings": [
+      "ACCOUNT-A01",
+      "CLIENT-C1",
+      "BUSINESS-B01",
+      "BUSINESS-B02",
+      "OPS-P1-01",
+      "OPS-P2-02",
+      "OPS-P2-03",
+      "OPS-P2-04"
+    ],
+    "report": "docs/verification/cumulative-pr-security-review-20261009.md",
+    "historicalApplicationPinPreserved": true,
+    "noNewSchemaMigrationDependency": true,
+    "externalGatesPromoted": false
   }
 }

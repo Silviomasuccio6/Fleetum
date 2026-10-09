@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import express, { Express } from "express";
 import test, { after } from "node:test";
+import { createApp, createPlatformApp } from "../src/app.js";
 import {
   OAuthFlowCreateInput,
   OAuthFlowStore,
@@ -8,6 +10,7 @@ import {
 import { AuthController } from "../src/interfaces/http/controllers/auth-controller.js";
 import { authRateLimit } from "../src/interfaces/http/middlewares/auth-rate-limit.js";
 import { authRoutes } from "../src/interfaces/http/routes/auth-routes.js";
+import { apiRouter } from "../src/interfaces/http/routes/index.js";
 import {
   getOAuthCorrelationCookieName,
   setOAuthCorrelationCookie
@@ -241,6 +244,140 @@ test("Apple form_post callback carries and consumes the browser correlation cook
   assert.equal(loginCount, 1);
   assert.equal(recorder.cookies.length, 3);
   assert.equal(recorder.cleared[0]?.name, getOAuthCorrelationCookieName("apple", flow.state));
+});
+
+// Keep the real bootstrap middleware and form parser; replace only the mounted
+// business router so the callback uses synthetic identities and no database.
+const callbackApp = (controller: AuthController) => {
+  const app = createApp();
+  const mountedApi = (app as any)._router.stack.find((layer: any) => layer.handle === apiRouter);
+  assert(mountedApi, "The test must exercise the real app bootstrap");
+  const router = express.Router();
+  router.use("/auth", authRoutes(controller));
+  mountedApi.handle = router;
+  return app;
+};
+
+const withHttpApp = async (app: Express, run: (baseUrl: string) => Promise<void>) => {
+  const server = app.listen(0, "127.0.0.1");
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+    const address = server.address();
+    assert(address && typeof address !== "string");
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+};
+
+const postAppleForm = (
+  baseUrl: string,
+  flow: { state: string; browserBinding: string },
+  origin: string,
+  options: { binding?: string | null; error?: string; path?: string; method?: string } = {}
+) => fetch(`${baseUrl}${options.path ?? "/api/auth/apple/callback"}`, {
+  method: options.method ?? "POST",
+  redirect: "manual",
+  headers: {
+    Origin: origin,
+    "Content-Type": "application/x-www-form-urlencoded",
+    ...(options.binding === null ? {} : {
+      Cookie: `${getOAuthCorrelationCookieName("apple", flow.state)}=${encodeURIComponent(options.binding ?? flow.browserBinding)}`
+    })
+  },
+  ...((options.method ?? "POST") === "POST" ? {
+    body: new URLSearchParams({ code: "synthetic-apple-code", state: flow.state, ...(options.error ? { error: options.error } : {}) })
+  } : {})
+});
+
+const callbackError = (response: globalThis.Response) =>
+  new URLSearchParams(new URL(response.headers.get("location")!).hash.slice(1)).get("error") ?? "";
+
+test("real bootstrap accepts Apple and null form-post origins while preserving browser binding and nonce", async () => {
+  const service = new SocialOAuthService(new MemoryOAuthFlowStore());
+  let exchanges = 0;
+  let logins = 0;
+  let expectedNonce = "";
+  (service as any).exchangeCode = async (provider: string, code: string, binding: { oidcNonce: string }) => {
+    assert.equal(provider, "apple");
+    assert.equal(code, "synthetic-apple-code");
+    assert.equal(binding.oidcNonce, expectedNonce, "The controller must forward the stored OIDC nonce");
+    exchanges += 1;
+    return { provider: "apple", email: "synthetic.apple@example.invalid", emailVerified: true };
+  };
+  await withHttpApp(callbackApp(buildController(service, () => { logins += 1; })), async (baseUrl) => {
+    for (const origin of ["https://appleid.apple.com", "null"]) {
+      const flow = await service.createState("apple", "login", "/dashboard");
+      expectedNonce = flow.oidcNonce;
+      const missingState = await postAppleForm(baseUrl, { ...flow, state: "" }, origin);
+      assert.equal(missingState.status, 302);
+      assert.match(callbackError(missingState), /state.*mancante/i);
+      assert.equal(missingState.headers.getSetCookie().some((cookie) => cookie.startsWith("fermi_access=")), false);
+      for (const binding of [null, "wrong-synthetic-binding"]) {
+        const rejected = await postAppleForm(baseUrl, flow, origin, { binding });
+        assert.equal(rejected.status, 302);
+        assert.match(callbackError(rejected), /browser/i);
+        assert.equal(rejected.headers.getSetCookie().some((cookie) => cookie.startsWith("fermi_access=")), false);
+      }
+      const completed = await postAppleForm(baseUrl, flow, origin);
+      assert.equal(completed.status, 302);
+      assert.equal(completed.headers.getSetCookie().some((cookie) => cookie.startsWith("fermi_access=")), true);
+      assert.equal(completed.headers.get("access-control-allow-origin"), null);
+      const replay = await postAppleForm(baseUrl, flow, origin);
+      assert.equal(replay.status, 302);
+      assert.match(callbackError(replay), /già utilizzato|replay/i);
+      assert.equal(replay.headers.getSetCookie().some((cookie) => cookie.startsWith("fermi_access=")), false);
+    }
+  });
+  assert.equal(exchanges, 2);
+  assert.equal(logins, 2);
+});
+
+test("real bootstrap consumes Apple denial once and does not broaden tenant or Platform CORS", async () => {
+  const service = new SocialOAuthService(new MemoryOAuthFlowStore());
+  let exchanges = 0;
+  (service as any).exchangeCode = async () => {
+    exchanges += 1;
+    return { provider: "apple", email: "synthetic.apple@example.invalid", emailVerified: true };
+  };
+  const controller = buildController(service, () => undefined);
+  await withHttpApp(callbackApp(controller), async (baseUrl) => {
+    const deniedFlow = await service.createState("apple", "login");
+    const denied = await postAppleForm(baseUrl, deniedFlow, "https://appleid.apple.com", { error: "access_denied" });
+    assert.equal(denied.status, 302);
+    assert.equal(denied.headers.getSetCookie().some((cookie) => cookie.startsWith("fermi_access=")), false);
+    const retry = await postAppleForm(baseUrl, deniedFlow, "https://appleid.apple.com");
+    assert.equal(retry.status, 302);
+    assert.match(callbackError(retry), /già utilizzato|replay/i);
+    const flow = await service.createState("apple", "login");
+    for (const options of [
+      { origin: "https://untrusted.example.invalid" },
+      { origin: "https://appleid.apple.com", method: "GET" },
+      { origin: "https://appleid.apple.com", method: "OPTIONS" },
+      { origin: "https://appleid.apple.com", path: "/api/auth/apple/callback/" },
+      { origin: "https://appleid.apple.com", path: "/api/auth/login" },
+      { origin: "null", path: "/api/auth/refresh" },
+      { origin: "https://appleid.apple.com", path: "/api/auth/google/callback" }
+    ]) {
+      const response = await postAppleForm(baseUrl, flow, options.origin, options);
+      assert.equal(response.status, 500);
+      assert.equal(response.headers.get("access-control-allow-origin"), null);
+    }
+    assert.equal(exchanges, 0);
+    assert.equal((await postAppleForm(baseUrl, flow, "https://appleid.apple.com")).status, 302);
+    assert.equal(exchanges, 1);
+  });
+  await withHttpApp(createPlatformApp(), async (baseUrl) => {
+    for (const origin of ["https://appleid.apple.com", "null"]) {
+      const response = await postAppleForm(baseUrl, { state: "synthetic-state", browserBinding: "synthetic-binding" }, origin);
+      assert.equal(response.status, 500);
+      assert.equal(response.headers.get("access-control-allow-origin"), null);
+    }
+  });
 });
 
 test("an unconfigured provider is rejected before an OAuth flow is persisted", async (t) => {

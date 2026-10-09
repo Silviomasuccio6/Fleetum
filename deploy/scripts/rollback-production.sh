@@ -42,13 +42,14 @@ load_last_deploy() {
     exit 2
   fi
 
-  if ! [[ "$PREVIOUS_BACKEND_IMAGE" =~ ^ghcr\.io/silviomasuccio6/fleetum-backend:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$|^ghcr\.io/silviomasuccio6/fleetum-backend@sha256:[0-9a-f]{64}$ ]]; then
-    log "last deploy file contains an invalid previous backend image"
+  # Legacy mutable state requires an operator-reviewed migration, never tag fallback.
+  if ! [[ "$PREVIOUS_BACKEND_IMAGE" =~ ^ghcr\.io/silviomasuccio6/fleetum-backend@sha256:[0-9a-f]{64}$ ]]; then
+    log "last deploy file requires an immutable previous backend digest; legacy mutable state cannot be used"
     exit 2
   fi
 
-  if ! [[ "$PREVIOUS_FRONTEND_IMAGE" =~ ^ghcr\.io/silviomasuccio6/fleetum-frontend:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$|^ghcr\.io/silviomasuccio6/fleetum-frontend@sha256:[0-9a-f]{64}$ ]]; then
-    log "last deploy file contains an invalid previous frontend image"
+  if ! [[ "$PREVIOUS_FRONTEND_IMAGE" =~ ^ghcr\.io/silviomasuccio6/fleetum-frontend@sha256:[0-9a-f]{64}$ ]]; then
+    log "last deploy file requires an immutable previous frontend digest; legacy mutable state cannot be used"
     exit 2
   fi
 }

@@ -168,11 +168,13 @@ export const DemoRequestPage = () => {
     setError("");
     const form = new FormData(formElement);
     const fleetSize = form.get("fleetSize");
+    const analyticsContext = getConsentedPublicAnalyticsContext();
     const payload = {
       ...Object.fromEntries(
         Array.from(form.entries()).filter(([, value]) => typeof value !== "string" || value.trim() !== "")
       ),
-      ...(getConsentedPublicAnalyticsContext() ?? {})
+      consentAnalytics: Boolean(analyticsContext),
+      ...(analyticsContext ?? {})
     };
     const requestFingerprint = JSON.stringify(payload);
     if (requestRef.current?.fingerprint !== requestFingerprint) {

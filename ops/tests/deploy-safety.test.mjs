@@ -20,6 +20,10 @@ const rollbackSource = resolve(repositoryRoot, "deploy/scripts/rollback-producti
 const healthCheckSource = resolve(repositoryRoot, "deploy/scripts/check-production-health.sh");
 const releaseSha = "b".repeat(40);
 const previousSha = "a".repeat(40);
+const previousBackendDigest = "a".repeat(64);
+const previousFrontendDigest = "e".repeat(64);
+const previousBackendImageId = `sha256:${"1".repeat(64)}`;
+const previousFrontendImageId = `sha256:${"2".repeat(64)}`;
 
 test("manual rollback defaults to the public production readiness endpoint", () => {
   const rollback = readFileSync(rollbackSource, "utf8");
@@ -60,26 +64,71 @@ set -u
 printf '%s|backend=%s|frontend=%s\\n' "$*" "\${FLEETUM_BACKEND_IMAGE:-}" "\${FLEETUM_FRONTEND_IMAGE:-}" >> "$COMMAND_LOG"
 if [ "\${1:-}" = "inspect" ]; then
   container="\${!#}"
-  if [ "$container" = "fleetum_backend" ]; then
+  if [ "$3" = '{{.Image}}' ]; then
+    if [ "$container" = fleetum_backend ]; then
+      printf '${previousBackendImageId}\\n'
+    else
+      printf '${previousFrontendImageId}\\n'
+    fi
+  elif [ "\${PREVIOUS_TAG_LATEST:-false}" = true ]; then
+    if [ "$container" = fleetum_backend ]; then
+      printf 'ghcr.io/silviomasuccio6/fleetum-backend:latest\\n'
+    else
+      printf 'ghcr.io/silviomasuccio6/fleetum-frontend:latest\\n'
+    fi
+  elif [ "$container" = fleetum_backend ]; then
     printf 'ghcr.io/silviomasuccio6/fleetum-backend:${previousSha}\\n'
   else
     printf 'ghcr.io/silviomasuccio6/fleetum-frontend:${previousSha}\\n'
   fi
   exit 0
 fi
-if [ "\${1:-}" = "image" ] && [ "\${2:-}" = "inspect" ]; then
+if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   image_ref="\${!#}"
+  if [ "$image_ref" = '${previousBackendImageId}' ] || [ "$image_ref" = '${previousFrontendImageId}' ]; then
+    repository=ghcr.io/silviomasuccio6/fleetum-backend
+    digest='${previousBackendDigest}'
+    if [ "$image_ref" = '${previousFrontendImageId}' ]; then
+      repository=ghcr.io/silviomasuccio6/fleetum-frontend
+      digest='${previousFrontendDigest}'
+    fi
+    digest_mode="\${PREVIOUS_DIGEST_MODE:-valid}"
+    if [ "\${PREVIOUS_DIGEST_ROLE:-backend}" = frontend ] && [ "$image_ref" = '${previousBackendImageId}' ]; then
+      digest_mode=valid
+    fi
+    case "$digest_mode" in
+      missing) exit 0 ;;
+      foreign) printf 'ghcr.io/unrelated/image@sha256:%s\\n' "$digest" ;;
+      invalid) printf '%s@sha256:invalid\\n' "$repository" ;;
+      malformed) printf '%s@sha256:invalid@sha256:%s\\n' "$repository" "$digest" ;;
+      ambiguous) printf '%s@sha256:%s\\n%s@sha256:%s\\n' "$repository" "$digest" "$repository" '${"3".repeat(64)}' ;;
+      duplicate) printf '%s@sha256:%s\\n%s@sha256:%s\\n' "$repository" "$digest" "$repository" "$digest" ;;
+      *) printf '%s@sha256:%s\\n' "$repository" "$digest" ;;
+    esac
+    exit 0
+  fi
+  case "$image_ref" in
+    'ghcr.io/silviomasuccio6/fleetum-backend@sha256:${previousBackendDigest}')
+      if [ "\${MISMATCH_PREVIOUS_DIGEST_ID:-false}" = true ]; then
+        printf 'sha256:${"4".repeat(64)}\\n'
+      else
+        printf '${previousBackendImageId}\\n'
+      fi
+      exit 0 ;;
+    'ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${previousFrontendDigest}')
+      printf '${previousFrontendImageId}\\n'; exit 0 ;;
+  esac
   image_kind=frontend
   case "$image_ref" in
     *fleetum-backend*) image_kind=backend ;;
   esac
   image_variant=release
-  if [ "\${MISMATCH_IMAGE_ID:-false}" = "true" ]; then
+  if [ "\${MISMATCH_IMAGE_ID:-false}" = true ]; then
     case "$image_ref" in
       *@sha256:*) image_variant=digest ;;
     esac
   fi
-  printf 'sha256:%s-%s\n' "$image_kind" "$image_variant"
+  printf 'sha256:%s-%s\\n' "$image_kind" "$image_variant"
   exit 0
 fi
 case " $* " in
@@ -211,7 +260,7 @@ test("a partial container restart failure triggers application rollback", (t) =>
   assert.equal((commands.match(/ up -d --no-build/g) ?? []).length, 2);
   assert.match(
     commands,
-    new RegExp(`up -d --no-build\\|backend=ghcr\\.io/silviomasuccio6/fleetum-backend:${previousSha}`)
+    new RegExp(`up -d --no-build\\|backend=ghcr\\.io/silviomasuccio6/fleetum-backend@sha256:${previousBackendDigest}`)
   );
   assert.match(state, new RegExp(`^RELEASE_SHA=${releaseSha}$`, "m"));
   assert.doesNotMatch(state, /^DEPLOY_COMPLETED_AT=/m);
@@ -312,4 +361,85 @@ test("deploy and rollback scripts keep the release state and lock contracts", ()
   assert.match(rollback, /check-production-health\.sh/);
   assert.match(healthCheck, /social preview/);
   assert.match(rollback, /another Fleetum deploy or rollback is already running/);
+});
+
+
+test("rollback captures the running image digest when its original latest tag has moved", (t) => {
+  const fixture = createFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const result = runSafeDeploy(fixture, { PREVIOUS_TAG_LATEST: "true" });
+  const output = `${result.stdout}\n${result.stderr}`;
+  const state = readFileSync(fixture.lastDeployFile, "utf8");
+  const commands = readFileSync(fixture.commandLog, "utf8");
+
+  assert.equal(result.status, 42, output);
+  assert.match(state, new RegExp(`^PREVIOUS_BACKEND_IMAGE=ghcr\\.io/silviomasuccio6/fleetum-backend@sha256:${previousBackendDigest}$`, "m"));
+  assert.match(state, new RegExp(`^PREVIOUS_FRONTEND_IMAGE=ghcr\\.io/silviomasuccio6/fleetum-frontend@sha256:${previousFrontendDigest}$`, "m"));
+  assert.match(commands, new RegExp(`up -d --no-build\\|backend=ghcr\\.io/silviomasuccio6/fleetum-backend@sha256:${previousBackendDigest}`));
+  assert.doesNotMatch(commands, /image inspect[^\n]*:latest/);
+  assert.doesNotMatch(commands, /pull\|backend=[^\n]*:latest/);
+});
+
+for (const mode of ["missing", "foreign", "invalid", "malformed", "ambiguous"]) {
+  test(`a ${mode} previous repository digest blocks migration and restart`, (t) => {
+    const fixture = createFixture();
+    t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+    const result = runSafeDeploy(fixture, { PREVIOUS_DIGEST_MODE: mode });
+    const output = `${result.stdout}\n${result.stderr}`;
+    const commands = readFileSync(fixture.commandLog, "utf8");
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /currently deployed immutable images|previous.*digest/i);
+    assert.doesNotMatch(commands, /prisma migrate|money:reconcile| up -d --no-build/);
+    assert.throws(() => readFileSync(fixture.lastDeployFile, "utf8"));
+  });
+}
+
+for (const mode of ["missing", "ambiguous"]) {
+  test(`a ${mode} previous frontend digest blocks migration and restart`, (t) => {
+    const fixture = createFixture();
+    t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+    const result = runSafeDeploy(fixture, { PREVIOUS_DIGEST_MODE: mode, PREVIOUS_DIGEST_ROLE: "frontend" });
+    assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.doesNotMatch(readFileSync(fixture.commandLog, "utf8"), /prisma migrate|money:reconcile| up -d --no-build/);
+    assert.throws(() => readFileSync(fixture.lastDeployFile, "utf8"));
+  });
+}
+
+test("a previous digest for a different local image is rejected", (t) => {
+  const fixture = createFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const result = runSafeDeploy(fixture, { MISMATCH_PREVIOUS_DIGEST_ID: "true" });
+  const commands = readFileSync(fixture.commandLog, "utf8");
+  assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.doesNotMatch(commands, /prisma migrate|money:reconcile| up -d --no-build/);
+  assert.throws(() => readFileSync(fixture.lastDeployFile, "utf8"));
+});
+
+test("duplicate identical previous digests retain one unambiguous identity", (t) => {
+  const fixture = createFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const result = runSafeDeploy(fixture, { PREVIOUS_DIGEST_MODE: "duplicate" });
+  assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
+  assert.match(readFileSync(fixture.lastDeployFile, "utf8"), new RegExp(`^PREVIOUS_BACKEND_IMAGE=ghcr\\.io/silviomasuccio6/fleetum-backend@sha256:${previousBackendDigest}$`, "m"));
+});
+
+test("manual rollback rejects legacy mutable release state before any Docker command", (t) => {
+  const fixture = createFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  writeFileSync(fixture.lastDeployFile, "PREVIOUS_BACKEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-backend:latest\nPREVIOUS_FRONTEND_IMAGE=ghcr.io/silviomasuccio6/fleetum-frontend:latest\n");
+  const result = spawnSync("bash", [join(fixture.appDir, "deploy/scripts/rollback-production.sh")], {
+    encoding: "utf8",
+    env: {
+      PATH: `${fixture.binDir}:${process.env.PATH}`,
+      APP_DIR: fixture.appDir,
+      LAST_DEPLOY_FILE: fixture.lastDeployFile,
+      DEPLOY_LOCK_FILE: fixture.lockFile,
+      COMMAND_LOG: fixture.commandLog,
+      RESTART_ATTEMPT_FILE: fixture.restartAttemptFile,
+      CURL_ATTEMPT_FILE: fixture.curlAttemptFile
+    }
+  });
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+  assert.match(`${result.stdout}\n${result.stderr}`, /immutable.*digest|invalid previous backend image/i);
+  assert.throws(() => readFileSync(fixture.commandLog, "utf8"));
 });

@@ -67,7 +67,12 @@ const getAllowedOrigins = (corsOrigin: string, localOrigins: string[]) => {
 
 const healthPaths = new Set(["/api/health", "/api/ready", "/platform-api/health", "/platform-api/ready"]);
 
-const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: string[]) => {
+const applyCommon = (
+  app: express.Express,
+  corsOrigin: string,
+  localDevOrigins: string[],
+  allowAppleFormPost = false
+) => {
   const allowedOrigins = getAllowedOrigins(corsOrigin, localDevOrigins);
   const styleSrc = env.NODE_ENV === "production" ? ["'self'"] : ["'self'", "'unsafe-inline'"];
 
@@ -102,18 +107,29 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
     next();
   });
 
-  app.use(
-    cors({
-      origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true);
-          return;
-        }
-        callback(new Error(`CORS blocked for origin: ${origin}`));
-      },
-      credentials: true
-    })
-  );
+  const corsMiddleware = cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true
+  });
+  app.use((req, res, next) => {
+    // Apple navigates back with a cross-site form POST, including Origin (or
+    // null after a redirect). The callback still requires single-use state and
+    // its browser binding; no other route or Platform app gets this exception.
+    const appleFormPost = allowAppleFormPost &&
+      req.method === "POST" && req.path === "/api/auth/apple/callback" &&
+      (req.headers.origin === "https://appleid.apple.com" || req.headers.origin === "null");
+    if (appleFormPost) {
+      next();
+      return;
+    }
+    corsMiddleware(req, res, next);
+  });
 
   app.use(
     rateLimit({
@@ -145,7 +161,7 @@ const applyCommon = (app: express.Express, corsOrigin: string, localDevOrigins: 
 
 export const createApp = () => {
   const app = express();
-  applyCommon(app, env.CORS_ORIGIN, localTenantOrigins);
+  applyCommon(app, env.CORS_ORIGIN, localTenantOrigins, true);
   app.get("/api/metrics", metricsHandler);
   app.use("/api", apiRouter);
   app.use(notFoundHandler);

@@ -14,7 +14,7 @@ description = "Source artifact SHA-256 entries in the staging evidence manifest"
 condition = "AND"
 regexTarget = "line"
 paths = ['''^(/repo/)?docs/deployment/staging-validation-package-20261002/inspected-source\.json$''']
-regexes = ['''^\s*"(backend/tests/profile-password-security\.test\.ts|backend/tests/security/account-credential-transitions\.test\.ts|backend/src/interfaces/http/middlewares/platform-auth\.ts|frontend/src/infrastructure/platform/platform-auth-storage\.ts|frontend/src/presentation/pages/auth/social-auth-callback-page\.tsx)"\s*:\s*"[a-f0-9]{64}",?\s*$''']
+regexes = ['''^\s*"(backend/tests/social-oauth-correlation\.test\.ts|backend/tests/profile-password-security\.test\.ts|backend/tests/security/account-credential-transitions\.test\.ts|backend/src/interfaces/http/middlewares/platform-auth\.ts|frontend/src/infrastructure/platform/platform-auth-storage\.ts|frontend/src/presentation/pages/auth/social-auth-callback-page\.tsx)"\s*:\s*"[a-f0-9]{64}",?\s*$''']
 
 [[rules.allowlists]]
 description = "Evidence artifact SHA-256 entries in the staging evidence index"
