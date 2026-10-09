@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag or SHA to deploy"
-        required: false
-        default: "develop"
+        description: "Full commit SHA (or ref resolving to a CI-verified SHA)"
+        required: true
+        default: "main"
       confirm:
         description: "Type DEPLOY_STAGING to confirm"
         required: true
@@ -16,23 +16,128 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve-release:
+    name: Resolve immutable staging release
+    if: ${{ inputs.confirm == 'DEPLOY_STAGING' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      ci_run_id: ${{ steps.ci.outputs.ci_run_id }}
+
+    steps:
+      - name: Checkout requested release once
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout trusted staging controls separately
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .fleetum-control
+          persist-credentials: false
+
+      - name: Resolve full release SHA
+        id: release
+        run: |
+          set -euo pipefail
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          if ! [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Staging candidate did not resolve to a full Git commit SHA."
+            exit 1
+          fi
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Staging release SHA: \`$RELEASE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require protected approval of workflow and candidate
+        env:
+          FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
+          RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
+        run: node .fleetum-control/ops/staging/control-policy.mjs
+
+      - name: Require successful CI for the release SHA
+        id: ci
+        uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
+        with:
+          script: |
+            const releaseSha = process.env.RELEASE_SHA;
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "ci.yml",
+              head_sha: releaseSha,
+              status: "completed",
+              per_page: 100,
+            });
+
+            const expectedRepository = `${context.repo.owner}/${context.repo.repo}`;
+            const successfulRun = data.workflow_runs.find((run) =>
+              run.head_sha === releaseSha &&
+              run.conclusion === "success" &&
+              ["push", "pull_request", "workflow_dispatch"].includes(run.event) &&
+              run.head_repository?.full_name === expectedRepository
+            );
+
+            if (!successfulRun) {
+              core.setFailed(`No successful CI workflow run exists for staging release SHA ${releaseSha}.`);
+              return;
+            }
+
+            core.setOutput("ci_run_id", String(successfulRun.id));
+            await core.summary
+              .addRaw(`CI proof: [run ${successfulRun.id}](${successfulRun.html_url}) for \`${releaseSha}\``)
+              .write();
+
+      - name: Require staging isolation capability before publishing or migrating
+        run: node .fleetum-control/ops/e2e/staging-release-binding.mjs policy-preflight
+
+      - name: Download exact CI source proof
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-source-proof-${{ steps.ci.outputs.ci_run_id }}
+          run-id: ${{ steps.ci.outputs.ci_run_id }}
+          github-token: ${{ github.token }}
+          path: .ci-proof
+
+      - name: Verify tested source matches staging candidate
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
+          CI_RUN_ID: ${{ steps.ci.outputs.ci_run_id }}
+        run: node .fleetum-control/ops/ci-release-identity.mjs verify .ci-proof/ci-source.json
+
   build-images:
     name: Build and publish staging images
-    if: ${{ github.event.inputs.confirm == 'DEPLOY_STAGING' }}
+    needs: resolve-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     outputs:
-      backend_image: ${{ steps.images.outputs.backend_image }}
-      frontend_image: ${{ steps.images.outputs.frontend_image }}
+      backend_image: ${{ steps.deployment_images.outputs.backend_image }}
+      frontend_image: ${{ steps.deployment_images.outputs.frontend_image }}
+      backend_tag: ${{ steps.images.outputs.backend_image }}
+      frontend_tag: ${{ steps.images.outputs.frontend_image }}
+      backend_digest: ${{ steps.build_backend.outputs.digest }}
+      frontend_digest: ${{ steps.build_frontend.outputs.digest }}
 
     steps:
-      - name: Checkout requested ref
+      - name: Checkout immutable release
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.ref || 'develop' }}
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -44,26 +149,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Resolve image names
+      - name: Resolve SHA-tagged image names
         id: images
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
-          IMAGE_TAG="staging-$(git rev-parse --short=12 HEAD)"
-          BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:${IMAGE_TAG}"
-          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:${IMAGE_TAG}"
-          echo "backend_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$FLEETUM_RELEASE_SHA" ]; then
+            echo "::error::Build checkout does not match the resolved release SHA."
+            exit 1
+          fi
+          echo "backend_image=ghcr.io/silviomasuccio6/fleetum-backend:staging-${FLEETUM_RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=ghcr.io/silviomasuccio6/fleetum-frontend:staging-${FLEETUM_RELEASE_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
+        id: build_backend
         uses: docker/build-push-action@v6
         with:
           context: .
           file: backend/Dockerfile.prod
           push: true
-          tags: |
-            ${{ steps.images.outputs.backend_image }}
-            ghcr.io/silviomasuccio6/fleetum-backend:staging-latest
+          tags: ${{ steps.images.outputs.backend_image }}
 
       - name: Build and push frontend image
+        id: build_frontend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -74,111 +183,240 @@ jobs:
             VITE_PLATFORM_API_BASE_URL=https://platform-staging.fleetum.it/platform-api
             VITE_CLIENT_APP_URL=https://staging.fleetum.it/dashboard
             VITE_GOOGLE_AUTH_URL=https://api-staging.fleetum.it/api/auth/google
-            VITE_APPLE_AUTH_URL=https://api-staging.fleetum.it/api/auth/apple
-          tags: |
-            ${{ steps.images.outputs.frontend_image }}
-            ghcr.io/silviomasuccio6/fleetum-frontend:staging-latest
+            NEXT_PUBLIC_API_URL=https://api-staging.fleetum.it/api
+            NEXT_PUBLIC_SITE_URL=https://staging.fleetum.it
+            NEXT_PUBLIC_APP_LOGIN_URL=https://staging.fleetum.it/login
+            NEXT_PUBLIC_SITE_INDEXABLE=false
+          tags: ${{ steps.images.outputs.frontend_image }}
+
+      - name: Resolve immutable deployment image references
+        id: deployment_images
+        env:
+          BACKEND_DIGEST: ${{ steps.build_backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build_frontend.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Backend build did not return a valid immutable digest."
+            exit 1
+          fi
+          if ! [[ "$FRONTEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Frontend build did not return a valid immutable digest."
+            exit 1
+          fi
+          echo "backend_image=ghcr.io/silviomasuccio6/fleetum-backend@$BACKEND_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=ghcr.io/silviomasuccio6/fleetum-frontend@$FRONTEND_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Record immutable staging image identities
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          CI_RUN_ID: ${{ needs.resolve-release.outputs.ci_run_id }}
+          BACKEND_TAG: ${{ steps.images.outputs.backend_image }}
+          FRONTEND_TAG: ${{ steps.images.outputs.frontend_image }}
+          BACKEND_IMAGE: ${{ steps.deployment_images.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ steps.deployment_images.outputs.frontend_image }}
+        run: |
+          {
+            echo "## Staging release identity"
+            echo
+            echo "- Release SHA: \`$FLEETUM_RELEASE_SHA\`"
+            echo "- CI run: \`$CI_RUN_ID\`"
+            echo "- Backend tag: \`$BACKEND_TAG\`"
+            echo "- Backend digest reference: \`$BACKEND_IMAGE\`"
+            echo "- Frontend tag: \`$FRONTEND_TAG\`"
+            echo "- Frontend digest reference: \`$FRONTEND_IMAGE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Deploy Fleetum staging VPS
-    if: ${{ github.event.inputs.confirm == 'DEPLOY_STAGING' }}
+    needs: [resolve-release, build-images]
     runs-on: ubuntu-latest
+    environment: staging
     timeout-minutes: 30
-    needs: build-images
     permissions:
       contents: read
       packages: read
 
     steps:
-      - name: Checkout requested ref
+      - name: Checkout immutable release
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.ref || 'develop' }}
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Checkout trusted staging controls separately
+        uses: actions/checkout@v6
         with:
-          node-version-file: ".node-version"
-          cache: "npm"
+          ref: ${{ github.workflow_sha }}
+          path: .fleetum-control
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Generate Prisma client
-        run: npx prisma generate --schema backend/prisma/schema.prisma
-
-      - name: Verify build before deploy
-        run: npm run build
+      - name: Verify deploy checkout identity
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$FLEETUM_RELEASE_SHA" ]; then
+            echo "::error::Deploy checkout does not match the resolved release SHA."
+            exit 1
+          fi
 
       - name: Configure SSH key
         env:
           FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
         run: |
+          set -euo pipefail
+          test -n "$FLEETUM_STAGING_KNOWN_HOSTS"
           test -n "$FLEETUM_STAGING_SSH_KEY"
           test -n "$FLEETUM_STAGING_HOST"
-          mkdir -p ~/.ssh
-          printf '%s\n' "$FLEETUM_STAGING_SSH_KEY" > ~/.ssh/fleetum_staging
+          if ! [[ "$FLEETUM_STAGING_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[A-Za-z0-9.-]+$ ]]; then
+            echo "::error::FLEETUM_STAGING_HOST must be only an IPv4 address or hostname."
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          if [[ "$FLEETUM_STAGING_SSH_KEY" == *\\n* ]]; then
+            printf '%b' "$FLEETUM_STAGING_SSH_KEY" > ~/.ssh/fleetum_staging
+          else
+            printf '%s\n' "$FLEETUM_STAGING_SSH_KEY" > ~/.ssh/fleetum_staging
+          fi
           chmod 600 ~/.ssh/fleetum_staging
-          ssh-keyscan -H "$FLEETUM_STAGING_HOST" >> ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/fleetum_staging >/dev/null
+          printf '%s\n' "$FLEETUM_STAGING_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Verify remote deploy target
         env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
           FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
           FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
         run: |
+          set -euo pipefail
           test -n "$FLEETUM_STAGING_USER"
-          ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
-            "mkdir -p '$FLEETUM_STAGING_APP_DIR' && test -w '$FLEETUM_STAGING_APP_DIR'"
+          if ! [[ "$FLEETUM_STAGING_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+            echo "::error::FLEETUM_STAGING_USER contains unsupported characters."
+            exit 1
+          fi
+          if ! [[ "$FLEETUM_STAGING_APP_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::FLEETUM_STAGING_APP_DIR must be an absolute safe path."
+            exit 1
+          fi
+          if [ "$FLEETUM_STAGING_APP_DIR" != "/opt/fleetum-staging/app" ]; then
+            echo "::error::Staging app path must be the isolated canonical path."
+            exit 1
+          fi
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "sh -s '$FLEETUM_RELEASE_SHA'" < .fleetum-control/ops/staging/target-preflight.sh
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+            "mkdir -p '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA' && test -w '$FLEETUM_STAGING_APP_DIR'"
 
-      - name: Upload deployment manifests
+      - name: Upload immutable deployment manifests
         env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
           FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
           FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
         run: |
+          set -euo pipefail
           rsync -az --delete \
             --include 'docker-compose.staging.yml' \
             --include 'deploy/' \
             --include 'deploy/caddy/' \
             --include 'deploy/caddy/Caddyfile.staging' \
-            --include 'deploy/backup/' \
-            --include 'deploy/backup/*.sh' \
-            --include 'deploy/backup/*.md' \
             --exclude '*' \
-            -e "ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" \
-            ./ "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/"
+            -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" \
+            ./ "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/"
 
-      - name: Pull images, migrate and restart staging containers
+      - name: Pull immutable images, migrate and restart staging
         env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
           FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
           FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
           FLEETUM_STAGING_ENV_FILE: ${{ vars.FLEETUM_STAGING_ENV_FILE || '/opt/fleetum-staging/env/compose.env' }}
+          FLEETUM_STAGING_LOCK_FILE: ${{ vars.FLEETUM_STAGING_LOCK_FILE || '/opt/fleetum-staging/deploy.lock' }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
           FLEETUM_FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
         run: |
-          printf '%s' "$GHCR_TOKEN" | ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+          set -euo pipefail
+          for deploy_path in "$FLEETUM_STAGING_APP_DIR" "$FLEETUM_STAGING_ENV_FILE" "$FLEETUM_STAGING_LOCK_FILE"; do
+            if ! [[ "$deploy_path" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+              echo "::error::Staging deploy paths must be absolute and contain only safe characters."
+              exit 1
+            fi
+          done
+          if [ "$FLEETUM_STAGING_APP_DIR" != "/opt/fleetum-staging/app" ] || [ "$FLEETUM_STAGING_ENV_FILE" != "/opt/fleetum-staging/env/compose.env" ] || [ "$FLEETUM_STAGING_LOCK_FILE" != "/opt/fleetum-staging/deploy.lock" ]; then
+            echo "::error::Staging deployment paths must match the isolated canonical paths."
+            exit 1
+          fi
+          LOCK_DIR="${FLEETUM_STAGING_LOCK_FILE%/*}"
+
+          printf '%s' "$GHCR_TOKEN" | ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
-          ssh -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
-            "cd '$FLEETUM_STAGING_APP_DIR' && export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend npx prisma migrate deploy --schema prisma/schema.prisma && docker compose --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d"
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
+            "set -eu; mkdir -p '$LOCK_DIR'; cd '$FLEETUM_STAGING_APP_DIR'; exec 9>'$FLEETUM_STAGING_LOCK_FILE'; flock -n 9; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.staging.yml' '$FLEETUM_STAGING_APP_DIR/docker-compose.staging.yml'; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_STAGING_APP_DIR/deploy/'; export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE'; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend sh -c 'node dist/shared/config/env.js && npx prisma migrate deploy --schema prisma/schema.prisma'; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d --no-build"
+
+      - name: Verify observed staging isolation
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
+        run: node .fleetum-control/ops/e2e/capture-staging-runtime.mjs deploy staging-runtime-isolation.json
 
       - name: Staging health checks
         run: |
-          for i in {1..12}; do
+          set -euo pipefail
+          for attempt in {1..12}; do
             if curl -fsS --max-time 20 https://api-staging.fleetum.it/api/ready; then
               break
             fi
-            if [ "$i" = "12" ]; then
+            if [ "$attempt" = "12" ]; then
               echo "Staging API ready check failed after retries" >&2
               exit 1
             fi
             sleep 5
           done
-
           curl -fsS --max-time 20 https://staging.fleetum.it/ | grep -q "Fleetum"
           curl -fsS --max-time 20 https://platform-staging.fleetum.it/platform-api/health
+
+      - name: Publish staging release proof
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          CI_RUN_ID: ${{ needs.resolve-release.outputs.ci_run_id }}
+          BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { writeFileSync } from 'node:fs';
+          assert.match(process.env.RELEASE_SHA, /^[0-9a-f]{40}$/);
+          assert.match(process.env.CI_RUN_ID, /^[1-9][0-9]*$/);
+          const repository = process.env.GITHUB_REPOSITORY;
+          const backendImage = process.env.BACKEND_IMAGE;
+          const frontendImage = process.env.FRONTEND_IMAGE;
+          assert.match(backendImage, /^ghcr\.io\/silviomasuccio6\/fleetum-backend@sha256:[0-9a-f]{64}$/);
+          assert.match(frontendImage, /^ghcr\.io\/silviomasuccio6\/fleetum-frontend@sha256:[0-9a-f]{64}$/);
+          writeFileSync('staging-release.json', JSON.stringify({ schemaVersion: 1, repository,
+            releaseSha: process.env.RELEASE_SHA, ciRunId: process.env.CI_RUN_ID,
+            deployRunId: process.env.GITHUB_RUN_ID, backendImage, frontendImage, completed: true, isolationPolicyVersion: 1, controlSha: process.env.GITHUB_WORKFLOW_SHA }, null, 2) + '\n');
+          NODE
+
+      - name: Upload staging release proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-release-proof-${{ github.run_id }}
+          path: |
+            staging-release.json
+            staging-runtime-isolation.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14

@@ -13,7 +13,7 @@ test.describe("Fleetum critical flow: tenant login", () => {
 
   test("tenant API session exposes authenticated profile", async () => {
     const auth = await createAuthenticatedApi();
-    const me = await auth.api.get("/auth/me");
+    const me = await auth.api.get("auth/me");
     expect(me.ok()).toBeTruthy();
     const payload = await me.json();
     expect(payload.email).toBeTruthy();

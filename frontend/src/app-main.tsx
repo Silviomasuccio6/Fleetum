@@ -4,6 +4,7 @@ import { HelmetProvider } from "react-helmet-async";
 import { BrowserRouter } from "react-router-dom";
 import { initTheme } from "./infrastructure/theme/theme-manager";
 import { SnackbarViewport } from "./presentation/components/ui/snackbar-viewport";
+import { AppErrorBoundary } from "./presentation/components/errors/app-error-boundary";
 import { AppRoutes } from "./presentation/routes/app-routes";
 import "./presentation/styles/fonts.css";
 import "./presentation/styles/global.css";
@@ -12,12 +13,14 @@ initTheme();
 
 const app = (
   <React.StrictMode>
-    <HelmetProvider>
-      <BrowserRouter>
-        <AppRoutes />
-        <SnackbarViewport />
-      </BrowserRouter>
-    </HelmetProvider>
+    <AppErrorBoundary scope="app">
+      <HelmetProvider>
+        <BrowserRouter>
+          <AppRoutes />
+          <SnackbarViewport />
+        </BrowserRouter>
+      </HelmetProvider>
+    </AppErrorBoundary>
   </React.StrictMode>
 );
 

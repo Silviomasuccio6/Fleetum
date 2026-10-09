@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag o SHA da deployare"
+        description: "main o SHA già verificato da una CI push/main"
         required: false
         default: "main"
   workflow_run:
@@ -17,9 +17,109 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve-release:
+    name: Resolve immutable release
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.head_branch == 'main' &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      ci_run_id: ${{ steps.ci_identity.outputs.ci_run_id }}
+
+    steps:
+      - name: Checkout release candidate once
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve full release SHA
+        id: release
+        env:
+          WORKFLOW_RUN_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          if ! [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Release candidate did not resolve to a full Git commit SHA."
+            exit 1
+          fi
+
+          if [ -n "$WORKFLOW_RUN_SHA" ] && [ "$RELEASE_SHA" != "$WORKFLOW_RUN_SHA" ]; then
+            echo "::error::Checked out commit does not match the successful CI workflow head SHA."
+            exit 1
+          fi
+
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Release SHA: \`$RELEASE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require successful CI for manual release
+        id: manual_ci
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.release_sha }}
+        with:
+          script: |
+            const releaseSha = process.env.RELEASE_SHA;
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "ci.yml",
+              head_sha: releaseSha,
+              branch: "main",
+              event: "push",
+              status: "completed",
+              exclude_pull_requests: true,
+              per_page: 100,
+            });
+
+            const expectedRepository = `${context.repo.owner}/${context.repo.repo}`;
+            const successfulRun = data.workflow_runs.find((run) =>
+              run.head_sha === releaseSha &&
+              run.conclusion === "success" &&
+              run.event === "push" &&
+              run.head_branch === "main" &&
+              run.head_repository?.full_name === expectedRepository
+            );
+
+            if (!successfulRun) {
+              core.setFailed(`No successful CI workflow run exists for release SHA ${releaseSha}.`);
+              return;
+            }
+
+            core.setOutput("ci_run_id", String(successfulRun.id));
+            await core.summary
+              .addRaw(`CI proof: [run ${successfulRun.id}](${successfulRun.html_url}) for \`${releaseSha}\``)
+              .write();
+
+      - name: Record CI proof identity
+        id: ci_identity
+        env:
+          WORKFLOW_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
+          MANUAL_CI_RUN_ID: ${{ steps.manual_ci.outputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          CI_RUN_ID="${WORKFLOW_RUN_ID:-$MANUAL_CI_RUN_ID}"
+          if ! [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Unable to record the successful CI workflow run identity."
+            exit 1
+          fi
+          echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+
   sast:
     name: SAST (Semgrep)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    needs: resolve-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -27,10 +127,12 @@ jobs:
       security-events: write
 
     steps:
-      - name: Checkout requested ref
+      - name: Checkout immutable release
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.ref || 'main' }}
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Install Semgrep
         run: |
@@ -67,21 +169,27 @@ jobs:
 
   build-images:
     name: Build and publish production images
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    needs: resolve-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     outputs:
-      backend_image: ${{ steps.images.outputs.backend_image }}
-      frontend_image: ${{ steps.images.outputs.frontend_image }}
+      backend_image: ${{ steps.deployment_images.outputs.backend_image }}
+      frontend_image: ${{ steps.deployment_images.outputs.frontend_image }}
+      backend_tag: ${{ steps.images.outputs.backend_image }}
+      frontend_tag: ${{ steps.images.outputs.frontend_image }}
+      backend_digest: ${{ steps.build_backend.outputs.digest }}
+      frontend_digest: ${{ steps.build_frontend.outputs.digest }}
 
     steps:
-      - name: Checkout requested ref
+      - name: Checkout immutable release
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.ref || 'main' }}
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -95,24 +203,30 @@ jobs:
 
       - name: Resolve image names
         id: images
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
-          IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
-          BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:${IMAGE_TAG}"
-          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:${IMAGE_TAG}"
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$FLEETUM_RELEASE_SHA" ]; then
+            echo "::error::Build checkout does not match the resolved release SHA."
+            exit 1
+          fi
+          BACKEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-backend:${FLEETUM_RELEASE_SHA}"
+          FRONTEND_IMAGE="ghcr.io/silviomasuccio6/fleetum-frontend:${FLEETUM_RELEASE_SHA}"
           echo "backend_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
           echo "frontend_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
+        id: build_backend
         uses: docker/build-push-action@v6
         with:
           context: .
           file: backend/Dockerfile.prod
           push: true
-          tags: |
-            ${{ steps.images.outputs.backend_image }}
-            ghcr.io/silviomasuccio6/fleetum-backend:latest
+          tags: ${{ steps.images.outputs.backend_image }}
 
       - name: Build and push frontend image
+        id: build_frontend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -128,26 +242,74 @@ jobs:
             NEXT_PUBLIC_SITE_URL=https://fleetum.it
             NEXT_PUBLIC_APP_LOGIN_URL=https://fleetum.it/login
             NEXT_PUBLIC_SITE_INDEXABLE=true
-          tags: |
-            ${{ steps.images.outputs.frontend_image }}
-            ghcr.io/silviomasuccio6/fleetum-frontend:latest
+          tags: ${{ steps.images.outputs.frontend_image }}
+
+      - name: Resolve immutable deployment image references
+        id: deployment_images
+        env:
+          BACKEND_DIGEST: ${{ steps.build_backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build_frontend.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Backend build did not return a valid immutable digest."
+            exit 1
+          fi
+          if ! [[ "$FRONTEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Frontend build did not return a valid immutable digest."
+            exit 1
+          fi
+
+          echo "backend_image=ghcr.io/silviomasuccio6/fleetum-backend@$BACKEND_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=ghcr.io/silviomasuccio6/fleetum-frontend@$FRONTEND_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Record immutable image identities
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          BACKEND_TAG: ${{ steps.images.outputs.backend_image }}
+          FRONTEND_TAG: ${{ steps.images.outputs.frontend_image }}
+          BACKEND_DIGEST: ${{ steps.build_backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build_frontend.outputs.digest }}
+          BACKEND_DEPLOYMENT_IMAGE: ${{ steps.deployment_images.outputs.backend_image }}
+          FRONTEND_DEPLOYMENT_IMAGE: ${{ steps.deployment_images.outputs.frontend_image }}
+        run: |
+          {
+            echo "## Production image identity"
+            echo
+            echo "- Release SHA: \`$FLEETUM_RELEASE_SHA\`"
+            echo "- Backend tag: \`$BACKEND_TAG\`"
+            echo "- Backend deploy reference: \`$BACKEND_DEPLOYMENT_IMAGE\`"
+            echo "- Frontend tag: \`$FRONTEND_TAG\`"
+            echo "- Frontend deploy reference: \`$FRONTEND_DEPLOYMENT_IMAGE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Deploy Fleetum VPS
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
-    needs: [build-images, sast]
+    needs: [resolve-release, build-images, sast]
     permissions:
       contents: read
       packages: read
 
     steps:
-      - name: Checkout requested ref
+      - name: Checkout immutable release
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.ref || 'main' }}
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify deploy checkout identity
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$FLEETUM_RELEASE_SHA" ]; then
+            echo "::error::Deploy checkout does not match the resolved release SHA."
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -172,6 +334,7 @@ jobs:
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
           FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE || vars.ENV_FILE }}
           FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE || vars.LAST_DEPLOY_FILE }}
+          FLEETUM_DEPLOY_LOCK_FILE: ${{ vars.FLEETUM_DEPLOY_LOCK_FILE || '/opt/fleetum/deploy.lock' }}
           FLEETUM_MIN_FREE_DISK_GB: ${{ vars.FLEETUM_MIN_FREE_DISK_GB || '10' }}
           FLEETUM_MAX_DISK_USAGE_PERCENT: ${{ vars.FLEETUM_MAX_DISK_USAGE_PERCENT || '90' }}
           FLEETUM_DISK_ALERT_WARNING_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_WARNING_PERCENT || '80' }}
@@ -197,9 +360,22 @@ jobs:
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
           : "${FLEETUM_ENV_FILE:=/opt/fleetum/env/compose.env}"
           : "${FLEETUM_LAST_DEPLOY_FILE:=/opt/fleetum/last-deploy.txt}"
+          : "${FLEETUM_DEPLOY_LOCK_FILE:=/opt/fleetum/deploy.lock}"
           FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           FLEETUM_ENV_FILE="$(printf '%s' "$FLEETUM_ENV_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           FLEETUM_LAST_DEPLOY_FILE="$(printf '%s' "$FLEETUM_LAST_DEPLOY_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_DEPLOY_LOCK_FILE="$(printf '%s' "$FLEETUM_DEPLOY_LOCK_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
+          if ! [[ "$FLEETUM_VPS_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+            echo "::error::FLEETUM_VPS_USER contains unsupported characters."
+            exit 1
+          fi
+          for deploy_path in "$FLEETUM_APP_DIR" "$FLEETUM_ENV_FILE" "$FLEETUM_LAST_DEPLOY_FILE" "$FLEETUM_DEPLOY_LOCK_FILE"; do
+            if ! [[ "$deploy_path" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+              echo "::error::Production deploy paths must be absolute and contain only safe path characters."
+              exit 1
+            fi
+          done
           for disk_variable in \
             FLEETUM_MIN_FREE_DISK_GB \
             FLEETUM_MAX_DISK_USAGE_PERCENT \
@@ -224,6 +400,7 @@ jobs:
           echo "App dir: $FLEETUM_APP_DIR"
           echo "Compose env file: $FLEETUM_ENV_FILE"
           echo "Last deploy file: $FLEETUM_LAST_DEPLOY_FILE"
+          echo "Deploy lock file: $FLEETUM_DEPLOY_LOCK_FILE"
           echo "Disk guard configured: yes"
 
       - name: Configure SSH key
@@ -274,6 +451,7 @@ jobs:
 
       - name: Verify remote deploy target
         env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
           FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
@@ -290,11 +468,16 @@ jobs:
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
           FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
+          if ! [[ "$FLEETUM_VPS_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || ! [[ "$FLEETUM_APP_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Remote deploy user or application path contains unsupported characters."
+            exit 1
+          fi
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "test \"\$(whoami)\" = '$FLEETUM_VPS_USER' && mkdir -p '$FLEETUM_APP_DIR' && test -w '$FLEETUM_APP_DIR'"
+            "test \"\$(whoami)\" = '$FLEETUM_VPS_USER' && mkdir -p '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA' && test -w '$FLEETUM_APP_DIR'"
 
       - name: Upload deployment manifests
         env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
           FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
@@ -311,6 +494,10 @@ jobs:
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
           FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
+          if ! [[ "$FLEETUM_VPS_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || ! [[ "$FLEETUM_APP_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Remote deploy user or application path contains unsupported characters."
+            exit 1
+          fi
           rsync -az --delete \
             --include 'docker-compose.prod.yml' \
             --include 'deploy/' \
@@ -323,15 +510,19 @@ jobs:
             --include 'deploy/scripts/*.sh' \
             --exclude '*' \
             -e "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps" \
-            ./ "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST:$FLEETUM_APP_DIR/"
+            ./ "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST:$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/"
 
       - name: Pull images, backup, migrate and restart production containers
         env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          FLEETUM_CI_RUN_ID: ${{ needs.resolve-release.outputs.ci_run_id }}
+          FLEETUM_DEPLOY_RUN_ID: ${{ github.run_id }}
           FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
           FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
           FLEETUM_APP_DIR: ${{ vars.FLEETUM_APP_DIR || vars.APP_DIR }}
           FLEETUM_ENV_FILE: ${{ vars.FLEETUM_ENV_FILE || vars.ENV_FILE }}
           FLEETUM_LAST_DEPLOY_FILE: ${{ vars.FLEETUM_LAST_DEPLOY_FILE || vars.LAST_DEPLOY_FILE }}
+          FLEETUM_DEPLOY_LOCK_FILE: ${{ vars.FLEETUM_DEPLOY_LOCK_FILE || '/opt/fleetum/deploy.lock' }}
           FLEETUM_MIN_FREE_DISK_GB: ${{ vars.FLEETUM_MIN_FREE_DISK_GB || '10' }}
           FLEETUM_MAX_DISK_USAGE_PERCENT: ${{ vars.FLEETUM_MAX_DISK_USAGE_PERCENT || '90' }}
           FLEETUM_DISK_ALERT_WARNING_PERCENT: ${{ vars.FLEETUM_DISK_ALERT_WARNING_PERCENT || '80' }}
@@ -341,14 +532,18 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
           FLEETUM_FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}
+          FLEETUM_BACKEND_RELEASE_TAG: ${{ needs.build-images.outputs.backend_tag }}
+          FLEETUM_FRONTEND_RELEASE_TAG: ${{ needs.build-images.outputs.frontend_tag }}
         run: |
           set -euo pipefail
           : "${FLEETUM_APP_DIR:=/opt/fleetum/app}"
           : "${FLEETUM_ENV_FILE:=/opt/fleetum/env/compose.env}"
           : "${FLEETUM_LAST_DEPLOY_FILE:=/opt/fleetum/last-deploy.txt}"
+          : "${FLEETUM_DEPLOY_LOCK_FILE:=/opt/fleetum/deploy.lock}"
           FLEETUM_APP_DIR="$(printf '%s' "$FLEETUM_APP_DIR" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           FLEETUM_ENV_FILE="$(printf '%s' "$FLEETUM_ENV_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           FLEETUM_LAST_DEPLOY_FILE="$(printf '%s' "$FLEETUM_LAST_DEPLOY_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          FLEETUM_DEPLOY_LOCK_FILE="$(printf '%s' "$FLEETUM_DEPLOY_LOCK_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           if [ -z "$FLEETUM_VPS_HOST" ] || [ -z "$FLEETUM_VPS_USER" ]; then
             echo "::error::Missing FLEETUM_VPS_HOST or FLEETUM_VPS_USER."
             exit 1
@@ -358,11 +553,22 @@ jobs:
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST#*@}"
           FLEETUM_VPS_HOST="${FLEETUM_VPS_HOST%%:*}"
           FLEETUM_VPS_USER="$(printf '%s' "$FLEETUM_VPS_USER" | tr -d '\r\n[:space:]')"
+          if ! [[ "$FLEETUM_VPS_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+            echo "::error::FLEETUM_VPS_USER contains unsupported characters."
+            exit 1
+          fi
+          for deploy_path in "$FLEETUM_APP_DIR" "$FLEETUM_ENV_FILE" "$FLEETUM_LAST_DEPLOY_FILE" "$FLEETUM_DEPLOY_LOCK_FILE"; do
+            if ! [[ "$deploy_path" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+              echo "::error::Production deploy paths must be absolute and contain only safe path characters."
+              exit 1
+            fi
+          done
+          FLEETUM_DEPLOY_LOCK_DIR="${FLEETUM_DEPLOY_LOCK_FILE%/*}"
           printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "cd '$FLEETUM_APP_DIR' && chmod +x deploy/scripts/*.sh deploy/backup/*.sh && FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' MIN_FREE_DISK_GB='$FLEETUM_MIN_FREE_DISK_GB' MAX_DISK_USAGE_PERCENT='$FLEETUM_MAX_DISK_USAGE_PERCENT' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
+            "set -eu; mkdir -p '$FLEETUM_DEPLOY_LOCK_DIR'; cd '$FLEETUM_APP_DIR'; exec 9>'$FLEETUM_DEPLOY_LOCK_FILE'; flock -n 9; rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.prod.yml' '$FLEETUM_APP_DIR/docker-compose.prod.yml'; rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_APP_DIR/deploy/'; chmod +x deploy/scripts/*.sh deploy/backup/*.sh; DEPLOY_LOCK_HELD=true FLEETUM_RELEASE_SHA='$FLEETUM_RELEASE_SHA' FLEETUM_CI_RUN_ID='$FLEETUM_CI_RUN_ID' FLEETUM_DEPLOY_RUN_ID='$FLEETUM_DEPLOY_RUN_ID' FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' FLEETUM_BACKEND_RELEASE_TAG='$FLEETUM_BACKEND_RELEASE_TAG' FLEETUM_FRONTEND_RELEASE_TAG='$FLEETUM_FRONTEND_RELEASE_TAG' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' DEPLOY_LOCK_FILE='$FLEETUM_DEPLOY_LOCK_FILE' MIN_FREE_DISK_GB='$FLEETUM_MIN_FREE_DISK_GB' MAX_DISK_USAGE_PERCENT='$FLEETUM_MAX_DISK_USAGE_PERCENT' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
 
       - name: Install managed backup cron
         env:
@@ -388,40 +594,11 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "APP_DIR='$FLEETUM_APP_DIR' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' '$FLEETUM_APP_DIR/deploy/backup/install-cron.sh'"
 
-      - name: Production health checks
-        run: |
-          for i in {1..12}; do
-            if curl -fsS --max-time 20 https://api.fleetum.it/api/ready; then
-              break
-            fi
-            if [ "$i" = "12" ]; then
-              echo "Backend readiness check failed after retries" >&2
-              exit 1
-            fi
-            sleep 5
-          done
-
-          for i in {1..12}; do
-            if curl -fsS --max-time 20 https://fleetum.it/ | grep -q "Fleetum"; then
-              break
-            fi
-            if [ "$i" = "12" ]; then
-              echo "Frontend health check failed after retries" >&2
-              exit 1
-            fi
-            sleep 5
-          done
-
-          curl -fsS --max-time 20 https://fleetum.it/robots.txt | grep -q "Sitemap"
-          curl -fsS --max-time 20 https://fleetum.it/sitemap.xml | grep -q "fleetum.it/demo"
-          curl -fsS --max-time 20 https://fleetum.it/llms.txt | grep -q "# Fleetum"
-          curl -fsSI --max-time 20 https://fleetum.it/brand/fleetum-social-preview.png | grep -qi "content-type: image/png"
-
   notify-failure:
     name: Create deploy failure issue
-    if: ${{ always() && (needs.sast.result == 'failure' || needs.build-images.result == 'failure' || needs.deploy.result == 'failure') }}
+    if: ${{ always() && (needs.resolve-release.result == 'failure' || needs.sast.result == 'failure' || needs.build-images.result == 'failure' || needs.deploy.result == 'failure') }}
     runs-on: ubuntu-latest
-    needs: [sast, build-images, deploy]
+    needs: [resolve-release, sast, build-images, deploy]
     permissions:
       contents: read
       issues: write
@@ -429,17 +606,21 @@ jobs:
     steps:
       - name: Create GitHub issue
         uses: actions/github-script@v7
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha || github.event.workflow_run.head_sha || '' }}
         with:
           script: |
-            const sha = context.sha.slice(0, 12);
+            const releaseSha = process.env.FLEETUM_RELEASE_SHA || "unresolved";
+            const shortSha = releaseSha === "unresolved" ? releaseSha : releaseSha.slice(0, 12);
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const title = `Deploy failed: ${sha}`;
+            const title = `Deploy failed: ${shortSha}`;
             const body = [
-              `Production deploy failed for commit \`${context.sha}\`.`,
+              `Production deploy failed for release commit \`${releaseSha}\`.`,
               ``,
               `Workflow run: ${runUrl}`,
               ``,
               `Job results:`,
+              `- Resolve release: ${{ needs.resolve-release.result }}`,
               `- SAST: ${{ needs.sast.result }}`,
               `- Build images: ${{ needs.build-images.result }}`,
               `- Deploy: ${{ needs.deploy.result }}`,
