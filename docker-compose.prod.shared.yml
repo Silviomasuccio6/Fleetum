@@ -1,0 +1,17 @@
+# Optional persistent ingress overlay; never apply it to an unverified host.
+# The production backend, images, data mounts and public ports are unchanged.
+services:
+  caddy:
+    volumes:
+      - ./deploy/caddy/Caddyfile.production-shared:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy/Caddyfile:/etc/caddy/production-baseline:ro
+      - ./deploy/caddy/Caddyfile.staging-ingress:/etc/caddy/staging-ingress:ro
+    networks:
+      fleetum_private: {}
+      fleetum_staging_ingress:
+        ipv4_address: 10.203.91.2
+
+networks:
+  fleetum_staging_ingress:
+    external: true
+    name: fleetum_staging_ingress
