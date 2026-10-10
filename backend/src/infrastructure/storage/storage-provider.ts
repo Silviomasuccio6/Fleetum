@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { metrics } from "../observability/metrics.js";
 import { env } from "../../shared/config/env.js";
@@ -23,6 +24,8 @@ export interface StorageProvider {
   read(key: string): Promise<Buffer>;
   write(key: string, data: Buffer, metadata?: StoredFileMetadata): Promise<void>;
   writeFromFile(key: string, filePath: string, metadata?: StoredFileMetadata): Promise<void>;
+  writeNew(key: string, data: Buffer, metadata?: StoredFileMetadata): Promise<void>;
+  writeNewFromFile(key: string, filePath: string, metadata?: StoredFileMetadata): Promise<void>;
   delete(key: string): Promise<void>;
   getSignedReadUrl(key: string, expiresInSeconds?: number): Promise<string>;
 }
@@ -41,18 +44,70 @@ const assertSafeStorageKey = (key: string) => {
   return normalized;
 };
 
+const canonicalUploadRoot = (uploadDir: string) => {
+  const resolved = path.resolve(process.cwd(), uploadDir);
+  // macOS exposes these fixed system aliases. Do not resolve arbitrary upload
+  // directory symlinks; those must fail the confinement checks below.
+  for (const [alias, canonical] of [["/tmp", "/private/tmp"], ["/var", "/private/var"]]) {
+    if (resolved === alias || resolved.startsWith(`${alias}/`)) {
+      try { if (realpathSync(alias) === canonical) return `${canonical}${resolved.slice(alias.length)}`; } catch { /* root may not exist yet */ }
+    }
+  }
+  return resolved;
+};
+
 class LocalStorageProvider implements StorageProvider {
   readonly name = "local" as const;
-  private readonly rootDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
+  private readonly rootDir = canonicalUploadRoot(env.UPLOAD_DIR);
+  // Historical database keys used uploads/<tenant>/... . Preserve that spelling
+  // when the upload root becomes absolute; it is a reserved legacy namespace.
+  private readonly legacyRelativePrefixes = [...new Set([
+    "uploads",
+    ...(path.isAbsolute(env.UPLOAD_DIR) ? [] : [
+      normalizeSegment(path.posix.normalize(env.UPLOAD_DIR.replace(/\\/g, "/"))).replace(/^\.\//, "")
+    ])
+  ])].filter((prefix) => prefix && prefix !== ".").sort((a, b) => b.length - a.length);
+
+  private assertNoSymlinks(fullPath: string) {
+    let current = path.parse(fullPath).root;
+    const segments = fullPath.slice(current.length).split(path.sep).filter(Boolean);
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      try {
+        if (lstatSync(current).isSymbolicLink()) {
+          throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+        throw error;
+      }
+    }
+  }
 
   buildKey(...segments: string[]) {
-    return path.posix.join(env.UPLOAD_DIR, ...segments.map(normalizeSegment).filter(Boolean));
+    return path.posix.join(...segments.map(normalizeSegment).filter(Boolean));
   }
 
   resolveLocalPath(key: string) {
-    const fullPath = path.resolve(process.cwd(), assertSafeStorageKey(key));
+    const safeKey = assertSafeStorageKey(key);
+    const legacyPrefix = this.legacyRelativePrefixes.find(
+      (prefix) => safeKey === prefix || safeKey.startsWith(`${prefix}/`)
+    );
+    const rootRelativeKey = legacyPrefix ? safeKey.slice(legacyPrefix.length).replace(/^\//, "") : safeKey;
+    const fullPath = path.resolve(this.rootDir, rootRelativeKey);
     if (fullPath !== this.rootDir && !fullPath.startsWith(`${this.rootDir}${path.sep}`)) {
       throw new AppError("Percorso file non valido", 400, "INVALID_FILE_PATH");
+    }
+    this.assertNoSymlinks(fullPath);
+    if (legacyPrefix) {
+      // Never select an alternative object by existence. A doubled-prefix
+      // object makes the historical spelling ambiguous and requires review.
+      try {
+        lstatSync(path.resolve(this.rootDir, safeKey));
+        throw new AppError("Chiave storage ambigua", 409, "AMBIGUOUS_STORAGE_KEY");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
     return fullPath;
   }
@@ -111,8 +166,56 @@ class LocalStorageProvider implements StorageProvider {
     });
   }
 
+  async writeNew(key: string, data: Buffer, metadata?: StoredFileMetadata) {
+    const fullPath = this.resolveLocalPath(key);
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    try {
+      await fs.writeFile(fullPath, data, { flag: "wx", mode: 0o600 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new AppError("Chiave storage gia esistente", 409, "STORAGE_OBJECT_EXISTS");
+      }
+      throw error;
+    }
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: data.byteLength
+    });
+  }
+
+  async writeNewFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
+    const fullPath = this.resolveLocalPath(key);
+    const sourcePath = path.resolve(filePath);
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    let created = false;
+    try {
+      await fs.copyFile(sourcePath, fullPath, fs.constants.COPYFILE_EXCL);
+      created = true;
+      await fs.chmod(fullPath, 0o600);
+    } catch (error) {
+      if (created) await fs.unlink(fullPath).catch(() => undefined);
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new AppError("Chiave storage gia esistente", 409, "STORAGE_OBJECT_EXISTS");
+      }
+      throw error;
+    }
+    const stat = await fs.stat(fullPath);
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: stat.size
+    });
+  }
+
   async delete(key: string) {
-    await fs.unlink(this.resolveLocalPath(key)).catch(() => undefined);
+    try {
+      await fs.unlink(this.resolveLocalPath(key));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     metrics.observeStorageOperation({
       operation: "delete",
       provider: this.name
@@ -219,7 +322,13 @@ export class S3StorageProvider implements StorageProvider {
     };
   }
 
-  private async request(method: string, key: string, body?: Buffer, metadata?: StoredFileMetadata) {
+  private async request(
+    method: string,
+    key: string,
+    body?: Buffer,
+    metadata?: StoredFileMetadata,
+    options?: { createOnly?: boolean }
+  ) {
     const url = this.objectUrl(key);
     const now = new Date();
     const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
@@ -230,6 +339,7 @@ export class S3StorageProvider implements StorageProvider {
     if (metadata?.tenantId) extraHeaders["x-amz-meta-tenant-id"] = metadata.tenantId;
     if (metadata?.resourceType) extraHeaders["x-amz-meta-resource-type"] = metadata.resourceType;
     if (metadata?.resourceId) extraHeaders["x-amz-meta-resource-id"] = metadata.resourceId;
+    if (options?.createOnly) extraHeaders["if-none-match"] = "*";
 
     const signed = this.authorization({ method, url, payloadHash, amzDate, dateStamp, extraHeaders });
     const response = await this.fetchImpl(url, {
@@ -241,6 +351,10 @@ export class S3StorageProvider implements StorageProvider {
         authorization: signed.authorization
       }
     });
+
+    if (options?.createOnly && response.status === 412) {
+      throw new AppError("Chiave storage gia esistente", 409, "STORAGE_OBJECT_EXISTS");
+    }
 
     if (!response.ok && !(method === "HEAD" && response.status === 404) && !(method === "DELETE" && response.status === 404)) {
       throw new AppError(`Errore storage S3 (${response.status})`, 502, "S3_STORAGE_ERROR");
@@ -278,6 +392,21 @@ export class S3StorageProvider implements StorageProvider {
   async writeFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
     const data = await fs.readFile(filePath);
     await this.write(key, data, metadata);
+  }
+
+  async writeNew(key: string, data: Buffer, metadata?: StoredFileMetadata) {
+    await this.request("PUT", key, data, metadata, { createOnly: true });
+    metrics.observeStorageOperation({
+      operation: "write",
+      provider: this.name,
+      resourceType: metadata?.resourceType,
+      bytes: data.byteLength
+    });
+  }
+
+  async writeNewFromFile(key: string, filePath: string, metadata?: StoredFileMetadata) {
+    const data = await fs.readFile(filePath);
+    await this.writeNew(key, data, metadata);
   }
 
   async delete(key: string) {

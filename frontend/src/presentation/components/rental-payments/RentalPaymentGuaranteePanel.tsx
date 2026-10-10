@@ -74,7 +74,7 @@ const extraLabels: Record<RentalExtraChargeStatus, string> = {
   DRAFT: "Bozza",
   PENDING_APPROVAL: "In approvazione",
   APPROVED: "Approvato",
-  NOTIFIED: "Cliente notificato",
+  NOTIFIED: "Notifica inviata",
   PAYMENT_PROCESSING: "Pagamento in corso",
   PAID: "Pagato",
   FAILED: "Fallito",
@@ -147,7 +147,15 @@ const isActionBusy = (busy: ActionState, type: string, id?: string) => busy?.typ
 const canCaptureDeposit = (deposit: RentalDepositDto) => deposit.status === "AUTHORIZED";
 const canReleaseDeposit = (deposit: RentalDepositDto) => deposit.status === "AUTHORIZED";
 const canApproveExtra = (charge: RentalExtraChargeDto) => ["DRAFT", "PENDING_APPROVAL"].includes(charge.status);
-const canNotifyExtra = (charge: RentalExtraChargeDto) => ["APPROVED"].includes(charge.status);
+const canNotifyExtra = (charge: RentalExtraChargeDto) => charge.status === "APPROVED" && charge.notificationStatus === "NONE";
+const noticeLabels = {
+  NONE: "",
+  PENDING: "Notifica in coda",
+  SENT: "Email accettata dal servizio di invio",
+  FAILED: "Invio non riuscito · da verificare",
+  BLOCKED: "Notifica bloccata · da verificare",
+  LEGACY_UNVERIFIED: "Invio precedente da verificare"
+} as const;
 const canChargeExtra = (charge: RentalExtraChargeDto) => ["APPROVED", "NOTIFIED", "FAILED", "REQUIRES_ACTION"].includes(charge.status);
 const canCancelExtra = (charge: RentalExtraChargeDto) => !["PAID", "REFUNDED", "DISPUTED", "CANCELED"].includes(charge.status);
 
@@ -507,7 +515,14 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
                       <p>{money(charge.totalAmountCents, charge.currency)}</p>
                       <p className="text-[10px] text-muted-foreground">Base {money(charge.amountCents, charge.currency)} · Fee {money(charge.adminFeeCents, charge.currency)}</p>
                     </TableCell>
-                    <TableCell><Badge variant={statusVariant(charge.status)}>{extraLabels[charge.status]}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant={statusVariant(charge.status)}>
+                        {charge.status === "NOTIFIED" && charge.notificationStatus !== "SENT" ? "Invio da verificare" : extraLabels[charge.status]}
+                      </Badge>
+                      {charge.notificationStatus && noticeLabels[charge.notificationStatus] ? (
+                        <p className="mt-1 text-[10px] text-muted-foreground">{noticeLabels[charge.notificationStatus]}</p>
+                      ) : null}
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap justify-end gap-1">
                         <Button size="sm" variant="outline" onClick={() => void runExtraAction(charge, "approve")} disabled={!canCharge || !canApproveExtra(charge) || isActionBusy(actionBusy, "approve", charge.id)}>Approva</Button>

@@ -1,5 +1,6 @@
 import rateLimit from "express-rate-limit";
-import { Router } from "express";
+import crypto from "node:crypto";
+import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { AcceptInviteUseCase } from "../../../application/usecases/auth/accept-invite-usecase.js";
 import { LoginUseCase } from "../../../application/usecases/auth/login-usecase.js";
@@ -23,6 +24,7 @@ import { InvoiceService } from "../../../application/services/invoice-service.js
 import { LicensePolicyService } from "../../../application/services/license-policy-service.js";
 import { NotificationsService } from "../../../application/services/notifications-service.js";
 import { PrivacyComplianceService } from "../../../application/services/privacy-compliance-service.js";
+import { buildConsentedDemoAnalyticsEvent } from "../../../application/services/public-demo-analytics-service.js";
 import { PrivacyNoticeService } from "../../../application/services/privacy-notice-service.js";
 import { RentalPaymentService } from "../../../application/services/rental-payment-service.js";
 import { SocialOAuthService } from "../../../application/services/social-oauth-service.js";
@@ -32,6 +34,7 @@ import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { env } from "../../../shared/config/env.js";
 import { privacyHash } from "../../../shared/utils/privacy-hash.js";
 import { uploadCompanyVerificationDocument } from "../../../infrastructure/storage/multer.js";
+import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import { metrics } from "../../../infrastructure/observability/metrics.js";
@@ -229,76 +232,131 @@ apiRouter.post("/public/analytics/event", publicAnalyticsRateLimit, asyncHandler
   res.status(202).json({ ok: true, stored: true });
 }));
 
-apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (req, res) => {
-  const input = publicDemoRequestSchema.parse(req.body);
-  const recipient = demoLeadRecipient();
-  const lead = await prisma.demoLead.create({
-    data: {
-      companyName: input.companyName,
-      fullName: input.fullName,
-      email: input.email,
-      phone: input.phone,
-      fleetSize: input.fleetSize,
-      message: input.message,
-      source: input.source,
-      referrer: input.referrer,
-      utmSource: input.utmSource,
-      utmMedium: input.utmMedium,
-      utmCampaign: input.utmCampaign,
-      utmContent: input.utmContent,
-      utmTerm: input.utmTerm,
-      visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
-      sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined
-    }
-  });
-  await prisma.websiteEvent.create({
-    data: {
-      eventType: "DEMO_FORM_SUBMIT",
-      path: "/demo",
-      referrer: input.referrer,
-      utmSource: input.utmSource,
-      utmMedium: input.utmMedium,
-      utmCampaign: input.utmCampaign,
-      utmContent: input.utmContent,
-      utmTerm: input.utmTerm,
-      consentAnalytics: true,
-      visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
-      sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined,
-      ipHash: privacyHash(req.ip),
-      userAgentHash: privacyHash(String(req.headers["user-agent"] ?? "")),
-      deviceType: detectDevice(String(req.headers["user-agent"] ?? "")),
-      browser: detectBrowser(String(req.headers["user-agent"] ?? "")),
-      metadata: { source: input.source, leadId: lead.id }
-    }
-  });
-  const body = [
-    "Nuova richiesta demo Fleetum",
-    `Azienda: ${input.companyName}`,
-    `Referente: ${input.fullName}`,
-    `Email: ${input.email}`,
-    input.phone ? `Telefono: ${input.phone}` : null,
-    input.fleetSize ? `Dimensione flotta: ${input.fleetSize}` : null,
-    input.message ? `Messaggio: ${input.message}` : null,
-    `Fonte: ${input.source}`,
-    `Data: ${new Date().toISOString()}`
-  ].filter(Boolean).join("\n");
+const DEMO_IDEMPOTENCY_HEADER = "x-idempotency-key";
+const DEMO_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
-  const queuedEmail = await emailQueueService.enqueue({
-    type: "PUBLIC_DEMO_REQUEST",
-    recipient,
-    subject: `Nuova demo Fleetum - ${input.companyName}`,
-    body,
-    meta: {
-      source: input.source,
-      companyName: input.companyName,
-      fullName: input.fullName,
-      email: input.email,
-      phone: input.phone ?? null,
-      fleetSize: input.fleetSize ?? null,
-      replyTo: input.email,
-      fromName: "Fleetum"
+const publicDemoIdempotencyKey = (req: Request) => {
+  const fromHelper = typeof req.header === "function" ? req.header(DEMO_IDEMPOTENCY_HEADER) : undefined;
+  const fromHeaders = req.headers?.[DEMO_IDEMPOTENCY_HEADER];
+  const raw = fromHelper ?? (Array.isArray(fromHeaders) ? fromHeaders[0] : fromHeaders);
+  const key = typeof raw === "string" ? raw.trim() : "";
+  if (!key) {
+    throw new AppError(
+      "Header x-idempotency-key obbligatorio per inviare una richiesta demo.",
+      400,
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
+  }
+  if (!DEMO_IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    throw new AppError("Header x-idempotency-key non valido.", 400, "INVALID_IDEMPOTENCY_KEY");
+  }
+  return key;
+};
+
+export const handlePublicDemoRequest = async (req: Request, res: Response) => {
+  const input = publicDemoRequestSchema.parse(req.body);
+  const idempotencyKey = publicDemoIdempotencyKey(req);
+  const requestHash = crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  const recipient = demoLeadRecipient();
+  const enqueued = await prisma.$transaction(async (tx) => {
+    const lockKey = `fleetum:public-demo:${idempotencyKey}`;
+    await tx.$queryRaw<Array<{ locked: string }>>`
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS locked
+    `;
+    const priorLead = await tx.demoLead.findUnique({ where: { idempotencyKey } });
+    if (priorLead) {
+      if (priorLead.requestHash !== requestHash) {
+        throw new AppError(
+          "La chiave di idempotenza e' gia' associata a una richiesta demo diversa.",
+          409,
+          "IDEMPOTENCY_KEY_REUSED"
+        );
+      }
+      if (!priorLead.emailQueueId) {
+        throw new AppError(
+          "Coda richiesta demo non disponibile per la richiesta idempotente.",
+          500,
+          "DEMO_EMAIL_OUTBOX_INCONSISTENT"
+        );
+      }
+      const queuedEmail = await tx.emailQueue.findFirst({
+        where: { id: priorLead.emailQueueId, type: "PUBLIC_DEMO_REQUEST" }
+      });
+      if (!queuedEmail) {
+        throw new AppError(
+          "Coda richiesta demo non disponibile per la richiesta idempotente.",
+          500,
+          "DEMO_EMAIL_OUTBOX_INCONSISTENT"
+        );
+      }
+      return { lead: priorLead, queuedEmail, replayed: true };
     }
+
+    const lead = await tx.demoLead.create({
+      data: {
+        companyName: input.companyName,
+        fullName: input.fullName,
+        email: input.email,
+        phone: input.phone,
+        fleetSize: input.fleetSize,
+        message: input.message,
+        source: input.source,
+        referrer: input.referrer,
+        utmSource: input.utmSource,
+        utmMedium: input.utmMedium,
+        utmCampaign: input.utmCampaign,
+        utmContent: input.utmContent,
+        utmTerm: input.utmTerm,
+        visitorId: input.visitorId ? privacyHash(input.visitorId) : undefined,
+        sessionId: input.sessionId ? privacyHash(input.sessionId) : undefined,
+        idempotencyKey,
+        requestHash
+      }
+    });
+    const analyticsEvent = buildConsentedDemoAnalyticsEvent({
+      input,
+      leadId: lead.id,
+      ip: req.ip,
+      userAgent: String(req.headers["user-agent"] ?? "")
+    });
+    if (analyticsEvent) await tx.websiteEvent.create({ data: analyticsEvent });
+
+    const body = [
+      "Nuova richiesta demo Fleetum",
+      `Azienda: ${input.companyName}`,
+      `Referente: ${input.fullName}`,
+      `Email: ${input.email}`,
+      input.phone ? `Telefono: ${input.phone}` : null,
+      input.fleetSize ? `Dimensione flotta: ${input.fleetSize}` : null,
+      input.message ? `Messaggio: ${input.message}` : null,
+      `Fonte: ${input.source}`,
+      `Data: ${lead.createdAt.toISOString()}`
+    ].filter(Boolean).join("\n");
+    const queuedEmail = await emailQueueService.enqueue({
+      type: "PUBLIC_DEMO_REQUEST",
+      recipient,
+      subject: `Nuova demo Fleetum - ${input.companyName}`,
+      body,
+      meta: {
+        source: input.source,
+        companyName: input.companyName,
+        fullName: input.fullName,
+        email: input.email,
+        phone: input.phone ?? null,
+        fleetSize: input.fleetSize ?? null,
+        replyTo: input.email,
+        fromName: "Fleetum",
+        demoLeadId: lead.id,
+        demoRequestKey: idempotencyKey
+      }
+    }, tx);
+    const linkedLead = await tx.demoLead.update({
+      where: { id: lead.id },
+      data: { emailQueueId: queuedEmail.id, emailDeliveryStatus: "PENDING" }
+    });
+    return { lead: linkedLead, queuedEmail, replayed: false };
   });
+  const { lead, queuedEmail, replayed } = enqueued;
 
   await emailQueueService.processPending(new Date(), { ids: [queuedEmail.id], take: 1 });
   const processed = await prisma.emailQueue.findUnique({
@@ -312,7 +370,7 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
       emailDeliveryStatus: processed?.status ?? "UNKNOWN"
     }
   });
-  if (!processed || processed.status !== "SENT") {
+  if (!processed || processed.status === "FAILED") {
     throw new AppError(
       processed?.lastError ?? "Invio richiesta demo non riuscito. Riprova tra poco.",
       502,
@@ -321,6 +379,7 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
   }
 
   const emailMeta = (processed.meta ?? {}) as Record<string, unknown>;
+  if (replayed) res.setHeader("Idempotency-Replayed", "true");
   res.status(202).json({
     ok: true,
     message: "Richiesta demo ricevuta",
@@ -332,7 +391,9 @@ apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(async (
       providerMessageId: typeof emailMeta.providerMessageId === "string" ? emailMeta.providerMessageId : null
     }
   });
-}));
+};
+
+apiRouter.post("/public/demo-request", publicDemoRateLimit, asyncHandler(handlePublicDemoRequest));
 
 apiRouter.get("/calendar/apple/feed.ics", asyncHandler(stoppagesController.appleCalendarFeedPublic));
 apiRouter.get("/calendar/google/callback", asyncHandler(stoppagesController.googleCalendarCallback));
@@ -359,7 +420,7 @@ apiRouter.use("/tenant", requireCsrfProtection, tenantProfileRoutes(tenantProfil
 apiRouter.post(
   "/tenant/onboarding/company-verification-document",
   requireCsrfProtection,
-  uploadCompanyVerificationDocument.single("file"),
+  cleanupOnUploadFailure(uploadCompanyVerificationDocument.single("file")),
   asyncHandler(tenantProfileController.uploadCompanyVerificationDocument)
 );
 apiRouter.use(requireValidLicense(licensePolicyService));

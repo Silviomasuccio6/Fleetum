@@ -1,0 +1,180 @@
+name: Staging Shared Ingress
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [plan, apply, recover]
+        default: plan
+        required: true
+        description: "Observe only, activate only Caddy, or recover only Caddy"
+      planDigest:
+        description: "Digest from the reviewed plan (or original operation for recovery/retry)"
+        required: false
+      confirm:
+        description: "ACTIVATE_STAGING_INGRESS or RECOVER_STAGING_INGRESS; empty for plan"
+        required: false
+
+concurrency:
+  group: fleetum-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.mode == 'plan' && 'staging' || 'production' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Bind reviewed source and controls before SSH secrets
+        env:
+          FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_INGRESS_APPROVED_SOURCE_SHA }}
+          RELEASE_SHA: ${{ github.workflow_sha }}
+          PRODUCTION_APP_DIR: ${{ vars.FLEETUM_APP_DIR || '/opt/fleetum/app' }}
+          PRODUCTION_LOCK_FILE: ${{ vars.FLEETUM_DEPLOY_LOCK_FILE || '/opt/fleetum/deploy.lock' }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_WORKFLOW_SHA"
+          node ops/staging/control-policy.mjs
+          test "$PRODUCTION_APP_DIR" = /opt/fleetum/app
+          test "$PRODUCTION_LOCK_FILE" = /opt/fleetum/deploy.lock
+
+      - name: Require exact successful CI
+        id: ci
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = process.env.GITHUB_WORKFLOW_SHA;
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            const {data} = await github.rest.actions.listWorkflowRuns({owner:context.repo.owner,repo:context.repo.repo,workflow_id:'ci.yml',head_sha:sha,status:'completed',per_page:100});
+            const run = data.workflow_runs.find(r => r.head_sha===sha && r.conclusion==='success' && ['push','pull_request','workflow_dispatch'].includes(r.event) && r.head_repository?.full_name===repository);
+            if (!run) throw new Error('No exact successful CI for ingress controls.');
+            core.setOutput('run_id',String(run.id));
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-source-proof-${{ steps.ci.outputs.run_id }}
+          run-id: ${{ steps.ci.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: .ingress-ci-proof
+
+      - name: Verify actual source proof
+        env:
+          RELEASE_SHA: ${{ github.workflow_sha }}
+          CI_RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: node ops/ci-release-identity.mjs verify .ingress-ci-proof/ci-source.json
+
+      - name: Verify default production controls persist the ingress
+        id: persistence
+        if: ${{ inputs.mode != 'plan' }}
+        uses: actions/github-script@v7
+        env:
+          APPROVED_PRODUCTION_CONTROL_SHA: ${{ vars.FLEETUM_INGRESS_PRODUCTION_CONTROL_SHA }}
+        with:
+          script: |
+            const pin=process.env.APPROVED_PRODUCTION_CONTROL_SHA;
+            if(!/^[a-f0-9]{40}$/.test(pin||''))throw new Error('Production control pin missing.');
+            const {data:repo}=await github.rest.repos.get({owner:context.repo.owner,repo:context.repo.repo});
+            const {data:head}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:repo.default_branch});
+            if(head.sha!==pin)throw new Error('Default production revision differs from reviewed control pin.');
+            for(const [path,markers] of [
+              ['.github/workflows/deploy-production.yml',['FLEETUM_SHARED_STAGING_INGRESS','shared-staging-ingress-preflight.sh']],
+              ['deploy/scripts/safe-production-deploy.sh',['configure_compose_files','shared-staging-ingress-preflight.sh']],
+              ['deploy/scripts/rollback-production.sh',['configure_compose_files','shared-staging-ingress-preflight.sh']]
+            ]) {
+              const {data:file}=await github.rest.repos.getContent({owner:context.repo.owner,repo:context.repo.repo,path,ref:pin});
+              const text=Buffer.from(file.content,'base64').toString('utf8');
+              if(!markers.every(m=>text.includes(m)))throw new Error('Reviewed persistent production control missing.');
+            }
+            core.setOutput('verified','true');
+
+      - name: Pin SSH trust and isolate transfer
+        env:
+          INGRESS_MODE: ${{ inputs.mode }}
+          INGRESS_CONFIRM: ${{ inputs.confirm }}
+          INGRESS_PLAN_DIGEST: ${{ inputs.planDigest }}
+          INGRESS_HOST: ${{ secrets.FLEETUM_INGRESS_HOST }}
+          INGRESS_USER: ${{ secrets.FLEETUM_INGRESS_USER }}
+          INGRESS_KEY: ${{ secrets.FLEETUM_INGRESS_SSH_KEY }}
+          INGRESS_KNOWN_HOSTS: ${{ secrets.FLEETUM_INGRESS_KNOWN_HOSTS }}
+          FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_INGRESS_APPROVED_SOURCE_SHA: ${{ vars.FLEETUM_INGRESS_APPROVED_SOURCE_SHA }}
+          FLEETUM_INGRESS_CADDY_IMAGE: ${{ vars.FLEETUM_INGRESS_CADDY_IMAGE }}
+          FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256: ${{ vars.FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256 }}
+          FLEETUM_INGRESS_BASELINE_CADDY_SHA256: ${{ vars.FLEETUM_INGRESS_BASELINE_CADDY_SHA256 }}
+          FLEETUM_SHARED_STAGING_INGRESS: ${{ vars.FLEETUM_SHARED_STAGING_INGRESS || 'false' }}
+          PRODUCTION_PERSISTENCE_VERIFIED: ${{ steps.persistence.outputs.verified || 'false' }}
+          FLEETUM_INGRESS_CADDY_EMAIL: ${{ inputs.mode != 'plan' && secrets.FLEETUM_INGRESS_CADDY_EMAIL || '' }}
+        run: |
+          set -euo pipefail
+          export CHECKOUT_SHA="$(git rev-parse HEAD)"
+          node --input-type=module -e "import {requestForIngress} from './ops/staging/ingress-request.mjs'; try { requestForIngress(process.env); } catch { console.error('Ingress controls refused before transfer.'); process.exit(1); }"
+          test -n "$INGRESS_KEY" && test -n "$INGRESS_KNOWN_HOSTS"
+          umask 077
+          mkdir -p .ingress-ssh .ingress-transfer/.docker-noauth
+          printf '%s\n' "$INGRESS_KEY" > .ingress-ssh/key
+          printf '%s\n' "$INGRESS_KNOWN_HOSTS" > .ingress-ssh/known_hosts
+          cp ops/staging/ingress-control.py .ingress-transfer/
+          cp deploy/caddy/Caddyfile deploy/caddy/Caddyfile.production-shared deploy/caddy/Caddyfile.staging-ingress .ingress-transfer/
+          remote=$(ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=.ingress-ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -i .ingress-ssh/key "$INGRESS_USER@$INGRESS_HOST" "umask 077; mktemp -d /tmp/fleetum-ingress.$GITHUB_WORKFLOW_SHA.XXXXXXXX")
+          [[ "$remote" =~ ^/tmp/fleetum-ingress\.[a-f0-9]{40}\.[A-Za-z0-9]{8}$ ]]
+          echo "INGRESS_REMOTE_BUNDLE=$remote" >> "$GITHUB_ENV"
+          rsync -az -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=.ingress-ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -i .ingress-ssh/key" .ingress-transfer/ "$INGRESS_USER@$INGRESS_HOST:$remote/"
+
+      - name: Execute bound gateway operation
+        env:
+          INGRESS_MODE: ${{ inputs.mode }}
+          INGRESS_CONFIRM: ${{ inputs.confirm }}
+          INGRESS_PLAN_DIGEST: ${{ inputs.planDigest }}
+          INGRESS_HOST: ${{ secrets.FLEETUM_INGRESS_HOST }}
+          INGRESS_USER: ${{ secrets.FLEETUM_INGRESS_USER }}
+          FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_INGRESS_APPROVED_SOURCE_SHA: ${{ vars.FLEETUM_INGRESS_APPROVED_SOURCE_SHA }}
+          FLEETUM_INGRESS_CADDY_IMAGE: ${{ vars.FLEETUM_INGRESS_CADDY_IMAGE }}
+          FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256: ${{ vars.FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256 }}
+          FLEETUM_INGRESS_BASELINE_CADDY_SHA256: ${{ vars.FLEETUM_INGRESS_BASELINE_CADDY_SHA256 }}
+          FLEETUM_SHARED_STAGING_INGRESS: ${{ vars.FLEETUM_SHARED_STAGING_INGRESS || 'false' }}
+          PRODUCTION_PERSISTENCE_VERIFIED: ${{ steps.persistence.outputs.verified || 'false' }}
+          FLEETUM_INGRESS_CADDY_EMAIL: ${{ inputs.mode != 'plan' && secrets.FLEETUM_INGRESS_CADDY_EMAIL || '' }}
+        run: |
+          set -euo pipefail
+          export CHECKOUT_SHA="$(git rev-parse HEAD)"
+          [[ "$INGRESS_REMOTE_BUNDLE" =~ ^/tmp/fleetum-ingress\.[a-f0-9]{40}\.[A-Za-z0-9]{8}$ ]]
+          # Secret input travels only through stdin; result contains metadata/status.
+          node ops/staging/ingress-request.mjs | ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=.ingress-ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -i .ingress-ssh/key "$INGRESS_USER@$INGRESS_HOST" "sudo -n python3 -I -B '$INGRESS_REMOTE_BUNDLE/ingress-control.py'" > ingress-result.json
+
+      - name: Preserve redacted operation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-ingress-${{ github.run_id }}
+          path: ingress-result.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove runner credentials
+        if: ${{ always() }}
+        env:
+          INGRESS_HOST: ${{ secrets.FLEETUM_INGRESS_HOST }}
+          INGRESS_USER: ${{ secrets.FLEETUM_INGRESS_USER }}
+        run: |
+          set -euo pipefail
+          trap 'rm -rf -- .ingress-ssh .ingress-transfer' EXIT
+          if [[ "${INGRESS_REMOTE_BUNDLE:-}" =~ ^/tmp/fleetum-ingress\.[a-f0-9]{40}\.[A-Za-z0-9]{8}$ ]] && test -f .ingress-ssh/key; then
+            ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=.ingress-ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -i .ingress-ssh/key "$INGRESS_USER@$INGRESS_HOST" "rm -rf -- '$INGRESS_REMOTE_BUNDLE'"
+          fi

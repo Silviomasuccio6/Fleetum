@@ -11,6 +11,14 @@ export const loginAs = async (page: Page, email = e2eEnv.email, password = e2eEn
   await page.goto("/login");
   await page.getByLabel(/indirizzo email/i).fill(email);
   await page.getByLabel(/^password$/i).fill(password);
+  const consentDialog = page.getByRole("dialog", { name: "Preferenze cookie Fleetum" });
+  const consentVisible = await consentDialog.waitFor({ state: "visible", timeout: 2000 }).then(
+    () => true,
+    (error) => { if (error.name === "TimeoutError") return false; throw error; }
+  );
+  if (consentVisible) {
+    await consentDialog.getByRole("button", { name: "Solo necessari", exact: true }).click();
+  }
   await page.getByRole("button", { name: /accedi|entra|login/i }).click();
   await expect(page).toHaveURL(/dashboard|booking|anagrafiche|statistiche/, { timeout: 20_000 });
 };
@@ -21,7 +29,7 @@ export const createAuthenticatedApi = async (email = e2eEnv.email, password = e2
     extraHTTPHeaders: { Accept: "application/json" }
   });
 
-  const response = await api.post("/auth/login", { data: { email, password } });
+  const response = await api.post("auth/login", { data: { email, password } });
   expect(response.ok(), `login API failed with ${response.status()}`).toBeTruthy();
   const payload = await response.json();
   const csrfToken = String(payload.csrfToken ?? "");

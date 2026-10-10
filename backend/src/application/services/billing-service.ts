@@ -13,7 +13,15 @@ import {
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
-import { TenantSubscriptionSnapshot, TenantSubscriptionUpsertInput, readTenantSubscription, upsertTenantSubscription } from "./tenant-subscription-service.js";
+import {
+  StripeTenantSubscriptionGuard,
+  StripeTenantSubscriptionMutationResult,
+  TenantSubscriptionSnapshot,
+  TenantSubscriptionUpsertInput,
+  readTenantSubscription,
+  upsertStripeTenantSubscriptionIfCurrent,
+  upsertTenantSubscription
+} from "./tenant-subscription-service.js";
 import {
   BillingLifecycleEmailInput,
   BillingLifecycleNotifier,
@@ -68,6 +76,22 @@ type LicenseAuditPayload = {
   updatedAt: string;
 };
 
+type StripeApplyOptions = {
+  expectedSubscriptionId: string;
+  expectedCurrent?: TenantSubscriptionSnapshot | null;
+  allowSubscriptionReplacement?: boolean;
+  eventType?: string;
+  notificationSource?: Record<string, unknown>;
+};
+
+type StripeApplyResult = {
+  tenantId: string;
+  previousStatus: BillingLifecycleStatus | null;
+  nextStatus: BillingLifecycleStatus;
+  applied: boolean;
+  reason?: StripeTenantSubscriptionMutationResult["reason"];
+};
+
 type BillingServiceDeps = {
   createBillingEvent(event: Stripe.Event, tenantId: string | null): Promise<BillingEventRecord>;
   updateBillingEvent(eventId: string, data: { tenantId?: string | null; status: BillingEventStatus; processedAt?: Date | null; errorMessage?: string | null }): Promise<void>;
@@ -76,6 +100,10 @@ type BillingServiceDeps = {
   findSubscriptionByStripeSubscriptionId(subscriptionId: string): Promise<{ tenantId: string } | null>;
   findSubscriptionByStripeCustomerId(customerId: string): Promise<{ tenantId: string } | null>;
   upsertSubscription(input: TenantSubscriptionUpsertInput): Promise<TenantSubscriptionSnapshot>;
+  upsertStripeSubscriptionIfCurrent(
+    input: TenantSubscriptionUpsertInput,
+    guard: StripeTenantSubscriptionGuard
+  ): Promise<StripeTenantSubscriptionMutationResult>;
 };
 
 const MANAGED_STRIPE_SUBSCRIPTION_STATUSES = new Set<BillingLicenseStatus>([
@@ -124,6 +152,13 @@ const stripeId = (value: unknown) => {
   if (typeof value === "string") return value;
   if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") return (value as { id: string }).id;
   return null;
+};
+
+const stripeSubscriptionIdFromObject = (source: Record<string, unknown>) => {
+  const sourceObject = typeof source.object === "string" ? source.object : null;
+  return stripeId(source.subscription)
+    ?? stripeId(getNested(source, "parent.subscription_details.subscription"))
+    ?? (sourceObject === "subscription" ? stripeId(source.id) : null);
 };
 
 const unixToIso = (value: unknown) => {
@@ -248,6 +283,9 @@ const defaultDeps: BillingServiceDeps = {
   },
   async upsertSubscription(input) {
     return upsertTenantSubscription(input);
+  },
+  async upsertStripeSubscriptionIfCurrent(input, guard) {
+    return upsertStripeTenantSubscriptionIfCurrent(input, guard);
   }
 };
 
@@ -586,7 +624,7 @@ export class BillingService {
   private async processStripeEvent(event: Stripe.Event, dataObject?: Record<string, unknown>) {
     if (!dataObject) return { ignored: true, tenantId: null };
 
-    if (this.rentalStripeWebhookHandler && isRentalPaymentEvent(event, dataObject)) {
+    if (this.rentalStripeWebhookHandler && (isRentalPaymentEvent(event, dataObject) || ["charge.refunded", "charge.dispute.created", "charge.dispute.closed"].includes(event.type))) {
       const result = await this.rentalStripeWebhookHandler.handleStripeEvent(event);
       return {
         ignored: result.ignored ?? false,
@@ -602,62 +640,76 @@ export class BillingService {
         return { tenantId };
       }
 
-      const subscriptionId = stripeId(session.subscription);
+      const subscriptionId = stripeSubscriptionIdFromObject(session);
       const tenantId = await this.resolveTenantId(session);
-      if (!tenantId) return { ignored: true, tenantId: null };
+      if (!tenantId || !subscriptionId || !this.stripeClient) return { ignored: true, tenantId };
 
-      let nextStatus: BillingLicenseStatus = "ACTIVE";
-      let stripeSubscriptionId = subscriptionId;
-      if (subscriptionId && this.stripeClient) {
+      const sessionCustomerId = stripeId(session.customer);
+      let expectedCurrent = await this.deps.findSubscriptionByTenantId(tenantId);
+      let applied: StripeApplyResult | null = null;
+      let nextStatus: BillingLicenseStatus = "PENDING";
+      for (let attempt = 0; attempt < 3; attempt += 1) {
         const subscription = await this.stripeClient.subscriptions.retrieve(subscriptionId);
-        nextStatus = stripeStatusToLicense(subscription.status);
-        stripeSubscriptionId = subscriptionId;
-        await this.applyStripeObject(subscription as unknown as Record<string, unknown>, nextStatus, {
+        const authoritativeSource = subscription as unknown as Record<string, unknown>;
+        const authoritativeCustomerId = stripeId(authoritativeSource.customer);
+        if (authoritativeCustomerId && sessionCustomerId && authoritativeCustomerId !== sessionCustomerId) {
+          return { ignored: true, tenantId };
+        }
+
+        const allowSubscriptionReplacement = await this.canCheckoutReplaceSubscription(
+          expectedCurrent,
+          authoritativeSource,
+          subscriptionId
+        );
+        nextStatus = stripeStatusToLicense(String(authoritativeSource.status ?? ""));
+        applied = await this.applyStripeObject(authoritativeSource, nextStatus, {
           fallbackTenantId: tenantId,
-          fallbackCustomerId: stripeId(session.customer),
+          fallbackCustomerId: sessionCustomerId,
           fallbackSubscriptionId: subscriptionId,
           fallbackMetadata: typeof session.metadata === "object" && session.metadata ? session.metadata as Record<string, unknown> : {}
+        }, {
+          expectedSubscriptionId: subscriptionId,
+          expectedCurrent,
+          allowSubscriptionReplacement
         });
-      } else {
-        await this.applyStripeObject(session, "ACTIVE", { fallbackTenantId: tenantId });
+        if (applied?.reason !== "STALE_SNAPSHOT") break;
+        expectedCurrent = await this.deps.findSubscriptionByTenantId(tenantId);
       }
+      if (applied?.reason === "STALE_SNAPSHOT") {
+        throw new AppError("Sincronizzazione abbonamento Stripe concorrente", 503, "STRIPE_SUBSCRIPTION_SYNC_CONFLICT");
+      }
+      if (!applied?.applied) return { ignored: true, tenantId: applied?.tenantId ?? tenantId };
 
       await this.recordCheckoutFunnelEvent("STRIPE_CHECKOUT_COMPLETED", session, {
         stripeEventId: event.id,
         stripeSessionId: session.id,
-        stripeSubscriptionId,
+        stripeSubscriptionId: subscriptionId,
         status: nextStatus
       });
       if (nextStatus === "TRIAL") {
         await this.recordCheckoutFunnelEvent("TRIAL_ACTIVATED", session, {
           stripeEventId: event.id,
           stripeSessionId: session.id,
-          stripeSubscriptionId,
+          stripeSubscriptionId: subscriptionId,
           status: nextStatus
         });
       }
-      return { tenantId };
+      return { tenantId: applied.tenantId };
     }
 
-    if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
-      const status = stripeStatusToLicense(String(dataObject.status ?? ""));
-      const applied = await this.applyStripeObject(dataObject, status, undefined, event.type);
-      return { tenantId: applied?.tenantId ?? null };
-    }
-
-    if (event.type === "customer.subscription.deleted") {
-      const applied = await this.applyStripeObject(dataObject, "CANCELED", undefined, event.type);
-      return { tenantId: applied?.tenantId ?? null };
-    }
-
-    if (event.type === "invoice.payment_failed") {
-      const applied = await this.applyStripeObject(dataObject, "PAST_DUE", undefined, event.type);
-      return { tenantId: applied?.tenantId ?? null };
-    }
-
-    if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
-      const applied = await this.applyStripeObject(dataObject, "ACTIVE", undefined, event.type);
-      return { tenantId: applied?.tenantId ?? null };
+    if (
+      event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated" ||
+      event.type === "customer.subscription.deleted" ||
+      event.type === "invoice.payment_failed" ||
+      event.type === "invoice.paid" ||
+      event.type === "invoice.payment_succeeded"
+    ) {
+      const applied = await this.syncAuthoritativeStripeSubscription(dataObject, event.type);
+      return {
+        tenantId: applied?.tenantId ?? await this.resolveTenantId(dataObject),
+        ignored: !applied?.applied
+      };
     }
 
     if (event.type === "customer.source.expiring") {
@@ -727,8 +779,7 @@ export class BillingService {
     const direct = metadata.tenantId ?? source.client_reference_id;
     if (typeof direct === "string" && direct.trim()) return direct;
 
-    const sourceObject = typeof source.object === "string" ? source.object : null;
-    const subscriptionId = stripeId(source.subscription) ?? (sourceObject === "subscription" ? stripeId(source.id) : null);
+    const subscriptionId = stripeSubscriptionIdFromObject(source);
     if (subscriptionId) {
       const row = await this.deps.findSubscriptionByStripeSubscriptionId(subscriptionId);
       if (row) return row.tenantId;
@@ -741,6 +792,115 @@ export class BillingService {
     }
 
     return null;
+  }
+
+  private async syncAuthoritativeStripeSubscription(source: Record<string, unknown>, eventType: string) {
+    if (!this.stripeClient) throw new AppError("STRIPE_SECRET_KEY non configurata", 500, "STRIPE_CLIENT_MISSING");
+
+    const expectedSubscriptionId = stripeSubscriptionIdFromObject(source);
+    if (!expectedSubscriptionId) return null;
+
+    const eventCustomerId = stripeId(source.customer);
+    const eventTenantId = await this.resolveAuthoritativeTenantId(source, {
+      fallbackCustomerId: eventCustomerId,
+      fallbackSubscriptionId: expectedSubscriptionId,
+      fallbackMetadata: metadataFromObject(source)
+    });
+    if (!eventTenantId) return null;
+
+    let expectedCurrent = await this.deps.findSubscriptionByTenantId(eventTenantId);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const subscription = await this.stripeClient.subscriptions.retrieve(expectedSubscriptionId);
+      const authoritativeSource = subscription as unknown as Record<string, unknown>;
+      if (stripeId(authoritativeSource.id) !== expectedSubscriptionId) return null;
+
+      const authoritativeCustomerId = stripeId(authoritativeSource.customer);
+      if (eventCustomerId && authoritativeCustomerId && eventCustomerId !== authoritativeCustomerId) return null;
+
+      const applied = await this.applyStripeObject(
+        authoritativeSource,
+        stripeStatusToLicense(String(authoritativeSource.status ?? "")),
+        {
+          fallbackTenantId: eventTenantId,
+          fallbackCustomerId: eventCustomerId,
+          fallbackSubscriptionId: expectedSubscriptionId,
+          fallbackMetadata: metadataFromObject(source)
+        },
+        {
+          eventType,
+          expectedSubscriptionId,
+          expectedCurrent,
+          notificationSource: source
+        }
+      );
+      if (applied?.reason !== "STALE_SNAPSHOT") return applied;
+      expectedCurrent = await this.deps.findSubscriptionByTenantId(eventTenantId);
+    }
+
+    throw new AppError(
+      "Sincronizzazione abbonamento Stripe concorrente",
+      503,
+      "STRIPE_SUBSCRIPTION_SYNC_CONFLICT"
+    );
+  }
+
+  private async resolveAuthoritativeTenantId(source: Record<string, unknown>, fallback?: {
+    fallbackTenantId?: string | null;
+    fallbackCustomerId?: string | null;
+    fallbackSubscriptionId?: string | null;
+    fallbackMetadata?: Record<string, unknown>;
+  }) {
+    const metadata = {
+      ...(fallback?.fallbackMetadata ?? {}),
+      ...(typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {})
+    };
+    const metadataTenantId = typeof metadata.tenantId === "string" && metadata.tenantId.trim()
+      ? metadata.tenantId.trim()
+      : null;
+    const fallbackTenantId = fallback?.fallbackTenantId?.trim() || null;
+    const subscriptionId = stripeSubscriptionIdFromObject(source) ?? fallback?.fallbackSubscriptionId ?? null;
+    const customerId = stripeId(source.customer) ?? fallback?.fallbackCustomerId ?? null;
+    const [subscriptionBinding, customerBinding] = await Promise.all([
+      subscriptionId ? this.deps.findSubscriptionByStripeSubscriptionId(subscriptionId) : Promise.resolve(null),
+      customerId ? this.deps.findSubscriptionByStripeCustomerId(customerId) : Promise.resolve(null)
+    ]);
+    const boundTenantId = subscriptionBinding?.tenantId ?? customerBinding?.tenantId ?? null;
+
+    if (subscriptionBinding && customerBinding && subscriptionBinding.tenantId !== customerBinding.tenantId) return null;
+    if (boundTenantId && metadataTenantId && boundTenantId !== metadataTenantId) return null;
+    if (boundTenantId && fallbackTenantId && boundTenantId !== fallbackTenantId) return null;
+    if (metadataTenantId && fallbackTenantId && metadataTenantId !== fallbackTenantId) return null;
+
+    return boundTenantId ?? metadataTenantId ?? fallbackTenantId;
+  }
+
+  private async canCheckoutReplaceSubscription(
+    current: TenantSubscriptionSnapshot | null,
+    candidate: Record<string, unknown>,
+    candidateSubscriptionId: string
+  ) {
+    if (
+      !current ||
+      current.provider !== "stripe" ||
+      !current.stripeSubscriptionId ||
+      current.stripeSubscriptionId === candidateSubscriptionId
+    ) {
+      return false;
+    }
+
+    if (MANAGED_STRIPE_SUBSCRIPTION_STATUSES.has(current.status)) return false;
+    if (!this.stripeClient) return false;
+
+    const candidateCreatedAt = Number(candidate.created);
+    if (!Number.isFinite(candidateCreatedAt) || candidateCreatedAt <= 0) return false;
+
+    const currentSubscription = await this.stripeClient.subscriptions.retrieve(current.stripeSubscriptionId);
+    const currentCreatedAt = Number((currentSubscription as unknown as Record<string, unknown>).created);
+    if (!Number.isFinite(currentCreatedAt) || currentCreatedAt <= 0) return false;
+
+    // Stripe timestamps have one-second precision. An equal timestamp is
+    // ambiguous, so retain the already persisted identity for manual retry.
+    return candidateCreatedAt > currentCreatedAt;
   }
 
   private checkoutAnalyticsMetadata(input?: CheckoutAnalyticsInput) {
@@ -793,19 +953,17 @@ export class BillingService {
     fallbackCustomerId?: string | null;
     fallbackSubscriptionId?: string | null;
     fallbackMetadata?: Record<string, unknown>;
-  }, eventType?: string): Promise<{
-    tenantId: string;
-    previousStatus: BillingLifecycleStatus | null;
-    nextStatus: BillingLifecycleStatus;
-  } | null> {
+  }, options?: StripeApplyOptions): Promise<StripeApplyResult | null> {
     const metadata = {
       ...(fallback?.fallbackMetadata ?? {}),
       ...(typeof source.metadata === "object" && source.metadata ? source.metadata as Record<string, unknown> : {})
     };
-    const tenantId = String(metadata.tenantId ?? fallback?.fallbackTenantId ?? await this.resolveTenantId(source) ?? "");
+    const tenantId = await this.resolveAuthoritativeTenantId(source, fallback);
     if (!tenantId) return null;
 
-    const current = await this.deps.findSubscriptionByTenantId(tenantId);
+    const current = options && Object.prototype.hasOwnProperty.call(options, "expectedCurrent")
+      ? options.expectedCurrent ?? null
+      : await this.deps.findSubscriptionByTenantId(tenantId);
     // Customer Portal can change the subscription price without changing historical metadata.
     const priceSelection = resolvePlanAndCycleFromStripePrice(source);
     const plan = priceSelection?.plan ?? ensureKnownPlan(String(metadata.plan ?? current?.plan ?? "STARTER"));
@@ -813,8 +971,12 @@ export class BillingService {
     const currentPeriodEnd = source.current_period_end ?? getNested(source, "lines.data.0.period.end");
     const expiresAt = unixToIso(currentPeriodEnd) ?? current?.expiresAt ?? null;
     const customerId = stripeId(source.customer) ?? fallback?.fallbackCustomerId ?? current?.stripeCustomerId ?? null;
-    const sourceObject = typeof source.object === "string" ? source.object : null;
-    const subscriptionId = stripeId(source.subscription) ?? (sourceObject === "subscription" ? stripeId(source.id) : null) ?? fallback?.fallbackSubscriptionId ?? current?.stripeSubscriptionId ?? null;
+    const subscriptionId = options?.expectedSubscriptionId
+      ?? stripeSubscriptionIdFromObject(source)
+      ?? fallback?.fallbackSubscriptionId
+      ?? current?.stripeSubscriptionId
+      ?? null;
+    if (!subscriptionId) return null;
 
     const nextPayload: LicenseAuditPayload = {
       plan,
@@ -829,17 +991,36 @@ export class BillingService {
       updatedAt: new Date().toISOString()
     };
 
-    await this.writeLicense(tenantId, null, nextPayload, current);
+    const mutation = await this.writeLicense(tenantId, null, nextPayload, current, {
+      stripeSubscriptionId: subscriptionId,
+      stripeCustomerId: customerId,
+      allowSubscriptionReplacement: options?.allowSubscriptionReplacement,
+      expectedCurrent: current
+    });
+    if (!mutation.applied) {
+      return {
+        tenantId,
+        previousStatus: mutation.previous?.status ?? null,
+        nextStatus: status,
+        applied: false,
+        reason: mutation.reason
+      };
+    }
+
+    const notificationSource = options?.notificationSource ?? source;
+    const notificationSourceObject = typeof notificationSource.object === "string" ? notificationSource.object : null;
     await this.notifyBillingTransition({
       tenantId,
-      eventType,
-      previous: current,
+      eventType: options?.eventType,
+      previous: mutation.previous,
       next: nextPayload,
-      stripeInvoiceId: sourceObject === "invoice" ? stripeId(source.id) : null,
-      hostedInvoiceUrl: sourceObject === "invoice" && typeof source.hosted_invoice_url === "string" ? source.hosted_invoice_url : null
+      stripeInvoiceId: notificationSourceObject === "invoice" ? stripeId(notificationSource.id) : null,
+      hostedInvoiceUrl: notificationSourceObject === "invoice" && typeof notificationSource.hosted_invoice_url === "string"
+        ? notificationSource.hosted_invoice_url
+        : null
     });
 
-    return { tenantId, previousStatus: current?.status ?? null, nextStatus: status };
+    return { tenantId, previousStatus: mutation.previous?.status ?? null, nextStatus: status, applied: true };
   }
 
   private async notifyBillingTransition(input: {
@@ -865,7 +1046,7 @@ export class BillingService {
       graceDays: env.BILLING_PAST_DUE_GRACE_DAYS
     };
 
-    if (input.eventType === "invoice.payment_failed" || input.next.status === "PAST_DUE") {
+    if (input.next.status === "PAST_DUE" && previousStatus !== "PAST_DUE") {
       await this.safeNotify("BILLING_PAYMENT_FAILED", input.tenantId, () =>
         this.lifecycleNotifier.notifyPaymentFailed(payload)
       );
@@ -909,8 +1090,14 @@ export class BillingService {
     }
   }
 
-  private async writeLicense(tenantId: string, userId: string | null, next: LicenseAuditPayload, previous?: TenantSubscriptionSnapshot | null) {
-    const subscription = await this.deps.upsertSubscription({
+  private async writeLicense(
+    tenantId: string,
+    userId: string | null,
+    next: LicenseAuditPayload,
+    previous?: TenantSubscriptionSnapshot | null,
+    stripeGuard?: StripeTenantSubscriptionGuard
+  ): Promise<StripeTenantSubscriptionMutationResult> {
+    const input: TenantSubscriptionUpsertInput = {
       tenantId,
       plan: next.plan,
       seats: next.seats,
@@ -921,7 +1108,17 @@ export class BillingService {
       provider: next.provider,
       stripeCustomerId: next.stripeCustomerId,
       stripeSubscriptionId: next.stripeSubscriptionId
-    });
+    };
+    const mutation = stripeGuard
+      ? await this.deps.upsertStripeSubscriptionIfCurrent(input, stripeGuard)
+      : {
+          applied: true,
+          previous: previous ?? null,
+          subscription: await this.deps.upsertSubscription(input)
+        };
+    if (!mutation.applied || !mutation.subscription) return mutation;
+
+    const persistedPrevious = mutation.previous ?? previous ?? null;
 
     await this.auditRepository.create({
       tenantId,
@@ -932,24 +1129,26 @@ export class BillingService {
       details: {
         source: "billing",
         persisted: true,
-        before: previous
+        before: persistedPrevious
           ? {
-              plan: previous.plan,
-              seats: previous.seats,
-              status: previous.status,
-              expiresAt: previous.expiresAt,
-              priceMonthly: previous.priceMonthly,
-              billingCycle: previous.billingCycle,
-              provider: previous.provider,
-              stripeCustomerId: previous.stripeCustomerId,
-              stripeSubscriptionId: previous.stripeSubscriptionId
+              plan: persistedPrevious.plan,
+              seats: persistedPrevious.seats,
+              status: persistedPrevious.status,
+              expiresAt: persistedPrevious.expiresAt,
+              priceMonthly: persistedPrevious.priceMonthly,
+              billingCycle: persistedPrevious.billingCycle,
+              provider: persistedPrevious.provider,
+              stripeCustomerId: persistedPrevious.stripeCustomerId,
+              stripeSubscriptionId: persistedPrevious.stripeSubscriptionId
             }
           : null,
         after: {
           ...next,
-          subscription
+          subscription: mutation.subscription
         }
       }
     });
+
+    return mutation;
   }
 }

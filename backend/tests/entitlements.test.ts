@@ -150,7 +150,7 @@ class RevenueRepo implements PlatformAdminRepository {
     return tenant ? { id: tenant.id, name: tenant.name, isActive: tenant.isActive } : null;
   }
 
-  async setTenantActive(_tenantId: string, _isActive: boolean): Promise<void> {}
+  async setTenantActive(): Promise<boolean> { return true; }
 
   async getLatestLicense(tenantId: string): Promise<PlatformLicense | null> {
     return this.getLatestLicenseAtOrBefore(tenantId, new Date("2030-01-01T00:00:00.000Z"));
