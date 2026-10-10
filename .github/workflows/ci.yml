@@ -90,6 +90,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test isolated production and ingress controls
+        run: node --test --test-concurrency=1 ops/tests/*.test.mjs
+
       - name: Generate Prisma client
         run: npx prisma generate --schema backend/prisma/schema.prisma
 
