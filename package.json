@@ -30,9 +30,17 @@
     "test:e2e:headed": "playwright test --project=chromium --headed"
   },
   "overrides": {
-    "body-parser": "^1.20.6",
+    "body-parser": "1.20.8",
+    "deepmerge-ts": "8.0.2",
+    "esbuild": "0.28.1",
     "follow-redirects": "^1.16.0",
-    "uuid": "^14.0.0"
+    "proxy-addr": "2.0.8",
+    "qs": "6.16.0",
+    "uuid": "11.1.1",
+    "sharp": "0.35.5",
+    "postcss-selector-parser": "7.1.6",
+    "source-map-js": "1.2.2",
+    "shell-quote": "1.11.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

@@ -2,9 +2,9 @@
 
 ## Policy
 
-Fleetum fails CI for every high or critical production dependency advisory
-unless it appears in the exact allowlist implemented by
-`ops/audit-production-dependencies.mjs`.
+Fleetum fails CI for every high or critical production dependency advisory.
+`ops/audit-production-dependencies.mjs` rejects unavailable, malformed or
+inconsistent npm audit reports as well. There is no active allowlist.
 
 An exception must:
 
@@ -14,24 +14,20 @@ An exception must:
 4. be reviewed whenever the parent package is upgraded;
 5. have a review deadline.
 
-## Active exception
+## Active exceptions
+
+None.
+
+## Retired exception
 
 ### `GHSA-mh99-v99m-4gvg` - `brace-expansion`
 
-- Parent dependency: `exceljs@4.4.0`.
-- Scope: the npm aggregate graph rooted at ExcelJS (`archiver`,
-  `archiver-utils`, `brace-expansion`, `glob`, `minimatch`, `readdir-glob`,
-  `rimraf`, and `zip-stream`) only.
-- Fleetum usage: server-side generation of workbooks from fixed application
-  templates and tenant-authorized report data.
-- Exposure assessment: Fleetum does not pass attacker-controlled glob patterns
-  to `brace-expansion`; the vulnerable functionality is not part of the export
-  execution path.
-- Mitigation: report input validation, tenant authorization, export limits, and
-  CI failure if the advisory appears through any dependency outside ExcelJS.
-- Review deadline: 2026-10-31, or immediately when ExcelJS publishes a release
-  with an updated dependency tree.
+Retired in the isolated control-baseline dependency correction on 2026-10-10.
+The archive dependency graph resolves to patched `brace-expansion` versions;
+ExcelJS export/import and clean-install compatibility are verified separately.
+The previously scheduled review deadline was 2026-10-31. No new exception is
+introduced: future high/critical production advisories always block the gate.
 
-Replacing ExcelJS or upgrading its transitive archive stack must be evaluated in
-a dedicated change because forced npm overrides currently produce a
-non-reproducible lockfile.
+The complete audit of development/build packages is reported separately. An
+upstream package without a compatible patched version remains an open finding;
+it must not be described as fixed by a production-only audit.

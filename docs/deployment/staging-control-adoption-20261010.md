@@ -12,7 +12,7 @@ Il primo job è protetto dall'ambiente production. Prima di emettere lo SHA util
 
 **Questa tranche mantiene intenzionalmente chiuso il rilascio applicativo.** La CI della base ha cinque job e non produce `ci-source-proof`: anche una CI verde della proposta non autorizza il deploy dell'app. L'attestazione completa e la compatibilità delle migrazioni restano prerequisiti della successiva integrazione applicativa. Non aggiungere attestazioni fittizie, rimuovere job richiesti o utilizzare la CI di PR144 per attestare uno SHA diverso.
 
-Non cambiano backend, frontend, sito, schema/migrazioni, dipendenze, Dockerfile, Compose produttivo base e Caddyfile base. Nessun file viene installato sul VPS dall'adozione Git.
+La proposta iniziale comprendeva soltanto i controlli. La correzione successiva delle dipendenze ereditate dalla base è descritta in `docs/security/control-baseline-dependencies-20261010.md`: aggiorna librerie/lock e l'import supportato di StaticRouter, senza integrare il candidato applicativo PR144 o il redesign UI. Schema/migrazioni, Dockerfile, Compose produttivo base e Caddyfile base restano invariati. Nessun file viene installato sul VPS dall'adozione Git.
 
 ## Dipendenze comprese nella proposta
 
@@ -59,6 +59,6 @@ Non usare un revert generale come recupero: reintrodurrebbe il deploy automatico
 
 `node --test --test-concurrency=1 ops/tests/*.test.mjs` esercita il diff con tutte le chiamate server/Docker/provider simulate. `python3 -B ops/staging/tests/ingress_control_test.py` usa soltanto filesystem temporaneo e subprocess sostituiti. Prove, conteggi, ambiente effettivo e revisione finale sono nel report esterno `Fleetum-audit-20260909/STAGING_CONTROL_ADOPTION_20261010.md`.
 
-La verifica release applicativa e PostgreSQL non vengono attribuite a questo branch. La CI hosted della proposta, la validazione Actions effettiva, i reviewer e il server restano da verificare. Il collaudo locale non equivale a un dispatch o a un deploy.
+Risultati della pubblicazione iniziale e della correzione successiva vanno letti nei rispettivi report ed evidenze sullo SHA effettivamente verificato. La CI iniziale PR145 falliva all'audit della base; non trasferire al nuovo commit il risultato precedente o quello storico della PR144. Anche dopo i gate della correzione, la CI completa con sei job e source proof, i reviewer e il server restano prerequisiti dell'adozione operativa. Il collaudo locale non equivale a un dispatch o a un deploy.
 
 Fonti primarie consultate: [workflow_dispatch e selezione del branch](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch), [protezioni degli ambienti](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments). GitHub richiede la presenza del workflow sul branch predefinito per attivarlo manualmente; le protezioni si applicano ai singoli job che indicano l'ambiente.
