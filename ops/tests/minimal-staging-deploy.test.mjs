@@ -71,7 +71,7 @@ test("production workflow validates shared metadata and the complete bundle befo
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("staging deploy applies the shared overlay, bootstraps once and keeps health within its lock", () => {
+for (const shell of ["sh", "bash", "dash"]) test(`staging deploy applies the shared overlay, bootstraps once and keeps health within its lock (${shell})`, () => {
   const source = readFileSync(new URL("../staging/run-deploy.sh", import.meta.url), "utf8");
   const root = mkdtempSync(path.join(tmpdir(), "fleetum-staging-deploy-"));
   try {
@@ -81,9 +81,12 @@ test("staging deploy applies the shared overlay, bootstraps once and keeps healt
     writeFileSync(path.join(bundle, "docker-compose.staging.yml"), "services: {}\n");
     writeFileSync(path.join(bundle, "docker-compose.staging.shared.yml"), "services: {}\n");
     writeFileSync(path.join(bundle, "deploy/caddy/Caddyfile.staging-shared"), "# synthetic\n");
-    writeFileSync(path.join(bundle, "trusted-preflight.sh"), "#!/bin/sh\nif { : <&3; } 2>/dev/null; then exit 21; fi\n");
-    const script = path.join(root, "deploy.sh"); writeFileSync(script, source.replaceAll("/opt/fleetum-staging", base));
-    const mock = (name, body) => writeFileSync(path.join(bin, name), `#!/bin/sh\nif { : <&3; } 2>/dev/null; then exit 21; fi\n${body}\n`, { mode: 0o700 });
+    // dash treats a bad redirect on a special builtin as fatal: contain the probe
+    // in a subshell while still rejecting any leaked bootstrap descriptor.
+    writeFileSync(path.join(bundle, "trusted-preflight.sh"), `#!/bin/${shell}\nif ( : <&3 ) 2>/dev/null; then exit 21; fi\n`);
+    const script = path.join(root, "deploy.sh");
+    writeFileSync(script, source.replaceAll("/opt/fleetum-staging", base).replace('sh "$bundle/trusted-preflight.sh"', `${shell} "$bundle/trusted-preflight.sh"`));
+    const mock = (name, body) => writeFileSync(path.join(bin, name), `#!/bin/${shell}\nif ( : <&3 ) 2>/dev/null; then exit 21; fi\n${body}\n`, { mode: 0o700 });
     mock("flock", 'printf "lock\\n" >> "$MOCK_LOG"');
     mock("rsync", 'printf "copy\\n" >> "$MOCK_LOG"; exec /bin/cp -R "$2" "$3"');
     mock("docker", 'printf "%s\\n" "$*" >> "$MOCK_LOG"; case "$*" in *"prisma migrate deploy"*) input=$(cat); [ -z "$input" ] || exit 19;; *staging-bootstrap.js*) input=$(cat); printf "bootstrap_bytes=%s\\n" "${#input}" >> "$MOCK_LOG"; printf "STAGING_BOOTSTRAP_CREATED\\n";; esac');

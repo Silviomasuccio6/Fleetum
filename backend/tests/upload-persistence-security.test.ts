@@ -37,6 +37,7 @@ const installTransactionOutcome = (input: {
   lookupError?: Error;
   committed?: boolean;
   visibleReceipts?: (rows: any[]) => any[];
+  reverseFileWrites?: boolean;
 }) => {
   const pending: any[] = [];
   let committed: any[] = [];
@@ -44,7 +45,13 @@ const installTransactionOutcome = (input: {
   let tombstoneCount = 0;
   const deleted: string[] = [];
   const written: string[] = [];
-  const recordWrite = async (key: string) => { written.push(key); };
+  let releaseFirstWrite!: () => void;
+  const secondWriteCompleted = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+  const recordWrite = async (key: string, _source?: unknown, metadata?: { originalName?: string | null }) => {
+    if (input.reverseFileWrites && metadata?.originalName === "first.png") await secondWriteCompleted;
+    written.push(key);
+    if (input.reverseFileWrites && metadata?.originalName === "second.png") releaseFirstWrite();
+  };
   (storageProvider as any).writeNew = recordWrite;
   (storageProvider as any).writeNewFromFile = recordWrite;
   (storageProvider as any).delete = async (key: string) => { deleted.push(key); };
@@ -89,11 +96,11 @@ const installTransactionOutcome = (input: {
   return { written, deleted, get committed() { return committed; }, get lookupCount() { return lookupCount; }, get tombstoneCount() { return tombstoneCount; } };
 };
 
-test("a lost COMMIT acknowledgement recovers the uploaded batch without deleting committed files or repeating the callback", async () => {
+test("a lost COMMIT acknowledgement preserves input order after out-of-order writes without deleting files or repeating the callback", { timeout: 10_000 }, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "fleetum-upload-test-"));
   try {
     const files = await Promise.all([createFile(directory, "first.png"), createFile(directory, "second.png")]);
-    const state = installTransactionOutcome({ acknowledgementError: new Error("synthetic lost COMMIT acknowledgement") });
+    const state = installTransactionOutcome({ acknowledgementError: new Error("synthetic lost COMMIT acknowledgement"), reverseFileWrites: true });
     const result = { resourceId: "vehicle_1", photoIds: ["photo_1", "photo_2"] };
     let callbacks = 0;
     const recovered = await persistNewUploadedFiles({
@@ -104,7 +111,8 @@ test("a lost COMMIT acknowledgement recovers the uploaded batch without deleting
     assert.equal(callbacks, 1);
     assert.deepEqual(recovered.result, result);
     assert.equal(recovered.uploads.length, 2);
-    assert.deepEqual(recovered.uploads.map((upload) => upload.key), state.written);
+    assert.deepEqual(recovered.uploads.map((upload) => upload.file.originalname), files.map((file) => file.originalname));
+    assert.deepEqual(recovered.uploads.map((upload) => upload.key), [...state.written].reverse());
     assert.deepEqual(recovered.uploads.map((upload) => upload.storedFileObject.id), state.committed.map((row) => row.id));
     assert.ok(recovered.uploads.every((upload) => /^[a-f0-9]{64}$/.test(upload.checksumSha256)));
     assert.ok(state.lookupCount > 0);
