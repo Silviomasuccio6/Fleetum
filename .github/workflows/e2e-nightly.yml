@@ -3,37 +3,79 @@ name: E2E Nightly
 on:
   workflow_dispatch:
     inputs:
+      releaseSha:
+        description: "Full 40-character staging release commit SHA"
+        required: true
+      stagingRunId:
+        description: "Successful Deploy Staging run ID for this release"
+        required: true
       baseUrl:
-        description: "Fleetum frontend URL"
-        required: false
-        default: "https://fleetum.it"
+        description: "Synthetic staging frontend URL"
+        required: true
       apiUrl:
-        description: "Fleetum API URL including /api"
-        required: false
-        default: "https://api.fleetum.it/api"
+        description: "Synthetic staging API URL including /api"
+        required: true
   schedule:
     - cron: "17 2 * * *"
 
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: fleetum-staging
+  cancel-in-progress: false
 
 jobs:
   playwright:
     name: Playwright critical flows
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: staging
 
     env:
-      E2E_BASE_URL: ${{ github.event.inputs.baseUrl || vars.E2E_BASE_URL || 'https://fleetum.it' }}
-      E2E_API_URL: ${{ github.event.inputs.apiUrl || vars.E2E_API_URL || 'https://api.fleetum.it/api' }}
+      FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
+      FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
+      E2E_RELEASE_SHA: ${{ inputs.releaseSha || vars.E2E_RELEASE_SHA }}
+      E2E_STAGING_RUN_ID: ${{ inputs.stagingRunId || vars.E2E_STAGING_RUN_ID }}
+      E2E_BASE_URL: ${{ inputs.baseUrl || vars.E2E_BASE_URL }}
+      E2E_API_URL: ${{ inputs.apiUrl || vars.E2E_API_URL }}
       E2E_TENANT_EMAIL: ${{ secrets.E2E_TENANT_EMAIL }}
       E2E_TENANT_PASSWORD: ${{ secrets.E2E_TENANT_PASSWORD }}
       E2E_OTHER_TENANT_EMAIL: ${{ secrets.E2E_OTHER_TENANT_EMAIL }}
       E2E_OTHER_TENANT_PASSWORD: ${{ secrets.E2E_OTHER_TENANT_PASSWORD }}
+      E2E_RUN_METADATA_PATH: ${{ runner.temp }}/fleetum-e2e-verified-run.json
 
     steps:
-      - name: Checkout
+      - name: Require explicit immutable release binding
+        id: binding
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = process.env.E2E_RELEASE_SHA || "";
+            const runId = process.env.E2E_STAGING_RUN_ID || "";
+            if (!/^[0-9a-f]{40}$/.test(sha) || !/^[1-9][0-9]*$/.test(runId) || !Number.isSafeInteger(Number(runId))) {
+              throw new Error("E2E requires a full release SHA and a positive safe Deploy Staging run ID; scheduled variables must be configured explicitly.");
+            }
+            if (process.env.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA !== process.env.GITHUB_WORKFLOW_SHA || !/^[0-9a-f]{40}$/.test(process.env.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA || "") || process.env.FLEETUM_STAGING_APPROVED_RELEASE_SHA !== sha) {
+              throw new Error("E2E requires protected approval of the workflow and exact staging candidate.");
+            }
+            core.setOutput("release_sha", sha);
+            core.setOutput("staging_run_id", runId);
+
+      - name: Checkout bound release
         uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.binding.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout trusted staging controls separately
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .fleetum-control
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -41,38 +83,105 @@ jobs:
           node-version-file: ".node-version"
           cache: "npm"
 
+      - name: Verify successful staging deploy and release artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { verifyDeployRun } = await import(`${process.env.GITHUB_WORKSPACE}/.fleetum-control/ops/e2e/staging-release-binding.mjs`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runId = Number(process.env.E2E_STAGING_RUN_ID);
+            const { data: workflow } = await github.rest.actions.getWorkflow({ owner, repo, workflow_id: "deploy-staging.yml" });
+            const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: runId });
+            const verification = verifyDeployRun(run, workflow, { repository: `${owner}/${repo}`, stagingRunId: String(runId), controlSha: process.env.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA });
+            if (!verification.ok) throw new Error(verification.errors.join(" "));
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: runId, per_page: 100 });
+            const matches = artifacts.filter((artifact) => artifact.name === `staging-release-proof-${runId}` && !artifact.expired);
+            if (matches.length !== 1) throw new Error("Exactly one unexpired staging release proof artifact is required for the verified deploy run.");
+            const metadata = {
+              workflow: { id: workflow.id, path: workflow.path, name: workflow.name },
+              run: { id: run.id, head_sha: run.head_sha, workflow_id: run.workflow_id, status: run.status, conclusion: run.conclusion, event: run.event,
+                repository: { full_name: run.repository?.full_name }, head_repository: { full_name: run.head_repository?.full_name } }
+            };
+            require("node:fs").writeFileSync(process.env.E2E_RUN_METADATA_PATH, JSON.stringify(metadata), { mode: 0o600 });
+
+      - name: Download verified staging release proof
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-release-proof-${{ steps.binding.outputs.staging_run_id }}
+          run-id: ${{ steps.binding.outputs.staging_run_id }}
+          github-token: ${{ github.token }}
+          path: test-results/staging-release-proof
+
+      - name: Check E2E configuration and source binding
+        run: |
+          node .fleetum-control/ops/e2e/validate-config.mjs
+          node .fleetum-control/ops/e2e/staging-release-binding.mjs validate test-results/staging-release-proof/staging-release.json "$E2E_RUN_METADATA_PATH"
+
       - name: Install dependencies
         run: npm ci
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Check E2E configuration
+      - name: Observe immutable staging runtime before E2E
+        id: runtime-before
+        env:
+          FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
         run: |
-          if [ -z "$E2E_TENANT_EMAIL" ] || [ -z "$E2E_TENANT_PASSWORD" ]; then
-            echo "E2E tenant credentials not configured. Skipping critical-flow tests."
-            exit 0
-          fi
-          echo "E2E configured for $E2E_BASE_URL"
+          mkdir -p test-results/staging-runtime
+          node .fleetum-control/ops/e2e/capture-staging-runtime.mjs before test-results/staging-release-proof/staging-release.json "$E2E_RUN_METADATA_PATH" test-results/staging-runtime/before.json
 
       - name: Run Playwright critical flows
-        if: env.E2E_TENANT_EMAIL != '' && env.E2E_TENANT_PASSWORD != ''
-        run: npm run test:e2e
+        id: playwright
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/e2e/e2e-results.json
+          PLAYWRIGHT_HTML_OPEN: never
+        run: |
+          mkdir -p test-results/e2e
+          npm run test:e2e -- --reporter=line,html,json --retries=0
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      - name: Observe unchanged staging runtime after E2E
+        if: always() && steps.runtime-before.outcome == 'success' && steps.playwright.outcome != 'skipped'
+        env:
+          FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
+        run: node .fleetum-control/ops/e2e/capture-staging-runtime.mjs after test-results/staging-release-proof/staging-release.json "$E2E_RUN_METADATA_PATH" test-results/staging-runtime/after.json test-results/staging-runtime/before.json
+
+      - name: Verify E2E execution evidence
+        if: always() && steps.playwright.outcome != 'skipped'
+        env:
+          E2E_MIN_EXECUTED_TESTS: "7"
+        run: node .fleetum-control/ops/e2e/verify-report.mjs test-results/e2e/e2e-results.json
+
+      - name: Record runtime identity evidence boundary
+        if: always()
+        run: |
+          echo "Runtime observations bind Docker image digests and unchanged container/restart identity before and after the suite. External HTTPS routing to those containers still requires a future proxy or sandbox gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright execution report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
-          if-no-files-found: ignore
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/e2e/e2e-results.json
+            test-results/staging-release-proof/staging-release.json
+            test-results/staging-runtime/
+          if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Playwright traces/videos on failure
+      - name: Upload synthetic screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-test-results
+          name: playwright-test-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/e2e/
           if-no-files-found: ignore
           retention-days: 14

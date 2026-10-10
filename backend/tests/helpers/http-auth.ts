@@ -25,6 +25,7 @@ export const tenantIsolationPermissions = [
 export const signTenantAccessToken = (input: {
   userId: string;
   tenantId: string;
+  sessionId: string;
   permissions?: string[];
   roles?: string[];
 }) => {
@@ -33,7 +34,8 @@ export const signTenantAccessToken = (input: {
     tenantId: input.tenantId,
     roles: input.roles ?? ["ADMIN"],
     permissions: input.permissions ?? tenantIsolationPermissions,
-    tokenType: "access"
+    tokenType: "access",
+    sessionId: input.sessionId
   };
 
   return jwt.sign(payload, env.JWT_SECRET, { expiresIn: "15m" });

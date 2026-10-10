@@ -22,17 +22,17 @@ test.describe("Fleetum critical flow: vehicle profitability report", () => {
       includeCosts: "true"
     };
 
-    const pdf = await auth.api.get("/stats/vehicles/profitability/export.pdf", { params });
+    const pdf = await auth.api.get("stats/vehicles/profitability/export.pdf", { params });
     expect(pdf.ok()).toBeTruthy();
     expect(pdf.headers()["content-type"]).toContain("application/pdf");
     expect((await pdf.body()).byteLength).toBeGreaterThan(1000);
 
-    const xlsx = await auth.api.get("/stats/vehicles/profitability/export.xlsx", { params });
+    const xlsx = await auth.api.get("stats/vehicles/profitability/export.xlsx", { params });
     expect(xlsx.ok()).toBeTruthy();
     expect(xlsx.headers()["content-type"]).toMatch(/spreadsheet|octet-stream/i);
     expect((await xlsx.body()).byteLength).toBeGreaterThan(1000);
 
-    const csv = await auth.api.get("/stats/vehicles/profitability/export.csv", { params });
+    const csv = await auth.api.get("stats/vehicles/profitability/export.csv", { params });
     expect(csv.ok()).toBeTruthy();
     expect(await csv.text()).toContain(dataset.vehicle.plate);
 

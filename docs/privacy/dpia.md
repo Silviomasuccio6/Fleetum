@@ -6,7 +6,7 @@ Owner: DPO + Legal
 
 Supporto tecnico: Security Engineer + Tech Lead
 
-Ultimo aggiornamento: 2026-05-05
+Ultimo aggiornamento: 2026-09-21
 
 ## 1. Decisione preliminare
 
@@ -47,23 +47,23 @@ Motivi tecnici:
 
 | ID | Rischio | Impatto | Probabilita | Livello | Misure richieste | Stato |
 |---|---|---:|---:|---:|---|---|
-| DPIA-R01 | Accesso non autorizzato ad allegati/documenti | Alto | Medio | Alto | RBAC, tenant isolation, audit download, storage privato | PARZIALE |
-| DPIA-R02 | IDOR tra tenant su API/documenti | Critico | Medio | Critico | test tenant isolation, query tenant-safe, deny by default | DA TESTARE |
-| DPIA-R03 | Conservazione eccessiva documenti | Alto | Alto | Alto | retention policy, job cancellazione, review periodica | DA IMPLEMENTARE |
-| DPIA-R04 | File malevoli caricati | Alto | Medio | Alto | mime/magic validation, antivirus scan, limiti size | PARZIALE |
-| DPIA-R05 | Dati personali in log/errori | Medio | Medio | Medio | log redaction, errori generici in produzione | DA VERIFICARE |
-| DPIA-R06 | Link contratto condivisibile troppo esposto | Alto | Medio | Alto | token scadenza, revoca, audit accessi | DA IMPLEMENTARE/VERIFICARE |
+| DPIA-R01 | Accesso non autorizzato ad allegati/documenti | Alto | Medio | Alto | RBAC, tenant isolation, audit download, storage privato | PARZIALE; controlli applicativi locali presenti, storage reale da collaudare |
+| DPIA-R02 | IDOR tra tenant su API/documenti | Critico | Medio | Critico | test tenant isolation, query tenant-safe, deny by default | TEST LOCALI PRESENTI; CI/staging ancora obbligatori |
+| DPIA-R03 | Conservazione eccessiva documenti | Alto | Alto | Alto | retention policy, job cancellazione, review periodica | PARZIALE; job presente, periodi/backfill/approvazione aperti |
+| DPIA-R04 | File malevoli caricati | Alto | Medio | Alto | mime/magic validation, antivirus scan, limiti size | PARZIALE; magic-byte/EICAR presenti, antivirus reale aperto |
+| DPIA-R05 | Dati personali in log/errori | Medio | Medio | Medio | log redaction, errori generici in produzione | TEST APPLICATIVI PRESENTI; proxy/CDN/WAF da verificare |
+| DPIA-R06 | Link contratto condivisibile troppo esposto | Alto | Medio | Alto | token scadenza, revoca, audit accessi | PARZIALE; token applicativi e redaction presenti, collaudo esterno aperto |
 | DPIA-R07 | OCR errato compila dati sbagliati | Medio | Medio | Medio | confidence score, revisione manuale obbligatoria | PARZIALE |
-| DPIA-R08 | Backup con documenti non cancellabili | Alto | Medio | Alto | backup retention breve, cifratura, restore test, policy cancellazione differita | DA DEFINIRE |
-| DPIA-R09 | Accesso platform admin troppo ampio | Alto | Medio | Alto | RBAC platform, break-glass, audit admin | DA VERIFICARE |
+| DPIA-R08 | Backup con documenti non cancellabili | Alto | Medio | Alto | backup retention breve, cifratura, restore test, policy cancellazione differita | PARZIALE; automazione presente, provider e restore file reale da verificare |
+| DPIA-R09 | Accesso platform admin troppo ampio | Alto | Medio | Alto | separazione token, IP/trusted device, OTP, audit admin | PARZIALE; controlli locali presenti, configurazione live da verificare |
 
 ## 5. Misure minime prima della produzione
 
 P0:
 
 - DPIA approvata da DPO/Legal.
-- Test tenant isolation su API clienti, booking, contratti, allegati.
-- Retention e cancellazione/anonymizzazione implementate.
+- Evidenza CI/staging dei test tenant isolation su API clienti, booking, contratti e allegati.
+- Periodi retention approvati, inventario/backfill file completato e dry-run globale revisionato.
 - DPA fornitori firmati e censiti.
 - Storage allegati privato, con audit download.
 - Link contratti con token a scadenza e revoca.
@@ -72,14 +72,14 @@ P1:
 
 - Antivirus/malware scan upload.
 - Alerting su accessi falliti e download anomali.
-- Log redaction verificata.
+- Log redaction verificata anche su proxy/CDN/WAF e sui log storici.
 - Procedure data breach operative.
 
 ## 6. Rischio residuo
 
 Rischio residuo attuale: ALTO.
 
-Motivazione: la base documentale ora esiste, ma mancano ancora validazione legale, implementazione tecnica completa della retention, evidenze di test tenant isolation e governance effettiva dei fornitori.
+Motivazione: molti controlli tecnici locali e test multi-tenant ora esistono, ma mancano ancora validazione legale, periodi retention approvati, backfill/inventario storage, evidenze CI/staging e governance effettiva dei fornitori e dei sistemi esterni.
 
 ## 7. Decisione go-live privacy
 
@@ -91,4 +91,3 @@ La decisione puo diventare GO WITH CONDITIONS solo con:
 - mitigazioni P0 implementate e testate;
 - tracciabilita fornitori e DPA;
 - piano P1 con owner e data.
-

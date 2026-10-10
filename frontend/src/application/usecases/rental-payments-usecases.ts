@@ -85,6 +85,8 @@ export type RentalExtraChargeDto = {
   totalAmountCents: number;
   currency: string;
   status: RentalExtraChargeStatus;
+  notificationStatus?: "NONE" | "PENDING" | "SENT" | "FAILED" | "BLOCKED" | "LEGACY_UNVERIFIED";
+  notifiedAt?: string | null;
   evidenceFileUrl?: string | null;
   failureReason?: string | null;
 };

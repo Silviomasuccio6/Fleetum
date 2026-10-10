@@ -1,0 +1,18 @@
+# Merge after docker-compose.staging.yml. Requires Docker Compose >= 2.24.4.
+# This network is provisioned separately after its CIDR and ownership are checked.
+services:
+  caddy:
+    ports: !reset []
+    volumes:
+      - ./deploy/caddy/Caddyfile.staging-shared:/etc/caddy/Caddyfile:ro
+    networks: !override
+      fleetum_staging_private: {}
+      fleetum_staging_ingress:
+        ipv4_address: 10.203.91.3
+        aliases:
+          - fleetum-staging-ingress
+
+networks:
+  fleetum_staging_ingress:
+    external: true
+    name: fleetum_staging_ingress
