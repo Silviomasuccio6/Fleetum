@@ -22,12 +22,12 @@ const expectOk = async (response: { ok(): boolean; status(): number; text(): Pro
 };
 
 export const ensureDemoSite = async (api: APIRequestContext, csrfToken: string, prefix: string) => {
-  const list = await api.get("/master-data/sites", { params: { pageSize: 50, search: "E2E" } });
+  const list = await api.get("master-data/sites", { params: { pageSize: 50, search: "E2E" } });
   await expectOk(list, "list sites");
   const existing = (await list.json()).data?.find((site: any) => String(site.name).includes("E2E Test Site"));
   if (existing) return existing;
 
-  const created = await api.post("/master-data/sites", {
+  const created = await api.post("master-data/sites", {
     headers: csrfHeaders(csrfToken),
     data: {
       name: `E2E Test Site ${prefix}`,
@@ -43,7 +43,7 @@ export const ensureDemoSite = async (api: APIRequestContext, csrfToken: string, 
 };
 
 export const createDemoCustomer = async (api: APIRequestContext, csrfToken: string, prefix: string) => {
-  const response = await api.post("/rental-bookings/customers", {
+  const response = await api.post("rental-bookings/customers", {
     headers: csrfHeaders(csrfToken),
     data: {
       customerType: "PERSONA_FISICA",
@@ -64,7 +64,7 @@ export const createDemoCustomer = async (api: APIRequestContext, csrfToken: stri
 
 export const createDemoVehicle = async (api: APIRequestContext, csrfToken: string, siteId: string, prefix: string) => {
   const plate = `E2E${prefix.slice(-4)}`.slice(0, 8).toUpperCase();
-  const response = await api.post("/master-data/vehicles", {
+  const response = await api.post("master-data/vehicles", {
     headers: csrfHeaders(csrfToken),
     data: {
       siteId,
@@ -92,8 +92,12 @@ export const createDemoBooking = async (api: APIRequestContext, csrfToken: strin
   const ret = new Date(pickup.getTime() + 3 * 24 * 60 * 60 * 1000);
   ret.setHours(18, 0, 0, 0);
 
-  const response = await api.post("/rental-bookings", {
-    headers: csrfHeaders(csrfToken),
+  const response = await api.post("rental-bookings", {
+    headers: {
+      ...csrfHeaders(csrfToken),
+      // Stable for this logical creation; a retry must keep the same key and payload.
+      "X-Idempotency-Key": `e2e-booking:${input.prefix}`
+    },
     data: {
       vehicleId: input.vehicleId,
       customerId: input.customerId,

@@ -1,3 +1,5 @@
+import { sanitizeRequestUrl } from "../logging/sanitize-request-url.js";
+
 type LabelValue = string | number | boolean | null | undefined;
 
 type HttpObservation = {
@@ -29,6 +31,13 @@ type StorageSummaryObservation = {
   deletedFilesPendingRetention: number;
   deletedBytesPendingRetention: number;
   retentionGraceDays: number;
+};
+
+type StorageCleanupObservation = {
+  status: "success" | "failure";
+  provider: string;
+  resourceType: string;
+  objects: number;
 };
 
 type RetentionObservation = {
@@ -95,7 +104,7 @@ const observeHistogram = (name: string, labels: Record<string, LabelValue>, buck
 };
 
 export const normalizeMetricPath = (path: string) => {
-  const pathname = path.split("?")[0] || "/";
+  const pathname = sanitizeRequestUrl(path).split("?")[0] || "/";
   return pathname
     .replace(/\bc[a-z0-9]{20,}\b/gi, ":id")
     .replace(/\b[0-9a-f]{24,}\b/gi, ":id")
@@ -138,6 +147,18 @@ export const metrics = {
     if (input.bytes && input.bytes > 0) {
       incCounter("fleetum_storage_operation_bytes_total", labels, input.bytes);
     }
+  },
+
+  observeStorageCleanup(input: StorageCleanupObservation) {
+    incCounter(
+      "fleetum_storage_cleanup_objects_total",
+      {
+        status: input.status,
+        provider: input.provider,
+        resource_type: input.resourceType
+      },
+      input.objects
+    );
   },
 
   setStorageSummary(input: StorageSummaryObservation) {
@@ -206,6 +227,8 @@ export const metrics = {
       "# TYPE fleetum_storage_operations_total counter",
       "# HELP fleetum_storage_operation_bytes_total Bytes moved by storage operations.",
       "# TYPE fleetum_storage_operation_bytes_total counter",
+      "# HELP fleetum_storage_cleanup_objects_total Storage objects processed by cleanup, labelled by result.",
+      "# TYPE fleetum_storage_cleanup_objects_total counter",
       "# HELP fleetum_storage_active_files Active private stored file objects tracked in Fleetum.",
       "# TYPE fleetum_storage_active_files gauge",
       "# HELP fleetum_storage_active_bytes Active private stored file bytes tracked in Fleetum.",

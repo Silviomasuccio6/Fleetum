@@ -413,7 +413,10 @@ export const rentalBookingsUseCases = {
     }>("/rental-bookings/suggest/vehicles", params),
   suggestCustomers: (params: { q: string }) =>
     httpClient.get<{ data: RentalCustomer[] }>("/rental-bookings/suggest/customers", params),
-  create: (input: unknown) => httpClient.post<RentalBookingDto>("/rental-bookings", input),
+  create: (input: unknown, idempotencyKey: string) =>
+    httpClient.post<RentalBookingDto>("/rental-bookings", input, {
+      headers: { "X-Idempotency-Key": idempotencyKey }
+    }),
   update: (id: string, input: unknown) => httpClient.patch<RentalBookingDto>(`/rental-bookings/${id}`, input),
   remove: (id: string) => httpClient.delete(`/rental-bookings/${id}`),
   transition: (id: string, toStatus: RentalBookingStatus, reason?: string) =>
@@ -433,8 +436,20 @@ export const rentalBookingsUseCases = {
       status?: BookingContractStatus;
     }
   ) => httpClient.patch<BookingContract>(`/rental-bookings/${bookingId}/contract`, input),
-  sendContractEmail: (bookingId: string, input?: { to?: string; subject?: string; body?: string }) =>
-    httpClient.post<{ queued: boolean; deliveryId: string }>(`/rental-bookings/${bookingId}/contract/email`, input),
+  sendContractEmail: (
+    bookingId: string,
+    input: { to?: string; subject?: string; body?: string } | undefined,
+    idempotencyKey: string
+  ) =>
+    httpClient.post<{
+      queued: boolean;
+      deliveryId: string;
+      status: "PENDING" | "SENT";
+      sentAt: string | null;
+      duplicate: boolean;
+    }>(`/rental-bookings/${bookingId}/contract/email`, input, {
+      headers: { "X-Idempotency-Key": idempotencyKey }
+    }),
   sendContractWhatsapp: (bookingId: string, input?: { phone?: string; message?: string; shareExpiresHours?: number }) =>
     httpClient.post<{
       queued: boolean;
@@ -657,18 +672,24 @@ export const rentalBookingsUseCases = {
   updateBookingPricing: (
     bookingId: string,
     input: {
+      preserveTerms?: false;
       priceListId: string;
       pricePackageId?: string;
       extraKmPolicyId?: string;
       estimatedKm?: number;
       actualKm?: number;
       notes?: string;
+    } | {
+      preserveTerms: true;
+      estimatedKm?: number | null;
+      actualKm?: number | null;
+      notes?: string;
     }
   ) =>
     httpClient.patch<{
       bookingId: string;
       bookingCode: string;
-      quote: RentalPricingQuote;
+      quote: RentalPricingQuote | null;
       snapshot: unknown;
     }>(`/rental-bookings/${bookingId}/pricing`, input),
   listCustomers: (params: Record<string, string | number | undefined>) =>

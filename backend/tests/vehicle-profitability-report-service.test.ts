@@ -26,10 +26,39 @@ const baseParams = {
   includeCosts: true
 };
 
+const ownedUserIds = ["user_owned", "user_archived"];
+
+const withOwnedUserScope = async <T>(run: () => Promise<T>): Promise<T> => {
+  const originalUserFindMany = prisma.user.findMany;
+  (prisma.user as any).findMany = async (input: any) => {
+    assert.deepEqual(input.where, { tenantId: "tenant_a" });
+    assert.deepEqual(input.select, { id: true });
+    return ownedUserIds.map((id) => ({ id }));
+  };
+  try {
+    return await run();
+  } finally {
+    (prisma.user as any).findMany = originalUserFindMany;
+  }
+};
+
+const assertOwnedStoppageScope = (where: any) => {
+  assert.equal(where.tenantId, "tenant_a");
+  assert.equal(where.deletedAt, null);
+  for (const relation of ["site", "workshop", "createdBy"]) {
+    assert.deepEqual(where[relation], { tenantId: "tenant_a" });
+  }
+  assert.deepEqual(where.vehicle, { tenantId: "tenant_a", site: { tenantId: "tenant_a" } });
+  assert.deepEqual(where.AND, [{
+    OR: [{ assignedToUserId: null }, { assignedToUserId: { in: ownedUserIds } }]
+  }]);
+};
+
 test("vehicle profitability report calculates revenue, costs, utilization and ROI with tenant filters", async () => {
   (prisma.vehicle as any).findMany = async (input: any) => {
     assert.equal(input.where.tenantId, "tenant_a");
     assert.equal(input.where.deletedAt, null);
+    assert.deepEqual(input.where.site, { tenantId: "tenant_a" });
     return [
       {
         id: "veh_1",
@@ -96,12 +125,12 @@ test("vehicle profitability report calculates revenue, costs, utilization and RO
   };
 
   (prisma.stoppage as any).findMany = async (input: any) => {
-    assert.equal(input.where.tenantId, "tenant_a");
+    assertOwnedStoppageScope(input.where);
     return [{ vehicleId: "veh_1", openedAt: new Date("2026-01-05T00:00:00.000Z"), closedAt: new Date("2026-01-06T00:00:00.000Z") }];
   };
 
   const service = new VehicleProfitabilityReportService();
-  const report = await service.build("tenant_a", { ...baseParams, vehicleId: "veh_1" });
+  const report = await withOwnedUserScope(() => service.build("tenant_a", { ...baseParams, vehicleId: "veh_1" }));
 
   assert.equal(report.summary.totalRevenue, 1000);
   assert.equal(report.summary.totalCosts, 400);
@@ -134,9 +163,12 @@ test("vehicle profitability report keeps ROI nullable when purchase price is mis
   (prisma.rentalBooking as any).findMany = async () => [];
   (prisma.vehicleMaintenance as any).findMany = async () => [];
   (prisma.vehicleCost as any).findMany = async () => [];
-  (prisma.stoppage as any).findMany = async () => [];
+  (prisma.stoppage as any).findMany = async (input: any) => {
+    assertOwnedStoppageScope(input.where);
+    return [];
+  };
 
-  const report = await new VehicleProfitabilityReportService().build("tenant_a", { ...baseParams, vehicleId: "veh_2" });
+  const report = await withOwnedUserScope(() => new VehicleProfitabilityReportService().build("tenant_a", { ...baseParams, vehicleId: "veh_2" }));
 
   assert.equal(report.investment.purchasePrice, null);
   assert.equal(report.investment.recoveredPercentage, null);

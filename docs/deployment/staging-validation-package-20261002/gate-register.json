@@ -1,0 +1,642 @@
+{
+  "schemaVersion": 1,
+  "candidateSha": "dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600",
+  "preparedOn": "2026-10-08",
+  "mode": "PREPARATION_ONLY",
+  "productionAuthorized": false,
+  "stagingDispatchAuthorized": false,
+  "allowedStatuses": [
+    "PENDING",
+    "PENDING_DECISION",
+    "BLOCKED_BY_IMPLEMENTATION",
+    "PASS",
+    "FAIL"
+  ],
+  "minimumCriticalE2e": 7,
+  "gates": [
+    {
+      "id": "G00",
+      "order": 0,
+      "title": "Revisione umana e identità candidato",
+      "ownerRole": "Responsabile tecnico/reviewer",
+      "assignedOwner": null,
+      "dependsOn": [],
+      "blocksStagingDispatch": true,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Riesaminare diff dall’ultimo rilascio approvato, report finali e limiti; congelare lo SHA completo. Separare parent dei test, manifest dei file e commit documentale.",
+      "acceptance": "Reviewer umano firma candidato dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600 e report privacy/history8 ottobre con limiti. Prove locali PostgreSQL 564, release 766, browser con API sintetiche 4. Nessuna autorizzazione produzione implicita.",
+      "failureMeans": "SHA diverso, review mancante o prove senza identità bloccano la dispatch; una modifica invalida il binding e richiede nuovo candidato/gate pertinenti.",
+      "requiredEvidence": [
+        "sha candidato/tree",
+        "identità reviewer/data UTC",
+        "diff revisionato e verbale rischi",
+        "manifest sorgenti/evidenze"
+      ],
+      "sourceRefs": [
+        "evidence-index.json"
+      ],
+      "domainScenarioGroups": [
+        "DG-00"
+      ],
+      "localEvidence": "Revisione6ottobre: REV01/REV02 corretti; nuovoPG540/540 e release624/624 con sorgente congelata. Prove DB inviti/password/sessioni, non HTTPS/browser/staging. Gate esternoPENDING."
+    },
+    {
+      "id": "G01",
+      "order": 1,
+      "title": "Rendere affidabile CI e binding E2E",
+      "ownerRole": "DevOps + QA",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G00"
+      ],
+      "blocksStagingDispatch": true,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "CI/E2E implementati localmente nella tranche97b56 e aggiornati dal candidatodbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600 con trustedcontrols/pincontrolSHA, policy/preflight edESMbootstrap. Restano review e CI/E2E effettivamente eseguiti hosted sul candidato. Nessun merge o deploy autorizzato.",
+      "acceptance": "Percorso CI sul commit realmente checkoutato e non su merge commit diverso; guardie DB attive con dotenv/devnull su PG temporaneo; E2E sullo stesso candidato e release osservata. Controlli YAML/fixtures/PR da review prima di qualunque esecuzione hosted.",
+      "failureMeans": "Verde head_sha senza prova checkout, test DB non eseguiti o E2E senza binding lasciano il gate bloccato.",
+      "requiredEvidence": [
+        "workflow diff e test della tranche successiva",
+        "checkout SHA attestato nel job",
+        "conteggi DB/skip",
+        "SHA test E2E e digest deploy"
+      ],
+      "sourceRefs": [
+        "workflow-readiness.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-00"
+      ]
+    },
+    {
+      "id": "G02",
+      "order": 2,
+      "title": "Isolare staging e impedire effetti reali",
+      "ownerRole": "DevOps + responsabile prodotto",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G01"
+      ],
+      "blocksStagingDispatch": true,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Baseline isolamento implementata localmente in dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600: email bloccata, zero cron, guardia pre-Prisma, rete privata interna/progetto Compose distinto, target/tenant/noindex, controlli trusted con pin protetti e preflight metadata host. Restano review e verifica effettiva host/mount/dati/egress/routing/protezioni/owner. Provider sandbox non abilitati; nessun gate esterno PASS.",
+      "acceptance": "Policy version1 e controlSHA approvati, nessuna chiave provider, 0cron e email disabled; project fleetum-staging, target filesystem reale dedicato senza symlink/orfani/ownership ambiguo, backend solo rete internal, tenantIDs sintetici distinti, robots/header/sitemap effettivi. Stato dati/host e protezioni indipendentemente attestati prima avvio.",
+      "failureMeans": "Placeholder nell’esempio o parola “staging” non sono prova. Destinatario reale, cron attivo all’avvio, dominio arbitrario, directory condivisa o indice pubblico bloccano l’avvio.",
+      "requiredEvidence": [
+        "attestazione isolamenti senza valori segreti",
+        "tenant IDs sintetici distinti",
+        "regole egress/sink",
+        "cron flags attestati",
+        "risposte robots/header"
+      ],
+      "sourceRefs": [
+        "workflow-readiness.md",
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-00",
+        "DG-16"
+      ]
+    },
+    {
+      "id": "G03",
+      "order": 3,
+      "title": "Decisioni condizioni legacy e privacy",
+      "ownerRole": "Product owner + Legal/DPO + operations",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G00"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING_DECISION",
+      "scenario": "Definire termini per extra legacy senza snapshot e retention/finalità per dataset/storage/log/backup. Stabilire limiti e proprietari prima dei test; nessuna ricostruzione di termini o purga.",
+      "acceptance": "Decisione firmata e campo applicazione, trattamento casi sconosciuti e periodi per categoria. Retention rimane disabilitata finché manca approvazione; funzioni legacy ambigue segregate.",
+      "failureMeans": "Default90/365/30 o termini correnti applicati retroattivamente non chiudono BE03/SEC10.",
+      "requiredEvidence": [
+        "decisione prodotto BE03",
+        "matrice retention/privacy approvata",
+        "inventario solo aggregato e non personale",
+        "soglie accettazione prima esecuzione"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-07",
+        "DG-08"
+      ]
+    },
+    {
+      "id": "G04",
+      "order": 4,
+      "title": "Restore e migrazioni su fixture legacy",
+      "ownerRole": "DBA/DevOps + backend",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G00",
+        "G02"
+      ],
+      "blocksStagingDispatch": true,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Su PG16 temporaneo sintetico: schema di partenza42 e fixture legacy, quindi48; ripetere duplicati deposito, code, cursori, importi dualwrite. Ripristinare anche upload fixture e misurare lock; confrontare compatibilità app vecchia/DB nuovo a worker fermi. Prima della dispatch preparare e provare il recovery baseline su PGtemporaneo sintetico a worker fermi: manifest/digest precedenti approvati, ripristino applicativo e upload, e stop sicuro su healthfailure. G14 è il successivo drill integrato dello stack staging.",
+      "acceptance": "42→48 senza alterare migrazioni base; confronto importi/dati e isolamento PASS; duplicati deposito rifiutati intenzionalmente senza riparazione automatica; restore ripetibile, limiti lock/tempo concordati rispettati. Piano fallback prerelease provato nel contenitore temporaneo, con versioni precedenti e owner di recovery espliciti.",
+      "failureMeans": "Fresh install locale48 e backup senza restore non chiudono il gate. Compatibilità o lock fuori budget bloccano la migrazione staging.",
+      "requiredEvidence": [
+        "migration-inventory.json con tempi misurati",
+        "fixture/schema baseline identificati",
+        "log restore redatto",
+        "reconcile denaro35campi/13tabelle",
+        "prova app precedente su schema nuovo",
+        "piano prerelease e prova fallback sintetica prima dispatch"
+      ],
+      "sourceRefs": [
+        "migration-inventory.json",
+        "../restore-recovery-20261005.md",
+        "../money-storage-compatibility-20261005.md",
+        "../application-failure-recovery-20261005.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-14"
+      ],
+      "localPreparationEvidence": {
+        "sourceCommit": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+        "applicationArchiveCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+        "report": "../../../../Fleetum-audit-20260909/RESTORE_RECOVERY_20261005.md",
+        "status": "LOCAL_SYNTHETIC_EVIDENCE_ONLY",
+        "externalGatePassed": false,
+        "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
+      },
+      "localEvidence": "Recovery5ottobre storico:46controlli/153HTTP su b533 e riserva9bd. Entrambi precedono nuovi fix invito/password; NON equivalente al candidatoadd3438cc17e23a29a45aad71282e296f45072a1. Nuovo recovery con pair/fallback security-equivalente e digests approvati richiesto. Gate esternoPENDING, nessun SLA/RTO/RPO approvato."
+    },
+    {
+      "id": "G05",
+      "order": 5,
+      "title": "CI hosted sullo SHA esatto",
+      "ownerRole": "DevOps/reviewer",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G01",
+        "G00"
+      ],
+      "blocksStagingDispatch": true,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Solo dopo autorizzazione di push/esecuzione hosted: CI nella stessa repo con sourceSHA effettivo uguale candidato; SAST/segreti/lint/build/release, PG sintetico e compatibilità migrations.",
+      "acceptance": "Tutti check richiesti PASS, nessuno skip inatteso, suite persistenti realmente eseguite, sourceSHA uguale checkout e immagine; link run/artefatti e conclusione finale.",
+      "failureMeans": "Nessuna CI hosted eseguita in questa preparazione; run vecchi, su main/merge altro o check mancanti restano PENDING.",
+      "requiredEvidence": [
+        "CI run ID/URL",
+        "headSHA e checkoutSHA",
+        "check names/conclusions",
+        "conteggi test persistenti e zero skip inattesi",
+        "compatibilità migrations"
+      ],
+      "sourceRefs": [
+        "workflow-readiness.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-00",
+        "DG-14"
+      ]
+    },
+    {
+      "id": "G06",
+      "order": 6,
+      "title": "Deploy staging autorizzato e versione osservata",
+      "ownerRole": "DevOps",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G00",
+        "G01",
+        "G02",
+        "G04",
+        "G05"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Solo con autorizzazione successiva usare workflow staging manuale per SHA congelato; backup e worker isolati, lock distinto. Confrontare digest costruiti, manifest versione e container realmente avviati tramite attestazione read-only. Prima del primo avvio avere il fallback sintetico G04 e digest precedenti approvati; non attendere il drill G14 per poter recuperare un deploy fallito.",
+      "acceptance": "CIID collega SHA a backend/frontend digest immutabili; manifest e immagine running coerenti dopo deploy, health locale/pubblico PASS; nessuna risorsa production mutata.",
+      "failureMeans": "200/health non prova release. Nessun rollback automatico staging: su guasto usare il piano prerelease G04, a worker fermi e senza down SQL o restore DB automatico. Il drill integrato G14 avviene dopo il primo stack, non è prerequisito circolare del suo recovery.",
+      "requiredEvidence": [
+        "dispatch approvata",
+        "CIID/buildID/deployID",
+        "SHA+digest backend/frontend",
+        "manifest attivo e labels container",
+        "backup isolato",
+        "health/routing"
+      ],
+      "sourceRefs": [
+        "workflow-readiness.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-00",
+        "DG-14"
+      ]
+    },
+    {
+      "id": "G07",
+      "order": 7,
+      "title": "Proxy, cookie e accesso tenant/Platform",
+      "ownerRole": "Security + QA/DevOps",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G06"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "HTTPS staging NODE_ENVproduction: login/logout, invito/reset, sospensione/cambio ruolo e revoca, due refresh concorrenti/retry/riuso. Esaminare cookie e CSRF, rate limit, CORS e sessioni Platform separate, log senza credenziali.",
+      "acceptance": "Sessione revocata rifiutata alla richiesta protetta successiva secondo codice; reset mantiene sospensione e revoca sessioni/token pendenti; un solo refresh successore; retry non provoca logout casuale; guardie tenant/Platform e flag cookie/proxy confermati.",
+      "failureMeans": "NODE_ENVtest locale non certifica cookie/proxyproduction. Ritardi rispetto SLA approvato o log/cookie esposti bloccano.",
+      "requiredEvidence": [
+        "test A/B+Platform e conteggi",
+        "cookie metadata senza valori",
+        "SLA revoca approvato e misura",
+        "verifica redazione app/proxy/CDN/WAF"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-11",
+        "DG-16"
+      ],
+      "localEvidence": "Revisione6ottobre: REV01/REV02 corretti; nuovoPG540/540 e release624/624 con sorgente congelata. Prove DB inviti/password/sessioni, non HTTPS/browser/staging. Gate esternoPENDING."
+    },
+    {
+      "id": "G08",
+      "order": 8,
+      "title": "Flussi reali frontend/API con due tenant",
+      "ownerRole": "QA + frontend/backend",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G07"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Eseguire7E2E del candidato e prove negative tenant su veicoli, booking, richieste, fatture/documenti. 23veicoliA+1B stessa marca,20+3pagine, ricerca0/23, IT/EN, overlay Back/Forward, API/UI e budget richieste. Verificare banner rifiuto/revoca: nessun analytics senza consenso, flusso operativo demo coerente con finalità.",
+      "acceptance": "7/7 senza skip/flaky; sourceSHA e deploydigest attestati; A non collega IDB e nessuna mutazione/leak. Cancellati e inattivi sono gestiti secondo le regole specifiche dell’operazione: storico owned e sedi owned inattive non sono rifiutati genericamente. Importi/ID/targhe API/UI coerenti, consenso rifiutato/revocato senza analytics. Client/backend coordinati per idempotenza e cache.",
+      "failureMeans": "Nightly su sorgente diverso, account uguali, skip o semplice health non chiudono. Screenshot senza payload/identità non prova isolamento.",
+      "requiredEvidence": [
+        "JSON report E2E",
+        "sourceSHA test e deploy",
+        "contratti sintetici API/UI",
+        "prove mutazioniA/B zero e stato dominio",
+        "console/network budget senza token"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-12",
+        "DG-13",
+        "DG-16"
+      ]
+    },
+    {
+      "id": "G09",
+      "order": 9,
+      "title": "OAuth browser/provider HTTPS",
+      "ownerRole": "Security + QA",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G07",
+        "G02"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Con client provider test approvato: Google e Apple browserA avvia/browserB callback, replay, scadenza, callback paralleli, provider/intent errati e login/signup legittimi; verificare state/nonce/PKCE e form_post cookie.",
+      "acceptance": "Solo browserA e un consumo atomico; errori generici, nessun utente/sessione perB/replay, percorso legittimo PASS. Provider live/configlive non modificati.",
+      "failureMeans": "Manca client sandbox o providerbehavior non osservato: PENDING. Nessuna deroga automatica per cookie/nonce/state.",
+      "requiredEvidence": [
+        "provider test identificato senza segreti",
+        "matrice browserA/B e consumoDB sintetico",
+        "cookie metadata",
+        "risultati Google/Apple distinti"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-10"
+      ]
+    },
+    {
+      "id": "G10",
+      "order": 10,
+      "title": "Pagamenti sandbox e outcome incerto",
+      "ownerRole": "Backend + QA + responsabile finanziario",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G08",
+        "G02"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Solo sandbox approvata: firma/rawbody, eventi distinti fuoriordine/replay, tenant/PI/amount/currency mismatch, pagamenti SaaS separati; race/doppio click, crash/timeout audit, deposito parzialmente catturato, refund/dispute, capture/release concorrenti.",
+      "acceptance": "INT01/02 non regrediscono; nessun doppioPI o retrocessione incassi; audit atomico. Extra incerto senzaPI non ricreato; deposito senzaPI oltre23h dalclaim409. Identità remote e importi verificati. Risultati capture/release e modello refund/dispute registrati con i limiti effettivi; la loro chiusura o esclusione controllata è una decisione separataG16.",
+      "failureMeans": "Webhook mock e522locali non provano sandbox. Violazioni delle invarianti o outcome incerto “sbloccato” da timer fanno FAIL. Fencing capture/release e ledger refund completo restano fuori dalle garanzie attuali e bloccanoG16 finché non risolti o esclusi con controlli testati.",
+      "requiredEvidence": [
+        "eventIDs/PI test senza dati carta/secret",
+        "stato e audit prima/dopo sintetici",
+        "race/crash/retry e chiamate remote",
+        "verbale rischi capture-release/refund/dispute"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md",
+        "../rental-payment-ordering-20261002.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-01",
+        "DG-02",
+        "DG-03"
+      ]
+    },
+    {
+      "id": "G11",
+      "order": 11,
+      "title": "Code email, licenze e report schedulati",
+      "ownerRole": "Backend + operations/QA",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G08",
+        "G02"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Simulatore email con multiworker, crash lease/retry, idempotenza richieste/audit; quarantenaPENDINGlegacy. Report perTZ/DST, arretrato/cambio impostazioni/licenza, cursore/versione/notice atomicity.",
+      "acceptance": "Un comando/notice per chiave prevista e un vincitore lease; invio successivo alla verifica eleggibilità corrente, report dell’occorrenza prevista, nessuna generazione arretrato infinito; revoca/licenza non aggirata e legacy senzainvio. NOTIFIED segue receipt valida e finalizzazione atomica, non il solo enqueue; una receipt già salvata permette solo finalizzazione senza reinvio, anche dopo sospensione. Accettazione provider non è prova di consegna/lettura.",
+      "failureMeans": "Code vecchie precomposte non certificate dal filtro nuovo; tenant or licenza ambiguo non abilita invio. Un fixture “NOTIFIED” storico non supera ledger/atomicity corrente.",
+      "requiredEvidence": [
+        "contratti comando/lease/audit",
+        "backlog counts sintetici redatti",
+        "matriceTZ/DST/impostazioni",
+        "decisione backlog e tenant/licenza legacy"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-04",
+        "DG-05",
+        "DG-06"
+      ]
+    },
+    {
+      "id": "G12",
+      "order": 12,
+      "title": "Storage e storico upload",
+      "ownerRole": "Backend + DevOps/Security",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G08",
+        "G02"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Provider locale/test realmente configurato: create-only, collisione path, tenant traversal, filetype/magic/limiti, quota concorrente/rollback, download link/trustproxy; inventario sintetico StoredFileObject e mount legacy.",
+      "acceptance": "Oggetti altrui inaccessibili, collisioni non sovrascritte, quota coerente e compensazioni dimostrate; tombstone/cleanup non elimina file non posseduti. Provider non provato resta dichiarato.",
+      "failureMeans": "Test localFS non certifica S3 remoto. Mount/backfilllegacy non inventariato o purge non approvata blocca cleanup e retention.",
+      "requiredEvidence": [
+        "provider e bucket/path test attestati",
+        "prove collisione/quota/compensazione",
+        "inventario aggregato legacy",
+        "cleanup preview approvata senza cancellazione"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md",
+        "../restore-recovery-20261005.md",
+        "../money-storage-compatibility-20261005.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-09"
+      ],
+      "localPreparationEvidence": {
+        "sourceCommit": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+        "applicationArchiveCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+        "report": "../../../../Fleetum-audit-20260909/RESTORE_RECOVERY_20261005.md",
+        "status": "LOCAL_SYNTHETIC_EVIDENCE_ONLY",
+        "externalGatePassed": false,
+        "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
+      },
+      "localEvidence": "Tranche5ottobre:35campi/13tabelle/206coppie in4fasi,8layout rel/abs,30recovery+57HTTP,522PG; candidato9bd57ff2f935a3a56205f381b41d35bfc982dd9a. Evidenza preparatoria sintetica; status esterno ancora PENDING. Baseline vecchia sololegacyrelativo; inventario live, fallback digest/client, healthfailure e soglie restano aperti."
+    },
+    {
+      "id": "G13",
+      "order": 13,
+      "title": "Carico, contesa e soglie",
+      "ownerRole": "QA/performance + backend/DevOps",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G07",
+        "G08",
+        "G09",
+        "G10",
+        "G11",
+        "G12"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Soltanto PostgreSQLtemporaneo sintetico nell’ambiente di prova isolato a volume concordato: session lookup, refreshrace, denaro/idempotenza, code/report e migrazioni. Stabilirep95/errori/lockwait/queue lag prima delrun, poi misurare.",
+      "acceptance": "Soglie firmate prima esecuzione e rispettate, invarianti tenant/denaro invariate sotto carico; nessuna sessione duplicata o backlog incontrollato. Risorse production non coinvolte.",
+      "failureMeans": "Soglie null/decise dopo risultati, test a volume sconosciuto o solo conteggio PASS non costituiscono gate.",
+      "requiredEvidence": [
+        "profilo dataset/carico sintetico",
+        "soglie predefinite/data e owner",
+        "p95/errori/lock wait/DBconnections/queue lag",
+        "invarianti dopo run"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-15"
+      ]
+    },
+    {
+      "id": "G14",
+      "order": 14,
+      "title": "Guasto parziale, rollback app e restore",
+      "ownerRole": "DevOps/DBA + backend",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G06",
+        "G04",
+        "G11",
+        "G12"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Provare healthfailure/restart interrotto a worker fermi; app/client coordinati a digest precedenti approvati su schema48; restoreDB+upload solo temporaneo sintetico e reconcile esterno sandbox senza replay.",
+      "acceptance": "Versione precedente osservata e health coerente; perdite/RPO/RTO entro soglie approvate. Nessun downSQL automatico né reinvioPI/email; piano distingue rollback app da restoreDB e suoi effetti irreversibili.",
+      "failureMeans": "Workflow staging senza rollback automatico, parent459/e0cfa non equivale ultima versione production; rollback che reintroduce INT01/02 non accettato implicitamente.",
+      "requiredEvidence": [
+        "rollback digest approvati",
+        "timeline failure/recovery",
+        "RTO/RPO firmati prima test",
+        "restore/reconcile e zero effetti reali"
+      ],
+      "sourceRefs": [
+        "migration-inventory.json",
+        "workflow-readiness.md",
+        "../restore-recovery-20261005.md",
+        "../money-storage-compatibility-20261005.md",
+        "../application-failure-recovery-20261005.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-14"
+      ],
+      "localPreparationEvidence": {
+        "sourceCommit": "579d7171bc90f17a50489eee0ffe1b31521383d0",
+        "applicationArchiveCommit": "70fdfab3522907d9d956ac260224c165774e2af6",
+        "report": "../../../../Fleetum-audit-20260909/RESTORE_RECOVERY_20261005.md",
+        "status": "LOCAL_SYNTHETIC_EVIDENCE_ONLY",
+        "externalGatePassed": false,
+        "remaining": "Owner/soglie e digest fallback approvati; 35 campi monetari; mapping storage assoluto/legacy; healthfailure e stack/client coordinati. BridgePG locale non prova egress staging."
+      },
+      "localEvidence": "Recovery5ottobre storico:46controlli/153HTTP su b533 e riserva9bd. Entrambi precedono nuovi fix invito/password; NON equivalente al candidatoadd3438cc17e23a29a45aad71282e296f45072a1. Nuovo recovery con pair/fallback security-equivalente e digests approvati richiesto. Gate esternoPENDING, nessun SLA/RTO/RPO approvato."
+    },
+    {
+      "id": "G15",
+      "order": 15,
+      "title": "Chiusura legacy e retention",
+      "ownerRole": "Product owner + Legal/DPO + operations",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G03",
+        "G11",
+        "G12"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING_DECISION",
+      "scenario": "Con decisioniG03 applicare solo preview sintetica di purga/code/storage; collegare termini legacy/quarantena e piano storico con owners. Enabling/cleanup reali richiedono autorizzazione separata.",
+      "acceptance": "BE03/SEC10 residui chiusi o funzionalità specifiche escluse formalmente con controlli dimostrati; nessun dato sensibile nei log/evidenze e backup/lifecycle coperti. PASS della sola preview/fixture sintetica riguarda quella prova; non chiude inventario, configurazione, trattamento e approvazioni esterne pertinenti. Chiusura complessiva o esclusione richiedono evidenze e decisioni specifiche, senza attivazione reale autorizzata.",
+      "failureMeans": "Scansione automatica o default di codice non equivale parereDPO/Legal. Dati senza provenienza o purge non approvata mantengonoPENDING.",
+      "requiredEvidence": [
+        "approvazioni BE03/SEC10",
+        "preview sintetica e scope",
+        "piano inventario/quarantena storico",
+        "evidenza logredaction/lifecycle"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-05",
+        "DG-07",
+        "DG-08",
+        "DG-09",
+        "DG-16"
+      ]
+    },
+    {
+      "id": "G16",
+      "order": 16,
+      "title": "Decisione finanziaria e limiti controllati",
+      "ownerRole": "Product owner + responsabile finanziario + reviewer",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G10"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING_DECISION",
+      "scenario": "Decidere riconciliazione operativa degli outcome ignoti, fencing capture/release e modello refund/dispute con esempi sandbox. Se funzioni escluse dal rilascio, provare disabilitazione e percorsi utente coerenti senza cambiare providerlive.",
+      "acceptance": "Responsabile assegna owner e procedura osservabile; nessun “accetta rischio” generico. Correzione necessaria primaGO oppure esclusione testata e firmata della funzione interessata.",
+      "failureMeans": "Semplice nota residuo o controllo manuale indefinito non soddisfa gate; non trattare REFUNDED/DISPUTED come ledger completo.",
+      "requiredEvidence": [
+        "decisione firmata e scenari supportati",
+        "riconciliazione sandbox",
+        "soluzione/test o esclusione funzionale dimostrata"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": [
+        "DG-02",
+        "DG-03"
+      ]
+    },
+    {
+      "id": "G17",
+      "order": 17,
+      "title": "Marketing e promesse di lancio",
+      "ownerRole": "Marketing + product owner",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G00",
+        "G03"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": false,
+      "status": "PENDING_DECISION",
+      "scenario": "Prima di campagne paid/vendita Enterprise: chiudere i blocker MKT01..03 su integrazioni/annuale/piani e claim/pricing/consenso/demo. MKT04..05 restano opportunità di prova commerciale/editoriale da pianificare e misurare separatamente; nessuna nuova policy di blocco all-five approvata qui. Distinguere sito daapp e UIredesign esclusa.",
+      "acceptance": "Claim sostenuti da evidenze, conversione e attribuzione consenzienti misurate, budget approvato e target realistici. Nessuna garanzia “esplode in30giorni”, metriche o testimonial inventati.",
+      "failureMeans": "Gate tecnico non autorizza campagne/spesa/pubblicazione né chiude marketing. Rimane separato dalG18.",
+      "requiredEvidence": [
+        "copy/pricing/claim approvati",
+        "flusso demo e consenso misurato",
+        "piano30giorni con budget/KPI owner"
+      ],
+      "sourceRefs": [
+        "domain-scenarios.md"
+      ],
+      "domainScenarioGroups": []
+    },
+    {
+      "id": "G18",
+      "order": 18,
+      "title": "Decisione rilascio production separata",
+      "ownerRole": "Responsabile rilascio + reviewer",
+      "assignedOwner": null,
+      "dependsOn": [
+        "G00",
+        "G01",
+        "G02",
+        "G03",
+        "G04",
+        "G05",
+        "G06",
+        "G07",
+        "G08",
+        "G09",
+        "G10",
+        "G11",
+        "G12",
+        "G13",
+        "G14",
+        "G15",
+        "G16"
+      ],
+      "blocksStagingDispatch": false,
+      "requiredForProductionDecision": true,
+      "status": "PENDING",
+      "scenario": "Dopo tutti gate richiesti: riesame SHA/digest/run/backup/restore/rischi e conferma esplicita rilascio in una fase successiva. Questo pacchetto non esegue o autorizza produzione.",
+      "acceptance": "Tutti prerequisitiG00..G16 PASS sul candidato esatto, nessun finding bloccante; decisione release firmata e autorizzazione utente production separata. MarketingG17 richiesto per campagne, non per questa sola decisione tecnica.",
+      "failureMeans": "Un PENDING/BLOCKED/FAIL o cambioSHA invalidaGO. Nessun merge/deploy è implicito nel record.",
+      "requiredEvidence": [
+        "verbale review finale",
+        "record esecuzione completo",
+        "attestazione SHA/digest running",
+        "autorizzazione esplicita successiva"
+      ],
+      "sourceRefs": [],
+      "domainScenarioGroups": [
+        "DG-00"
+      ]
+    }
+  ]
+}

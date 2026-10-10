@@ -77,7 +77,7 @@ const pickLicenseSource = (details: unknown): Record<string, unknown> => {
 
 export class LicensePolicyService {
   constructor(
-    private readonly auditRepository: AuditLogRepository,
+    private readonly auditRepository: Pick<AuditLogRepository, "getLatestByAction">,
     private readonly subscriptionReader: (tenantId: string) => Promise<TenantSubscriptionSnapshot | null> = readTenantSubscription
   ) {}
 
@@ -87,9 +87,9 @@ export class LicensePolicyService {
       const expiresAt = persisted.expiresAt;
       const now = Date.now();
       const expiresMs = expiresAt ? new Date(expiresAt).getTime() : null;
-      const daysRemaining = expiresMs ? Math.ceil((expiresMs - now) / 86400000) : null;
+      const daysRemaining = expiresMs !== null ? Math.ceil((expiresMs - now) / 86400000) : null;
       let status = persisted.status;
-      if (expiresMs && expiresMs < now) status = "EXPIRED";
+      if (expiresMs !== null && expiresMs < now) status = "EXPIRED";
 
       return {
         plan: persisted.plan,
@@ -110,10 +110,10 @@ export class LicensePolicyService {
     const expiresAt = typeof raw.expiresAt === "string" && raw.expiresAt ? raw.expiresAt : null;
     const now = Date.now();
     const expiresMs = expiresAt ? new Date(expiresAt).getTime() : null;
-    const daysRemaining = expiresMs ? Math.ceil((expiresMs - now) / 86400000) : null;
+    const daysRemaining = expiresMs !== null ? Math.ceil((expiresMs - now) / 86400000) : null;
 
     let status = toValidStatus(raw.status);
-    if (expiresMs && expiresMs < now) status = "EXPIRED";
+    if (expiresMs !== null && expiresMs < now) status = "EXPIRED";
 
     const plan = ensureKnownPlan(typeof raw.plan === "string" ? raw.plan : defaultLicense.plan);
 

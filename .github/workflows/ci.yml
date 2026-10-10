@@ -9,6 +9,17 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      previousReleaseSha:
+        description: "Full SHA of the approved previous release for migration compatibility"
+        required: true
+
+env:
+  CI_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+permissions:
+  contents: read
 
 jobs:
   secret-scan:
@@ -19,6 +30,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
 
       - name: Run gitleaks
         run: |
@@ -38,6 +58,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
 
       - name: Install Semgrep
         run: |
@@ -80,6 +109,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -105,6 +143,7 @@ jobs:
       - name: Backend tests
         env:
           NODE_ENV: test
+          DOTENV_CONFIG_PATH: /dev/null
         run: npm run test -w backend
 
       - name: Frontend tests
@@ -161,7 +200,9 @@ jobs:
 
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public
+      RUN_TENANT_ISOLATION_TESTS: "1"
+      DOTENV_CONFIG_PATH: /dev/null
+      DATABASE_URL: postgresql://fleetum:fleetum_dev@127.0.0.1:5433/fleetum_ci?schema=public
       JWT_SECRET: test-jwt-secret-for-ci-only-0000000000000000
       PLATFORM_JWT_SECRET: test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000
       PLATFORM_ADMIN_PASSWORD_HASH: $2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde
@@ -170,11 +211,19 @@ jobs:
       RESEND_API_KEY: re_ci_placeholder
       RESEND_FROM: Fleetum <onboarding@resend.dev>
       STORAGE_PROVIDER: local
-      UPLOAD_DIR: uploads-test
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -184,6 +233,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Prepare temporary tenant uploads
+        id: tenant-storage
+        run: |
+          set -euo pipefail
+          CI_UPLOAD_DIRECTORY="$(mktemp -d /tmp/fleetum-ci-uploads.XXXXXXXX)"
+          printf 'directory=%s\n' "$CI_UPLOAD_DIRECTORY" >> "$GITHUB_OUTPUT"
+          printf 'UPLOAD_DIR=%s\n' "$CI_UPLOAD_DIRECTORY" >> "$GITHUB_ENV"
 
       - name: Generate Prisma client
         run: npx prisma generate --schema backend/prisma/schema.prisma
@@ -200,6 +257,61 @@ jobs:
       - name: Run black-box tenant isolation tests
         run: npm run test:tenant-isolation -w backend
 
+      - name: Verify first staging bootstrap in a separate temporary PostgreSQL 16
+        run: npm run verify:staging-bootstrap
+
+      - name: Remove temporary tenant uploads
+        if: always()
+        env:
+          CI_UPLOAD_DIRECTORY: ${{ steps.tenant-storage.outputs.directory }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CI_UPLOAD_DIRECTORY" ]]; then exit 0; fi
+          [[ "$CI_UPLOAD_DIRECTORY" =~ ^/tmp/fleetum-ci-uploads\.[A-Za-z0-9]{8}$ ]]
+          [[ ! -L "$CI_UPLOAD_DIRECTORY" ]]
+          rm -rf -- "$CI_UPLOAD_DIRECTORY"
+
+  migration-compatibility:
+    name: Previous Release / Migrated Schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PREVIOUS_RELEASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || (github.event_name == 'workflow_dispatch' && inputs.previousReleaseSha || github.event.before) }}
+
+    steps:
+      - name: Checkout complete release history
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - name: Validate manual previous-release SHA
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if ! [[ "$PREVIOUS_RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Manual CI requires the approved previous release full SHA."
+            exit 1
+          fi
+
+      - name: Install candidate dependencies
+        run: npm ci
+
+      - name: Verify migration and previous-release compatibility
+        run: npm run verify:migration-compatibility
+
   lighthouse:
     name: Lighthouse CI
     runs-on: ubuntu-latest
@@ -209,6 +321,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -243,3 +364,35 @@ jobs:
           configPath: ./.lighthouserc.json
           uploadArtifacts: true
           temporaryPublicStorage: false
+
+  source-attestation:
+    name: CI source attestation
+    needs: [secret-scan, sast, verify, tenant-isolation, migration-compatibility, lighthouse]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout verified source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Verify immutable checkout and write source proof
+        env:
+          CI_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$CI_SOURCE_SHA"
+          export CI_ACTUAL_SHA="$ACTUAL_SHA"
+          node ops/ci-release-identity.mjs write .ci-proof/ci-source.json
+      - name: Publish CI source proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-source-proof-${{ github.run_id }}
+          path: .ci-proof/ci-source.json
+          include-hidden-files: true
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14

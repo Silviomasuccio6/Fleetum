@@ -4,7 +4,7 @@ Stato: BOZZA TECNICA DA VALIDARE
 
 Owner: DPO + Legal + Tech Lead
 
-Ultimo aggiornamento: 2026-05-05
+Ultimo aggiornamento: 2026-09-19
 
 ## 1. Obiettivo
 
@@ -32,6 +32,21 @@ Definire criteri minimi di conservazione, cancellazione, anonimizzazione e prova
 | Audit sicurezza | actor, azione, oggetto, esito | 24 mesi | cancellazione/archiviazione | necessario per incident response |
 | Export generati | CSV/XLSX/PDF temporanei | max 7-30 giorni se server-side | elimina file | preferire download diretto non persistente |
 | Backup | DB/allegati | 30-90 giorni | rotazione automatica | backup cifrati e restore testato |
+| Eventi analytics sito con consenso | percorso, attribuzione, identificativi pseudonimi | default tecnico 90 giorni | cancellazione automatica | configurabile; validare con DPO/Legal |
+| Richieste demo | contatti e richiesta commerciale | default tecnico 365 giorni | cancellazione automatica | configurabile; validare con DPO/Legal e processo commerciale |
+| Coda email conclusa | destinatario, oggetto, corpo, errore e metadati | default tecnico 30 giorni dopo ultimo aggiornamento | elimina il contenuto, conserva solo stato e riferimenti tecnici ammessi | solo record `SENT`/`FAILED`; configurabile |
+
+I tre periodi aggiunti sono valori tecnici iniziali e non costituiscono una conclusione legale. Prima dell'attivazione in produzione devono essere approvati dal DPO/Legal e impostati tramite `PRIVACY_RETENTION_WEBSITE_EVENT_DAYS`, `PRIVACY_RETENTION_DEMO_LEAD_DAYS` e `PRIVACY_RETENTION_EMAIL_QUEUE_PAYLOAD_DAYS`. La parte globale del job resta disattivata finche `PRIVACY_RETENTION_GLOBAL_ENABLED` non viene impostato esplicitamente a `true`.
+
+La retention della coda email non modifica elementi in attesa. Per i record conclusi conserva id, stato, tentativi, date e un insieme limitato di riferimenti operativi; sostituisce destinatario, oggetto e corpo con `[redacted]`, rimuove l'ultimo errore e scarta metadati liberi o allegati incorporati.
+
+L'anteprima globale si esegue con `npm run privacy:retention:dry-run -w backend -- --global`. L'esecuzione richiede la modalità esplicita `npm run privacy:retention:run -w backend -- --global`. Entrambe restituiscono solo policy, date limite e conteggi aggregati, senza contenuti personali.
+
+## Impatto e rollback della migrazione
+
+La migrazione aggiunge a `EmailQueue` una colonna nullable e un indice per individuare i payload ancora da eliminare. Non modifica contratti, fatture, righe fattura, pagamenti o altri record soggetti a obblighi fiscali o civilistici. Prima del deploy va eseguita l'anteprima globale e va valutato il tempo di creazione dell'indice sul volume reale.
+
+Per il rollback strutturale, distribuire prima il codice precedente, eliminare l'indice `EmailQueue_payloadPurgedAt_status_updatedAt_idx` e poi la colonna `payloadPurgedAt`. La cancellazione di eventi e lead e la redazione dei payload email sono intenzionalmente irreversibili nel database primario; un recupero richiede un backup autorizzato e deve rispettare la stessa policy privacy.
 
 ## 4. Workflow cancellazione
 
@@ -70,4 +85,3 @@ Definire criteri minimi di conservazione, cancellazione, anonimizzazione e prova
 - Documentazione backup retention.
 - Verifica manuale che allegati cancellati non siano scaricabili.
 - Approvazione DPO/Legal sui periodi.
-

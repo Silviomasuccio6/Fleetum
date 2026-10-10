@@ -146,5 +146,7 @@ test('CI exercises the production gate and ingress tests on every checked-out pr
   assert.ok(controls > steps.findIndex(s => s.name === 'Install dependencies'));
   assert.ok(controls < steps.findIndex(s => s.name === 'Generate Prisma client'));
   assert.equal(steps[controls].run, 'node --test --test-concurrency=1 ops/tests/*.test.mjs');
-  for (const gate of ['secret-scan', 'sast', 'verify', 'tenant-isolation', 'lighthouse']) assert.ok(ci.jobs[gate]);
+  for (const gate of REQUIRED_CI_JOBS) assert.ok(ci.jobs[gate]);
+  assert.deepEqual(ci.jobs['source-attestation'].needs, REQUIRED_CI_JOBS);
+  assert.ok(steps.filter(s => s.run?.includes('ops/tests/*.test.mjs')).length === 1);
 });

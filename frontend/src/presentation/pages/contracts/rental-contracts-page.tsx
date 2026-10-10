@@ -149,6 +149,7 @@ export const RentalContractsPage = () => {
   const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const signatureDrawingRef = useRef(false);
   const signatureLastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const contractEmailRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
@@ -392,7 +393,16 @@ export const RentalContractsPage = () => {
     setActionBusyId(row.id);
     setError(null);
     try {
-      await rentalBookingsUseCases.sendContractEmail(row.bookingId);
+      const fingerprint = JSON.stringify({ contractId: row.id, bookingId: row.bookingId });
+      if (contractEmailRequestRef.current?.fingerprint !== fingerprint) {
+        contractEmailRequestRef.current = { fingerprint, key: globalThis.crypto.randomUUID() };
+      }
+      await rentalBookingsUseCases.sendContractEmail(
+        row.bookingId,
+        undefined,
+        contractEmailRequestRef.current.key
+      );
+      contractEmailRequestRef.current = null;
       setSuccess(`Email contratto accodata (${row.booking.code}).`);
       await loadContracts(page);
     } catch (e) {

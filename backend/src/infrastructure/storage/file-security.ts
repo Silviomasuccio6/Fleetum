@@ -42,14 +42,17 @@ const readHead = async (filePath: string, bytes = 512) => {
 
 const isZipLike = (bytes: Buffer) => startsWith(bytes, zip) || startsWith(bytes, zipEmpty) || startsWith(bytes, zipSpanned);
 
-export const validateImageMagic = async (filePath: string, mimeType: string) => {
-  const buffer = await readHead(filePath, 16);
-
+export const validateImageBufferMagic = (buffer: Buffer, mimeType: string) => {
   if (mimeType === "image/jpeg" && startsWith(buffer, jpeg)) return true;
   if (mimeType === "image/png" && startsWith(buffer, png)) return true;
   if (mimeType === "image/webp" && startsWith(buffer, riff) && buffer.slice(8, 12).every((v, i) => v === webp[i])) return true;
 
   throw new AppError("Contenuto file non valido", 400, "INVALID_FILE_MAGIC");
+};
+
+export const validateImageMagic = async (filePath: string, mimeType: string) => {
+  const buffer = await readHead(filePath, 16);
+  return validateImageBufferMagic(buffer, mimeType);
 };
 
 export const validateFileMagic = async (filePath: string, mimeType: string) => {
@@ -66,7 +69,11 @@ export const validateFileMagic = async (filePath: string, mimeType: string) => {
 
 export const scanFileForThreats = async (filePath: string) => {
   const sample = await readHead(filePath, 4096);
-  if (sample.toString("ascii").includes(eicarPattern)) {
+  return scanBufferForThreats(sample);
+};
+
+export const scanBufferForThreats = (sample: Buffer) => {
+  if (sample.subarray(0, 4096).toString("ascii").includes(eicarPattern)) {
     throw new AppError("File bloccato dai controlli di sicurezza", 400, "MALWARE_SIGNATURE_DETECTED");
   }
   return true;

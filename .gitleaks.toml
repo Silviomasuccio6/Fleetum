@@ -1,0 +1,24 @@
+title = "Fleetum secret scanning"
+
+[extend]
+useDefault = true
+
+# These lines record SHA-256 checksums of named source/evidence artifacts.
+# Match both the exact manifest path and the complete digest entry. Credentials
+# elsewhere in these manifests, and every other default rule, remain detectable.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Source artifact SHA-256 entries in the staging evidence manifest"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^(/repo/)?docs/deployment/staging-validation-package-20261002/inspected-source\.json$''']
+regexes = ['''^\s*"(backend/tests/social-oauth-correlation\.test\.ts|backend/tests/profile-password-security\.test\.ts|backend/tests/security/account-credential-transitions\.test\.ts|backend/src/interfaces/http/middlewares/platform-auth\.ts|frontend/src/infrastructure/platform/platform-auth-storage\.ts|frontend/src/presentation/pages/auth/social-auth-callback-page\.tsx)"\s*:\s*"[a-f0-9]{64}",?\s*$''']
+
+[[rules.allowlists]]
+description = "Evidence artifact SHA-256 entries in the staging evidence index"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^(/repo/)?docs/deployment/staging-validation-package-20261002/evidence-index\.json$''']
+regexes = ['''^\s*"(e2e-final/api\.log|e2e-red/api\.log|rehearsal/api\.log|credential-only-candidate\.diff|credential-only-candidate\.json|credential-only-database\.log|oauth-diff\.patch|oauth-green\.log|oauth-red\.log|oauth-result\.json)"\s*:\s*"[a-f0-9]{64}",?\s*$''']

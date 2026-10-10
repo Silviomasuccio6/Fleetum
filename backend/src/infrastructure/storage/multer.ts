@@ -1,24 +1,20 @@
-import fs from "node:fs";
 import multer from "multer";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
-import { localStorageProvider } from "./storage-provider.js";
-
-const uploadDir = localStorageProvider.getRootDir();
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+import { createStagingFileName, getRequestUploadStagingDirectory } from "./upload-lifecycle.js";
 
 const mb = (value: number) => value * 1024 * 1024;
 
 const createDiskUpload = (allowedMime: Set<string>, limits: { fileSizeMb: number; files: number }) =>
   multer({
     storage: multer.diskStorage({
-      destination: (_req, _file, cb) => cb(null, uploadDir),
-      filename: (_req, file, cb) => {
-        const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-        cb(null, `${Date.now()}-${safeName}`);
-      }
+      destination: (req, _file, cb) => {
+        void getRequestUploadStagingDirectory(req).then(
+          (directory) => cb(null, directory),
+          (error) => cb(error as Error, "")
+        );
+      },
+      filename: (_req, file, cb) => cb(null, createStagingFileName(file.mimetype))
     }),
     limits: { fileSize: mb(limits.fileSizeMb), files: limits.files },
     fileFilter: (_req, file, cb) => {
