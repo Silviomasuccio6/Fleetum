@@ -22,7 +22,9 @@ test("staging Caddy covers app, API, Platform and denies robots and sitemap disc
 
 test("staging migration validates runtime env before Prisma and observes safety before proof", () => {
   const workflow = source(".github/workflows/deploy-staging.yml");
-  assert.match(workflow, /node dist\/shared\/config\/env\.js && npx prisma migrate deploy/);
+  const trustedDeploy = source("ops/staging/run-deploy.sh");
+  assert.match(trustedDeploy, /node dist\/shared\/config\/env\.js && npx prisma migrate deploy/);
+  assert.match(workflow, /\.fleetum-control\/ops\/staging\/run-deploy\.sh/);
   assert.match(workflow, /name: Verify observed staging isolation/);
   assert.match(workflow, /capture-staging-runtime\.mjs deploy staging-runtime-isolation\.json/);
   assert.match(workflow, /isolationPolicyVersion: 1/);
@@ -42,6 +44,9 @@ test("backend staging network is internal and only Caddy receives the edge netwo
 
 test("candidate capability gate rejects missing historical isolation implementation", () => {
   assert.equal(verifyIsolationSource(new URL("../..", import.meta.url).pathname).ok, true);
+  assert.equal(verifyIsolationSource(new URL("../..", import.meta.url).pathname, "shared", "true").ok, true);
+  assert.equal(verifyIsolationSource(new URL("../..", import.meta.url).pathname, "unknown", "false").ok, false);
+  assert.equal(verifyIsolationSource(new URL("../..", import.meta.url).pathname, "shared", "unknown").ok, false);
   assert.equal(verifyIsolationSource(new URL("../../ops/tests", import.meta.url).pathname).ok, false);
   const workflow = source(".github/workflows/deploy-staging.yml");
   assert.ok(workflow.indexOf("staging-release-binding.mjs policy-preflight") < workflow.indexOf("  build-images:"));

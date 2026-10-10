@@ -4,11 +4,12 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { READONLY_INSPECT_COMMAND, validateSshTarget, requireReleaseBinding, verifyRuntimeSnapshot, verifyRuntimeContinuity } from "./staging-release-binding.mjs";
+import { readonlyInspectCommand, validateSshTarget, requireReleaseBinding, verifyRuntimeSnapshot, verifyRuntimeContinuity } from "./staging-release-binding.mjs";
 
 export function captureRuntime(proof, { env = process.env, execute = spawnSync } = {}) {
   const target = validateSshTarget(env.FLEETUM_STAGING_HOST, env.FLEETUM_STAGING_USER);
   if (!target.ok) throw new Error(target.errors.join(" "));
+  const inspectCommand = readonlyInspectCommand(env.FLEETUM_STAGING_DOCKER_MODE ?? "direct");
   if (!env.FLEETUM_STAGING_SSH_KEY?.trim() || !env.FLEETUM_STAGING_KNOWN_HOSTS?.trim()) throw new Error("Staging observation requires a protected SSH key and pinned known_hosts secret.");
   const directory = mkdtempSync(path.join(tmpdir(), "fleetum-staging-observer-"));
   try {
@@ -21,7 +22,7 @@ export function captureRuntime(proof, { env = process.env, execute = spawnSync }
       "-o", `UserKnownHostsFile=${knownHostsPath}`, "-o", "GlobalKnownHostsFile=/dev/null",
       "-o", "ConnectTimeout=20", "-o", "ConnectionAttempts=1", "-o", "IdentitiesOnly=yes",
       "-o", "LogLevel=ERROR", "-i", keyPath,
-      `${env.FLEETUM_STAGING_USER}@${env.FLEETUM_STAGING_HOST}`, READONLY_INSPECT_COMMAND
+      `${env.FLEETUM_STAGING_USER}@${env.FLEETUM_STAGING_HOST}`, inspectCommand
     ], { encoding: "utf8", timeout: 30_000, maxBuffer: 65_536, env: { PATH: env.PATH ?? process.env.PATH, LC_ALL: "C" } });
     if (observed.status !== 0 || observed.error || observed.signal) throw new Error("Readonly staging container observation failed.");
     let inspections;

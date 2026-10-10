@@ -10,6 +10,20 @@ on:
       confirm:
         description: "Type DEPLOY_STAGING to confirm"
         required: true
+      ingressMode:
+        description: "Dedicated listener or the reviewed shared HTTPS ingress"
+        type: choice
+        options: [dedicated, shared]
+        default: dedicated
+        required: true
+      prepareTarget:
+        description: "Create only missing canonical staging directories (no env/user/key provisioning)"
+        type: boolean
+        default: false
+      bootstrapSynthetic:
+        description: "First startup only: create two synthetic tenants from protected stdin credentials"
+        type: boolean
+        default: false
 
 concurrency:
   group: fleetum-staging
@@ -99,7 +113,10 @@ jobs:
               .write();
 
       - name: Require staging isolation capability before publishing or migrating
-        run: node .fleetum-control/ops/e2e/staging-release-binding.mjs policy-preflight
+        env:
+          INGRESS_MODE: ${{ inputs.ingressMode }}
+          BOOTSTRAP_SYNTHETIC: ${{ inputs.bootstrapSynthetic }}
+        run: node .fleetum-control/ops/e2e/staging-release-binding.mjs policy-preflight "$INGRESS_MODE" "$BOOTSTRAP_SYNTHETIC"
 
       - name: Download exact CI source proof
         uses: actions/download-artifact@v4
@@ -287,14 +304,30 @@ jobs:
           printf '%s\n' "$FLEETUM_STAGING_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      - name: Prepare only missing staging directories
+        if: ${{ inputs.prepareTarget }}
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+        run: |
+          set -euo pipefail
+          [[ "$FLEETUM_STAGING_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          # The remote account's numeric IDs are metadata, never credential material.
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "sudo -n python3 - '$FLEETUM_RELEASE_SHA' PREPARE_STAGING \$(id -u) \$(id -g)" < .fleetum-control/ops/staging/prepare-target.py
+
       - name: Verify remote deploy target
         env:
           FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
           FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
           FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
+          INGRESS_MODE: ${{ inputs.ingressMode }}
+          DOCKER_MODE: ${{ vars.FLEETUM_STAGING_DOCKER_MODE || 'direct' }}
         run: |
           set -euo pipefail
+          case "$INGRESS_MODE" in dedicated|shared) ;; *) exit 1 ;; esac
+          case "$DOCKER_MODE" in direct|sudo) ;; *) exit 1 ;; esac
           test -n "$FLEETUM_STAGING_USER"
           if ! [[ "$FLEETUM_STAGING_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
             echo "::error::FLEETUM_STAGING_USER contains unsupported characters."
@@ -308,7 +341,7 @@ jobs:
             echo "::error::Staging app path must be the isolated canonical path."
             exit 1
           fi
-          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "sh -s '$FLEETUM_RELEASE_SHA'" < .fleetum-control/ops/staging/target-preflight.sh
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "sh -s '$FLEETUM_RELEASE_SHA' '$INGRESS_MODE' '$DOCKER_MODE'" < .fleetum-control/ops/staging/target-preflight.sh
           ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
             "mkdir -p '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA' && test -w '$FLEETUM_STAGING_APP_DIR'"
 
@@ -322,12 +355,16 @@ jobs:
           set -euo pipefail
           rsync -az --delete \
             --include 'docker-compose.staging.yml' \
+            --include 'docker-compose.staging.shared.yml' \
             --include 'deploy/' \
             --include 'deploy/caddy/' \
             --include 'deploy/caddy/Caddyfile.staging' \
+            --include 'deploy/caddy/Caddyfile.staging-shared' \
             --exclude '*' \
             -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" \
             ./ "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/"
+          rsync -az -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" .fleetum-control/ops/staging/run-deploy.sh "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-run-deploy.sh"
+          rsync -az -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" .fleetum-control/ops/staging/target-preflight.sh "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-preflight.sh"
 
       - name: Pull immutable images, migrate and restart staging
         env:
@@ -337,6 +374,10 @@ jobs:
           FLEETUM_STAGING_APP_DIR: ${{ vars.FLEETUM_STAGING_APP_DIR || '/opt/fleetum-staging/app' }}
           FLEETUM_STAGING_ENV_FILE: ${{ vars.FLEETUM_STAGING_ENV_FILE || '/opt/fleetum-staging/env/compose.env' }}
           FLEETUM_STAGING_LOCK_FILE: ${{ vars.FLEETUM_STAGING_LOCK_FILE || '/opt/fleetum-staging/deploy.lock' }}
+          INGRESS_MODE: ${{ inputs.ingressMode }}
+          DOCKER_MODE: ${{ vars.FLEETUM_STAGING_DOCKER_MODE || 'direct' }}
+          BOOTSTRAP_SYNTHETIC: ${{ inputs.bootstrapSynthetic }}
+          FLEETUM_STAGING_BOOTSTRAP_CREDENTIALS: ${{ secrets.FLEETUM_STAGING_BOOTSTRAP_CREDENTIALS }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           FLEETUM_BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
@@ -353,16 +394,24 @@ jobs:
             echo "::error::Staging deployment paths must match the isolated canonical paths."
             exit 1
           fi
-          LOCK_DIR="${FLEETUM_STAGING_LOCK_FILE%/*}"
-
-          printf '%s' "$GHCR_TOKEN" | ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
-            "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
-
-          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" \
-            "set -eu; mkdir -p '$LOCK_DIR'; cd '$FLEETUM_STAGING_APP_DIR'; exec 9>'$FLEETUM_STAGING_LOCK_FILE'; flock -n 9; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.staging.yml' '$FLEETUM_STAGING_APP_DIR/docker-compose.staging.yml'; rsync -a '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_STAGING_APP_DIR/deploy/'; export FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE'; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml pull; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml run --rm backend sh -c 'node dist/shared/config/env.js && npx prisma migrate deploy --schema prisma/schema.prisma'; docker compose --project-name fleetum-staging --env-file '$FLEETUM_STAGING_ENV_FILE' -f docker-compose.staging.yml up -d --no-build"
+          case "$INGRESS_MODE" in dedicated|shared) ;; *) exit 1 ;; esac
+          case "$DOCKER_MODE" in direct|sudo) ;; *) exit 1 ;; esac
+          case "$BOOTSTRAP_SYNTHETIC" in true|false) ;; *) exit 1 ;; esac
+          if [ "$BOOTSTRAP_SYNTHETIC" = true ] && [ -z "$FLEETUM_STAGING_BOOTSTRAP_CREDENTIALS" ]; then
+            echo "::error::Protected synthetic bootstrap input is missing."
+            exit 1
+          fi
+          docker_command="docker --config /opt/fleetum-staging/docker-config"
+          if [ "$DOCKER_MODE" = sudo ]; then docker_command="sudo -n $docker_command"; fi
+          printf '%s' "$GHCR_TOKEN" | ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "$docker_command login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+          # When bootstrap is false no credential bytes are sent to the remote process.
+          bootstrap_input=""
+          if [ "$BOOTSTRAP_SYNTHETIC" = true ]; then bootstrap_input="$FLEETUM_STAGING_BOOTSTRAP_CREDENTIALS"; fi
+          printf '%s' "$bootstrap_input" | ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "bash '$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-run-deploy.sh' '$FLEETUM_RELEASE_SHA' '$FLEETUM_BACKEND_IMAGE' '$FLEETUM_FRONTEND_IMAGE' '$INGRESS_MODE' '$BOOTSTRAP_SYNTHETIC' '$DOCKER_MODE'"
 
       - name: Verify observed staging isolation
         env:
+          FLEETUM_STAGING_DOCKER_MODE: ${{ vars.FLEETUM_STAGING_DOCKER_MODE || 'direct' }}
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           BACKEND_IMAGE: ${{ needs.build-images.outputs.backend_image }}
           FRONTEND_IMAGE: ${{ needs.build-images.outputs.frontend_image }}

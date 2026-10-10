@@ -26,6 +26,27 @@ DISK_ALERT_ENV_FILE="${DISK_ALERT_ENV_FILE:-/opt/fleetum/env/backup.env}"
 DISK_ALERT_SCRIPT="${DISK_ALERT_SCRIPT:-$APP_DIR/deploy/scripts/disk-capacity-alert.sh}"
 CLEANUP_DOCKER_IMAGES="${CLEANUP_DOCKER_IMAGES:-true}"
 DRY_RUN="${DRY_RUN:-false}"
+export FLEETUM_SHARED_STAGING_INGRESS="${FLEETUM_SHARED_STAGING_INGRESS:-false}"
+
+# Opt-in shared staging ingress must survive image deployment and application rollback.
+configure_compose_files() {
+  case "$FLEETUM_SHARED_STAGING_INGRESS" in true|false) ;; *) echo 'Invalid shared ingress policy.' >&2; exit 2 ;; esac
+  COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+  if [ "$FLEETUM_SHARED_STAGING_INGRESS" = true ]; then
+    [ -f "$APP_DIR/docker-compose.prod.shared.yml" ] && [ ! -L "$APP_DIR/docker-compose.prod.shared.yml" ] || { echo 'Reviewed shared ingress overlay is required.' >&2; exit 2; }
+    for shared_file in deploy/caddy/Caddyfile.production-shared deploy/caddy/Caddyfile.staging-ingress deploy/caddy/Caddyfile deploy/scripts/shared-staging-ingress-preflight.sh; do
+      [ -f "$APP_DIR/$shared_file" ] && [ ! -L "$APP_DIR/$shared_file" ] || { echo 'Reviewed shared ingress bundle is required.' >&2; exit 2; }
+    done
+    if [ "$DRY_RUN" != true ]; then bash "$APP_DIR/deploy/scripts/shared-staging-ingress-preflight.sh"; fi
+    COMPOSE_ARGS+=(-f "$APP_DIR/docker-compose.prod.shared.yml")
+  elif [ "$DRY_RUN" != true ]; then
+    gateway_id="$(docker ps -a --filter name=fleetum_caddy --format '{{.ID}}')" || { echo 'Production gateway metadata unavailable.' >&2; exit 2; }
+    if [ -n "$gateway_id" ]; then
+      active_ingress="$(docker inspect --format '{{if index .NetworkSettings.Networks "fleetum_staging_ingress"}}shared{{end}}' fleetum_caddy)" || { echo 'Production gateway metadata unavailable.' >&2; exit 2; }
+      [ "$active_ingress" != shared ] || { echo 'Active staging ingress cannot be removed by an unconfigured production deploy.' >&2; exit 2; }
+    fi
+  fi
+}
 
 : "${FLEETUM_BACKEND_IMAGE:?FLEETUM_BACKEND_IMAGE is required}"
 : "${FLEETUM_FRONTEND_IMAGE:?FLEETUM_FRONTEND_IMAGE is required}"
@@ -452,6 +473,7 @@ main() {
 
   validate_release_identity
   acquire_deploy_lock
+  configure_compose_files
 
   # Keep the active release, rollback release and target image while reclaiming stale layers.
   cleanup_docker_storage "image pull"
@@ -462,7 +484,7 @@ main() {
   export FLEETUM_FRONTEND_IMAGE
 
   log "pulling target images"
-  if ! run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull; then
+  if ! run docker compose "${COMPOSE_ARGS[@]}" pull; then
     report_disk_state "failed image pull"
     check_disk_alert_thresholds "failed-image-pull"
     exit 1
@@ -484,15 +506,15 @@ main() {
   ensure_minimum_disk_space "Prisma migration"
 
   log "running Prisma migrations"
-  run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm backend \
+  run docker compose "${COMPOSE_ARGS[@]}" run --rm backend \
     sh -lc 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; fi; npx prisma migrate deploy --schema prisma/schema.prisma'
 
   log "reconciling exact monetary shadow columns"
-  run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm backend \
+  run docker compose "${COMPOSE_ARGS[@]}" run --rm backend \
     sh -lc 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; fi; npm run money:reconcile:prod'
 
   log "restarting production containers"
-  if run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build; then
+  if run docker compose "${COMPOSE_ARGS[@]}" up -d --no-build; then
     log "production container restart command completed"
   else
     restart_status=$?

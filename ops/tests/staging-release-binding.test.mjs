@@ -4,7 +4,7 @@ import test from "node:test";
 import { captureRuntime } from "../e2e/capture-staging-runtime.mjs";
 import {
   validateBindingInputs, verifyDeployRun, verifyReleaseProof, verifySourceHead,
-  verifyRuntimeSnapshot, verifyRuntimeContinuity, validateSshTarget, READONLY_INSPECT_COMMAND
+  verifyRuntimeSnapshot, verifyRuntimeContinuity, validateSshTarget, READONLY_INSPECT_COMMAND, readonlyInspectCommand
 } from "../e2e/staging-release-binding.mjs";
 
 const sha = "a".repeat(40);
@@ -79,6 +79,15 @@ test("SSH target rejects injection and inspection command is fixed and emits onl
   assert.doesNotMatch(READONLY_INSPECT_COMMAND, /json \.Config\.Env|\b(?:compose|exec|restart|pull|up)\b|;|&&/);
   assert.match(READONLY_INSPECT_COMMAND, /FLEETUM_ENVIRONMENT=staging/);
   assert.match(READONLY_INSPECT_COMMAND, /EMAIL_PROVIDER=disabled/);
+});
+
+test("sudo observation changes only the two fixed Docker command prefixes and rejects injected modes", () => {
+  assert.equal(readonlyInspectCommand("direct"), READONLY_INSPECT_COMMAND);
+  assert.equal(readonlyInspectCommand("sudo"), READONLY_INSPECT_COMMAND.split("\n").map(line => `sudo -n ${line}`).join("\n"));
+  for (const mode of ["", "sudo;id", "sudo -n", "root", "false"]) assert.throws(() => readonlyInspectCommand(mode), /Unsupported/);
+  let called = false;
+  assert.throws(() => captureRuntime(proof, { env: { ...sshEnvironment, FLEETUM_STAGING_DOCKER_MODE: "sudo;id" }, execute() { called = true; } }), /Unsupported/);
+  assert.equal(called, false);
 });
 
 const sshEnvironment = {

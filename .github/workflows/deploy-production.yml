@@ -500,9 +500,12 @@ jobs:
           fi
           rsync -az --delete \
             --include 'docker-compose.prod.yml' \
+            --include 'docker-compose.prod.shared.yml' \
             --include 'deploy/' \
             --include 'deploy/caddy/' \
             --include 'deploy/caddy/Caddyfile' \
+            --include 'deploy/caddy/Caddyfile.production-shared' \
+            --include 'deploy/caddy/Caddyfile.staging-ingress' \
             --include 'deploy/backup/' \
             --include 'deploy/backup/*.sh' \
             --include 'deploy/backup/*.md' \
@@ -516,6 +519,7 @@ jobs:
         env:
           FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           FLEETUM_CI_RUN_ID: ${{ needs.resolve-release.outputs.ci_run_id }}
+          FLEETUM_SHARED_STAGING_INGRESS: ${{ vars.FLEETUM_SHARED_STAGING_INGRESS || 'false' }}
           FLEETUM_DEPLOY_RUN_ID: ${{ github.run_id }}
           FLEETUM_VPS_HOST: ${{ vars.FLEETUM_VPS_HOST || vars.VPS_HOST }}
           FLEETUM_VPS_USER: ${{ vars.FLEETUM_VPS_USER || vars.VPS_USER }}
@@ -567,8 +571,9 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
             "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
+          case "$FLEETUM_SHARED_STAGING_INGRESS" in true|false) ;; *) exit 1 ;; esac
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_vps "$FLEETUM_VPS_USER@$FLEETUM_VPS_HOST" \
-            "set -eu; mkdir -p '$FLEETUM_DEPLOY_LOCK_DIR'; cd '$FLEETUM_APP_DIR'; exec 9>'$FLEETUM_DEPLOY_LOCK_FILE'; flock -n 9; rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.prod.yml' '$FLEETUM_APP_DIR/docker-compose.prod.yml'; rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_APP_DIR/deploy/'; chmod +x deploy/scripts/*.sh deploy/backup/*.sh; DEPLOY_LOCK_HELD=true FLEETUM_RELEASE_SHA='$FLEETUM_RELEASE_SHA' FLEETUM_CI_RUN_ID='$FLEETUM_CI_RUN_ID' FLEETUM_DEPLOY_RUN_ID='$FLEETUM_DEPLOY_RUN_ID' FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' FLEETUM_BACKEND_RELEASE_TAG='$FLEETUM_BACKEND_RELEASE_TAG' FLEETUM_FRONTEND_RELEASE_TAG='$FLEETUM_FRONTEND_RELEASE_TAG' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' DEPLOY_LOCK_FILE='$FLEETUM_DEPLOY_LOCK_FILE' MIN_FREE_DISK_GB='$FLEETUM_MIN_FREE_DISK_GB' MAX_DISK_USAGE_PERCENT='$FLEETUM_MAX_DISK_USAGE_PERCENT' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
+            "set -eu; mkdir -p '$FLEETUM_DEPLOY_LOCK_DIR'; cd '$FLEETUM_APP_DIR'; exec 9>'$FLEETUM_DEPLOY_LOCK_FILE'; flock -n 9; gateway_id=\$(docker ps -a --filter name=fleetum_caddy --format '{{.ID}}'); if [ -n \"\$gateway_id\" ]; then active_ingress=\$(docker inspect --format '{{if index .NetworkSettings.Networks \"fleetum_staging_ingress\"}}shared{{end}}' fleetum_caddy); [ '$FLEETUM_SHARED_STAGING_INGRESS' = true ] || [ \"\$active_ingress\" != shared ] || exit 1; fi; if [ '$FLEETUM_SHARED_STAGING_INGRESS' = true ]; then for shared_file in docker-compose.prod.shared.yml deploy/caddy/Caddyfile.production-shared deploy/caddy/Caddyfile.staging-ingress deploy/caddy/Caddyfile deploy/scripts/shared-staging-ingress-preflight.sh; do test -f '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/'\"\$shared_file\" && test ! -L '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/'\"\$shared_file\" || exit 1; done; bash '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/scripts/shared-staging-ingress-preflight.sh'; fi; rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.prod.yml' '$FLEETUM_APP_DIR/docker-compose.prod.yml'; if [ '$FLEETUM_SHARED_STAGING_INGRESS' = true ]; then rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/docker-compose.prod.shared.yml' '$FLEETUM_APP_DIR/docker-compose.prod.shared.yml'; fi; rsync -a '$FLEETUM_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/deploy/' '$FLEETUM_APP_DIR/deploy/'; chmod +x deploy/scripts/*.sh deploy/backup/*.sh; DEPLOY_LOCK_HELD=true FLEETUM_SHARED_STAGING_INGRESS='$FLEETUM_SHARED_STAGING_INGRESS' FLEETUM_RELEASE_SHA='$FLEETUM_RELEASE_SHA' FLEETUM_CI_RUN_ID='$FLEETUM_CI_RUN_ID' FLEETUM_DEPLOY_RUN_ID='$FLEETUM_DEPLOY_RUN_ID' FLEETUM_BACKEND_IMAGE='$FLEETUM_BACKEND_IMAGE' FLEETUM_FRONTEND_IMAGE='$FLEETUM_FRONTEND_IMAGE' FLEETUM_BACKEND_RELEASE_TAG='$FLEETUM_BACKEND_RELEASE_TAG' FLEETUM_FRONTEND_RELEASE_TAG='$FLEETUM_FRONTEND_RELEASE_TAG' ENV_FILE='$FLEETUM_ENV_FILE' LAST_DEPLOY_FILE='$FLEETUM_LAST_DEPLOY_FILE' DEPLOY_LOCK_FILE='$FLEETUM_DEPLOY_LOCK_FILE' MIN_FREE_DISK_GB='$FLEETUM_MIN_FREE_DISK_GB' MAX_DISK_USAGE_PERCENT='$FLEETUM_MAX_DISK_USAGE_PERCENT' DISK_ALERT_WARNING_PERCENT='$FLEETUM_DISK_ALERT_WARNING_PERCENT' DISK_ALERT_CRITICAL_PERCENT='$FLEETUM_DISK_ALERT_CRITICAL_PERCENT' DISK_ALERT_COOLDOWN_HOURS='$FLEETUM_DISK_ALERT_COOLDOWN_HOURS' HEALTH_URL='https://api.fleetum.it/api/ready' ./deploy/scripts/safe-production-deploy.sh"
 
       - name: Install managed backup cron
         env:

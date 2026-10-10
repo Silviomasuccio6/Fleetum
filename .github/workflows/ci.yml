@@ -257,6 +257,9 @@ jobs:
       - name: Run black-box tenant isolation tests
         run: npm run test:tenant-isolation -w backend
 
+      - name: Verify first staging bootstrap in a separate temporary PostgreSQL 16
+        run: npm run verify:staging-bootstrap
+
       - name: Remove temporary tenant uploads
         if: always()
         env:

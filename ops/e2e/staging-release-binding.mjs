@@ -14,13 +14,19 @@ const imagePattern = (role) => new RegExp(`^ghcr\\.io/silviomasuccio6/fleetum-${
 // Capability gate for historical candidates, not an independent code review.
 // Run before image publication or any remote migration. Legacy checkouts do not
 // implement this command and fail closed instead of ignoring the staging mode.
-export function verifyIsolationSource(root = process.cwd()) {
+export function verifyIsolationSource(root = process.cwd(), ingressMode = "dedicated", bootstrap = "false") {
+  if (!["dedicated", "shared"].includes(ingressMode) || !["true", "false"].includes(bootstrap)) return result(["Unsupported staging deployment controls."]);
   const markers = {
     "backend/src/shared/config/staging-safety.ts": ["assertStagingIsolation", "STAGING_CANONICAL"],
     "backend/src/shared/config/env.ts": ["assertStagingIsolation({", "FLEETUM_ENVIRONMENT"],
     "backend/src/server.ts": ["startAutomaticCronTasks(env.FLEETUM_ENVIRONMENT"],
     "docker-compose.staging.yml": ["FLEETUM_ENVIRONMENT: staging", "EMAIL_PROVIDER: disabled", "internal: true"]
   };
+  if (ingressMode === "shared") {
+    markers["docker-compose.staging.shared.yml"] = ["fleetum_staging_ingress", "external: true", "!reset"];
+    markers["deploy/caddy/Caddyfile.staging-shared"] = ["http://staging.fleetum.it", "trusted_proxies", "10.203.91.2"];
+  }
+  if (bootstrap === "true") markers["backend/src/scripts/staging-bootstrap.ts"] = ["runStagingBootstrap", "process.stdin"];
   for (const [name, expected] of Object.entries(markers)) {
     let source;
     try { source = readFileSync(path.join(root, name), "utf8"); }
@@ -71,6 +77,11 @@ export function verifyReleaseProof(proof, { repository, releaseSha, stagingRunId
 // Never emit .Config.Env. Exact single-entry matches reject duplicate or noncanonical flags.
 export const READONLY_INSPECT_COMMAND = `docker inspect --format '{{$stagingMode := ""}}{{$emailDisabled := ""}}{{$dunningDisabled := ""}}{{$retentionDisabled := ""}}{{$retentionGlobalDisabled := ""}}{{range .Config.Env}}{{if eq (index (split . "=") 0) "FLEETUM_ENVIRONMENT"}}{{$stagingMode = printf "%s|%s" $stagingMode .}}{{end}}{{if eq (index (split . "=") 0) "EMAIL_PROVIDER"}}{{$emailDisabled = printf "%s|%s" $emailDisabled .}}{{end}}{{if eq (index (split . "=") 0) "BILLING_DUNNING_CRON_ENABLED"}}{{$dunningDisabled = printf "%s|%s" $dunningDisabled .}}{{end}}{{if eq (index (split . "=") 0) "PRIVACY_RETENTION_CRON_ENABLED"}}{{$retentionDisabled = printf "%s|%s" $retentionDisabled .}}{{end}}{{if eq (index (split . "=") 0) "PRIVACY_RETENTION_GLOBAL_ENABLED"}}{{$retentionGlobalDisabled = printf "%s|%s" $retentionGlobalDisabled .}}{{end}}{{end}}{"image":{{json .Config.Image}},"running":{{json .State.Running}},"containerId":{{json .Id}},"startedAt":{{json .State.StartedAt}},"restartCount":{{json .RestartCount}},"stagingMode":{{eq $stagingMode "|FLEETUM_ENVIRONMENT=staging"}},"emailDisabled":{{eq $emailDisabled "|EMAIL_PROVIDER=disabled"}},"dunningDisabled":{{eq $dunningDisabled "|BILLING_DUNNING_CRON_ENABLED=false"}},"retentionDisabled":{{eq $retentionDisabled "|PRIVACY_RETENTION_CRON_ENABLED=false"}},"retentionGlobalDisabled":{{eq $retentionGlobalDisabled "|PRIVACY_RETENTION_GLOBAL_ENABLED=false"}},"privateNetworkOnly":{{eq (len .NetworkSettings.Networks) 1}},"privateNetworkId":{{with index .NetworkSettings.Networks "fleetum_staging_private"}}{{json .NetworkID}}{{else}}null{{end}}}' fleetum_staging_backend fleetum_staging_caddy
 docker network inspect --format '{"networkId":{{json .Id}},"internal":{{json .Internal}},"name":{{json .Name}}}' fleetum_staging_private`;
+
+export function readonlyInspectCommand(dockerMode = "direct") {
+  if (!["direct", "sudo"].includes(dockerMode)) throw new Error("Unsupported staging Docker access mode.");
+  return dockerMode === "sudo" ? READONLY_INSPECT_COMMAND.replace(/^docker /gm, "sudo -n docker ") : READONLY_INSPECT_COMMAND;
+}
 
 export function validateSshTarget(host, user) {
   const errors = [];
@@ -143,8 +154,8 @@ export function requireReleaseBinding(proofPath, runMetadataPath, env = process.
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   try {
-    if (process.argv[2] === "policy-preflight" && process.argv.length === 3) {
-      const capability = verifyIsolationSource();
+    if (process.argv[2] === "policy-preflight" && [3, 5].includes(process.argv.length)) {
+      const capability = verifyIsolationSource(process.cwd(), process.argv[3] ?? "dedicated", process.argv[4] ?? "false");
       if (!capability.ok) throw new Error(capability.errors.join(" "));
       console.log("Candidate implements staging isolation policy version 1; runtime proof is still required.");
     } else {

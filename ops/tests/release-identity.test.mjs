@@ -80,8 +80,8 @@ test("deployment manifests are staged and promoted only while holding the VPS lo
     workflow,
     /\.\/ "\$FLEETUM_VPS_USER@\$FLEETUM_VPS_HOST:\$FLEETUM_APP_DIR\/\.deploy-staging\/\$FLEETUM_RELEASE_SHA\/"/,
   );
-  assert.match(workflow, /exec 9>'\$FLEETUM_DEPLOY_LOCK_FILE'; flock -n 9; rsync -a/);
-  assert.match(workflow, /DEPLOY_LOCK_HELD=true FLEETUM_RELEASE_SHA=/);
+  assert.match(workflow, /exec 9>'\$FLEETUM_DEPLOY_LOCK_FILE'; flock -n 9; gateway_id=.*?rsync -a/);
+  assert.match(workflow, /DEPLOY_LOCK_HELD=true FLEETUM_SHARED_STAGING_INGRESS='\$FLEETUM_SHARED_STAGING_INGRESS' FLEETUM_RELEASE_SHA=/);
   assert.doesNotMatch(
     workflow,
     /\.\/ "\$FLEETUM_VPS_USER@\$FLEETUM_VPS_HOST:\$FLEETUM_APP_DIR\/"/,

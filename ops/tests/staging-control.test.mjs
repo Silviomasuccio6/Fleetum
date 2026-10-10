@@ -35,6 +35,8 @@ test("deploy executes observer and gates from the trusted workflow checkout", ()
   const workflow = readFileSync(new URL("../../.github/workflows/deploy-staging.yml", import.meta.url), "utf8");
   assert.match(workflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.match(workflow, /node \.fleetum-control\/ops\/e2e\/capture-staging-runtime\.mjs deploy/);
-  assert.match(workflow, /--project-name fleetum-staging/g);
+  const helper = readFileSync(new URL("../staging/run-deploy.sh", import.meta.url), "utf8");
+  assert.match(helper, /--project-name fleetum-staging/g);
+  assert.match(workflow, /\.fleetum-control\/ops\/staging\/run-deploy\.sh/);
   assert.match(workflow, /target-preflight\.sh/);
 });

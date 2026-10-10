@@ -5,6 +5,14 @@ services:
     image: postgres:16-alpine
     container_name: fleetum_staging_postgres
     restart: unless-stopped
+    cpus: "0.50"
+    mem_limit: 512m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_USER: fleetum_staging
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -23,6 +31,14 @@ services:
     image: ${FLEETUM_BACKEND_IMAGE:?FLEETUM_BACKEND_IMAGE must be an immutable GHCR digest reference}
     container_name: fleetum_staging_backend
     restart: unless-stopped
+    cpus: "0.75"
+    mem_limit: 768m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       # Bcrypt hashes contain `$`; raw keeps them intact instead of interpolating them.
       - path: /opt/fleetum-staging/env/backend.env
@@ -51,6 +67,14 @@ services:
     image: ${FLEETUM_FRONTEND_IMAGE:?FLEETUM_FRONTEND_IMAGE must be an immutable GHCR digest reference}
     container_name: fleetum_staging_caddy
     restart: unless-stopped
+    cpus: "0.25"
+    mem_limit: 128m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       - backend
     environment:

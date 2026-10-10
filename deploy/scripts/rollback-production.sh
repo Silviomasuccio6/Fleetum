@@ -15,6 +15,27 @@ SOCIAL_PREVIEW_HEALTH_URL="${SOCIAL_PREVIEW_HEALTH_URL:-https://fleetum.it/brand
 HEALTH_RETRIES="${HEALTH_RETRIES:-12}"
 HEALTH_SLEEP_SECONDS="${HEALTH_SLEEP_SECONDS:-5}"
 DRY_RUN="${DRY_RUN:-false}"
+export FLEETUM_SHARED_STAGING_INGRESS="${FLEETUM_SHARED_STAGING_INGRESS:-false}"
+
+# Opt-in shared staging ingress must survive image deployment and application rollback.
+configure_compose_files() {
+  case "$FLEETUM_SHARED_STAGING_INGRESS" in true|false) ;; *) echo 'Invalid shared ingress policy.' >&2; exit 2 ;; esac
+  COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+  if [ "$FLEETUM_SHARED_STAGING_INGRESS" = true ]; then
+    [ -f "$APP_DIR/docker-compose.prod.shared.yml" ] && [ ! -L "$APP_DIR/docker-compose.prod.shared.yml" ] || { echo 'Reviewed shared ingress overlay is required.' >&2; exit 2; }
+    for shared_file in deploy/caddy/Caddyfile.production-shared deploy/caddy/Caddyfile.staging-ingress deploy/caddy/Caddyfile deploy/scripts/shared-staging-ingress-preflight.sh; do
+      [ -f "$APP_DIR/$shared_file" ] && [ ! -L "$APP_DIR/$shared_file" ] || { echo 'Reviewed shared ingress bundle is required.' >&2; exit 2; }
+    done
+    if [ "$DRY_RUN" != true ]; then bash "$APP_DIR/deploy/scripts/shared-staging-ingress-preflight.sh"; fi
+    COMPOSE_ARGS+=(-f "$APP_DIR/docker-compose.prod.shared.yml")
+  elif [ "$DRY_RUN" != true ]; then
+    gateway_id="$(docker ps -a --filter name=fleetum_caddy --format '{{.ID}}')" || { echo 'Production gateway metadata unavailable.' >&2; exit 2; }
+    if [ -n "$gateway_id" ]; then
+      active_ingress="$(docker inspect --format '{{if index .NetworkSettings.Networks "fleetum_staging_ingress"}}shared{{end}}' fleetum_caddy)" || { echo 'Production gateway metadata unavailable.' >&2; exit 2; }
+      [ "$active_ingress" != shared ] || { echo 'Active staging ingress cannot be removed by an unconfigured production deploy.' >&2; exit 2; }
+    fi
+  fi
+}
 
 log() {
   printf '[rollback-production] %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
@@ -78,6 +99,7 @@ acquire_rollback_lock() {
 main() {
   acquire_rollback_lock
   load_last_deploy
+  configure_compose_files
   cd "$APP_DIR"
 
   export FLEETUM_BACKEND_IMAGE="$PREVIOUS_BACKEND_IMAGE"
@@ -86,8 +108,8 @@ main() {
   log "rolling back backend image to $FLEETUM_BACKEND_IMAGE"
   log "rolling back frontend image to $FLEETUM_FRONTEND_IMAGE"
 
-  run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull
-  run docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build
+  run docker compose "${COMPOSE_ARGS[@]}" pull
+  run docker compose "${COMPOSE_ARGS[@]}" up -d --no-build
   HEALTH_URL="$HEALTH_URL" \
     FRONTEND_HEALTH_URL="$FRONTEND_HEALTH_URL" \
     ROBOTS_HEALTH_URL="$ROBOTS_HEALTH_URL" \
