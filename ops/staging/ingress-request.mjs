@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { verifyControlPolicy } from './control-policy.mjs';
 import { validateSshTarget } from '../e2e/staging-release-binding.mjs';
 
-export function requestForIngress(env, root = process.cwd()) {
+export function requestForIngress(env, root = process.cwd(), baselineRoot = `${root}/.ingress-baseline`) {
   const control = verifyControlPolicy({ GITHUB_WORKFLOW_SHA: env.GITHUB_WORKFLOW_SHA,
     FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: env.FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA,
     FLEETUM_STAGING_APPROVED_RELEASE_SHA: env.FLEETUM_INGRESS_APPROVED_SOURCE_SHA,
@@ -18,11 +18,13 @@ export function requestForIngress(env, root = process.cwd()) {
   for (const key of ['FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256', 'FLEETUM_INGRESS_BASELINE_CADDY_SHA256']) {
     if (!/^[a-f0-9]{64}$/.test(env[key] ?? '')) throw new Error('Approved baseline fingerprint required.');
   }
+  const baselineSha = env.FLEETUM_INGRESS_BASELINE_SOURCE_SHA;
+  if (!/^[a-f0-9]{40}$/.test(baselineSha ?? '') || env.CHECKOUT_BASELINE_SHA !== baselineSha) throw new Error('Approved immutable baseline checkout required.');
   const bundleHashes = Object.fromEntries(['Caddyfile', 'Caddyfile.production-shared', 'Caddyfile.staging-ingress'].map(name =>
-    [name, createHash('sha256').update(readFileSync(`${root}/deploy/caddy/${name}`)).digest('hex')]));
-  if (createHash('sha256').update(readFileSync(`${root}/docker-compose.prod.yml`)).digest('hex') !== env.FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256) throw new Error('Reviewed Compose baseline differs from protected fingerprint.');
+    [name, createHash('sha256').update(readFileSync(`${name === 'Caddyfile' ? baselineRoot : root}/deploy/caddy/${name}`)).digest('hex')]));
+  if (createHash('sha256').update(readFileSync(`${baselineRoot}/docker-compose.prod.yml`)).digest('hex') !== env.FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256) throw new Error('Reviewed Compose baseline differs from protected fingerprint.');
   if (bundleHashes.Caddyfile !== env.FLEETUM_INGRESS_BASELINE_CADDY_SHA256) throw new Error('Reviewed baseline differs from protected fingerprint.');
-  const request = { mode, sourceSha: env.GITHUB_WORKFLOW_SHA, image,
+  const request = { mode, sourceSha: env.GITHUB_WORKFLOW_SHA, baselineSourceSha: baselineSha, image,
     composeHash: env.FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256, caddyHash: bundleHashes.Caddyfile, bundleHashes };
   if (mode !== 'plan') {
     const confirmation = mode === 'apply' ? 'ACTIVATE_STAGING_INGRESS' : 'RECOVER_STAGING_INGRESS';

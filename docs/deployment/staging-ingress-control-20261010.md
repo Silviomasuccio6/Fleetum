@@ -1,6 +1,6 @@
 # Controllo del solo ingresso staging
 
-Nella proposta di adozione separata questo runbook descrive i controlli del candidato PR144. Per registrazione, scelta del branch, CI disponibile e rilascio applicativo chiuso vedere [adozione separata](staging-control-adoption-20261010.md). I collaudi completi Docker/proxy richiedono il checkout candidato `21e6282825f0ef1c6a7b50dc6b711936fe40e137`; la proposta include soltanto i controlli e il runner di lifecycle, senza il backend di staging.
+Per la proposta integrata PR146 vedere [integrazione applicativa](application-control-integration-20261010.md). La PR144 e il documento di [adozione separata](staging-control-adoption-20261010.md) descrivono fonti storiche: non usarne gli SHA o la CI come prova della nuova revisione. Tutti i dispatch richiedono la CI/source proof dell'esatto SHA dei controlli approvati.
 
 Il workflow `.github/workflows/staging-ingress.yml` prepara un percorso dedicato
 per il primo ingresso condiviso. Non rilascia backend, database o frontend nuovi.
@@ -51,6 +51,7 @@ runbook non li crea o modifica e non contiene segreti.
 | --- | --- |
 | `FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA` | SHA completo del workflow e helper approvati. |
 | `FLEETUM_INGRESS_APPROVED_SOURCE_SHA` | Stesso SHA completo del bundle Caddy approvato. |
+| `FLEETUM_INGRESS_BASELINE_SOURCE_SHA` | SHA completo e distinto dei manifest originali osservati sul VPS; checkout separato senza credenziali. |
 | `FLEETUM_INGRESS_CADDY_IMAGE` | Digest GHCR completo dell'immagine frontend/Caddy live, già presente sul server. Nessun tag. |
 | `FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256` | Hash approvato del Compose produzione originale, uguale a sorgente e server. |
 | `FLEETUM_INGRESS_BASELINE_CADDY_SHA256` | Hash approvato del Caddyfile produzione originale, uguale a sorgente e server. |
@@ -76,6 +77,27 @@ comando/utente/restart/porte/mount canonici, TLS nei volumi esterni esistenti
 `app_caddy_data` e `app_caddy_config`, tre container nel progetto `app`, rete
 privata produzione invariata. Un aggiornamento di versione o hardening live
 diverso richiede nuova osservazione/revisione, non un bypass.
+
+La baseline è distinta dalla futura applicazione. Il workflow checkouta
+`.ingress-baseline` sul pin completo, verifica il checkout e le due impronte
+protette, e trasferisce da lì soltanto il Caddyfile originale. Overlay e
+controller restano quelli del source/workflow approvato con CI completa.
+Il Compose originale non viene trasferito né applicato; serve a riconoscere
+la configurazione live immutata. Le due impronte devono ancora coincidere
+con i file del server. Non adeguare i manifest live al futuro candidato per
+far passare un piano del solo gateway. Nel rilievo del 10 ottobre i manifest
+live corrispondono a main `db1f231dc8cb699f1a5ce4215a0278c93212d16d`, mentre
+il candidato cambia il mount upload del backend: quella modifica appartiene
+al futuro rilascio applicativo e non all'attivazione ingress.
+
+`baselineSourceSha` è incluso nello snapshot/digest del piano e nel diario:
+deriva del pin invalida apply/retry/recover. Diari precedenti senza il nuovo
+campo richiedono riconciliazione esplicita, non vengono adottati automaticamente.
+Il rilievo non ha trovato ingress attivo o diario operativo di questa proposta;
+nessuna attivazione live è eseguita da questa correzione. Il lock produzione
+canonico è risultato assente: deve essere predisposto con una modifica
+specifica approvata prima del primo plan. Non viene creato dal controller
+osservativo e non si deve usare un lock alternativo.
 
 La rete `fleetum_staging_ingress` è bridge interna IPv4 `10.203.91.0/28`, gateway
 `.1`, Caddy pubblico `.2`, staging `.3`, con label di proprietà e solo membri

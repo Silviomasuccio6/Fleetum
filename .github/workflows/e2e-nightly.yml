@@ -44,9 +44,14 @@ jobs:
       E2E_TENANT_PASSWORD: ${{ secrets.E2E_TENANT_PASSWORD }}
       E2E_OTHER_TENANT_EMAIL: ${{ secrets.E2E_OTHER_TENANT_EMAIL }}
       E2E_OTHER_TENANT_PASSWORD: ${{ secrets.E2E_OTHER_TENANT_PASSWORD }}
-      E2E_RUN_METADATA_PATH: ${{ runner.temp }}/fleetum-e2e-verified-run.json
 
     steps:
+      - name: Prepare private run metadata path
+        run: |
+          set -euo pipefail
+          test -n "$RUNNER_TEMP"
+          printf 'E2E_RUN_METADATA_PATH=%s/fleetum-e2e-verified-run.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - name: Require explicit immutable release binding
         id: binding
         uses: actions/github-script@v7

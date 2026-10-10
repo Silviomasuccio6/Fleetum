@@ -13,6 +13,7 @@ const hash = path => createHash('sha256').update(readFileSync(new URL(path, impo
 const env = {
   GITHUB_WORKFLOW_SHA: 'a'.repeat(40), CHECKOUT_SHA: 'a'.repeat(40),
   FLEETUM_INGRESS_TRUSTED_WORKFLOW_SHA: 'a'.repeat(40), FLEETUM_INGRESS_APPROVED_SOURCE_SHA: 'a'.repeat(40),
+  FLEETUM_INGRESS_BASELINE_SOURCE_SHA: 'c'.repeat(40), CHECKOUT_BASELINE_SHA: 'c'.repeat(40),
   INGRESS_HOST: 'staging-host.example.invalid', INGRESS_USER: 'ubuntu', INGRESS_MODE: 'plan',
   FLEETUM_INGRESS_CADDY_IMAGE: `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${'b'.repeat(64)}`,
   FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256: hash('../../docker-compose.prod.yml'),
@@ -31,7 +32,7 @@ test('Python ingress state machine passes synthetic fault/recovery cases', () =>
 });
 
 test('plan omits all protected contact and mutation inputs', () => {
-  const request = requestForIngress({ ...env, FLEETUM_INGRESS_CADDY_EMAIL: 'synthetic@example.invalid', INGRESS_CONFIRM: 'ignored' }, root);
+  const request = requestForIngress({ ...env, FLEETUM_INGRESS_CADDY_EMAIL: 'synthetic@example.invalid', INGRESS_CONFIRM: 'ignored' }, root, root);
   assert.equal(request.mode, 'plan'); assert.equal(request.sourceSha, env.CHECKOUT_SHA);
   for (const name of ['email', 'confirm', 'planDigest']) assert.equal(Object.hasOwn(request, name), false);
 });
@@ -45,17 +46,17 @@ for (const [name, changes] of Object.entries({
   'Caddy fingerprint drift': { FLEETUM_INGRESS_BASELINE_CADDY_SHA256: 'c'.repeat(64) },
   'Compose fingerprint drift': { FLEETUM_INGRESS_BASELINE_COMPOSE_SHA256: 'c'.repeat(64) },
   'unsupported mode': { INGRESS_MODE: 'deploy' },
-})) test(`request rejects ${name}`, () => assert.throws(() => requestForIngress({ ...env, ...changes }, root)));
+})) test(`request rejects ${name}`, () => assert.throws(() => requestForIngress({ ...env, ...changes }, root, root)));
 
 for (const mode of ['apply', 'recover']) test(`${mode} requires explicit plan, source and production persistence policy`, () => {
   const complete = { ...env, INGRESS_MODE: mode, INGRESS_CONFIRM: mode === 'apply' ? 'ACTIVATE_STAGING_INGRESS' : 'RECOVER_STAGING_INGRESS',
     INGRESS_PLAN_DIGEST: 'd'.repeat(64), FLEETUM_SHARED_STAGING_INGRESS: mode === 'apply' ? 'true' : 'false',
     PRODUCTION_PERSISTENCE_VERIFIED: 'true', FLEETUM_INGRESS_CADDY_EMAIL: 'synthetic@example.invalid' };
-  assert.equal(requestForIngress(complete, root).mode, mode);
+  assert.equal(requestForIngress(complete, root, root).mode, mode);
   for (const changes of [{ INGRESS_CONFIRM: '' }, { INGRESS_PLAN_DIGEST: '' }, { FLEETUM_INGRESS_CADDY_EMAIL: '' },
     { FLEETUM_INGRESS_CADDY_EMAIL: 'bad@example.invalid\n' }, { PRODUCTION_PERSISTENCE_VERIFIED: 'false' },
     { FLEETUM_SHARED_STAGING_INGRESS: mode === 'apply' ? 'false' : 'true' }]) {
-    assert.throws(() => requestForIngress({ ...complete, ...changes }, root));
+    assert.throws(() => requestForIngress({ ...complete, ...changes }, root, root));
   }
 });
 

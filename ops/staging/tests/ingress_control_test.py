@@ -105,7 +105,7 @@ class IngressTests(unittest.TestCase):
         self.app.joinpath('docker-compose.prod.yml').write_text('synthetic compose baseline')
         for name in control.FILES: self.bundle.joinpath(name).write_text('synthetic ' + name)
         self.app.joinpath('deploy/caddy/Caddyfile').write_bytes(self.bundle.joinpath('Caddyfile').read_bytes())
-        self.request = {'mode': 'plan', 'sourceSha': 'e' * 40, 'image': 'ghcr.io/silviomasuccio6/fleetum-frontend@sha256:' + 'f' * 64,
+        self.request = {'mode': 'plan', 'sourceSha': 'e' * 40, 'baselineSourceSha': 'a' * 40, 'image': 'ghcr.io/silviomasuccio6/fleetum-frontend@sha256:' + 'f' * 64,
                         'composeHash': control.file_hash(self.app / 'docker-compose.prod.yml'), 'caddyHash': control.file_hash(self.bundle / 'Caddyfile'),
                         'bundleHashes': {name: control.file_hash(self.bundle / name) for name in control.FILES}}
         self.g = FakeGateway(self.bundle, self.request, self.app, self.state)
@@ -144,6 +144,14 @@ class IngressTests(unittest.TestCase):
         self.request['image'] = 'caddy:latest'; self.refused('invalid-image', lambda: control.validate_request(self.request))
     def test_request_rejects_short_source(self):
         self.request['sourceSha'] = 'e' * 7; self.refused('invalid-source', lambda: control.validate_request(self.request))
+    def test_request_rejects_mutable_baseline_source(self):
+        self.request['baselineSourceSha'] = 'main'; self.refused('invalid-baseline-source', lambda: control.validate_request(self.request))
+    def test_changed_baseline_source_invalidates_plan_without_mutations(self):
+        self.applying(); self.request['baselineSourceSha'] = 'b' * 40
+        self.refused('stale-plan'); self.assertFalse(self.state.exists())
+    def test_recovery_rejects_a_different_baseline_source(self):
+        self.applying(); self.g.execute(); self.recovering(); self.request['baselineSourceSha'] = 'b' * 40
+        self.refused('journal-baseline-mismatch')
     def test_request_rejects_confirmation(self):
         self.applying(); self.request['confirm'] = 'yes'; self.refused('confirmation-required', lambda: control.validate_request(self.request))
     def test_request_rejects_email_control_characters(self):

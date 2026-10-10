@@ -35,7 +35,7 @@ export async function runLifecycle({ image }) {
   const check = (name, fn) => { fn(); report.checks.push({ name, passed: true }); };
   const hashes = Object.fromEntries(['Caddyfile', 'Caddyfile.production-shared', 'Caddyfile.staging-ingress'].map(name =>
     [name, createHash('sha256').update(readFileSync(join(root, 'deploy/caddy', name))).digest('hex')]));
-  const input = { mode: 'plan', sourceSha: 'a'.repeat(40), image: `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${'b'.repeat(64)}`,
+  const input = { mode: 'plan', sourceSha: 'a'.repeat(40), baselineSourceSha: 'c'.repeat(40), image: `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${'b'.repeat(64)}`,
     composeHash: createHash('sha256').update(readFileSync(join(root, 'docker-compose.prod.yml'))).digest('hex'), caddyHash: hashes.Caddyfile, bundleHashes: hashes };
   const python = `import importlib.util,json,sys\nfrom pathlib import Path\nspec=importlib.util.spec_from_file_location('control',sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)\ng=m.Gateway(Path(sys.argv[1]).parent,json.load(sys.stdin));g.paths['app']=Path(sys.argv[2]);print(json.dumps([g.manifest(False),g.manifest(True)]))\n`;
   const generated = spawnSync('python3', ['-I', '-B', '-c', python, join(root, 'ops/staging/ingress-control.py'), scratch], { input: JSON.stringify(input), encoding: 'utf8' });

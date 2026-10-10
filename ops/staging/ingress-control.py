@@ -40,11 +40,12 @@ def file_hash(path):
 
 def validate_request(request):
     require(isinstance(request, dict), 'invalid-request')
-    common = {'mode', 'sourceSha', 'image', 'composeHash', 'caddyHash', 'bundleHashes'}
+    common = {'mode', 'sourceSha', 'baselineSourceSha', 'image', 'composeHash', 'caddyHash', 'bundleHashes'}
     mode = request.get('mode')
     extra = set() if mode == 'plan' else {'confirm', 'planDigest', 'email'}
     require(mode in {'plan', 'apply', 'recover'} and set(request) == common | extra, 'invalid-request')
     require(SHA.fullmatch(request.get('sourceSha', '')), 'invalid-source')
+    require(SHA.fullmatch(request.get('baselineSourceSha', '')), 'invalid-baseline-source')
     require(re.fullmatch(r'ghcr.io/silviomasuccio6/fleetum-frontend@sha256:[a-f0-9]{64}', request.get('image', '')), 'invalid-image')
     for name in ['composeHash', 'caddyHash']:
         require(DIGEST.fullmatch(request.get(name, '')), 'invalid-baseline')
@@ -187,7 +188,7 @@ class Gateway:
                     and set(container['Networks']) == {PRIVATE} and container['Networks'][PRIVATE]['NetworkID'] == private['Id'], 'application-drift')
         ingress = self.network_preflight()
         require(not shared or ingress is not None, 'network-metadata-failed')
-        return {'sourceSha': self.request['sourceSha'], 'image': image, 'composeVersion': compose_version, 'gateway': gateway['Id'], 'gatewayState': gateway['State'], 'shared': shared,
+        return {'sourceSha': self.request['sourceSha'], 'baselineSourceSha': self.request['baselineSourceSha'], 'image': image, 'composeVersion': compose_version, 'gateway': gateway['Id'], 'gatewayState': gateway['State'], 'shared': shared,
                 'applications': {name: {key: containers[name][key] for key in ['Id', 'Image', 'State']} for name in ['fleetum_backend', 'fleetum_postgres']},
                 'network': ingress, 'privateId': private['Id'], 'composeHash': self.request['composeHash'],
                 'caddyHash': self.request['caddyHash'], 'bundleHashes': self.request['bundleHashes']}
@@ -225,6 +226,7 @@ class Gateway:
         require(file_hash(journal) and journal.stat().st_uid == 0 and stat.S_IMODE(journal.stat().st_mode) == 0o600, 'unsafe-journal')
         record = json.loads(journal.read_text())
         require(record['before']['sourceSha'] == self.request['sourceSha'] and record['before']['image'] == self.request['image'], 'journal-source-mismatch')
+        require(record['before'].get('baselineSourceSha') == self.request['baselineSourceSha'], 'journal-baseline-mismatch')
         require(fingerprint(record['before']) == self.request['planDigest'], 'journal-plan-mismatch')
         require(record['emailDigest'] == hashlib.sha256(self.request['email'].encode()).hexdigest(), 'protected-email-mismatch')
         return record
