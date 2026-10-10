@@ -60,6 +60,17 @@ Replacing Tailwind 3 or the lint/glob stack is a separate compatibility change
 and must preserve the existing visual output. Full audit remains nonzero
 until that dependency is removed or an upstream patch is verified.
 
+### Subsequent local patch
+
+The next isolated correction replaces the vulnerable implementation with
+the explicitly identified local package `@fleetum/braces@3.0.3-fleetum.2`.
+See `docs/security/local-braces-patch-20261010.md` for origin, bounded AST
+behavior, source/archive/installed-file verification, required vendor gate
+and maintenance/rollback. Tailwind and all other resolved versions stay
+unchanged. The upstream advisory remains unpatched; npm does not certify
+the local namespace, so its inventory result must be accompanied by the
+actual behavioral and provenance evidence.
+
 ## Impact and rollback
 
 No provider, secret, production configuration, database migration or live

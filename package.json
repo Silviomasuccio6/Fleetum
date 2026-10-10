@@ -22,12 +22,13 @@
     "verify:frontend": "npm run lint -w frontend && npm run test:frontend && npm run build -w frontend",
     "verify:website": "npm run lint -w website && npm run build -w website && npm run test:website",
     "verify:database": "bash ops/verify-database.sh",
-    "verify:release": "npm run prisma:generate -w backend && npm run lint && npm run build && npm run test:backend && npm run test:frontend && npm run test:website && npm run verify:prerender -w frontend && npm run audit:production",
+    "verify:release": "npm run verify:vendor && npm run prisma:generate -w backend && npm run lint && npm run build && npm run test:backend && npm run test:frontend && npm run test:website && npm run verify:prerender -w frontend && npm run audit:production",
     "work:status": "bash ops/current-work-status.sh",
     "analyze": "ANALYZE=true npm run build -w frontend",
     "test:e2e": "playwright test --project=chromium",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --project=chromium --headed"
+    "test:e2e:headed": "playwright test --project=chromium --headed",
+    "verify:vendor": "node --test --test-concurrency=1 ops/tests/braces-provenance.test.mjs ops/tests/braces-security.test.mjs"
   },
   "overrides": {
     "body-parser": "1.20.8",
@@ -40,11 +41,13 @@
     "sharp": "0.35.5",
     "postcss-selector-parser": "7.1.6",
     "source-map-js": "1.2.2",
-    "shell-quote": "1.11.0"
+    "shell-quote": "1.11.0",
+    "braces": "$braces"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "braces": "file:vendor/fleetum-braces-3.0.3-fleetum.2.tgz"
   },
   "engines": {
     "node": ">=22.23.0 <23",
