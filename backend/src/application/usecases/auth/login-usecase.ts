@@ -22,14 +22,14 @@ export class LoginUseCase {
     });
     if (!candidates.length) throw new AppError("Credenziali non valide", 401, "UNAUTHORIZED");
 
-    const matchingUserIds: string[] = [];
+    const matchingUsers: Array<{ id: string; passwordHash: string }> = [];
     for (const candidate of candidates) {
       const ok = await bcrypt.compare(input.password, candidate.passwordHash);
-      if (ok) matchingUserIds.push(candidate.id);
+      if (ok) matchingUsers.push({ id: candidate.id, passwordHash: candidate.passwordHash });
     }
 
-    if (matchingUserIds.length === 0) throw new AppError("Credenziali non valide", 401, "UNAUTHORIZED");
-    if (matchingUserIds.length > 1) {
+    if (matchingUsers.length === 0) throw new AppError("Credenziali non valide", 401, "UNAUTHORIZED");
+    if (matchingUsers.length > 1) {
       throw new AppError(
         "Email associata a più tenant. Contatta supporto per unificare l'utenza.",
         409,
@@ -37,8 +37,9 @@ export class LoginUseCase {
       );
     }
 
-    const user = await this.userRepository.findById(matchingUserIds[0]);
-    return this.issueSessionForUser(user?.id ?? "", context);
+    const matched = matchingUsers[0];
+    const user = await this.userRepository.findById(matched.id);
+    return this.issueSessionForUser(user?.id ?? "", context, matched.passwordHash);
   }
 
   async executeTrustedEmail(email: string, context?: { userAgent?: string; ipAddress?: string }) {
@@ -65,7 +66,11 @@ export class LoginUseCase {
     return this.issueSessionForUser(candidates[0].id, context);
   }
 
-  private async issueSessionForUser(userId: string, context?: { userAgent?: string; ipAddress?: string }) {
+  private async issueSessionForUser(
+    userId: string,
+    context?: { userAgent?: string; ipAddress?: string },
+    expectedPasswordHash?: string
+  ) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError("Utente non trovato", 404, "NOT_FOUND");
     if (user.status !== "ACTIVE") throw new AppError("Utente non attivo", 403, "FORBIDDEN");
@@ -88,7 +93,8 @@ export class LoginUseCase {
       roles: user.roles,
       permissions: user.permissions,
       userAgent: context?.userAgent,
-      ipAddress: context?.ipAddress
+      ipAddress: context?.ipAddress,
+      expectedPasswordHash
     });
     const token = this.tokenService.sign({
       userId: user.id,

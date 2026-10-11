@@ -1,8 +1,10 @@
 import { Request, Response } from "express";
+import { PlatformSessionService, platformSessionService } from "../../../application/services/platform-session-service.js";
 import { PlatformAdminService } from "../../../application/services/platform-admin-service.js";
 import { InvoiceService } from "../../../application/services/invoice-service.js";
 import { PlatformConsoleService } from "../../../application/services/platform-console-service.js";
 import { getClientIp } from "../../../shared/utils/ip.js";
+import { AppError } from "../../../shared/errors/app-error.js";
 import {
   demoLeadIdSchema,
   invoiceIdSchema,
@@ -26,11 +28,30 @@ import {
   setPlatformTrustedDeviceCookie
 } from "../utils/platform-trusted-device-cookies.js";
 
+const IDEMPOTENCY_HEADER = "x-idempotency-key";
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+const requiredIdempotencyKey = (req: Request) => {
+  const header = req.header(IDEMPOTENCY_HEADER)?.trim();
+  if (!header) {
+    throw new AppError(
+      "Header x-idempotency-key obbligatorio per inviare una fattura.",
+      400,
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(header)) {
+    throw new AppError("Header x-idempotency-key non valido.", 400, "INVALID_IDEMPOTENCY_KEY");
+  }
+  return header;
+};
+
 export class PlatformAdminController {
   constructor(
     private readonly service: PlatformAdminService,
     private readonly invoiceService: InvoiceService,
-    private readonly consoleService: PlatformConsoleService
+    private readonly consoleService: PlatformConsoleService,
+    private readonly sessions: PlatformSessionService = platformSessionService
   ) {}
 
   login = async (req: Request, res: Response) => {
@@ -46,6 +67,14 @@ export class PlatformAdminController {
       res.json({ ...safeResult, trustedDevice: { expiresAt: _trustedDevice.expiresAt.toISOString() } });
       return;
     }
+    res.json(result);
+  };
+
+  logout = async (req: Request, res: Response) => {
+    const token = req.headers.authorization?.slice(7);
+    if (!token) throw new AppError("Token platform mancante", 401, "UNAUTHORIZED");
+    const result = await this.sessions.logout(token);
+    res.setHeader("Cache-Control", "no-store");
     res.json(result);
   };
 
@@ -243,8 +272,10 @@ export class PlatformAdminController {
     const result = await this.invoiceService.sendEmail({
       invoiceId,
       actorUserId: req.auth?.userId ?? "platform-admin",
-      sourceIp: getClientIp(req)
+      sourceIp: getClientIp(req),
+      idempotencyKey: requiredIdempotencyKey(req)
     });
+    if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
     res.json(result);
   };
 

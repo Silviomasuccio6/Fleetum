@@ -4,6 +4,7 @@ import { useAuthStore } from "../../application/stores/auth-store";
 import { ApiRepository } from "../../domain/repositories/api-repository";
 import { tokenStorage } from "../auth/token-storage";
 import { getApiBaseUrl } from "./api-base-url";
+import { getLoginRedirectPath } from "../../presentation/routes/safe-return-to";
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -62,9 +63,10 @@ const isStateChangingMethod = (method?: string) => {
 const readCsrfToken = () => getCookieValue("fermi_csrf") ?? tokenStorage.getCsrf();
 
 const logoutAndRedirectToLogin = () => {
+  const loginPath = getLoginRedirectPath(window.location);
   tokenStorage.clear();
   useAuthStore.getState().logout();
-  if (window.location.pathname !== "/login") window.location.href = "/login";
+  if (window.location.pathname !== "/login") window.location.replace(loginPath);
 };
 
 const tryRefreshSession = async () => {

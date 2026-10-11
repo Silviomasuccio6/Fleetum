@@ -1,4 +1,10 @@
 import "dotenv/config";
+import {
+  assertStagingIsolation,
+  environmentDefaults,
+  resolveEmailProvider,
+  resolveFleetumEnvironment
+} from "./staging-safety.js";
 
 const required = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
@@ -14,7 +20,9 @@ const TEST_PLATFORM_JWT_SECRET =
   "test-platform-jwt-secret-for-ci-only-000000000000000000000000000000000000000000";
 const TEST_PLATFORM_ADMIN_PASSWORD_HASH = "$2a$12$1kW0dHz8CuORBMdsqDk9Z.HEJFh/IofTBgmMuBA43F8VUoCgX0Bde";
 const TEST_DATABASE_URL = "postgresql://fleetum:fleetum_dev@localhost:5433/fleetum_ci?schema=public";
-const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
+const FLEETUM_ENVIRONMENT = resolveFleetumEnvironment(process.env.FLEETUM_ENVIRONMENT);
+const ENVIRONMENT_DEFAULTS = environmentDefaults(FLEETUM_ENVIRONMENT);
+const EMAIL_PROVIDER = resolveEmailProvider(FLEETUM_ENVIRONMENT, process.env.EMAIL_PROVIDER);
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
 const PLATFORM_IP_ALLOWLIST_MODE = (process.env.PLATFORM_IP_ALLOWLIST_MODE ?? "optional").toLowerCase();
 const EXACT_MONEY_READ_MODE = (process.env.EXACT_MONEY_READ_MODE ?? "legacy").toLowerCase();
@@ -53,8 +61,26 @@ const parseTrustProxy = (value?: string): boolean | number | string => {
 
 const JWT_SECRET = required("JWT_SECRET", isCiOrTest ? TEST_JWT_SECRET : undefined);
 const PLATFORM_JWT_SECRET = required("PLATFORM_JWT_SECRET", isCiOrTest ? TEST_PLATFORM_JWT_SECRET : undefined);
+const DATABASE_URL = required("DATABASE_URL", isCiOrTest ? TEST_DATABASE_URL : undefined);
 const APP_URL = process.env.APP_URL ?? "http://localhost:5173";
 const BACKEND_PUBLIC_URL = process.env.BACKEND_PUBLIC_URL ?? "http://127.0.0.1:4000";
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "http://localhost:5173";
+const PLATFORM_CORS_ORIGIN = process.env.PLATFORM_CORS_ORIGIN ?? "http://localhost:5174";
+const PRIVACY_RETENTION_CRON_ENABLED = toBool(
+  process.env.PRIVACY_RETENTION_CRON_ENABLED ?? String(ENVIRONMENT_DEFAULTS.privacyRetentionCronEnabled)
+);
+const PRIVACY_RETENTION_GLOBAL_ENABLED = toBool(process.env.PRIVACY_RETENTION_GLOBAL_ENABLED ?? "false");
+const BILLING_DUNNING_CRON_ENABLED = toBool(
+  process.env.BILLING_DUNNING_CRON_ENABLED ?? String(ENVIRONMENT_DEFAULTS.billingDunningCronEnabled)
+);
+const RESEND_API_KEY =
+  FLEETUM_ENVIRONMENT === "staging"
+    ? process.env.RESEND_API_KEY
+    : required("RESEND_API_KEY", isCiOrTest ? "re_ci_placeholder" : undefined);
+const RESEND_FROM =
+  FLEETUM_ENVIRONMENT === "staging"
+    ? process.env.RESEND_FROM
+    : required("RESEND_FROM", isCiOrTest ? "Fleetum <onboarding@resend.dev>" : undefined);
 const PLATFORM_ADMIN_PASSWORD_HASH = required(
   "PLATFORM_ADMIN_PASSWORD_HASH",
   isCiOrTest ? TEST_PLATFORM_ADMIN_PASSWORD_HASH : undefined
@@ -76,10 +102,6 @@ if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(PLATFORM_ADMIN_PASSWORD_HASH)) 
   throw new Error("PLATFORM_ADMIN_PASSWORD_HASH must be a complete bcrypt hash generated with bcryptjs");
 }
 
-if (EMAIL_PROVIDER !== "resend") {
-  throw new Error("EMAIL_PROVIDER must be resend");
-}
-
 if (!["local", "s3"].includes(STORAGE_PROVIDER)) {
   throw new Error("STORAGE_PROVIDER must be local or s3");
 }
@@ -92,6 +114,21 @@ if (!["legacy", "compare", "exact"].includes(EXACT_MONEY_READ_MODE)) {
   throw new Error("EXACT_MONEY_READ_MODE must be legacy, compare or exact");
 }
 
+assertStagingIsolation({
+  environment: FLEETUM_ENVIRONMENT,
+  appUrl: APP_URL,
+  backendPublicUrl: BACKEND_PUBLIC_URL,
+  corsOrigin: CORS_ORIGIN,
+  platformCorsOrigin: PLATFORM_CORS_ORIGIN,
+  databaseUrl: DATABASE_URL,
+  emailProvider: EMAIL_PROVIDER,
+  storageProvider: STORAGE_PROVIDER,
+  privacyRetentionCronEnabled: PRIVACY_RETENTION_CRON_ENABLED,
+  privacyRetentionGlobalEnabled: PRIVACY_RETENTION_GLOBAL_ENABLED,
+  billingDunningCronEnabled: BILLING_DUNNING_CRON_ENABLED,
+  rawEnv: process.env
+});
+
 if (STORAGE_PROVIDER === "s3") {
   for (const name of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]) {
     if (!process.env[name]) throw new Error(`Missing required env var for S3 storage: ${name}`);
@@ -100,13 +137,14 @@ if (STORAGE_PROVIDER === "s3") {
 
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
+  FLEETUM_ENVIRONMENT,
   PORT: toInt(process.env.PORT ?? "4000", "PORT"),
   PLATFORM_PORT: toInt(process.env.PLATFORM_PORT ?? "4100", "PLATFORM_PORT"),
   SHUTDOWN_GRACE_MS: toInt(process.env.SHUTDOWN_GRACE_MS ?? "15000", "SHUTDOWN_GRACE_MS"),
   PLATFORM_BIND_HOST: process.env.PLATFORM_BIND_HOST ?? "127.0.0.1",
   TRUST_PROXY: parseTrustProxy(process.env.TRUST_PROXY),
 
-  DATABASE_URL: required("DATABASE_URL", isCiOrTest ? TEST_DATABASE_URL : undefined),
+  DATABASE_URL,
   JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "15m",
   PLATFORM_JWT_SECRET,
@@ -114,8 +152,8 @@ export const env = {
 
   APP_URL,
   BACKEND_PUBLIC_URL,
-  CORS_ORIGIN: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-  PLATFORM_CORS_ORIGIN: process.env.PLATFORM_CORS_ORIGIN ?? "http://localhost:5174",
+  CORS_ORIGIN,
+  PLATFORM_CORS_ORIGIN,
   OAUTH_CALLBACK_URL: process.env.OAUTH_CALLBACK_URL ?? `${APP_URL}/auth/social-callback`,
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
@@ -132,6 +170,12 @@ export const env = {
   FILE_MAX_IMAGE_MB: toIntInRange(process.env.FILE_MAX_IMAGE_MB ?? "5", "FILE_MAX_IMAGE_MB", 1, 50),
   FILE_MAX_DOCUMENT_MB: toIntInRange(process.env.FILE_MAX_DOCUMENT_MB ?? "12", "FILE_MAX_DOCUMENT_MB", 1, 100),
   FILE_MAX_LOGO_MB: toIntInRange(process.env.FILE_MAX_LOGO_MB ?? "4", "FILE_MAX_LOGO_MB", 1, 20),
+  UPLOAD_TENANT_QUOTA_MB: toIntInRange(
+    process.env.UPLOAD_TENANT_QUOTA_MB ?? "2048",
+    "UPLOAD_TENANT_QUOTA_MB",
+    100,
+    1048576
+  ),
   IMAGE_MAX_WIDTH_PX: toIntInRange(process.env.IMAGE_MAX_WIDTH_PX ?? "1920", "IMAGE_MAX_WIDTH_PX", 320, 8000),
   IMAGE_COMPRESSION_QUALITY: toIntInRange(process.env.IMAGE_COMPRESSION_QUALITY ?? "82", "IMAGE_COMPRESSION_QUALITY", 40, 100),
   IMAGE_PNG_COMPRESSION_LEVEL: toIntInRange(process.env.IMAGE_PNG_COMPRESSION_LEVEL ?? "9", "IMAGE_PNG_COMPRESSION_LEVEL", 0, 9),
@@ -156,18 +200,37 @@ export const env = {
     1,
     366
   ),
-  PRIVACY_RETENTION_CRON_ENABLED: toBool(process.env.PRIVACY_RETENTION_CRON_ENABLED ?? "false"),
+  PRIVACY_RETENTION_CRON_ENABLED,
   PRIVACY_RETENTION_CRON_SCHEDULE: process.env.PRIVACY_RETENTION_CRON_SCHEDULE ?? "30 3 * * *",
+  PRIVACY_RETENTION_GLOBAL_ENABLED,
   PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS: toIntInRange(
     process.env.PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS ?? "30",
     "PRIVACY_RETENTION_DELETED_FILE_GRACE_DAYS",
     1,
     365
   ),
+  PRIVACY_RETENTION_WEBSITE_EVENT_DAYS: toIntInRange(
+    process.env.PRIVACY_RETENTION_WEBSITE_EVENT_DAYS ?? "90",
+    "PRIVACY_RETENTION_WEBSITE_EVENT_DAYS",
+    1,
+    3650
+  ),
+  PRIVACY_RETENTION_DEMO_LEAD_DAYS: toIntInRange(
+    process.env.PRIVACY_RETENTION_DEMO_LEAD_DAYS ?? "365",
+    "PRIVACY_RETENTION_DEMO_LEAD_DAYS",
+    1,
+    3650
+  ),
+  PRIVACY_RETENTION_EMAIL_QUEUE_PAYLOAD_DAYS: toIntInRange(
+    process.env.PRIVACY_RETENTION_EMAIL_QUEUE_PAYLOAD_DAYS ?? "30",
+    "PRIVACY_RETENTION_EMAIL_QUEUE_PAYLOAD_DAYS",
+    1,
+    3650
+  ),
 
-  EMAIL_PROVIDER: "resend" as const,
-  RESEND_API_KEY: required("RESEND_API_KEY", isCiOrTest ? "re_ci_placeholder" : undefined),
-  RESEND_FROM: required("RESEND_FROM", isCiOrTest ? "Fleetum <onboarding@resend.dev>" : undefined),
+  EMAIL_PROVIDER,
+  RESEND_API_KEY,
+  RESEND_FROM,
   DEMO_LEAD_RECIPIENT_EMAIL: process.env.DEMO_LEAD_RECIPIENT_EMAIL,
 
   CRON_REMINDER_SCHEDULE: process.env.CRON_REMINDER_SCHEDULE ?? "*/10 * * * *",
@@ -188,7 +251,7 @@ export const env = {
 
   BILLING_TRIAL_DAYS: toInt(process.env.BILLING_TRIAL_DAYS ?? "14", "BILLING_TRIAL_DAYS"),
   BILLING_PAST_DUE_GRACE_DAYS: toInt(process.env.BILLING_PAST_DUE_GRACE_DAYS ?? "7", "BILLING_PAST_DUE_GRACE_DAYS"),
-  BILLING_DUNNING_CRON_ENABLED: toBool(process.env.BILLING_DUNNING_CRON_ENABLED ?? "true"),
+  BILLING_DUNNING_CRON_ENABLED,
   BILLING_DUNNING_CRON_SCHEDULE: process.env.BILLING_DUNNING_CRON_SCHEDULE ?? "15 * * * *",
   BILLING_DUNNING_BATCH_SIZE: toIntInRange(
     process.env.BILLING_DUNNING_BATCH_SIZE ?? "100",

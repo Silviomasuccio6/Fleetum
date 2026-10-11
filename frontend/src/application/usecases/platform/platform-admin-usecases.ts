@@ -1,13 +1,13 @@
 import { platformAuthStorage } from "../../../infrastructure/platform/platform-auth-storage";
 
-const configuredApiBase = import.meta.env.VITE_PLATFORM_API_BASE_URL || "/platform-api";
+const configuredApiBase = import.meta.env?.VITE_PLATFORM_API_BASE_URL || "/platform-api";
 const isBrowser = typeof window !== "undefined";
 const isLocalPlatformHost = isBrowser && ["localhost", "127.0.0.1"].includes(window.location.hostname);
 const apiBase = configuredApiBase.includes("127.0.0.1") || configuredApiBase.includes("localhost")
   ? (isLocalPlatformHost ? configuredApiBase : "/platform-api")
   : configuredApiBase;
 
-type PlatformApiError = Error & { status?: number; code?: string };
+type PlatformApiError = Error & { status?: number; code?: string; sessionRevision?: number };
 
 const authHeaders = () => {
   const token = platformAuthStorage.get();
@@ -16,8 +16,14 @@ const authHeaders = () => {
   return headers;
 };
 
-const platformFetch = (input: RequestInfo | URL, init?: RequestInit) =>
-  fetch(input, { credentials: "include", ...init });
+const responseRevisions = new WeakMap<Response, number>();
+const platformFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const revision = platformAuthStorage.revision();
+  const response = await fetch(input, { credentials: "include", ...init });
+  // Correlate failures with a generation, never with a bearer in error metadata.
+  responseRevisions.set(response, revision);
+  return response;
+};
 
 export type LicenseStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
 export type QuickAction =
@@ -319,7 +325,8 @@ export type PlatformTrustedDevice = {
 const toPlatformError = (response: Response, payload: any, fallback: string): PlatformApiError => {
   const error = new Error(payload?.message || fallback) as PlatformApiError;
   error.status = response.status;
-  if (payload?.code) error.code = String(payload.code);
+  error.sessionRevision = responseRevisions.get(response);
+  if (payload?.code || payload?.error) error.code = String(payload.code || payload.error);
   return error;
 };
 
@@ -372,7 +379,29 @@ export const platformAdminUseCases = {
     platformAuthStorage.clear();
     return data as { message: string };
   },
-  logout: () => platformAuthStorage.clear(),
+  clearSession: () => platformAuthStorage.clear(),
+  clearSessionForAuthError: (error: unknown) => {
+    const failure = error as PlatformApiError;
+    const revision = failure?.sessionRevision;
+    return failure?.status === 401 && typeof revision === "number" && platformAuthStorage.clearIfRevision(revision);
+  },
+  logout: async () => {
+    const token = platformAuthStorage.get();
+    const revision = platformAuthStorage.revision();
+    if (!token) return { sessionCleared: true };
+    const response = await platformFetch(`${apiBase}/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await response.json().catch(() => null);
+    const revokedOrExpired = response.status === 401 &&
+      ["PLATFORM_SESSION_REVOKED", "PLATFORM_SESSION_EXPIRED"].includes(data?.code || data?.error);
+    if ((!response.ok || data?.revoked !== true) && !revokedOrExpired) {
+      throw toPlatformError(response, data, "Uscita non confermata. Riprova.");
+    }
+    // A response for the old bearer must not erase a concurrent new login.
+    return { sessionCleared: platformAuthStorage.clearIfRevision(revision) };
+  },
   listTrustedDevices: async () => {
     const response = await platformFetch(`${apiBase}/security/trusted-devices`, { headers: { ...authHeaders() } });
     const data = await response.json();
@@ -546,14 +575,14 @@ export const platformAdminUseCases = {
     if (!response.ok) throw toPlatformError(response, data, "Generazione fattura fallita");
     return data as { data: PlatformInvoice };
   },
-  sendInvoiceEmail: async (invoiceId: string) => {
+  sendInvoiceEmail: async (invoiceId: string, idempotencyKey: string) => {
     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/send-email`, {
       method: "POST",
-      headers: { ...authHeaders() }
+      headers: { ...authHeaders(), "X-Idempotency-Key": idempotencyKey }
     });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Invio fattura fallito");
-    return data as { data: PlatformInvoice };
+    return data as { data: PlatformInvoice; replayed?: boolean };
   },
   updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/status`, {

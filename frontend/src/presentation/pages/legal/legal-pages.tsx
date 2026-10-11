@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Mail, ShieldCheck } from "lucide-react";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { getConsentedPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
@@ -154,6 +154,7 @@ export const DemoRequestPage = () => {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState("");
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+  const requestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   useEffect(() => {
     trackPublicEvent("PAGE_VIEW", { page: "demo" });
@@ -167,17 +168,26 @@ export const DemoRequestPage = () => {
     setError("");
     const form = new FormData(formElement);
     const fleetSize = form.get("fleetSize");
+    const analyticsContext = getConsentedPublicAnalyticsContext();
     const payload = {
       ...Object.fromEntries(
         Array.from(form.entries()).filter(([, value]) => typeof value !== "string" || value.trim() !== "")
       ),
-      ...(getConsentedPublicAnalyticsContext() ?? {})
+      consentAnalytics: Boolean(analyticsContext),
+      ...(analyticsContext ?? {})
     };
+    const requestFingerprint = JSON.stringify(payload);
+    if (requestRef.current?.fingerprint !== requestFingerprint) {
+      requestRef.current = { fingerprint: requestFingerprint, key: globalThis.crypto.randomUUID() };
+    }
 
     try {
       const response = await fetch(`${apiBaseUrl}/public/demo-request`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": requestRef.current.key
+        },
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
@@ -191,6 +201,7 @@ export const DemoRequestPage = () => {
         fleetSize: typeof fleetSize === "string" && fleetSize ? fleetSize : "not_provided"
       });
       setStatus("success");
+      requestRef.current = null;
       formElement.reset();
     } catch (err) {
       setStatus("error");

@@ -58,32 +58,103 @@ const activePaymentMethod = {
   deletedAt: null
 };
 
-const fakeStripeBase = (overrides: Partial<Record<"paymentIntents" | "checkout" | "customers" | "setupIntents" | "paymentMethods", unknown>> = {}) => ({
-  customers: {
-    create: async () => ({ id: "cus_rental" })
-  },
-  checkout: {
-    sessions: {
-      create: async () => ({ id: "cs_setup", url: "https://checkout.stripe.test/setup", setup_intent: "seti_setup" })
+const paymentIntentForRequest = (
+  params: Stripe.PaymentIntentCreateParams,
+  response: Partial<Stripe.PaymentIntent>
+): Stripe.PaymentIntent => ({
+  id: "pi_123",
+  object: "payment_intent",
+  amount: params.amount,
+  amount_received: 0,
+  currency: params.currency,
+  customer: params.customer,
+  payment_method: params.payment_method,
+  metadata: params.metadata ?? {},
+  status: "requires_capture",
+  ...response
+}) as Stripe.PaymentIntent;
+
+// Keep provider state separate from repository snapshots: retrieve returns the
+// current PaymentIntent, including the identity and money fields used to bind it.
+const fakeStripeBase = (overrides: Partial<Record<"paymentIntents" | "checkout" | "customers" | "setupIntents" | "paymentMethods", unknown>> = {}) => {
+  const intents = new Map<string, Stripe.PaymentIntent>();
+  const intentOverrides = overrides.paymentIntents as Partial<Stripe["paymentIntents"]> | undefined;
+  return {
+    customers: {
+      create: async () => ({ id: "cus_rental" })
+    },
+    checkout: {
+      sessions: {
+        create: async () => ({ id: "cs_setup", url: "https://checkout.stripe.test/setup", setup_intent: "seti_setup" })
+      }
+    },
+    setupIntents: {
+      retrieve: async () => ({ id: "seti_setup", payment_method: "pm_card", metadata: {} })
+    },
+    paymentMethods: {
+      retrieve: async () => ({
+        id: "pm_card",
+        card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
+        billing_details: { name: "Mario Rossi" }
+      })
+    },
+    ...overrides,
+    paymentIntents: {
+      create: async (params: Stripe.PaymentIntentCreateParams, options?: Stripe.RequestOptions) => {
+        const response = intentOverrides?.create
+          ? await intentOverrides.create(params, options)
+          : { id: "pi_123", status: "requires_capture", amount_received: 0 } as const;
+        const intent = paymentIntentForRequest(params, response);
+        intents.set(intent.id, structuredClone(intent));
+        return structuredClone(intent);
+      },
+      retrieve: async (id: string) => {
+        if (intentOverrides?.retrieve) return intentOverrides.retrieve(id);
+        const intent = intents.get(id);
+        assert.ok(intent, `Synthetic PaymentIntent ${id} must exist before retrieval`);
+        return structuredClone(intent);
+      },
+      capture: intentOverrides?.capture ?? (async (id: string, params: Stripe.PaymentIntentCaptureParams) => {
+        const intent = intents.get(id);
+        assert.ok(intent);
+        const captured = { ...intent, status: "succeeded", amount_received: params.amount_to_capture ?? intent.amount } as Stripe.PaymentIntent;
+        intents.set(id, captured);
+        return structuredClone(captured);
+      }),
+      cancel: intentOverrides?.cancel ?? (async (id: string) => {
+        const intent = intents.get(id);
+        assert.ok(intent);
+        const canceled = { ...intent, status: "canceled" } as Stripe.PaymentIntent;
+        intents.set(id, canceled);
+        return structuredClone(canceled);
+      })
     }
-  },
-  setupIntents: {
-    retrieve: async () => ({ id: "seti_setup", payment_method: "pm_card", metadata: {} })
-  },
-  paymentMethods: {
-    retrieve: async () => ({
-      id: "pm_card",
-      card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
-      billing_details: { name: "Mario Rossi" }
-    })
-  },
-  paymentIntents: {
-    create: async () => ({ id: "pi_123", status: "requires_capture", amount_received: 0 }),
-    capture: async () => ({ id: "pi_123", status: "succeeded" }),
-    cancel: async () => ({ id: "pi_123", status: "canceled" })
-  },
-  ...overrides
-}) as unknown as Stripe;
+  } as unknown as Stripe;
+};
+
+// Serialize compare/update and audit as one fake transaction. An audit failure
+// leaves the row unchanged; copied read snapshots reject later stale writes.
+const paymentRowLocks = new WeakMap<object, Promise<void>>();
+const compareAndUpdatePayment = (
+  current: Record<string, unknown>, expected: object, data: object,
+  auditRepository: AuditLogRepository,
+  audit?: Parameters<AuditLogRepository["create"]>[0]
+) => {
+  const prior = paymentRowLocks.get(current) ?? Promise.resolve();
+  const transaction = prior.then(async () => {
+    const snapshot = expected as Record<string, unknown>;
+    for (const field of ["id", "tenantId", "bookingId", "rentalCustomerId", "paymentMethodId", "stripePaymentIntentId", "status", "amountCents", "capturedAmountCents", "adminFeeCents", "totalAmountCents", "currency", "updatedAt"]) {
+      if (current[field] instanceof Date && snapshot[field] instanceof Date) {
+        if ((current[field] as Date).getTime() !== (snapshot[field] as Date).getTime()) return null;
+      } else if (current[field] !== snapshot[field]) return null;
+    }
+    if (audit) await auditRepository.create(audit);
+    Object.assign(current, data);
+    return { ...current } as never;
+  });
+  paymentRowLocks.set(current, transaction.then(() => undefined, () => undefined));
+  return transaction;
+};
 
 const setStripeTestEnv = () => {
   (env as unknown as Record<string, unknown>).STRIPE_SECRET_KEY = "sk_test_rental_payments";
@@ -154,6 +225,183 @@ test("deposit creation requires an active payment method with mandate", async ()
   );
 });
 
+test("concurrent deposit requests reuse one atomic claim and one Stripe attempt key", async () => {
+  setStripeTestEnv();
+  const deposit = {
+    id: "deposit-shared",
+    createdAt: new Date(),
+    tenantId: "tenant-1",
+    bookingId: "booking-1",
+    rentalCustomerId: "customer-1",
+    vehicleId: "vehicle-1",
+    paymentMethodId: "rpm-active",
+    stripePaymentIntentId: null,
+    amountCents: 50_000,
+    capturedAmountCents: 0,
+    currency: "EUR",
+    status: "AUTHORIZING",
+    failureReason: null
+  };
+  let claimed = false;
+  const stripeAttemptKeys: string[] = [];
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      create: async (_params: unknown, options?: { idempotencyKey?: string }) => {
+        stripeAttemptKeys.push(String(options?.idempotencyKey));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { id: "pi_shared", status: "requires_capture", amount_received: 0 };
+      }
+    }
+  });
+  const auditRepository = new FakeAuditRepo();
+  const service = new RentalPaymentService(auditRepository, stripe, {
+    async findBookingForPayment() { return booking; },
+    async findPaymentMethodById() { return activePaymentMethod as never; },
+    async claimActiveDeposit() {
+      const created = !claimed;
+      claimed = true;
+      return { deposit: { ...deposit } as never, created };
+    },
+    async findDepositById(tenantId, depositId) {
+      return tenantId === deposit.tenantId && depositId === deposit.id ? { ...deposit } as never : null;
+    },
+    async findHistoricalPaymentMethodById(tenantId, paymentMethodId) {
+      return tenantId === activePaymentMethod.tenantId && paymentMethodId === activePaymentMethod.id ? { ...activePaymentMethod } as never : null;
+    },
+    async compareAndUpdateDeposit(expected, data, audit) {
+      return compareAndUpdatePayment(deposit, expected, data, auditRepository, audit);
+    },
+    async updateDeposit(_tenantId, _depositId, data) {
+      Object.assign(deposit, data);
+      return { ...deposit } as never;
+    }
+  });
+
+  const [first, second] = await Promise.all([
+    service.createDeposit({ tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" }),
+    service.createDeposit({ tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" })
+  ]);
+
+  assert.equal(first.id, "deposit-shared");
+  assert.equal(second.id, "deposit-shared");
+  assert.equal(new Set(stripeAttemptKeys).size, 1);
+  assert.equal(stripeAttemptKeys[0], "rental-deposit:tenant-1:deposit-shared");
+});
+
+test("an active deposit with a different request payload returns 409 without another Stripe call", async () => {
+  setStripeTestEnv();
+  let stripeCalls = 0;
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      create: async () => {
+        stripeCalls += 1;
+        return { id: "pi_unexpected", status: "requires_capture", amount_received: 0 };
+      }
+    }
+  });
+  const auditRepository = new FakeAuditRepo();
+  const service = new RentalPaymentService(auditRepository, stripe, {
+    async findBookingForPayment() { return booking; },
+    async findPaymentMethodById() { return activePaymentMethod as never; },
+    async claimActiveDeposit() {
+      return {
+        created: false,
+        deposit: {
+          id: "deposit-existing",
+          tenantId: "tenant-1",
+          bookingId: "booking-1",
+          rentalCustomerId: "customer-1",
+          vehicleId: "vehicle-1",
+          paymentMethodId: "rpm-active",
+          stripePaymentIntentId: "pi_existing",
+          amountCents: 60_000,
+          capturedAmountCents: 0,
+          currency: "EUR",
+          status: "AUTHORIZED",
+          failureReason: null
+        } as never
+      };
+    }
+  });
+
+  await assert.rejects(
+    () => service.createDeposit({ tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" }),
+    (error) => error instanceof AppError && error.statusCode === 409 && error.code === "RENTAL_DEPOSIT_ALREADY_ACTIVE"
+  );
+  assert.equal(stripeCalls, 0);
+});
+
+test("an indeterminate Stripe error keeps the claim retryable with the same attempt key", async () => {
+  setStripeTestEnv();
+  const deposit = {
+    id: "deposit-retry",
+    createdAt: new Date(),
+    tenantId: "tenant-1",
+    bookingId: "booking-1",
+    rentalCustomerId: "customer-1",
+    vehicleId: "vehicle-1",
+    paymentMethodId: "rpm-active",
+    stripePaymentIntentId: null,
+    amountCents: 50_000,
+    capturedAmountCents: 0,
+    currency: "EUR",
+    status: "AUTHORIZING",
+    failureReason: null
+  };
+  let callCount = 0;
+  const stripeAttemptKeys: string[] = [];
+  const statusUpdates: string[] = [];
+  const stripe = fakeStripeBase({
+    paymentIntents: {
+      create: async (_params: unknown, options?: { idempotencyKey?: string }) => {
+        callCount += 1;
+        stripeAttemptKeys.push(String(options?.idempotencyKey));
+        if (callCount === 1) {
+          const timeout = new Error("Connection timed out") as Error & { type?: string; code?: string };
+          timeout.type = "StripeConnectionError";
+          timeout.code = "ETIMEDOUT";
+          throw timeout;
+        }
+        return { id: "pi_retry", status: "requires_capture", amount_received: 0 };
+      }
+    }
+  });
+  const auditRepository = new FakeAuditRepo();
+  const service = new RentalPaymentService(auditRepository, stripe, {
+    async findBookingForPayment() { return booking; },
+    async findPaymentMethodById() { return activePaymentMethod as never; },
+    async claimActiveDeposit() { return { deposit: { ...deposit } as never, created: callCount === 0 }; },
+    async findDepositById(tenantId, depositId) {
+      return tenantId === deposit.tenantId && depositId === deposit.id ? { ...deposit } as never : null;
+    },
+    async findHistoricalPaymentMethodById(tenantId, paymentMethodId) {
+      return tenantId === activePaymentMethod.tenantId && paymentMethodId === activePaymentMethod.id ? { ...activePaymentMethod } as never : null;
+    },
+    async compareAndUpdateDeposit(expected, data, audit) {
+      const updated = await compareAndUpdatePayment(deposit, expected, data, auditRepository, audit);
+      if (updated && typeof data.status === "string") statusUpdates.push(data.status);
+      return updated;
+    },
+    async updateDeposit(_tenantId, _depositId, data) {
+      if (typeof data.status === "string") statusUpdates.push(data.status);
+      Object.assign(deposit, data);
+      return { ...deposit } as never;
+    }
+  });
+
+  const request = { tenantId: "tenant-1", bookingId: "booking-1", paymentMethodId: "rpm-active", amountCents: 50_000, userId: "user-1" };
+  await assert.rejects(() => service.createDeposit(request), /Connection timed out/);
+  assert.equal(deposit.status, "AUTHORIZING");
+  assert.ok(!statusUpdates.includes("FAILED"));
+
+  const retried = await service.createDeposit(request);
+  assert.equal(retried.status, "AUTHORIZED");
+  assert.deepEqual(stripeAttemptKeys, [
+    "rental-deposit:tenant-1:deposit-retry",
+    "rental-deposit:tenant-1:deposit-retry"
+  ]);
+});
+
 test("extra charge cannot be charged twice or after paid status", async () => {
   setStripeTestEnv();
   const service = new RentalPaymentService(new FakeAuditRepo(), fakeStripeBase(), {
@@ -187,6 +435,23 @@ test("extra charge cannot be charged twice or after paid status", async () => {
 test("authentication_required maps extra charge to REQUIRES_ACTION", async () => {
   setStripeTestEnv();
   let finalStatus: string | null = null;
+  const extraCharge = {
+    id: "extra-1",
+    tenantId: "tenant-1",
+    bookingId: "booking-1",
+    rentalCustomerId: "customer-1",
+    vehicleId: "vehicle-1",
+    paymentMethodId: "rpm-active",
+    stripePaymentIntentId: null,
+    type: "FINE",
+    description: "Multa ZTL",
+    amountCents: 1000,
+    adminFeeCents: 200,
+    totalAmountCents: 1200,
+    currency: "EUR",
+    status: "APPROVED",
+    failureReason: null
+  };
   const stripe = fakeStripeBase({
     paymentIntents: {
       create: async () => {
@@ -196,46 +461,21 @@ test("authentication_required maps extra charge to REQUIRES_ACTION", async () =>
       }
     }
   });
-  const service = new RentalPaymentService(new FakeAuditRepo(), stripe, {
-    async findExtraChargeById() {
-      return {
-        id: "extra-1",
-        tenantId: "tenant-1",
-        bookingId: "booking-1",
-        rentalCustomerId: "customer-1",
-        vehicleId: "vehicle-1",
-        paymentMethodId: "rpm-active",
-        stripePaymentIntentId: null,
-        type: "FINE",
-        description: "Multa ZTL",
-        amountCents: 1000,
-        adminFeeCents: 200,
-        totalAmountCents: 1200,
-        currency: "EUR",
-        status: "APPROVED",
-        failureReason: null
-      } as never;
+  const auditRepository = new FakeAuditRepo();
+  const service = new RentalPaymentService(auditRepository, stripe, {
+    async findExtraChargeById(tenantId, extraChargeId) {
+      return tenantId === extraCharge.tenantId && extraChargeId === extraCharge.id ? { ...extraCharge } as never : null;
     },
     async findPaymentMethodById() { return activePaymentMethod as never; },
+    async compareAndUpdateExtraCharge(expected, data, audit) {
+      const updated = await compareAndUpdatePayment(extraCharge, expected, data, auditRepository, audit);
+      if (updated && typeof data.status === "string") finalStatus = data.status;
+      return updated;
+    },
     async updateExtraCharge(_tenantId, _extraChargeId, data) {
       if (typeof data.status === "string") finalStatus = data.status;
-      return {
-        id: "extra-1",
-        tenantId: "tenant-1",
-        bookingId: "booking-1",
-        rentalCustomerId: "customer-1",
-        vehicleId: "vehicle-1",
-        paymentMethodId: "rpm-active",
-        stripePaymentIntentId: null,
-        type: "FINE",
-        description: "Multa ZTL",
-        amountCents: 1000,
-        adminFeeCents: 200,
-        totalAmountCents: 1200,
-        currency: "EUR",
-        status: finalStatus ?? "APPROVED",
-        failureReason: null
-      } as never;
+      Object.assign(extraCharge, data);
+      return { ...extraCharge } as never;
     }
   });
 
@@ -247,45 +487,55 @@ test("authentication_required maps extra charge to REQUIRES_ACTION", async () =>
 test("partial deposit capture is final and stores captured timestamp", async () => {
   setStripeTestEnv();
   let updateData: Record<string, unknown> | null = null;
+  const deposit = {
+    id: "deposit-1",
+    tenantId: "tenant-1",
+    bookingId: "booking-1",
+    rentalCustomerId: "customer-1",
+    vehicleId: "vehicle-1",
+    paymentMethodId: "rpm-active",
+    stripePaymentIntentId: "pi_deposit",
+    amountCents: 50_000,
+    capturedAmountCents: 0,
+    currency: "EUR",
+    status: "AUTHORIZED",
+    failureReason: null
+  };
+  let currentIntent = paymentIntentForRequest({
+    amount: 50_000, currency: "eur", customer: "cus_rental", payment_method: "pm_active",
+    metadata: { domain: "rental_payments", purpose: "rental_deposit", tenantId: "tenant-1",
+      bookingId: "booking-1", rentalCustomerId: "customer-1", rentalDepositId: "deposit-1", paymentMethodId: "rpm-active" }
+  }, { id: "pi_deposit", status: "requires_capture", amount_received: 0 });
   const stripe = fakeStripeBase({
     paymentIntents: {
-      capture: async () => ({ id: "pi_deposit", status: "succeeded" })
+      retrieve: async (id: string) => {
+        assert.equal(id, currentIntent.id);
+        return structuredClone(currentIntent);
+      },
+      capture: async (id: string, params: Stripe.PaymentIntentCaptureParams) => {
+        assert.equal(id, currentIntent.id);
+        currentIntent = { ...currentIntent, status: "succeeded", amount_received: params.amount_to_capture ?? currentIntent.amount };
+        return structuredClone(currentIntent);
+      }
     }
   });
-  const service = new RentalPaymentService(new FakeAuditRepo(), stripe, {
-    async findDepositById() {
-      return {
-        id: "deposit-1",
-        tenantId: "tenant-1",
-        bookingId: "booking-1",
-        rentalCustomerId: "customer-1",
-        vehicleId: "vehicle-1",
-        paymentMethodId: "rpm-active",
-        stripePaymentIntentId: "pi_deposit",
-        amountCents: 50_000,
-        capturedAmountCents: 0,
-        currency: "EUR",
-        status: "AUTHORIZED",
-        failureReason: null
-      } as never;
+  const auditRepository = new FakeAuditRepo();
+  const service = new RentalPaymentService(auditRepository, stripe, {
+    async findDepositById(tenantId, depositId) {
+      return tenantId === deposit.tenantId && depositId === deposit.id ? { ...deposit } as never : null;
+    },
+    async findHistoricalPaymentMethodById(tenantId, paymentMethodId) {
+      return tenantId === activePaymentMethod.tenantId && paymentMethodId === activePaymentMethod.id ? { ...activePaymentMethod } as never : null;
+    },
+    async compareAndUpdateDeposit(expected, data, audit) {
+      const updated = await compareAndUpdatePayment(deposit, expected, data, auditRepository, audit);
+      if (updated) updateData = data as Record<string, unknown>;
+      return updated;
     },
     async updateDeposit(_tenantId, _depositId, data) {
-      const saved = data as Record<string, unknown>;
-      updateData = saved;
-      return {
-        id: "deposit-1",
-        tenantId: "tenant-1",
-        bookingId: "booking-1",
-        rentalCustomerId: "customer-1",
-        vehicleId: "vehicle-1",
-        paymentMethodId: "rpm-active",
-        stripePaymentIntentId: "pi_deposit",
-        amountCents: 50_000,
-        capturedAmountCents: Number(saved.capturedAmountCents),
-        currency: "EUR",
-        status: String(saved.status),
-        failureReason: null
-      } as never;
+      updateData = data as Record<string, unknown>;
+      Object.assign(deposit, data);
+      return { ...deposit } as never;
     }
   });
 

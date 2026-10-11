@@ -660,6 +660,7 @@ cd /opt/fleetum/app
 APP_DIR=/opt/fleetum/app \
 ENV_FILE=/opt/fleetum/env/compose.env \
 LAST_DEPLOY_FILE=/opt/fleetum/last-deploy.txt \
+HEALTH_URL=https://api.fleetum.it/api/ready \
 ./deploy/scripts/rollback-production.sh
 ```
 

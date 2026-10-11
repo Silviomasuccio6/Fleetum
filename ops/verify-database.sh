@@ -62,6 +62,8 @@ if ! [[ "${HOST_PORT}" =~ ^[0-9]+$ ]]; then
 fi
 
 export NODE_ENV=test
+export DOTENV_CONFIG_PATH=/dev/null
+export RUN_TENANT_ISOLATION_TESTS=1
 export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${HOST_PORT}/${DB_NAME}?schema=public"
 export UPLOAD_DIR
 

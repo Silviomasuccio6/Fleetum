@@ -4,6 +4,7 @@
 
 - [ ] Branch corretto e PR approvata.
 - [ ] CI GitHub Actions verde.
+- [ ] SHA completo della release uguale allo SHA verificato dalla CI; per dispatch manuale è presente una CI riuscita sullo stesso SHA.
 - [ ] `npm run lint` eseguito o coperto da CI.
 - [ ] `npm run build` eseguito o coperto da CI.
 - [ ] `npm run test -w backend` eseguito o coperto da CI.
@@ -32,12 +33,17 @@
 ## Docker e container
 
 - [ ] Immagini buildate da CI o processo controllato.
+- [ ] Backend e frontend provengono dallo stesso SHA e i digest immutabili sono presenti nel riepilogo del workflow.
+- [ ] Il controllo VPS digest/tag conferma che ciascun digest corrisponde al tag dello SHA completo prima di backup o migrazioni.
+- [ ] Nessun deploy usa `latest` come input o identità della release.
+- [ ] Lock deploy `/opt/fleetum/deploy.lock` acquisibile e nessun altro deploy/rollback attivo.
+- [ ] I manifest sono caricati nella directory di staging dello SHA e promossi soltanto dopo l'acquisizione del lock VPS.
 - [ ] Spazio libero VPS verificato (`df -h /`); almeno 10 GB disponibili prima del pull immagini.
 - [ ] `docker system df` verificato se il deploy precedente ha lasciato cache o immagini obsolete.
 - [ ] Nessun `.env` copiato nell'immagine.
 - [ ] Container backend avviato.
 - [ ] Container Caddy avviato.
-- [ ] Container PostgreSQL healthy.
+- [ ] Managed PostgreSQL readiness, provider status and direct migration connection verificati; se e' attivo il fallback locale, il relativo container PostgreSQL e' healthy.
 - [ ] Volumi persistenti corretti.
 
 ## Health check
@@ -81,6 +87,9 @@
 - [ ] Immagine/container precedente disponibile o deploy precedente riproducibile.
 - [ ] Backup DB disponibile.
 - [ ] Procedura rollback documentata.
+- [ ] Il rollback verifica backend, frontend e asset pubblici critici prima di dichiararsi completato.
+- [ ] Versione applicativa precedente verificata sullo schema successivo in rehearsal isolato quando sono presenti migrazioni.
+- [ ] Distinzione chiara tra rollback applicativo e restore database; nessun restore DB automatico.
 - [ ] Owner decisionale disponibile.
 
 ## Dopo deploy

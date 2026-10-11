@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
@@ -393,19 +394,11 @@ export class InvoiceService {
     return this.renderPdf(await this.findInvoice(invoiceId, tenantId));
   }
 
-  async sendEmail(input: { invoiceId: string; actorUserId: string; sourceIp: string }) {
+  async sendEmail(input: { invoiceId: string; actorUserId: string; sourceIp: string; idempotencyKey: string }) {
     const invoice = await this.findInvoice(input.invoiceId);
     if (!invoice.billingEmail) throw new AppError("Email fatturazione mancante", 422, "INVOICE_RECIPIENT_MISSING");
+    const recipient = invoice.billingEmail;
     const pdf = await this.renderPdf(invoice);
-    const delivery = await prisma.invoiceDelivery.create({
-      data: {
-        invoiceId: invoice.id,
-        channel: "EMAIL",
-        recipient: invoice.billingEmail,
-        status: "PENDING"
-      }
-    });
-
     const subject = `Fattura Fleetum ${invoice.invoiceNumber} - ${formatPeriod(invoice.periodStart, invoice.periodEnd)}`;
     const text = [
       `Gentile ${invoice.billingName},`,
@@ -420,84 +413,139 @@ export class InvoiceService {
     ].join("\n");
 
     const html = this.invoiceEmailHtml(invoice);
-    const queued = await this.emailQueueService.enqueue({
-      tenantId: invoice.tenantId,
-      type: "SAAS_INVOICE_EMAIL",
-      recipient: invoice.billingEmail,
+    const requestHash = crypto.createHash("sha256").update(JSON.stringify({
+      invoiceId: invoice.id,
+      recipient,
       subject,
-      body: text,
-      meta: {
-        fromName: "Fleetum Billing",
-        replyTo: issuer.email,
-        invoiceId: invoice.id,
-        invoiceDeliveryId: delivery.id,
-        tenantId: invoice.tenantId,
-        html,
-        attachments: [
-          {
-            filename: `${invoice.invoiceNumber}.pdf`,
-            contentBase64: pdf.toString("base64"),
-            contentType: "application/pdf"
+      body: text
+    })).digest("hex");
+
+    const enqueued = await prisma.$transaction(async (tx) => {
+      const lockKey = `fleetum:invoice-email:${invoice.tenantId}:${input.idempotencyKey}`;
+      await tx.$queryRaw<Array<{ locked: string }>>`
+        SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS locked
+      `;
+
+      const priorRequest = await tx.invoiceEmailRequest.findUnique({
+        where: {
+          tenantId_idempotencyKey: {
+            tenantId: invoice.tenantId,
+            idempotencyKey: input.idempotencyKey
           }
-        ]
+        },
+        include: { delivery: true }
+      });
+      if (priorRequest) {
+        if (priorRequest.requestHash !== requestHash) {
+          throw new AppError(
+            "La chiave di idempotenza e' gia' associata a un invio fattura diverso.",
+            409,
+            "IDEMPOTENCY_KEY_REUSED"
+          );
+        }
+        const queued = await tx.emailQueue.findFirst({
+          where: {
+            id: priorRequest.queueEmailId,
+            tenantId: invoice.tenantId,
+            type: "SAAS_INVOICE_EMAIL"
+          }
+        });
+        if (!queued) {
+          throw new AppError(
+            "Coda invio fattura non disponibile per la richiesta idempotente.",
+            500,
+            "INVOICE_EMAIL_OUTBOX_INCONSISTENT"
+          );
+        }
+        return { delivery: priorRequest.delivery, queued, replayed: true };
       }
+
+      const delivery = await tx.invoiceDelivery.create({
+        data: {
+          invoiceId: invoice.id,
+          channel: "EMAIL",
+          recipient,
+          status: "PENDING"
+        }
+      });
+      const queued = await this.emailQueueService.enqueue({
+        tenantId: invoice.tenantId,
+        type: "SAAS_INVOICE_EMAIL",
+        recipient,
+        subject,
+        body: text,
+        meta: {
+          fromName: "Fleetum Billing",
+          replyTo: issuer.email,
+          invoiceId: invoice.id,
+          invoiceDeliveryId: delivery.id,
+          tenantId: invoice.tenantId,
+          invoiceEmailCommandKey: input.idempotencyKey,
+          html,
+          attachments: [
+            {
+              filename: `${invoice.invoiceNumber}.pdf`,
+              contentBase64: pdf.toString("base64"),
+              contentType: "application/pdf"
+            }
+          ]
+        }
+      }, tx);
+      await tx.invoiceEmailRequest.create({
+        data: {
+          tenantId: invoice.tenantId,
+          idempotencyKey: input.idempotencyKey,
+          requestHash,
+          deliveryId: delivery.id,
+          queueEmailId: queued.id
+        }
+      });
+      return { delivery, queued, replayed: false };
     });
+    const { delivery, queued, replayed } = enqueued;
 
     await this.emailQueueService.processPending(new Date(), { ids: [queued.id], take: 1 });
     const processed = await prisma.emailQueue.findUnique({ where: { id: queued.id }, select: { status: true, lastError: true, meta: true } });
-    const deliveryStatus = processed?.status === "SENT" ? "SENT" : "FAILED";
-    const meta = (processed?.meta ?? {}) as Record<string, unknown>;
+    if (!processed) {
+      throw new AppError("Stato invio email fattura non disponibile", 502, "INVOICE_EMAIL_FAILED");
+    }
 
-    const updatedDelivery = await prisma.invoiceDelivery.update({
-      where: { id: delivery.id },
-      data: {
-        status: deliveryStatus,
-        provider: typeof meta.emailProvider === "string" ? meta.emailProvider : null,
-        providerMessageId: typeof meta.providerMessageId === "string" ? meta.providerMessageId : null,
-        errorMessage: deliveryStatus === "FAILED" ? (processed?.lastError ?? "Invio email fattura fallito") : null,
-        sentAt: deliveryStatus === "SENT" ? new Date() : null
-      }
-    });
-
-    const updatedInvoice = await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: {
-        status: deliveryStatus === "SENT" ? "SENT" : "ERROR",
-        sentAt: deliveryStatus === "SENT" ? new Date() : invoice.sentAt
-      },
-      include: {
-        tenant: { select: { id: true, name: true } },
-        items: true,
-        deliveries: { orderBy: { createdAt: "desc" } }
-      }
-    });
+    const refreshedInvoice = await this.findInvoice(invoice.id);
+    const refreshedDelivery = refreshedInvoice.deliveries.find((candidate) => candidate.id === delivery.id) ?? delivery;
+    const meta = (processed.meta ?? {}) as Record<string, unknown>;
+    const auditAction = replayed
+      ? "PLATFORM_INVOICE_EMAIL_DEDUPED"
+      : processed.status === "SENT"
+      ? "PLATFORM_INVOICE_EMAIL_SENT"
+      : processed.status === "FAILED"
+        ? "PLATFORM_INVOICE_EMAIL_FAILED"
+        : "PLATFORM_INVOICE_EMAIL_QUEUED";
 
     await prisma.auditLog.create({
       data: {
         tenantId: invoice.tenantId,
         userId: input.actorUserId,
-        action: deliveryStatus === "SENT" ? "PLATFORM_INVOICE_EMAIL_SENT" : "PLATFORM_INVOICE_EMAIL_FAILED",
+        action: auditAction,
         resource: "invoice",
         resourceId: invoice.id,
         details: {
           actor: input.actorUserId,
           sourceIp: input.sourceIp,
           queueEmailId: queued.id,
-          deliveryId: updatedDelivery.id,
-          provider: updatedDelivery.provider,
-          providerMessageId: updatedDelivery.providerMessageId,
-          recipientMasked: invoice.billingEmail.replace(/^(.{2}).*(@.*)$/, "$1***$2"),
-          error: updatedDelivery.errorMessage
+          deliveryId: refreshedDelivery.id,
+          provider: typeof meta.emailProvider === "string" ? meta.emailProvider : refreshedDelivery.provider,
+          providerMessageId: typeof meta.providerMessageId === "string" ? meta.providerMessageId : refreshedDelivery.providerMessageId,
+          recipientMasked: recipient.replace(/^(.{2}).*(@.*)$/, "$1***$2"),
+          error: processed.status === "FAILED" ? (processed.lastError ?? refreshedDelivery.errorMessage) : null
         } as Prisma.InputJsonValue
       }
     });
 
-    if (deliveryStatus !== "SENT") {
-      throw new AppError(updatedDelivery.errorMessage ?? "Invio email fattura fallito", 502, "INVOICE_EMAIL_FAILED");
+    if (processed.status === "FAILED") {
+      throw new AppError(processed.lastError ?? refreshedDelivery.errorMessage ?? "Invio email fattura fallito", 502, "INVOICE_EMAIL_FAILED");
     }
 
-    const exactUpdated = (await hydrateInvoiceRows([updatedInvoice], updatedInvoice.tenantId))[0];
-    return { data: toPublicInvoice(exactUpdated) };
+    return { data: toPublicInvoice(refreshedInvoice), replayed };
   }
 
   private async findInvoice(invoiceId: string, tenantId?: string): Promise<InvoiceWithRelations> {

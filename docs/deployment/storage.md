@@ -13,6 +13,10 @@ UPLOAD_DIR=uploads
 
 Files are stored in the backend container volume mounted by Docker Compose. Access to files must keep going through authenticated API routes; uploaded files are not intended to be served as public static assets.
 
+The production image runs with `WORKDIR=/app/backend`, so `UPLOAD_DIR=uploads` resolves to `/app/backend/uploads`. The Compose bind mount must therefore target `/app/backend/uploads`.
+
+Before deploying the corrected mount for the first time, stop the backend and inventory both `/app/backend/uploads` inside the existing container and `/opt/fleetum/uploads` on the host. Copy any objects found only in the container layer into the backed-up host directory before recreating the container. The new mount would otherwise hide those objects. Run an authenticated download smoke test and a backup/restore check after the copy. This is a production gate; do not infer that the host directory already contains every object.
+
 ## Upload optimization
 
 Fleetum validates every uploaded file before it is persisted:
@@ -31,6 +35,7 @@ Runtime knobs:
 FILE_MAX_IMAGE_MB=5
 FILE_MAX_DOCUMENT_MB=12
 FILE_MAX_LOGO_MB=4
+UPLOAD_TENANT_QUOTA_MB=2048
 IMAGE_MAX_WIDTH_PX=1920
 IMAGE_COMPRESSION_QUALITY=82
 IMAGE_PNG_COMPRESSION_LEVEL=9
@@ -53,6 +58,10 @@ The local provider centralizes:
 - file existence checks;
 - file writes;
 - file deletion.
+
+New uploads use a private per-request staging directory, random tenant-scoped object keys and create-only writes. If validation or the database transaction fails, Fleetum removes the staging files and compensates any newly written objects.
+
+The cumulative quota is checked against active `StoredFileObject` bytes inside a serializable transaction. Set `UPLOAD_TENANT_QUOTA_MB` explicitly for each environment after measuring current tenant usage. Legacy objects must be backfilled into `StoredFileObject` before the quota can account for them.
 
 This keeps existing local storage behavior stable while preparing a future S3-compatible backend.
 
@@ -122,6 +131,7 @@ Relevant metrics:
 ```txt
 fleetum_storage_operations_total
 fleetum_storage_operation_bytes_total
+fleetum_storage_cleanup_objects_total
 fleetum_storage_active_files
 fleetum_storage_active_bytes
 fleetum_storage_deleted_files_pending_retention

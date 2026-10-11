@@ -51,6 +51,7 @@ export const publicDemoRequestSchema = z.object({
   utmTerm: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
   visitorId: trackingIdSchema,
   sessionId: trackingIdSchema,
+  consentAnalytics: z.boolean().default(false),
   websiteUrl: z.string().trim().max(0).optional()
 });
 

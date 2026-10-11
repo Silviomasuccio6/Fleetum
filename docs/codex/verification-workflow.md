@@ -28,6 +28,24 @@ Avvia un container PostgreSQL 16 temporaneo su una porta locale casuale, applica
 
 Il comando non usa il database locale o di produzione. Richiede Docker in esecuzione.
 
+## Restore e compatibilità sintetici
+
+Il runner `verify:restore-recovery` richiede SHA completi di candidato e baseline
+storica e una directory di evidenze nuova. Vedere
+[runbook restore](../deployment/restore-recovery-20261005.md) per il comando e i limiti.
+La copertura completa dei35campi/13tabelle,206coppie in4fasi e degli8layout storage
+è descritta nel [runbook denaro/storage](../deployment/money-storage-compatibility-20261005.md).
+L'opt-in `--application-recovery --recovery-source-sha <SHA>` aggiunge quattro guasti
+su backend/client compilati e una riserva applicativa pin: vedere il
+[runbook recupero applicativo](../deployment/application-failure-recovery-20261005.md).
+La prova corrente include cinque fasi monetarie,46controlli e153asserzioniHTTP;
+nessun gate esterno viene promosso.
+La verifica HTTP corrente include download legacy/moderno con root relativa/assoluta;
+la baseline storica è esercitata soltanto con chiavi legacy relative.
+Avvia soltanto PostgreSQL16 temporaneo con dati sintetici e tiene fermi i worker.
+Non identifica la release live, non approva un fallback e non sostituisce G04/G14
+su stack e storage staging, budget RTO/RPO e digest precedenti approvati.
+
 ## Verifica release
 
 ```bash

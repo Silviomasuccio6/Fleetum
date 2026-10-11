@@ -3,6 +3,8 @@ import ExcelJS from "exceljs";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { ownedStoppageWhere } from "../../infrastructure/repositories/stoppage-tenant-scope.js";
+import { ownedVehicleWhere } from "../../infrastructure/repositories/vehicle-tenant-scope.js";
 
 const DAY_MS = 86_400_000;
 
@@ -65,10 +67,9 @@ export class VehicleProfitabilityReportService {
 
     const statuses = params.statuses?.length ? params.statuses : [...DEFAULT_STATUSES];
     const vehicleWhere: any = {
-      tenantId,
-      deletedAt: null,
+      ...ownedVehicleWhere(tenantId),
       ...(params.vehicleId ? { id: params.vehicleId } : {}),
-      ...(params.siteId ? { siteId: params.siteId } : {})
+      ...(params.siteId ? { AND: [{ siteId: params.siteId }] } : {})
     };
 
     const vehicleRows = await prisma.vehicle.findMany({
@@ -90,6 +91,8 @@ export class VehicleProfitabilityReportService {
     if (!vehicleIds.length) {
       return this.empty(params);
     }
+    const stoppageScope = await ownedStoppageWhere(tenantId);
+    const historicalVehicleScope = ownedVehicleWhere(tenantId, true);
 
     const [bookingRows, maintenanceRows, vehicleCostRows, stoppages] = await Promise.all([
       prisma.rentalBooking.findMany({
@@ -97,6 +100,7 @@ export class VehicleProfitabilityReportService {
           tenantId,
           deletedAt: null,
           vehicleId: { in: vehicleIds },
+          vehicle: historicalVehicleScope,
           status: { in: statuses as any },
           pickupAt: { lte: params.dateTo },
           returnAt: { gte: params.dateFrom }
@@ -113,6 +117,7 @@ export class VehicleProfitabilityReportService {
           tenantId,
           deletedAt: null,
           vehicleId: { in: vehicleIds },
+          vehicle: historicalVehicleScope,
           performedAt: { gte: params.dateFrom, lte: params.dateTo }
         },
         select: { id: true, vehicleId: true, cost: true, performedAt: true, maintenanceType: true, description: true }
@@ -122,14 +127,14 @@ export class VehicleProfitabilityReportService {
           tenantId,
           deletedAt: null,
           vehicleId: { in: vehicleIds },
+          vehicle: historicalVehicleScope,
           date: { gte: params.dateFrom, lte: params.dateTo }
         },
         select: { id: true, vehicleId: true, amount: true, type: true, description: true, date: true, recurring: true }
       }),
       prisma.stoppage.findMany({
         where: {
-          tenantId,
-          deletedAt: null,
+          ...stoppageScope,
           vehicleId: { in: vehicleIds },
           status: { not: "CANCELED" as any },
           openedAt: { lte: params.dateTo },

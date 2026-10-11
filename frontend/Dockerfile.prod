@@ -22,6 +22,7 @@ ENV NEXT_PUBLIC_APP_LOGIN_URL=$NEXT_PUBLIC_APP_LOGIN_URL
 ENV NEXT_PUBLIC_SITE_INDEXABLE=$NEXT_PUBLIC_SITE_INDEXABLE
 
 COPY package.json package-lock.json ./
+COPY vendor vendor
 COPY frontend/package.json frontend/package.json
 COPY website/package.json website/package.json
 COPY packages/commercial-plan-catalog/package.json packages/commercial-plan-catalog/package.json

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { uploadContractLogo } from "../../../infrastructure/storage/multer.js";
+import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { TenantProfileController } from "../controllers/tenant-profile-controller.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
@@ -10,7 +11,12 @@ export const tenantProfileRoutes = (controller: TenantProfileController) => {
   router.get("/profile", requirePermissions("users:read"), asyncHandler(controller.getProfile));
   router.get("/profile/completeness", requirePermissions("users:read"), asyncHandler(controller.completeness));
   router.patch("/profile", requirePermissions("users:write"), asyncHandler(controller.updateProfile));
-  router.post("/branding/logo", requirePermissions("users:write"), uploadContractLogo.single("file"), asyncHandler(controller.uploadLogo));
+  router.post(
+    "/branding/logo",
+    requirePermissions("users:write"),
+    cleanupOnUploadFailure(uploadContractLogo.single("file")),
+    asyncHandler(controller.uploadLogo)
+  );
   router.delete("/branding/logo", requirePermissions("users:write"), asyncHandler(controller.removeLogo));
 
   return router;

@@ -12,7 +12,7 @@ test.describe("Fleetum critical flow: tenant isolation", () => {
     const dataset = await createDemoDataset(auth.api, auth.csrfToken);
 
     const unauthenticatedApi = await playwright.request.newContext({ baseURL: e2eEnv.apiUrl });
-    const unauthenticated = await unauthenticatedApi.get(`/rental-bookings/${dataset.booking.id}`);
+    const unauthenticated = await unauthenticatedApi.get(`rental-bookings/${dataset.booking.id}`);
     expect([401, 403]).toContain(unauthenticated.status());
     await unauthenticatedApi.dispose();
     await auth.api.dispose();
@@ -25,10 +25,10 @@ test.describe("Fleetum critical flow: tenant isolation", () => {
     const dataset = await createDemoDataset(tenantA.api, tenantA.csrfToken);
     const tenantB = await createAuthenticatedApi(process.env.E2E_OTHER_TENANT_EMAIL!, process.env.E2E_OTHER_TENANT_PASSWORD!);
 
-    const read = await tenantB.api.get(`/rental-bookings/${dataset.booking.id}`);
+    const read = await tenantB.api.get(`rental-bookings/${dataset.booking.id}`);
     expect([403, 404]).toContain(read.status());
 
-    const mutate = await tenantB.api.post(`/rental-bookings/${dataset.booking.id}/transition`, {
+    const mutate = await tenantB.api.post(`rental-bookings/${dataset.booking.id}/transition`, {
       headers: csrfHeaders(tenantB.csrfToken),
       data: { toStatus: "CLOSED", reason: "Cross tenant mutation attempt from E2E" }
     });

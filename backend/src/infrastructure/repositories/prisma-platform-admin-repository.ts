@@ -76,8 +76,41 @@ export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
     });
   }
 
-  async setTenantActive(tenantId: string, isActive: boolean): Promise<void> {
-    await prisma.tenant.update({ where: { id: tenantId }, data: { isActive } });
+  async setTenantActive(
+    tenantId: string,
+    isActive: boolean,
+    audit: { actorUserId: string; sourceIp: string }
+  ): Promise<boolean> {
+    return prisma.$transaction(async (tx) => {
+      const [lockedTenant] = await tx.$queryRaw<Array<{ isActive: boolean }>>`
+        SELECT "isActive" FROM "Tenant" WHERE "id" = ${tenantId} FOR UPDATE
+      `;
+      if (!lockedTenant) throw new Error(`Tenant ${tenantId} not found while changing status`);
+      if (lockedTenant.isActive === isActive) return lockedTenant.isActive;
+      await tx.tenant.update({ where: { id: tenantId }, data: { isActive } });
+      const [clock] = await tx.$queryRaw<Array<{ currentTime: Date }>>`
+        SELECT clock_timestamp() AS "currentTime"
+      `;
+      if (!clock) throw new Error("Database clock unavailable while changing tenant status");
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          userId: audit.actorUserId,
+          action: "PLATFORM_TENANT_STATUS_CHANGED",
+          resource: "tenant",
+          resourceId: tenantId,
+          createdAt: clock.currentTime,
+          details: {
+            actor: audit.actorUserId,
+            sourceIp: audit.sourceIp,
+            happenedAt: clock.currentTime.toISOString(),
+            before: { isActive: lockedTenant.isActive },
+            after: { isActive }
+          }
+        }
+      });
+      return lockedTenant.isActive;
+    });
   }
 
   async getLatestLicense(tenantId: string): Promise<PlatformLicense | null> {

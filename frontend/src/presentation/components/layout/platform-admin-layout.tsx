@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, BarChart3, Building2, ChevronDown, FileText, Globe2, LayoutDashboard, Lock, Menu, Settings, ShieldCheck, SlidersHorizontal, UserRoundCheck, Users } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
+import { platformAuthStorage } from "../../../infrastructure/platform/platform-auth-storage";
+import { snackbar } from "../../../application/stores/snackbar-store";
 import { platformAdminUseCases } from "../../../application/usecases/platform/platform-admin-usecases";
 import { ThemeMode, getStoredTheme, setTheme } from "../../../infrastructure/theme/theme-manager";
 import { PlatformThemeToggle } from "../platform/platform-theme-toggle";
@@ -12,6 +14,7 @@ export const PlatformAdminLayout = () => {
   const navigate = useNavigate();
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getStoredTheme());
   const [consoleMenuOpen, setConsoleMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [activeSectionLabel, setActiveSectionLabel] = useState("Overview");
   const consoleMenuRef = useRef<HTMLDivElement | null>(null);
   const sectionLabel: Record<PlatformSection, string> = {
@@ -169,12 +172,20 @@ export const PlatformAdminLayout = () => {
             <Button
               variant="destructive"
               size="sm"
-              onClick={() => {
-                platformAdminUseCases.logout();
-                navigate("/login");
+              disabled={loggingOut}
+              onClick={async () => {
+                setLoggingOut(true);
+                try {
+                  const result = await platformAdminUseCases.logout();
+                  if (result.sessionCleared && !platformAuthStorage.get()) navigate("/login", { replace: true });
+                } catch {
+                  snackbar.error("Uscita non confermata. La sessione resta aperta: riprova.");
+                } finally {
+                  setLoggingOut(false);
+                }
               }}
             >
-              Logout
+              {loggingOut ? "Uscita…" : "Logout"}
             </Button>
           </div>
         </div>

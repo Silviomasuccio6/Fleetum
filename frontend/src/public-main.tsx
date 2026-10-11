@@ -2,15 +2,18 @@ import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { BrowserRouter } from "react-router-dom";
+import { AppErrorBoundary } from "./presentation/components/errors/app-error-boundary";
 import { PublicRoutes } from "./presentation/routes/public-routes";
 
 const app = (
   <React.StrictMode>
-    <HelmetProvider>
-      <BrowserRouter>
-        <PublicRoutes />
-      </BrowserRouter>
-    </HelmetProvider>
+    <AppErrorBoundary scope="app">
+      <HelmetProvider>
+        <BrowserRouter>
+          <PublicRoutes />
+        </BrowserRouter>
+      </HelmetProvider>
+    </AppErrorBoundary>
   </React.StrictMode>
 );
 

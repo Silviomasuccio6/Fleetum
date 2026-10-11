@@ -21,10 +21,10 @@ npm run test -w backend
 echo "[4/6] Frontend build"
 npm run build -w frontend
 
-echo "[5/6] Retention dry-run"
-npm run privacy:retention:dry-run -w backend
+echo "[5/6] Controlli database isolati (migrazioni, tenant, retention)"
+npm run verify:database
 
 echo "[6/6] Audit dipendenze produzione"
-npm audit --omit=dev --audit-level=high
+npm run audit:production
 
 echo "Preflight compliance completato."

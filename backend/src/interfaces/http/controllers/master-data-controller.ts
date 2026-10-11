@@ -6,6 +6,7 @@ import { ImportMasterDataUseCase } from "../../../application/usecases/master-da
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
 import { assertImportFileIntegrity } from "../../../infrastructure/storage/import-upload.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 import { ManageSitesUseCases } from "../../../application/usecases/sites/manage-sites-usecases.js";
 import { ManageVehiclesUseCases } from "../../../application/usecases/vehicles/manage-vehicles-usecases.js";
 import { ManageWorkshopsUseCases } from "../../../application/usecases/workshops/manage-workshops-usecases.js";
@@ -205,7 +206,7 @@ export class MasterDataController {
     input: { kmWarning: number; revisionWarningDays: number; includeAll: boolean; limit: number }
   ) {
     const vehicles = await prisma.vehicle.findMany({
-      where: { tenantId, deletedAt: null, isActive: true },
+      where: { ...ownedVehicleWhere(tenantId), isActive: true },
       orderBy: [{ updatedAt: "desc" }],
       take: input.limit,
       include: {
@@ -383,6 +384,7 @@ export class MasterDataController {
     const where: Prisma.VehicleMaintenanceWhereInput = {
       tenantId,
       deletedAt: null,
+      AND: [{ vehicle: { is: ownedVehicleWhere(tenantId, true) } }],
       ...(parsed.dateFrom || parsed.dateTo
         ? {
             performedAt: {
@@ -908,84 +910,90 @@ export class MasterDataController {
       });
     }
 
-    const existing = await prisma.calendarEvent.findMany({
-      where: {
-        tenantId,
-        userId,
-        type: "TASK",
-        OR: [{ description: { contains: "[[AUTO_SCADENZA|" } }, { description: { contains: "[[AUTO_VEICOLO|" } }]
-      },
-      select: { id: true, description: true }
-    });
+    const { created, updated, removed } = await prisma.$transaction(async (tx) => {
+      const vehicleIds = [...new Set(filtered.map((row) => row.vehicleId))].sort();
+      for (const vehicleId of vehicleIds) await lockOwnedVehicle(tx, tenantId, vehicleId);
+      const existing = await tx.calendarEvent.findMany({
+        where: {
+          tenantId,
+          userId,
+          type: "TASK",
+          OR: [{ description: { contains: "[[AUTO_SCADENZA|" } }, { description: { contains: "[[AUTO_VEICOLO|" } }]
+        },
+        select: { id: true, description: true }
+      });
 
-    const existingByMarker = new Map<string, { id: string; marker: string; vehicleId: string }>();
-    existing.forEach((event) => {
-      const parsed = this.extractAutoDeadlineMarker(event.description);
-      if (!parsed) return;
-      existingByMarker.set(parsed.marker, { id: event.id, marker: parsed.marker, vehicleId: parsed.vehicleId });
-    });
-
-    let created = 0;
-    let updated = 0;
-
-    for (const item of needed.values()) {
-      const existingItem = existingByMarker.get(item.marker);
-      if (existingItem) {
-        await prisma.calendarEvent.update({
-          where: { id: existingItem.id },
-          data: {
-            title: item.title,
-            description: item.description,
-            location: item.location,
-            startAt: item.startAt,
-            endAt: item.endAt,
-            allDay: false,
-            reminder: 60,
-            color: "#f59e0b",
-            calendarId: "work"
-          }
-        });
-        updated += 1;
-      } else {
-        await prisma.calendarEvent.create({
-          data: {
-            tenantId,
-            userId,
-            title: item.title,
-            description: item.description,
-            startAt: item.startAt,
-            endAt: item.endAt,
-            allDay: false,
-            location: item.location,
-            attendees: [] as any,
-            reminder: 60,
-            visibility: "default",
-            availability: "BUSY",
-            type: "TASK",
-            color: "#f59e0b",
-            calendarId: "work"
-          }
-        });
-        created += 1;
-      }
-    }
-
-    const neededMarkers = new Set(Array.from(needed.keys()));
-    const staleEventIds = existing
-      .map((event) => {
+      const existingByMarker = new Map<string, { id: string; marker: string; vehicleId: string }>();
+      existing.forEach((event) => {
         const parsed = this.extractAutoDeadlineMarker(event.description);
-        if (!parsed) return null;
-        if (targetVehicleSet && !targetVehicleSet.has(parsed.vehicleId)) return null;
-        if (neededMarkers.has(parsed.marker)) return null;
-        return event.id;
-      })
-      .filter((value): value is string => Boolean(value));
+        if (!parsed) return;
+        existingByMarker.set(parsed.marker, { id: event.id, marker: parsed.marker, vehicleId: parsed.vehicleId });
+      });
 
-    let removed = 0;
-    if (staleEventIds.length > 0) {
-      const deleted = await prisma.calendarEvent.deleteMany({ where: { id: { in: staleEventIds }, tenantId, userId } });
-      removed = deleted.count;
-    }
+      let created = 0;
+      let updated = 0;
+
+      for (const item of needed.values()) {
+        const existingItem = existingByMarker.get(item.marker);
+        if (existingItem) {
+          await tx.calendarEvent.update({
+            where: { id: existingItem.id },
+            data: {
+              title: item.title,
+              description: item.description,
+              location: item.location,
+              startAt: item.startAt,
+              endAt: item.endAt,
+              allDay: false,
+              reminder: 60,
+              color: "#f59e0b",
+              calendarId: "work"
+            }
+          });
+          updated += 1;
+        } else {
+          await tx.calendarEvent.create({
+            data: {
+              tenantId,
+              userId,
+              title: item.title,
+              description: item.description,
+              startAt: item.startAt,
+              endAt: item.endAt,
+              allDay: false,
+              location: item.location,
+              attendees: [] as any,
+              reminder: 60,
+              visibility: "default",
+              availability: "BUSY",
+              type: "TASK",
+              color: "#f59e0b",
+              calendarId: "work"
+            }
+          });
+          created += 1;
+        }
+      }
+
+      const neededMarkers = new Set(Array.from(needed.keys()));
+      const staleEventIds = existing
+        .map((event) => {
+          const parsed = this.extractAutoDeadlineMarker(event.description);
+          if (!parsed) return null;
+          if (targetVehicleSet && !targetVehicleSet.has(parsed.vehicleId)) return null;
+          if (neededMarkers.has(parsed.marker)) return null;
+          return event.id;
+        })
+        .filter((value): value is string => Boolean(value));
+
+      let removed = 0;
+      if (staleEventIds.length > 0) {
+        const deleted = await tx.calendarEvent.deleteMany({ where: { id: { in: staleEventIds }, tenantId, userId } });
+        removed = deleted.count;
+      }
+
+      return { created, updated, removed };
+    }, { timeout: 30_000 });
 
     res.json({
       synced: needed.size,
@@ -1003,6 +1011,7 @@ export class MasterDataController {
     const where: Prisma.VehicleMaintenanceWhereInput = {
       tenantId,
       deletedAt: null,
+      AND: [{ vehicle: { is: ownedVehicleWhere(tenantId, true) } }],
       ...(vehicleId ? { vehicleId } : {}),
       ...(query.search
         ? {
@@ -1053,14 +1062,14 @@ export class MasterDataController {
     res.json({ data, total, page: query.page, pageSize: query.pageSize });
   };
 
-  private async syncVehicleRevisionFromMaintenances(tenantId: string, vehicleId: string) {
-    const vehicle = await prisma.vehicle.findFirst({
-      where: { id: vehicleId, tenantId, deletedAt: null },
+  private async syncVehicleRevisionFromMaintenances(tx: Prisma.TransactionClient, tenantId: string, vehicleId: string) {
+    const vehicle = await tx.vehicle.findFirst({
+      where: { ...ownedVehicleWhere(tenantId), id: vehicleId },
       select: { id: true, registrationDate: true, revisionDueAt: true }
     });
     if (!vehicle) return;
 
-    const latestRevisionMaintenance = await prisma.vehicleMaintenance.findFirst({
+    const latestRevisionMaintenance = await tx.vehicleMaintenance.findFirst({
       where: {
         tenantId,
         vehicleId,
@@ -1081,8 +1090,8 @@ export class MasterDataController {
       manualRevisionDueAt: vehicle.revisionDueAt
     });
 
-    await prisma.vehicle.updateMany({
-      where: { id: vehicleId, tenantId, deletedAt: null },
+    await tx.vehicle.updateMany({
+      where: { ...ownedVehicleWhere(tenantId), id: vehicleId },
       data: {
         lastRevisionAt,
         revisionDueAt
@@ -1094,50 +1103,46 @@ export class MasterDataController {
     const tenantId = req.auth!.tenantId;
     const input = vehicleMaintenanceSchema.parse(req.body);
 
-    const vehicle = await prisma.vehicle.findFirst({
-      where: { id: input.vehicleId, tenantId, deletedAt: null },
-      select: { id: true }
-    });
-    if (!vehicle) {
-      throw new AppError("Veicolo non trovato", 404, "NOT_FOUND");
-    }
-
-    const result = await prisma.vehicleMaintenance.create({
-      data: {
-        tenantId,
-        vehicleId: input.vehicleId,
-        performedAt: input.performedAt,
-        maintenanceType: input.maintenanceType,
-        description: input.description,
-        workshopName: input.workshopName,
-        kmAtService: input.kmAtService,
-        cost: input.cost
-      },
-      include: {
-        vehicle: {
-          select: {
-            id: true,
-            plate: true,
-            brand: true,
-            model: true,
-            site: { select: { id: true, name: true, city: true } }
-          }
+    const result = await prisma.$transaction(async (tx) => {
+      await lockOwnedVehicle(tx, tenantId, input.vehicleId);
+      const created = await tx.vehicleMaintenance.create({
+        data: {
+          tenantId,
+          vehicleId: input.vehicleId,
+          performedAt: input.performedAt,
+          maintenanceType: input.maintenanceType,
+          description: input.description,
+          workshopName: input.workshopName,
+          kmAtService: input.kmAtService,
+          cost: input.cost
         },
-        attachments: {
-          select: {
-            id: true,
-            fileName: true,
-            mimeType: true,
-            sizeBytes: true,
-            createdAt: true,
-            invoiceTotalAmount: true
+        include: {
+          vehicle: {
+            select: {
+              id: true,
+              plate: true,
+              brand: true,
+              model: true,
+              site: { select: { id: true, name: true, city: true } }
+            }
           },
-          orderBy: { createdAt: "desc" }
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              mimeType: true,
+              sizeBytes: true,
+              createdAt: true,
+              invoiceTotalAmount: true
+            },
+            orderBy: { createdAt: "desc" }
+          }
         }
-      }
-    });
+      });
 
-    await this.syncVehicleRevisionFromMaintenances(tenantId, input.vehicleId);
+      await this.syncVehicleRevisionFromMaintenances(tx, tenantId, input.vehicleId);
+      return created;
+    });
 
     res.status(201).json(result);
   };
@@ -1149,93 +1154,98 @@ export class MasterDataController {
       throw new AppError("Nessun campo da aggiornare", 400, "VALIDATION_ERROR");
     }
 
-    const existingMaintenance = await prisma.vehicleMaintenance.findFirst({
-      where: { id: req.params.id, tenantId, deletedAt: null },
+    const snapshot = await prisma.vehicleMaintenance.findFirst({
+      where: { id: req.params.id, tenantId, deletedAt: null, vehicle: { is: ownedVehicleWhere(tenantId, true) } },
       select: { id: true, vehicleId: true, maintenanceType: true }
     });
-    if (!existingMaintenance) {
+    if (!snapshot) {
       throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
     }
 
-    if (input.vehicleId) {
-      const vehicle = await prisma.vehicle.findFirst({
-        where: { id: input.vehicleId, tenantId, deletedAt: null },
-        select: { id: true }
+    const result = await prisma.$transaction(async (tx) => {
+      const affectedVehicleIds = [...new Set([snapshot.vehicleId, input.vehicleId ?? snapshot.vehicleId])].sort();
+      for (const vehicleId of affectedVehicleIds) {
+        await lockOwnedVehicle(tx, tenantId, vehicleId, vehicleId === snapshot.vehicleId);
+      }
+      await tx.$queryRaw`
+        SELECT "id" FROM "VehicleMaintenance"
+        WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE
+      `;
+      const existingMaintenance = await tx.vehicleMaintenance.findFirst({
+        where: { id: req.params.id, tenantId, deletedAt: null, vehicle: { is: ownedVehicleWhere(tenantId, true) } }
       });
-      if (!vehicle) {
-        throw new AppError("Veicolo non trovato", 404, "NOT_FOUND");
+      if (!existingMaintenance || existingMaintenance.vehicleId !== snapshot.vehicleId) {
+        throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
       }
-    }
-
-    const updated = await prisma.vehicleMaintenance.updateMany({
-      where: { id: req.params.id, tenantId, deletedAt: null },
-      data: {
-        ...(input.vehicleId !== undefined ? { vehicleId: input.vehicleId } : {}),
-        ...(input.performedAt !== undefined ? { performedAt: input.performedAt } : {}),
-        ...(input.maintenanceType !== undefined ? { maintenanceType: input.maintenanceType } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.workshopName !== undefined ? { workshopName: input.workshopName } : {}),
-        ...(input.kmAtService !== undefined ? { kmAtService: input.kmAtService } : {}),
-        ...(input.cost !== undefined ? { cost: input.cost } : {})
-      }
-    });
-    if (!updated.count) {
-      throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
-    }
-
-    const affectedVehicleIds = new Set<string>([existingMaintenance.vehicleId]);
-    if (input.vehicleId) affectedVehicleIds.add(input.vehicleId);
-    for (const vehicleId of affectedVehicleIds) {
-      await this.syncVehicleRevisionFromMaintenances(tenantId, vehicleId);
-    }
-
-    const result = await prisma.vehicleMaintenance.findFirst({
-      where: { id: req.params.id, tenantId, deletedAt: null },
-      include: {
-        vehicle: {
-          select: {
-            id: true,
-            plate: true,
-            brand: true,
-            model: true,
-            site: { select: { id: true, name: true, city: true } }
-          }
-        },
-        attachments: {
-          select: {
-            id: true,
-            fileName: true,
-            mimeType: true,
-            sizeBytes: true,
-            createdAt: true,
-            invoiceTotalAmount: true
-          },
-          orderBy: { createdAt: "desc" }
+      const updated = await tx.vehicleMaintenance.updateMany({
+        where: { id: req.params.id, tenantId, deletedAt: null, vehicle: { is: ownedVehicleWhere(tenantId, true) } },
+        data: {
+          ...(input.vehicleId !== undefined ? { vehicleId: input.vehicleId } : {}),
+          ...(input.performedAt !== undefined ? { performedAt: input.performedAt } : {}),
+          ...(input.maintenanceType !== undefined ? { maintenanceType: input.maintenanceType } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.workshopName !== undefined ? { workshopName: input.workshopName } : {}),
+          ...(input.kmAtService !== undefined ? { kmAtService: input.kmAtService } : {}),
+          ...(input.cost !== undefined ? { cost: input.cost } : {})
         }
+      });
+      if (!updated.count) {
+        throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
       }
-    });
 
+      for (const vehicleId of affectedVehicleIds) {
+        await this.syncVehicleRevisionFromMaintenances(tx, tenantId, vehicleId);
+      }
+
+      return tx.vehicleMaintenance.findFirst({
+        where: { id: req.params.id, tenantId, deletedAt: null, vehicle: { is: ownedVehicleWhere(tenantId, true) } },
+        include: {
+          vehicle: {
+            select: {
+              id: true,
+              plate: true,
+              brand: true,
+              model: true,
+              site: { select: { id: true, name: true, city: true } }
+            }
+          },
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              mimeType: true,
+              sizeBytes: true,
+              createdAt: true,
+              invoiceTotalAmount: true
+            },
+            orderBy: { createdAt: "desc" }
+          }
+        }
+      });
+    });
     res.json(result);
   };
 
   deleteVehicleMaintenance = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
-    const maintenance = await prisma.vehicleMaintenance.findFirst({
-      where: { id: req.params.id, tenantId, deletedAt: null },
-      select: { id: true, vehicleId: true, maintenanceType: true }
+    const snapshot = await prisma.vehicleMaintenance.findFirst({
+      where: { id: req.params.id, tenantId, deletedAt: null, vehicle: { is: ownedVehicleWhere(tenantId, true) } },
+      select: { vehicleId: true }
     });
-    if (!maintenance) {
-      throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
-    }
-    const removed = await prisma.vehicleMaintenance.updateMany({
-      where: { id: req.params.id, tenantId, deletedAt: null },
-      data: { deletedAt: new Date() }
+    if (!snapshot) throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
+    await prisma.$transaction(async (tx) => {
+      await lockOwnedVehicle(tx, tenantId, snapshot.vehicleId, true);
+      await tx.$queryRaw`
+        SELECT "id" FROM "VehicleMaintenance"
+        WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE
+      `;
+      const removed = await tx.vehicleMaintenance.updateMany({
+        where: { id: req.params.id, tenantId, vehicleId: snapshot.vehicleId, deletedAt: null, vehicle: { is: ownedVehicleWhere(tenantId, true) } },
+        data: { deletedAt: new Date() }
+      });
+      if (!removed.count) throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
+      await this.syncVehicleRevisionFromMaintenances(tx, tenantId, snapshot.vehicleId);
     });
-    if (!removed.count) {
-      throw new AppError("Manutenzione non trovata", 404, "NOT_FOUND");
-    }
-
-    await this.syncVehicleRevisionFromMaintenances(tenantId, maintenance.vehicleId);
 
     res.status(204).send();
   };

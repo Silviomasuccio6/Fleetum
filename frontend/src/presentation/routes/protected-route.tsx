@@ -7,6 +7,7 @@ import { FleetumFullScreenLoader } from "../components/brand/fleetum-logo-loader
 import { Button } from "../components/ui/button";
 import { useEntitlements } from "../hooks/use-entitlements";
 import { isBillingSelfServiceRoute } from "./billing-self-service-routes";
+import { getLoginRedirectPath } from "./safe-return-to";
 
 const ENTITLEMENTS_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -41,7 +42,7 @@ export const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   }
 
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
-  if (!isAuthenticated) return <Navigate to={`/login?next=${encodeURIComponent(returnTo)}`} replace />;
+  if (!isAuthenticated) return <Navigate to={getLoginRedirectPath(location)} replace />;
 
   if (error && !loaded) {
     return (

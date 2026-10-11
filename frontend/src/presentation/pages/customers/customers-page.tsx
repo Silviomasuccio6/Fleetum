@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BookingContractStatus,
@@ -260,6 +260,7 @@ const contractStatusLabel: Record<string, string> = {
 };
 
 export const CustomersPage = () => {
+  const contractEmailRequestKeys = useRef(new Map<string, string>());
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
@@ -646,8 +647,11 @@ export const CustomersPage = () => {
   };
 
   const sendContractEmail = async (bookingId: string) => {
+    const idempotencyKey = contractEmailRequestKeys.current.get(bookingId) ?? globalThis.crypto.randomUUID();
+    contractEmailRequestKeys.current.set(bookingId, idempotencyKey);
     try {
-      await rentalBookingsUseCases.sendContractEmail(bookingId);
+      await rentalBookingsUseCases.sendContractEmail(bookingId, undefined, idempotencyKey);
+      contractEmailRequestKeys.current.delete(bookingId);
       setSuccess("Contratto inviato via email.");
       if (selectedCustomerId) await loadTimeline(selectedCustomerId, timelinePage);
     } catch (e) {

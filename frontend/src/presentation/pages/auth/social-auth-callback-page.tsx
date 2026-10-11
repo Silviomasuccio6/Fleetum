@@ -4,16 +4,9 @@ import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
-import { User } from "../../../domain/entities/models";
+import type { User } from "../../../domain/entities/models";
 import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { getSafeReturnTo } from "../../routes/safe-return-to";
-
-const decodeBase64Url = (input: string) => {
-  const base64 = input.replace(/-/g, "+").replace(/_/g, "/");
-  const padLength = base64.length % 4 === 0 ? 0 : 4 - (base64.length % 4);
-  const padded = base64 + "=".repeat(padLength);
-  return atob(padded);
-};
 
 export const SocialAuthCallbackPage = () => {
   const navigate = useNavigate();
@@ -28,6 +21,10 @@ export const SocialAuthCallbackPage = () => {
   useEffect(() => {
     let cancelled = false;
 
+    // Routing hints are captured above; identity in the URL is never trusted.
+    // Keep the router state and query while removing the callback's personal data.
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
+
     const providerError = hashParams.get("error");
     if (providerError) {
       setError(providerError);
@@ -36,32 +33,34 @@ export const SocialAuthCallbackPage = () => {
       };
     }
 
-    const encodedUser = hashParams.get("user");
-
-    if (!encodedUser) {
-      setError("Risposta OAuth incompleta. Riprova il login social.");
-      return () => {
-        cancelled = true;
-      };
-    }
-
     const finalizeSocialLogin = async () => {
       try {
-        const user = JSON.parse(decodeBase64Url(encodedUser)) as User;
+        // OAuth has already established HttpOnly cookies on the server. Only its
+        // authenticated profile can establish the client identity and permissions.
+        const user = await authUseCases.me() as User;
+        if (cancelled) return;
         const returnTo = getSafeReturnTo(hashParams.get("returnTo"));
         const socialSignupCreated = hashParams.get("socialSignup") === "1";
         setSession(user, true);
         if (socialSignupCreated) {
-          trackPublicEvent("SIGNUP_COMPLETED", { source: "google", next: "company_onboarding" });
+          // This URL hint is a consent-gated funnel metric, never proof of signup
+          // or authorization. Analytics failure must not interrupt authentication.
+          try {
+            trackPublicEvent("SIGNUP_COMPLETED", { source: "google", next: "company_onboarding" });
+          } catch {
+            // Browser storage or analytics availability cannot block login.
+          }
         }
 
         let nextPath = returnTo;
         try {
           const license = await authUseCases.licenseStatus();
+          if (cancelled) return;
           const hasOperativeLicense = license.status === "ACTIVE" || license.status === "TRIAL";
 
           if (!hasOperativeLicense) {
             const profile = await tenantProfileUseCases.getProfile().catch(() => null);
+            if (cancelled) return;
             if (!isCompanyProfileReadyForBilling(profile)) {
               nextPath = "/onboarding/azienda?from=social";
             } else if (!nextPath.startsWith("/activate") && !nextPath.startsWith("/upgrade")) {

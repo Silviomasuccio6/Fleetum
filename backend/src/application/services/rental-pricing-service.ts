@@ -1,13 +1,13 @@
 import { RentalBaseRateUnit, RentalExtraKmPolicyType, RentalHourOverflowRule, RentalKmPackageType, RentalKmScope } from "@prisma/client";
 
-type RentalExtraKmTierLike = {
+export type RentalExtraKmTierLike = {
   fromKm: number;
   toKm: number | null;
   ratePerKm: number;
   sortOrder?: number;
 };
 
-type RentalExtraKmPolicyLike = {
+export type RentalExtraKmPolicyLike = {
   id: string;
   name: string;
   type: RentalExtraKmPolicyType;
@@ -15,7 +15,7 @@ type RentalExtraKmPolicyLike = {
   tiers?: RentalExtraKmTierLike[];
 };
 
-type RentalPricePackageLike = {
+export type RentalPricePackageLike = {
   id: string;
   name: string;
   type: RentalKmPackageType;
@@ -23,7 +23,7 @@ type RentalPricePackageLike = {
   kmScope: RentalKmScope;
 };
 
-type RentalPriceListLike = {
+export type RentalPriceListLike = {
   id: string;
   name: string;
   baseRateUnit: RentalBaseRateUnit;
@@ -41,6 +41,19 @@ export type RentalQuoteInput = {
   returnAt: Date;
   estimatedKm?: number | null;
   actualKm?: number | null;
+};
+
+export type RentalPricingTerms = Pick<
+  RentalQuoteInput,
+  "priceList" | "pricePackage" | "extraKmPolicy"
+>;
+
+export type RentalPricingTermsSnapshotV1 = {
+  kind: "fleetum.rental-pricing-terms";
+  version: 1;
+  priceList: RentalPriceListLike;
+  pricePackage: RentalPricePackageLike | null;
+  extraKmPolicy: (RentalExtraKmPolicyLike & { tiers: RentalExtraKmTierLike[] }) | null;
 };
 
 export type RentalQuoteResult = {
@@ -91,6 +104,172 @@ export type RentalQuoteResult = {
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isEnumValue = <T extends string>(values: readonly T[], value: unknown): value is T =>
+  typeof value === "string" && values.includes(value as T);
+
+const rentalBaseRateUnits = Object.values(RentalBaseRateUnit);
+const rentalHourOverflowRules = Object.values(RentalHourOverflowRule);
+const rentalKmPackageTypes = Object.values(RentalKmPackageType);
+const rentalKmScopes = Object.values(RentalKmScope);
+const rentalExtraKmPolicyTypes = Object.values(RentalExtraKmPolicyType);
+
+/**
+ * Captures every value used by computeRentalQuote. Relations remain useful for
+ * navigation, but closing a booking must never reload mutable pricing rows.
+ */
+export const buildRentalPricingTermsSnapshot = (
+  input: RentalPricingTerms
+): RentalPricingTermsSnapshotV1 => ({
+  kind: "fleetum.rental-pricing-terms",
+  version: 1,
+  priceList: {
+    id: input.priceList.id,
+    name: input.priceList.name,
+    baseRateUnit: input.priceList.baseRateUnit,
+    baseRateAmount: input.priceList.baseRateAmount,
+    vatRate: input.priceList.vatRate,
+    discountPercent: input.priceList.discountPercent,
+    hourOverflowRule: input.priceList.hourOverflowRule
+  },
+  pricePackage: input.pricePackage
+    ? {
+        id: input.pricePackage.id,
+        name: input.pricePackage.name,
+        type: input.pricePackage.type,
+        kmIncluded: input.pricePackage.kmIncluded,
+        kmScope: input.pricePackage.kmScope
+      }
+    : null,
+  extraKmPolicy: input.extraKmPolicy
+    ? {
+        id: input.extraKmPolicy.id,
+        name: input.extraKmPolicy.name,
+        type: input.extraKmPolicy.type,
+        flatRatePerKm: input.extraKmPolicy.flatRatePerKm,
+        tiers: [...(input.extraKmPolicy.tiers ?? [])]
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.fromKm - b.fromKm)
+          .map((tier) => ({
+            fromKm: tier.fromKm,
+            toKm: tier.toKm,
+            ratePerKm: tier.ratePerKm,
+            sortOrder: tier.sortOrder ?? 0
+          }))
+      }
+    : null
+});
+
+/**
+ * Returns null for pre-v1 or malformed metadata. Callers must then preserve the
+ * already agreed totals instead of consulting today's mutable price lists.
+ */
+export const restoreRentalPricingTermsSnapshot = (
+  metadata: unknown
+): RentalPricingTerms | null => {
+  if (!isRecord(metadata)) return null;
+  if (metadata.kind !== "fleetum.rental-pricing-terms" || metadata.version !== 1) return null;
+
+  const priceList = metadata.priceList;
+  if (
+    !isRecord(priceList) ||
+    !isNonEmptyString(priceList.id) ||
+    !isNonEmptyString(priceList.name) ||
+    !isEnumValue(rentalBaseRateUnits, priceList.baseRateUnit) ||
+    !isFiniteNumber(priceList.baseRateAmount) ||
+    !isFiniteNumber(priceList.vatRate) ||
+    !isFiniteNumber(priceList.discountPercent) ||
+    !isEnumValue(rentalHourOverflowRules, priceList.hourOverflowRule)
+  ) {
+    return null;
+  }
+
+  let pricePackage: RentalPricePackageLike | null = null;
+  if (metadata.pricePackage !== null) {
+    const rawPackage = metadata.pricePackage;
+    if (
+      !isRecord(rawPackage) ||
+      !isNonEmptyString(rawPackage.id) ||
+      !isNonEmptyString(rawPackage.name) ||
+      !isEnumValue(rentalKmPackageTypes, rawPackage.type) ||
+      !(rawPackage.kmIncluded === null || isFiniteNumber(rawPackage.kmIncluded)) ||
+      !isEnumValue(rentalKmScopes, rawPackage.kmScope)
+    ) {
+      return null;
+    }
+    pricePackage = {
+      id: rawPackage.id,
+      name: rawPackage.name,
+      type: rawPackage.type,
+      kmIncluded: rawPackage.kmIncluded,
+      kmScope: rawPackage.kmScope
+    };
+  }
+
+  let extraKmPolicy: RentalExtraKmPolicyLike | null = null;
+  if (metadata.extraKmPolicy !== null) {
+    const rawPolicy = metadata.extraKmPolicy;
+    if (
+      !isRecord(rawPolicy) ||
+      !isNonEmptyString(rawPolicy.id) ||
+      !isNonEmptyString(rawPolicy.name) ||
+      !isEnumValue(rentalExtraKmPolicyTypes, rawPolicy.type) ||
+      !(rawPolicy.flatRatePerKm === null || isFiniteNumber(rawPolicy.flatRatePerKm)) ||
+      !Array.isArray(rawPolicy.tiers)
+    ) {
+      return null;
+    }
+
+    const tiers: RentalExtraKmTierLike[] = [];
+    for (const rawTier of rawPolicy.tiers) {
+      if (
+        !isRecord(rawTier) ||
+        !isFiniteNumber(rawTier.fromKm) ||
+        !(rawTier.toKm === null || isFiniteNumber(rawTier.toKm)) ||
+        !isFiniteNumber(rawTier.ratePerKm) ||
+        !isFiniteNumber(rawTier.sortOrder)
+      ) {
+        return null;
+      }
+      tiers.push({
+        fromKm: rawTier.fromKm,
+        toKm: rawTier.toKm,
+        ratePerKm: rawTier.ratePerKm,
+        sortOrder: rawTier.sortOrder
+      });
+    }
+
+    extraKmPolicy = {
+      id: rawPolicy.id,
+      name: rawPolicy.name,
+      type: rawPolicy.type,
+      flatRatePerKm: rawPolicy.flatRatePerKm,
+      tiers
+    };
+  }
+
+  return {
+    priceList: {
+      id: priceList.id,
+      name: priceList.name,
+      baseRateUnit: priceList.baseRateUnit,
+      baseRateAmount: priceList.baseRateAmount,
+      vatRate: priceList.vatRate,
+      discountPercent: priceList.discountPercent,
+      hourOverflowRule: priceList.hourOverflowRule
+    },
+    pricePackage,
+    extraKmPolicy
+  };
+};
 
 export const toSafeNonNegativeInt = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;

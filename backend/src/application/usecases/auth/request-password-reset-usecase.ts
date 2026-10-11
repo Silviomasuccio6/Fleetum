@@ -6,7 +6,9 @@ export class RequestPasswordResetUseCase {
   constructor(private readonly emailQueueService: EmailQueueService) {}
 
   async execute(email: string) {
-    const users = await prisma.user.findMany({ where: { email, deletedAt: null } });
+    // Password reset is credential recovery only. Invitations activate users in
+    // their dedicated flow, while suspended users must stay suspended.
+    const users = await prisma.user.findMany({ where: { email, deletedAt: null, status: "ACTIVE" } });
     if (!users.length) return { accepted: true };
 
     for (const user of users) {

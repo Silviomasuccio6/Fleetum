@@ -34,8 +34,19 @@ class FakePlatformRepository implements PlatformAdminRepository {
     return { id: tenantId, name: "Tenant Demo", isActive: this.isActive };
   }
 
-  async setTenantActive(_tenantId: string, isActive: boolean): Promise<void> {
+  async setTenantActive(
+    _tenantId: string,
+    isActive: boolean,
+    audit: { actorUserId: string; sourceIp: string }
+  ): Promise<boolean> {
+    const before = this.isActive;
+    if (before === isActive) return before;
     this.isActive = isActive;
+    this.audits.push({
+      action: "PLATFORM_TENANT_STATUS_CHANGED",
+      details: { actor: audit.actorUserId, sourceIp: audit.sourceIp, before: { isActive: before }, after: { isActive } }
+    });
+    return before;
   }
 
   async getLatestLicense(): Promise<PlatformLicense | null> {
@@ -282,6 +293,27 @@ test("quick action deactivate tenant updates state and writes audit", async () =
   assert.equal(repo.audits[0]?.action, "PLATFORM_TENANT_STATUS_CHANGED");
   assert.equal(repo.audits[1]?.action, "PLATFORM_LICENSE_QUICK_ACTION");
   assert.equal(sentAlerts.length, 2);
+});
+
+test("repeating an unchanged tenant status does not write an audit or send an alert", async () => {
+  const repo = new FakePlatformRepository();
+  const sentAlerts: Array<Record<string, unknown>> = [];
+  const service = new PlatformAdminService(
+    repo,
+    { notify: async (input: Record<string, unknown>) => { sentAlerts.push(input); } } as any,
+    new PlatformLoginGuardService()
+  );
+
+  const result = await service.updateTenantStatus({
+    tenantId: "cktnant222222111111111111",
+    actorUserId: "platform-admin",
+    sourceIp: "127.0.0.1",
+    isActive: true
+  });
+
+  assert.equal(result.updated, false);
+  assert.equal(repo.audits.length, 0);
+  assert.equal(sentAlerts.length, 0);
 });
 
 test("quick action trial sets TRIAL status with 14-day expiry", async () => {

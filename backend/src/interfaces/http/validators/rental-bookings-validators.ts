@@ -247,7 +247,15 @@ export const rentalPricingQuoteSchema = z
     path: ["returnAt"]
   });
 
-export const rentalBookingPricingUpdateSchema = z.object({
+const rentalBookingOperationalPricingSchema = z.object({
+  preserveTerms: z.literal(true),
+  estimatedKm: z.coerce.number().finite().min(0).optional().nullable(),
+  actualKm: z.coerce.number().finite().min(0).optional().nullable(),
+  notes: z.string().trim().optional()
+}).strict();
+
+const rentalBookingRepricingSchema = z.object({
+  preserveTerms: z.literal(false).optional(),
   priceListId: z.string().trim().min(1),
   pricePackageId: optionalString,
   extraKmPolicyId: optionalString,
@@ -255,6 +263,11 @@ export const rentalBookingPricingUpdateSchema = z.object({
   actualKm: z.coerce.number().min(0).optional().nullable(),
   notes: optionalString
 });
+
+export const rentalBookingPricingUpdateSchema = z.union([
+  rentalBookingOperationalPricingSchema,
+  rentalBookingRepricingSchema
+]);
 
 const italianVatRegex = /^\d{11}$/;
 const sdiCodeRegex = /^[A-Za-z0-9]{7}$/;

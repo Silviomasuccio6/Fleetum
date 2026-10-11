@@ -16,10 +16,13 @@ import { AppError } from "../../../shared/errors/app-error.js";
 import {
   REFRESH_COOKIE_NAME,
   clearAuthCookies,
+  clearOAuthCorrelationCookie,
   getCookieValue,
+  getOAuthCorrelationCookie,
   issueCsrfToken,
   setAccessCookie,
   setCsrfCookie,
+  setOAuthCorrelationCookie,
   setRefreshCookie
 } from "../utils/auth-cookies.js";
 import {
@@ -108,8 +111,9 @@ export class AuthController {
   googleAuthStart = async (req: Request, res: Response) => {
     try {
       const intent = this.parseOAuthIntent(req);
-      const state = this.socialOAuthService.createState("google", intent, this.parseSafeReturnTo(req));
-      const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("google", state);
+      const flow = await this.socialOAuthService.createState("google", intent, this.parseSafeReturnTo(req));
+      const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("google", flow.state, flow);
+      setOAuthCorrelationCookie(res, "google", flow.state, flow.browserBinding, flow.expiresAt);
       res.redirect(authorizationUrl);
     } catch (error) {
       this.redirectOauthError(res, (error as Error).message);
@@ -123,8 +127,9 @@ export class AuthController {
   appleAuthStart = async (req: Request, res: Response) => {
     try {
       const intent = this.parseOAuthIntent(req);
-      const state = this.socialOAuthService.createState("apple", intent, this.parseSafeReturnTo(req));
-      const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("apple", state);
+      const flow = await this.socialOAuthService.createState("apple", intent, this.parseSafeReturnTo(req));
+      const authorizationUrl = this.socialOAuthService.getAuthorizationUrl("apple", flow.state, flow);
+      setOAuthCorrelationCookie(res, "apple", flow.state, flow.browserBinding, flow.expiresAt);
       res.redirect(authorizationUrl);
     } catch (error) {
       this.redirectOauthError(res, (error as Error).message);
@@ -268,18 +273,22 @@ export class AuthController {
   };
 
   private async handleOAuthCallback(provider: "google" | "apple", req: Request, res: Response) {
-    const providerError = req.query.error ? String(req.query.error) : null;
-    if (providerError) {
-      this.redirectOauthError(res, `Accesso ${provider} annullato: ${providerError}`);
-      return;
-    }
-
     try {
       const code = String(req.query.code ?? req.body?.code ?? "");
       const state = String(req.query.state ?? req.body?.state ?? "");
-      const statePayload = this.socialOAuthService.verifyState(provider, state);
+      const browserBinding = getOAuthCorrelationCookie(req, provider, state);
+      clearOAuthCorrelationCookie(res, provider, state);
+      const statePayload = await this.socialOAuthService.consumeState(provider, state, browserBinding);
 
-      const identity = await this.socialOAuthService.exchangeCode(provider, code);
+      const providerError = req.query.error ? String(req.query.error) : req.body?.error ? String(req.body.error) : null;
+      if (providerError) {
+        throw new AppError(`Accesso ${provider} annullato: ${providerError}`, 400, "OAUTH_PROVIDER_DENIED");
+      }
+
+      const identity = await this.socialOAuthService.exchangeCode(provider, code, {
+        codeVerifier: statePayload.codeVerifier,
+        oidcNonce: statePayload.oidcNonce
+      });
       if (!identity.emailVerified) {
         throw new AppError("Email social non verificata dal provider", 403, "SOCIAL_EMAIL_NOT_VERIFIED");
       }

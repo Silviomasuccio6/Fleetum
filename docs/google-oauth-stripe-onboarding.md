@@ -106,8 +106,11 @@ Se viene usata anche la sincronizzazione Google Calendar:
 - `GOOGLE_CLIENT_SECRET` deve stare solo in `.env` locale o GitHub/VPS secrets.
 - Il frontend apre `/api/auth/google`, non conosce il client secret.
 - Il parametro `returnTo` viene accettato solo se e un path interno, ad esempio `/dashboard`, `/onboarding/azienda` o `/activate`.
-- Lo stato OAuth e firmato con `JWT_SECRET` e scade dopo 10 minuti.
+- Lo stato OAuth e un valore casuale opaco: il backend conserva solo l'hash per 10 minuti, lo associa a un cookie HttpOnly del browser e lo consuma una sola volta con un aggiornamento atomico.
+- Google usa PKCE `S256`; il verifier viene inviato solo al token endpoint. Un nonce OIDC collega inoltre la risposta di identita al flusso avviato.
 - Non usare redirect assoluti esterni nel parametro `next`/`returnTo`.
+
+Dettagli di correlazione, compatibilita Apple e rollback della tabella temporanea sono in [`security/oauth-login-correlation.md`](security/oauth-login-correlation.md).
 
 ## GitHub Actions
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Request, Response, NextFunction } from "express";
 import { logger, runWithLogContext } from "../../../infrastructure/logging/logger.js";
+import { sanitizeRequestUrl } from "../../../infrastructure/logging/sanitize-request-url.js";
 
 declare global {
   namespace Express {
@@ -44,7 +45,7 @@ export const requestContext = (req: Request, res: Response, next: NextFunction) 
       logger.info(
         {
           method: req.method,
-          path: req.originalUrl,
+          path: sanitizeRequestUrl(req.originalUrl),
           statusCode: res.statusCode,
           durationMs: Date.now() - startedAt,
           ip: req.ip

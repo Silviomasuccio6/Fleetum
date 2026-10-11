@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "candidateSha": "dbe8ada7d9f1a66b14dd0c4bc0ab3a5f46e90600",
+  "environment": "STAGING_SYNTHETIC",
+  "preparedOn": "2026-10-08",
+  "observedReleaseSha": null,
+  "backendDigest": null,
+  "frontendDigest": null,
+  "ciRunId": null,
+  "ciCheckoutSha": null,
+  "e2eSourceSha": null,
+  "e2eExpected": null,
+  "e2ePassed": null,
+  "e2eSkipped": null,
+  "e2eFlaky": null,
+  "stagingDispatchAuthorization": null,
+  "productionAuthorization": null,
+  "acceptanceBudgets": {
+    "approvedBeforeExecutionAt": null,
+    "approver": null,
+    "p95Ms": null,
+    "maxErrorRate": null,
+    "maxLockWaitMs": null,
+    "maxQueueLagSeconds": null,
+    "rtoSeconds": null,
+    "rpoSeconds": null
+  },
+  "gates": [
+    {
+      "id": "G00",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G01",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G02",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G03",
+      "status": "PENDING_DECISION",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G04",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Prove locali sintetiche del 5 ottobre disponibili; il gate esterno non è stato eseguito e rimane PENDING."
+    },
+    {
+      "id": "G05",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G06",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G07",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G08",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G09",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G10",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G11",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G12",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Prove locali sintetiche del 5 ottobre disponibili; il gate esterno non è stato eseguito e rimane PENDING."
+    },
+    {
+      "id": "G13",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G14",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Prove locali sintetiche del 5 ottobre disponibili; il gate esterno non è stato eseguito e rimane PENDING."
+    },
+    {
+      "id": "G15",
+      "status": "PENDING_DECISION",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G16",
+      "status": "PENDING_DECISION",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G17",
+      "status": "PENDING_DECISION",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    },
+    {
+      "id": "G18",
+      "status": "PENDING",
+      "owner": null,
+      "startedAt": null,
+      "completedAt": null,
+      "evidence": [],
+      "decision": null,
+      "notes": "Non eseguito in questa preparazione."
+    }
+  ],
+  "ciChecks": {
+    "secret-scan": null,
+    "sast": null,
+    "verify": null,
+    "tenant-isolation": null,
+    "migration-compatibility": null,
+    "lighthouse": null,
+    "source-attestation": null
+  },
+  "deployRunId": null,
+  "e2eRunnerErrors": null,
+  "e2eRunId": null,
+  "e2eObservedReleaseSha": null,
+  "e2eBackendDigest": null,
+  "e2eFrontendDigest": null,
+  "approvedControlSha": null,
+  "observedControlSha": null,
+  "approvedReleaseSha": null,
+  "stagingIsolation": {
+    "policyVersion": null,
+    "emailDelivery": null,
+    "cronStarted": null,
+    "privateNetworkInternal": null,
+    "backendOnlyPrivateNetwork": null,
+    "composeProject": null,
+    "hostPreflight": null,
+    "syntheticTenantIds": [],
+    "syntheticDataAttestedBy": null,
+    "providersDisabled": null,
+    "discoveryVerified": null
+  }
+}

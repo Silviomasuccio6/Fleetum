@@ -249,11 +249,13 @@ model Tenant {
   stoppages                     Stoppage[]
   reminders                     Reminder[]
   auditLogs                     AuditLog[]
+  scheduledReportCursor         ScheduledReportCursor?
   calendarEvents                CalendarEvent[]
   vehicleMaintenances           VehicleMaintenance[]
   vehicleMaintenanceAttachments VehicleMaintenanceAttachment[]
   vehicleBooklets               VehicleBooklet[]
   rentalBookings                RentalBooking[]
+  rentalBookingCreateRequests   RentalBookingCreateRequest[]
   rentalBookingNotes            RentalBookingNote[]
   rentalCustomers               RentalCustomer[]
   rentalCustomerAttachments     RentalCustomerAttachment[]
@@ -266,6 +268,8 @@ model Tenant {
   bookingContracts              BookingContract[]
   bookingContractEvents         BookingContractEvent[]
   bookingContractDeliveries     BookingContractDelivery[]
+  bookingContractEmailRequests  BookingContractEmailRequest[]
+  invoiceEmailRequests          InvoiceEmailRequest[]
   rentalPriceLists              RentalPriceList[]
   rentalPricePackages           RentalPricePackage[]
   rentalExtraKmPolicies         RentalExtraKmPolicy[]
@@ -496,6 +500,22 @@ model RefreshSession {
 
   @@index([userId, revokedAt, expiresAt])
   @@index([tenantId, createdAt])
+}
+
+model OauthFlow {
+  id                 String    @id @default(cuid())
+  stateHash          String    @unique
+  browserBindingHash String
+  provider           String
+  intent             String
+  returnTo           String?
+  codeVerifier       String?
+  oidcNonce          String?
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@index([expiresAt, consumedAt])
 }
 
 model PasswordResetToken {
@@ -816,6 +836,7 @@ model RentalBooking {
   rentalDeposits       RentalDeposit[]
   rentalExtraCharges   RentalExtraCharge[]
   rentalPaymentEvents  RentalPaymentEvent[]
+  createRequest        RentalBookingCreateRequest?
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
@@ -826,6 +847,20 @@ model RentalBooking {
   @@index([tenantId, customerId])
   @@index([tenantId, customerId, pickupAt])
   @@index([vehicleId, pickupAt, returnAt])
+}
+
+model RentalBookingCreateRequest {
+  id             String        @id @default(cuid())
+  tenantId       String
+  idempotencyKey String
+  requestHash    String
+  bookingId      String        @unique
+  createdAt      DateTime      @default(now())
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  booking        RentalBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
 }
 
 model RentalBookingNote {
@@ -1093,6 +1128,9 @@ model RentalDeposit {
   approvedBy            User?                      @relation("RentalDepositApprover", fields: [approvedByUserId], references: [id])
   paymentEvents         RentalPaymentEvent[]
 
+  /// The database migration adds a partial unique index for one non-deleted
+  /// AUTHORIZING/AUTHORIZED deposit per tenant booking. Prisma cannot express
+  /// partial indexes in this schema.
   @@index([tenantId, bookingId])
   @@index([tenantId, rentalCustomerId])
   @@index([tenantId, status])
@@ -1464,10 +1502,26 @@ model BookingContractDelivery {
   createdAt    DateTime                      @default(now())
   tenant       Tenant                        @relation(fields: [tenantId], references: [id])
   contract     BookingContract               @relation(fields: [contractId], references: [id])
+  emailRequest BookingContractEmailRequest?
 
   @@index([tenantId, bookingId, createdAt])
   @@index([contractId, status, createdAt])
   @@index([tenantId, channel, status, createdAt])
+}
+
+model BookingContractEmailRequest {
+  id             String                  @id @default(cuid())
+  tenantId       String
+  idempotencyKey String
+  requestHash    String
+  deliveryId     String                  @unique
+  queueEmailId   String                  @unique
+  createdAt      DateTime                @default(now())
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  delivery       BookingContractDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
 }
 
 model Stoppage {
@@ -1584,6 +1638,21 @@ model AuditLog {
 
   @@index([tenantId, createdAt])
   @@index([resource, resourceId])
+}
+
+model ScheduledReportCursor {
+  tenantId           String   @id
+  settingsAuditLogId String
+  timeZone           String   @db.VarChar(128)
+  nextRunAt          DateTime?
+  lastQueuedFor      DateTime?
+  lastSkippedFrom    DateTime?
+  lastSkippedThrough DateTime?
+  lastSkipReason     String?  @db.VarChar(64)
+  updatedAt          DateTime @updatedAt
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([nextRunAt])
 }
 
 model PrivacyNotice {
@@ -1747,6 +1816,7 @@ model EmailQueue {
   id            String           @id @default(cuid())
   tenantId      String?
   type          String
+  deduplicationKey String?        @unique @db.VarChar(255)
   /// @pii
   recipient     String
   /// @pii
@@ -1759,12 +1829,18 @@ model EmailQueue {
   attempts      Int              @default(0)
   maxAttempts   Int              @default(5)
   nextAttemptAt DateTime         @default(now())
+  processingToken     String?
+  processingStartedAt DateTime?
+  leaseExpiresAt      DateTime?
   /// @pii
   lastError     String?
+  payloadPurgedAt DateTime?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@index([payloadPurgedAt, status, updatedAt])
 }
 
 model Invoice {
@@ -1854,9 +1930,25 @@ model InvoiceDelivery {
   sentAt            DateTime?
   createdAt         DateTime               @default(now())
   invoice           Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  emailRequest      InvoiceEmailRequest?
 
   @@index([invoiceId, createdAt])
   @@index([status, createdAt])
+}
+
+model InvoiceEmailRequest {
+  id             String          @id @default(cuid())
+  tenantId       String
+  idempotencyKey String
+  requestHash    String
+  deliveryId     String          @unique
+  queueEmailId   String          @unique
+  createdAt      DateTime        @default(now())
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  delivery       InvoiceDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
 }
 
 model WebsiteEvent {
@@ -1917,6 +2009,8 @@ model DemoLead {
   visitorId           String?
   /// @pii
   sessionId           String?
+  idempotencyKey      String?        @unique
+  requestHash         String?
   emailQueueId        String?
   emailDeliveryStatus String?
   contactedAt         DateTime?

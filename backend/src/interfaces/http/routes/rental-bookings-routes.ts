@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { uploadRentalCustomerAttachments } from "../../../infrastructure/storage/multer.js";
+import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { RentalBookingsController } from "../controllers/rental-bookings-controller.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
@@ -17,10 +18,10 @@ export const rentalBookingsRoutes = (controller: RentalBookingsController) => {
   router.post(
     "/customers/parse-document",
     requirePermissions("vehicles:write"),
-    uploadRentalCustomerAttachments.fields([
+    cleanupOnUploadFailure(uploadRentalCustomerAttachments.fields([
       { name: "file", maxCount: 1 },
       { name: "files", maxCount: 10 }
-    ]),
+    ])),
     asyncHandler(controller.parseCustomerDocument)
   );
   router.post("/customers", requirePermissions("vehicles:write"), asyncHandler(controller.createCustomer));
