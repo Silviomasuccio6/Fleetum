@@ -21,6 +21,9 @@ PRIVATE = 'app_fleetum_private'
 FILES = ['Caddyfile', 'Caddyfile.production-shared', 'Caddyfile.staging-ingress']
 SHA = re.compile(r'[a-f0-9]{40}')
 DIGEST = re.compile(r'[a-f0-9]{64}')
+# Keep the release pin; admit only the observed Ubuntu backport in addition
+# to the existing build metadata forms. Preserve the full version in plans.
+COMPOSE_VERSION = re.compile(r'v?2\.40\.3(?:\+(?:[A-Za-z0-9.-]+|ds1-0ubuntu1~24\.04\.1))?')
 
 class Refused(Exception):
     pass
@@ -144,10 +147,14 @@ class Gateway:
             require(state.is_dir() and not state.is_symlink() and state.stat().st_uid == 0
                     and stat.S_IMODE(state.stat().st_mode) == 0o700, 'unsafe-state')
 
+    def checked_compose_version(self):
+        version = self.run(self.docker + ['compose', 'version', '--short']).strip()
+        require(COMPOSE_VERSION.fullmatch(version), 'compose-version-drift')
+        return version
+
     def snapshot(self):
         self.filesystem()
-        compose_version = self.run(self.docker + ['compose', 'version', '--short']).strip()
-        require(re.fullmatch(r'v?2\.40\.3(?:\+[A-Za-z0-9.-]+)?', compose_version), 'compose-version-drift')
+        compose_version = self.checked_compose_version()
         image = self.request['image']
         image_id = self.image_identity()
         containers = {name: self.inspect(name) for name in ['fleetum_caddy', 'fleetum_backend', 'fleetum_postgres']}
@@ -235,7 +242,7 @@ class Gateway:
         # Recovery must work even when the replacement gateway cannot start.
         self.filesystem()
         require(os.geteuid() == 0, 'root-required')
-        require(re.fullmatch(r'v?2\.40\.3(?:\+[A-Za-z0-9.-]+)?', self.run(self.docker + ['compose', 'version', '--short']).strip()), 'compose-version-drift')
+        self.checked_compose_version()
         state = self.paths['state']; journal = state / (self.request['planDigest'] + '.json')
         record = self.read_journal(journal)
         require(record['phase'] in {'prepared', 'network-created', 'gateway-started', 'applied', 'recovery-failed', 'recovered'}, 'recovery-unavailable')
