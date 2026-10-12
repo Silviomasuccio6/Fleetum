@@ -217,11 +217,11 @@ class Gateway:
     def image_identity(self):
         # Compose inherits these image defaults: prove they match the live
         # gateway before relying on them, without inspecting image Env.
-        template = '{"Id":{{json .Id}},"Cmd":{{json .Config.Cmd}},"Entrypoint":{{json .Config.Entrypoint}},"User":{{json .Config.User}}}'
+        template = '{"Id":{{json .Id}},"Cmd":{{json .Config.Cmd}},"Entrypoint":{{json (index .Config "Entrypoint")}},"User":{{json (index .Config "User")}}}'
         image = json.loads(self.run(self.docker + ['image', 'inspect', '--format', template, self.request['image']]))
         require(re.fullmatch(r'sha256:[a-f0-9]{64}', image.get('Id', '')), 'invalid-image-metadata')
         require(image.get('Cmd') == ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
-                and image.get('Entrypoint') in (None, []) and image.get('User') == '', 'image-command-drift')
+                and image.get('Entrypoint') in (None, []) and image.get('User') in (None, ''), 'image-command-drift')
         return image['Id']
 
     def config_check(self):

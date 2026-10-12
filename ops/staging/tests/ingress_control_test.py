@@ -2,11 +2,16 @@
 import copy
 import importlib.util
 import io
+import http.server
 import json
 import os
+import shutil
+import socketserver
 from pathlib import Path
 import stat
 import tempfile
+import threading
+import urllib.parse
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -33,6 +38,7 @@ class FakeGateway(control.Gateway):
         self.email_matches = True
         self.compose_version = '2.40.3+ds1-0ubuntu'
         self.image_command = ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+        self.image_entrypoint = None; self.image_user = ''; self.gateway_user = ''
 
     def container(self, name):
         state = {'Running': True, 'StartedAt': '2026-10-10T00:00:00Z', 'RestartCount': 0}
@@ -50,7 +56,7 @@ class FakeGateway(control.Gateway):
         if self.shared: nets[control.NETWORK] = {'NetworkID': 'a' * 64, 'IPAddress': '10.203.91.2'}
         return {'Id': self.gateway_id, 'Image': 'sha256:' + 'd' * 64, 'State': state,
                 'Labels': {'com.docker.compose.project': 'foreign' if self.foreign_gateway else 'app', 'com.docker.compose.service': 'caddy'},
-                'Cmd': ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'], 'Entrypoint': None, 'User': '',
+                'Cmd': ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'], 'Entrypoint': None, 'User': self.gateway_user,
                 'Mounts': mounts, 'Networks': nets, 'Ports': {p + '/tcp': [{'HostPort': p, 'HostIp': ''}] for p in ['80', '443']},
                 'Restart': {'Name': 'unless-stopped', 'MaximumRetryCount': 0}, 'Privileged': False, 'Readonly': False,
                 'CapAdd': None, 'CapDrop': None, 'SecurityOpt': None, 'Memory': 0, 'NanoCpus': 0, 'PidsLimit': None,
@@ -59,7 +65,7 @@ class FakeGateway(control.Gateway):
     def run(self, args, input_data=None, email=None):
         self.calls.append((args, input_data, email))
         args = args[3:] if args[:1] == ['docker'] else args
-        if args[:2] == ['image', 'inspect']: return json.dumps({'Id': 'sha256:' + 'd' * 64, 'Cmd': self.image_command, 'Entrypoint': None, 'User': ''})
+        if args[:2] == ['image', 'inspect']: return json.dumps({'Id': 'sha256:' + 'd' * 64, 'Cmd': self.image_command, 'Entrypoint': self.image_entrypoint, 'User': self.image_user})
         if args[:1] == ['inspect']:
             if args[-1] == 'fleetum_caddy' and self.gateway_absent: raise control.Refused('command-failed')
             return json.dumps(self.container(args[-1]))
@@ -222,6 +228,46 @@ class IngressTests(unittest.TestCase):
         self.assertEqual(len(self.compose_calls()), 1); self.assertEqual(journal.read_bytes(), before)
     def test_image_defaults_differing_from_container_prevent_mutation(self):
         self.g.image_command = ['unexpected']; self.refused('image-command-drift'); self.assertFalse(self.state.exists())
+    def test_image_omitted_defaults_plan_has_no_mutations(self):
+        self.g.image_user = None
+        result = self.g.execute()
+        self.assertEqual(result['status'], 'planned'); self.assertFalse(result['mutations'])
+        self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+        self.assertFalse(any('create' in c[0] for c in self.g.calls))
+    def test_image_omitted_defaults_support_apply_and_stopped_gateway_recovery(self):
+        self.g.image_user = None
+        self.applying(); self.assertEqual(self.g.execute()['status'], 'applied')
+        self.recovering(); self.g.gateway_running = False
+        self.assertEqual(self.g.execute()['status'], 'recovered'); self.assertFalse(self.g.shared)
+        self.assertEqual(len(self.compose_calls()), 2)
+    def test_image_explicit_empty_defaults_remain_accepted(self):
+        self.g.image_entrypoint = []
+        self.assertEqual(self.g.execute()['status'], 'planned')
+        self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+    def test_image_explicit_nondefault_user_refused_before_mutations(self):
+        for user in ['root', '0', '1000', False, [], {}]:
+            with self.subTest(user=user):
+                self.g.image_user = user; self.refused('image-command-drift')
+                self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+    def test_image_nonempty_entrypoint_refused_before_mutations(self):
+        for entrypoint in [['/bin/sh'], 'caddy', False, {}]:
+            with self.subTest(entrypoint=entrypoint):
+                self.g.image_entrypoint = entrypoint; self.refused('image-command-drift')
+                self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+    def test_image_default_does_not_allow_nondefault_container_user(self):
+        self.g.image_user = None
+        for user in ['root', '1000']:
+            with self.subTest(user=user):
+                self.g.gateway_user = user; self.refused('gateway-command-drift')
+                self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+    def test_image_invalid_digest_refused_before_mutations(self):
+        original = self.g.run
+        def run(args, **kwargs):
+            if 'image' in args and 'inspect' in args:
+                return json.dumps({'Id': 'latest', 'Cmd': self.g.image_command, 'Entrypoint': None, 'User': None})
+            return original(args, **kwargs)
+        with patch.object(self.g, 'run', side_effect=run): self.refused('invalid-image-metadata')
+        self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
     def test_gateway_owner_drift_rejected(self):
         self.g.foreign_gateway = True; self.refused('gateway-owner-drift')
     def test_stale_gateway_plan_rejected(self):
@@ -344,5 +390,73 @@ class IngressTests(unittest.TestCase):
     def test_routes_allow_only_owned_bridge(self):
         n = network(); control.verify_routes([n], [{'dst': '10.203.91.0/28', 'dev': 'br-' + 'a' * 12}, {'dst': '10.203.91.1/32', 'dev': 'br-' + 'a' * 12}])
         self.refused('route-conflict', lambda: control.verify_routes([n], [{'dst': '10.203.91.0/28', 'dev': 'vpn0'}]))
+
+class ImageMetadataTemplateTests(unittest.TestCase):
+    """Use the real Docker formatter against a synthetic Unix-socket API only."""
+    @unittest.skipUnless(shutil.which('docker'), 'Docker CLI required; no daemon is used')
+    def check_image(self, config):
+        image_id = 'sha256:' + 'd' * 64
+        observed = []
+        class SyntheticEngine(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def respond(self, head=False):
+                path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+                observed.append((self.command, path))
+                if path == '/_ping':
+                    payload = b'OK'
+                    content_type = 'text/plain'
+                elif path.endswith('/images/' + image_id + '/json') and self.command == 'GET':
+                    payload = json.dumps({'Id': image_id, 'Config': config,
+                                          'Architecture': 'amd64', 'Os': 'linux'}).encode()
+                    content_type = 'application/json'
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('API-Version', '1.44')
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                if not head:
+                    self.wfile.write(payload)
+
+            def do_HEAD(self):
+                self.respond(head=True)
+
+            def do_GET(self):
+                self.respond()
+
+        with tempfile.TemporaryDirectory(prefix='fleetum-image-template-', dir='/private/tmp' if Path('/private/tmp').exists() else None) as scratch:
+            scratch = Path(scratch)
+            empty_config = scratch / 'docker-noauth'
+            empty_config.mkdir()
+            socket = scratch / 'engine.sock'
+            with socketserver.UnixStreamServer(str(socket), SyntheticEngine) as engine:
+                worker = threading.Thread(target=engine.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
+                worker.start()
+                try:
+                    gateway = object.__new__(control.Gateway)
+                    gateway.docker = [shutil.which('docker'), '--config', str(empty_config), '--host', 'unix://' + str(socket)]
+                    gateway.request = {'image': image_id}
+                    result = gateway.image_identity()
+                finally:
+                    engine.shutdown()
+                    worker.join(timeout=2)
+                self.assertEqual(result, image_id)
+                self.assertEqual(list(empty_config.iterdir()), [])
+                self.assertTrue(any(path.endswith('/images/' + image_id + '/json') for _, path in observed))
+                self.assertTrue(all(path == '/_ping' or path.endswith('/images/' + image_id + '/json') for _, path in observed))
+
+    def test_real_formatter_accepts_omitted_entrypoint(self):
+        self.check_image({'Cmd': ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'], 'User': ''})
+
+    def test_real_formatter_accepts_omitted_user(self):
+        self.check_image({'Cmd': ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'], 'Entrypoint': None})
+
+    def test_real_formatter_preserves_explicit_empty_defaults(self):
+        self.check_image({'Cmd': ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'], 'Entrypoint': [], 'User': ''})
+
 
 if __name__ == '__main__': unittest.main(verbosity=2)

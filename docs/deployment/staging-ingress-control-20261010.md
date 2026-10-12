@@ -86,6 +86,13 @@ passare a un altro pacchetto invalida il piano, anche se la versione upstream
 rimane 2.40.3. Altri backport contenenti `~` richiedono osservazione e revisione
 specifiche; non si elimina il suffisso per far superare il controllo.
 
+I campi vuoti `Config.Entrypoint` e `Config.User` dell'immagine possono essere
+omessi da Docker. Il template usa `index` per leggerli come `null`: entrata
+`null`/vuota e utente immagine `null`/vuoto rappresentano soltanto i default.
+Il comando Caddy dell'immagine e il digest restano esatti; utente effettivo del
+container `''`, entrata e comando del container sono verificati separatamente.
+Utenti espliciti diversi dal default e entrate non vuote sono rifiutati.
+
 La baseline è distinta dalla futura applicazione. Il workflow checkouta
 `.ingress-baseline` sul pin completo, verifica il checkout e le due impronte
 protette, e trasferisce da lì soltanto il Caddyfile originale. Overlay e
@@ -182,6 +189,14 @@ Non rimuovere il diario root quando si puliscono questi trasferimenti.
 stdlib con subprocess sostituiti e filesystem sintetico temporaneo: rifiuti,
 piano senza mutazioni, lock, retry, guasti, recupero da gateway fermo/assente,
 assenza di segreti in manifest/diario e controlli di workflow/source/policy.
+
+La suite Python esercita inoltre il formatter della **vera CLI Docker** su
+un'API sintetica esposta soltanto via socket Unix temporaneo. Copre campi
+immagine omessi e default espliciti, con configurazione Docker vuota e host
+socket esplicito: nessun daemon reale, registry, container, env o rete esterna.
+Se manca la CLI Docker quei tre casi sono skipped e vanno dichiarati separatamente;
+gli altri casi sintetici continuano a verificare la policy. La CLI è disponibile
+nel runner CI Ubuntu. Il test non richiede Docker Desktop o un daemon avviato.
 
 Il runner opt-in `ops/verify-staging-ingress-lifecycle.mjs` usa **solo** immagini
 locali pin. Richiede Compose 2.40.3 su PATH (`docker-compose` standalone per il
