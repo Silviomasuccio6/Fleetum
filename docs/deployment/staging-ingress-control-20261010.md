@@ -72,11 +72,19 @@ si ferma prima del trasferimento SSH. Non usare un deploy applicativo come
 scorciatoia per attivare il gateway.
 
 Sorgente, stato e rete sono verificati ancora dal controller sul server:
-Caddy **2.11.4**, Compose **2.40.3** (ammesso suffisso packaging `+...`), digest,
+Caddy **2.11.4**, Compose **2.40.3** (ammessi i suffissi build `+...` con caratteri
+alfanumerici, punto e trattino, e il solo backport Ubuntu osservato
+`2.40.3+ds1-0ubuntu1~24.04.1`, con eventuale prefisso `v`), digest,
 comando/utente/restart/porte/mount canonici, TLS nei volumi esterni esistenti
 `app_caddy_data` e `app_caddy_config`, tre container nel progetto `app`, rete
 privata produzione invariata. Un aggiornamento di versione o hardening live
 diverso richiede nuova osservazione/revisione, non un bypass.
+
+La stessa verifica Compose si applica a piano, attivazione e recupero. La
+versione completa, incluso il suffisso, resta nello snapshot e nel digest:
+passare a un altro pacchetto invalida il piano, anche se la versione upstream
+rimane 2.40.3. Altri backport contenenti `~` richiedono osservazione e revisione
+specifiche; non si elimina il suffisso per far superare il controllo.
 
 La baseline è distinta dalla futura applicazione. Il workflow checkouta
 `.ingress-baseline` sul pin completo, verifica il checkout e le due impronte

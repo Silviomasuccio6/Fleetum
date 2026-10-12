@@ -175,6 +175,51 @@ class IngressTests(unittest.TestCase):
         self.g.version = 'v2.11.3 '; self.refused('caddy-version-drift')
     def test_compose_version_drift_prevents_any_mutation(self):
         self.g.compose_version = '5.1.0'; self.refused('compose-version-drift'); self.assertFalse(self.state.exists())
+    def test_observed_ubuntu_compose_plan_preserves_exact_version_without_mutations(self):
+        self.g.compose_version = '2.40.3+ds1-0ubuntu1~24.04.1'
+        result = self.g.execute()
+        self.assertEqual(result['status'], 'planned'); self.assertFalse(result['mutations'])
+        self.assertEqual(result['snapshot']['composeVersion'], self.g.compose_version)
+        self.assertEqual(result['planDigest'], control.fingerprint(result['snapshot']))
+        self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+        self.assertFalse(any('create' in c[0] for c in self.g.calls))
+    def test_observed_ubuntu_compose_supports_apply_and_stopped_gateway_recovery(self):
+        self.g.compose_version = '2.40.3+ds1-0ubuntu1~24.04.1'
+        self.applying(); self.assertEqual(self.g.execute()['status'], 'applied')
+        self.recovering(); self.g.gateway_running = False
+        self.assertEqual(self.g.execute()['status'], 'recovered'); self.assertFalse(self.g.shared)
+        self.assertEqual(len(self.compose_calls()), 2)
+        self.assertTrue(all(call[0][-1] == 'caddy' for call in self.compose_calls()))
+    def test_compose_existing_version_forms_remain_supported(self):
+        for version in ['2.40.3', 'v2.40.3', '2.40.3+ds1-0ubuntu', 'v2.40.3+build.1',
+                        'v2.40.3+ds1-0ubuntu1~24.04.1']:
+            with self.subTest(version=version):
+                self.g.compose_version = version
+                result = self.g.execute()
+                self.assertEqual(result['snapshot']['composeVersion'], version)
+                self.assertFalse(result['mutations']); self.assertFalse(self.state.exists())
+    def test_compose_unreviewed_ubuntu_packages_and_versions_refused_before_mutations(self):
+        for version in ['2.40.4+ds1-0ubuntu1~24.04.1', '2.39.3+ds1-0ubuntu1~24.04.1',
+                        '2.40.3+ds1-0ubuntu2~24.04.1', '2.40.3+ds1-0ubuntu1~24.04.2',
+                        '2.40.3+ds1-0ubuntu1~22.04.1', '2.40.3-rc1',
+                        '2.40.3+ds1-0ubuntu1~24.04.1;ignored',
+                        '2.40.3+ds1-0ubuntu1~24.04.1\nunreviewed']:
+            with self.subTest(version=version):
+                self.g.compose_version = version; self.refused('compose-version-drift')
+                self.assertFalse(self.state.exists()); self.assertEqual(self.compose_calls(), [])
+                self.assertFalse(any('create' in c[0] for c in self.g.calls))
+    def test_compose_package_change_invalidates_existing_plan(self):
+        self.g.compose_version = '2.40.3+ds1-0ubuntu1~24.04.1'
+        self.applying(); self.g.compose_version = '2.40.3'
+        self.refused('stale-plan'); self.assertFalse(self.state.exists())
+        self.assertEqual(self.compose_calls(), [])
+    def test_recovery_refuses_unreviewed_compose_package_before_recreation(self):
+        self.applying(); self.g.execute(); self.recovering()
+        journal = self.state / (self.request['planDigest'] + '.json')
+        before = journal.read_bytes()
+        self.g.compose_version = '2.40.3+ds1-0ubuntu2~24.04.1'
+        self.refused('compose-version-drift')
+        self.assertEqual(len(self.compose_calls()), 1); self.assertEqual(journal.read_bytes(), before)
     def test_image_defaults_differing_from_container_prevent_mutation(self):
         self.g.image_command = ['unexpected']; self.refused('image-command-drift'); self.assertFalse(self.state.exists())
     def test_gateway_owner_drift_rejected(self):
