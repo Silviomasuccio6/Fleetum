@@ -71,7 +71,7 @@ test("production workflow validates shared metadata and the complete bundle befo
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-for (const shell of ["sh", "bash", "dash"]) test(`staging deploy applies the shared overlay, bootstraps once and keeps health within its lock (${shell})`, () => {
+for (const shell of ["sh", "bash", "dash"]) for (const dockerMode of ["direct", "sudo"]) test(`staging deploy applies the shared overlay, bootstraps once and keeps health within its lock (${shell}/${dockerMode})`, () => {
   const source = readFileSync(new URL("../staging/run-deploy.sh", import.meta.url), "utf8");
   const root = mkdtempSync(path.join(tmpdir(), "fleetum-staging-deploy-"));
   try {
@@ -91,10 +91,18 @@ for (const shell of ["sh", "bash", "dash"]) test(`staging deploy applies the sha
     mock("rsync", 'printf "copy\\n" >> "$MOCK_LOG"; exec /bin/cp -R "$2" "$3"');
     mock("docker", 'printf "%s\\n" "$*" >> "$MOCK_LOG"; case "$*" in *"prisma migrate deploy"*) input=$(cat); [ -z "$input" ] || exit 19;; *staging-bootstrap.js*) input=$(cat); printf "bootstrap_bytes=%s\\n" "${#input}" >> "$MOCK_LOG"; printf "STAGING_BOOTSTRAP_CREATED\\n";; esac');
     mock("curl", 'printf "health\\n" >> "$MOCK_LOG"');
+    // Match Ubuntu sudo env_reset; do not let the mock hide missing image refs.
+    mock("sudo", '[ "$1" = -n ] || exit 22; shift; exec /usr/bin/env -i PATH="$PATH" MOCK_LOG="$MOCK_LOG" "$@"');
+    const dockerPath = path.join(bin, "docker");
+    const dockerSource = readFileSync(dockerPath, "utf8");
+    const imageChecks = '[ "$FLEETUM_BACKEND_IMAGE" = "ghcr.io/silviomasuccio6/fleetum-backend@sha256:' + "b".repeat(64) + '" ] && [ "$FLEETUM_FRONTEND_IMAGE" = "ghcr.io/silviomasuccio6/fleetum-frontend@sha256:' + "c".repeat(64) + '" ] || { echo "Required immutable image variables missing" >&2; exit 23; }\n';
+    const ambientCheck = dockerMode === "sudo" ? '[ -z "${SYNTHETIC_AMBIENT_TOKEN+x}" ] || exit 24;\n' : "";
+    writeFileSync(dockerPath, dockerSource.replace('printf "%s\\n" "$*"', imageChecks + ambientCheck + 'printf "%s\\n" "$*"'), { mode: 0o700 });
+
     const args = [sha, `ghcr.io/silviomasuccio6/fleetum-backend@sha256:${"b".repeat(64)}`,
-      `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${"c".repeat(64)}`, "shared", "true", "direct"];
+      `ghcr.io/silviomasuccio6/fleetum-frontend@sha256:${"c".repeat(64)}`, "shared", "true", dockerMode];
     const payload = '{"tenantA":"synthetic_password_a","tenantB":"synthetic_password_b"}';
-    const out = spawnSync("bash", [script, ...args], { encoding: "utf8", input: payload, env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log } });
+    const out = spawnSync("bash", [script, ...args], { encoding: "utf8", input: payload, env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log, SYNTHETIC_AMBIENT_TOKEN: "synthetic_ambient_must_not_be_preserved" } });
     assert.equal(out.status, 0, out.stderr);
     const calls = readFileSync(log, "utf8");
     assert.match(calls, /-f docker-compose.staging.yml -f docker-compose.staging.shared.yml/);
@@ -105,12 +113,12 @@ for (const shell of ["sh", "bash", "dash"]) test(`staging deploy applies the sha
     assert.ok(calls.indexOf("health") > calls.indexOf("up -d --no-build"));
     assert.doesNotMatch(calls + out.stdout + out.stderr, /synthetic_password_[ab]/);
     writeFileSync(log, "");
-    const again = spawnSync("bash", [script, ...args.slice(0, 4), "false", "direct"], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log } });
+    const again = spawnSync("bash", [script, ...args.slice(0, 4), "false", dockerMode], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log, SYNTHETIC_AMBIENT_TOKEN: "synthetic_ambient_must_not_be_preserved" } });
     assert.equal(again.status, 0, again.stderr);
     assert.doesNotMatch(readFileSync(log, "utf8"), /staging-bootstrap.js/);
     rmSync(path.join(bundle, "docker-compose.staging.shared.yml"));
     writeFileSync(log, "");
-    const missing = spawnSync("bash", [script, ...args], { encoding: "utf8", input: payload, env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log } });
+    const missing = spawnSync("bash", [script, ...args], { encoding: "utf8", input: payload, env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log, SYNTHETIC_AMBIENT_TOKEN: "synthetic_ambient_must_not_be_preserved" } });
     assert.equal(missing.status, 1);
     assert.equal(readFileSync(log, "utf8"), "", "incomplete shared bundle must fail before locking or copying");
   } finally { rmSync(root, { recursive: true, force: true }); }
