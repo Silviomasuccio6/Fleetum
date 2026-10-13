@@ -40,7 +40,10 @@ fi
 rsync -a "$bundle/deploy/" "$app/deploy/" 3<&-
 export FLEETUM_BACKEND_IMAGE="$backend_image" FLEETUM_FRONTEND_IMAGE="$frontend_image"
 docker_command=(docker --config /opt/fleetum-staging/docker-config)
-if [ "$docker_mode" = sudo ]; then docker_command=(sudo -n docker --config /opt/fleetum-staging/docker-config); fi
+# sudo clears the caller environment. Pass only the two validated public image refs.
+if [ "$docker_mode" = sudo ]; then
+  docker_command=(sudo -n /usr/bin/env "FLEETUM_BACKEND_IMAGE=$backend_image" "FLEETUM_FRONTEND_IMAGE=$frontend_image" docker --config /opt/fleetum-staging/docker-config)
+fi
 compose_args=(--project-name fleetum-staging --env-file /opt/fleetum-staging/env/compose.env -f docker-compose.staging.yml)
 if [ "$ingress_mode" = shared ]; then compose_args+=(-f docker-compose.staging.shared.yml); fi
 staging_compose() { "${docker_command[@]}" compose "${compose_args[@]}" "$@" 3<&-; }
