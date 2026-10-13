@@ -44,7 +44,9 @@ test("staging requires successful CI source proof and publishes a post-health de
   assert.match(deploy, /ci-source-proof-\$\{\{ steps\.ci\.outputs\.ci_run_id \}\}/);
   assert.match(deploy, /node \.fleetum-control\/ops\/ci-release-identity\.mjs verify/);
   assert.match(deploy, /\["push", "pull_request", "workflow_dispatch"\]/);
-  assert.ok(deploy.indexOf("Publish staging release proof") > deploy.indexOf("https://platform-staging.fleetum.it/api/health"));
+  const healthIndex = deploy.indexOf("- name: Staging health checks");
+  assert.ok(healthIndex >= 0, "health step must exist before release proof");
+  assert.ok(deploy.indexOf("- name: Publish staging release proof") > healthIndex);
   assert.match(deploy, /staging-release-proof-\$\{\{ github\.run_id \}\}/);
 });
 

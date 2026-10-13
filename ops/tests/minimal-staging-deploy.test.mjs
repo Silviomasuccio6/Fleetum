@@ -84,18 +84,21 @@ for (const shell of ["sh", "bash", "dash"]) for (const dockerMode of ["direct", 
     // dash treats a bad redirect on a special builtin as fatal: contain the probe
     // in a subshell while still rejecting any leaked bootstrap descriptor.
     writeFileSync(path.join(bundle, "trusted-preflight.sh"), `#!/bin/${shell}\nif ( : <&3 ) 2>/dev/null; then exit 21; fi\n`);
+    writeFileSync(path.join(bundle, "trusted-platform-health.sh"), readFileSync(new URL("../staging/check-platform-health.sh", import.meta.url), "utf8").replaceAll("/opt/fleetum-staging", base));
     const script = path.join(root, "deploy.sh");
     writeFileSync(script, source.replaceAll("/opt/fleetum-staging", base).replace('sh "$bundle/trusted-preflight.sh"', `${shell} "$bundle/trusted-preflight.sh"`));
-    const mock = (name, body) => writeFileSync(path.join(bin, name), `#!/bin/${shell}\nif ( : <&3 ) 2>/dev/null; then exit 21; fi\n${body}\n`, { mode: 0o700 });
+    const mock = (name, body) => writeFileSync(path.join(bin, name), `#!/bin/${shell}\nif ( : <&3 ) 2>/dev/null; then exit 21; fi\n( : >&9 ) 2>/dev/null || exit 26\n${body}\n`, { mode: 0o700 });
     mock("flock", 'printf "lock\\n" >> "$MOCK_LOG"');
     mock("rsync", 'printf "copy\\n" >> "$MOCK_LOG"; exec /bin/cp -R "$2" "$3"');
-    mock("docker", 'printf "%s\\n" "$*" >> "$MOCK_LOG"; case "$*" in *"prisma migrate deploy"*) input=$(cat); [ -z "$input" ] || exit 19;; *staging-bootstrap.js*) input=$(cat); printf "bootstrap_bytes=%s\\n" "${#input}" >> "$MOCK_LOG"; printf "STAGING_BOOTSTRAP_CREATED\\n";; esac');
-    mock("curl", 'printf "health\\n" >> "$MOCK_LOG"');
+    mock("docker", 'printf "%s\\n" "$*" >> "$MOCK_LOG"; case "$*" in *"prisma migrate deploy"*) input=$(cat); [ -z "$input" ] || exit 19;; *staging-bootstrap.js*) input=$(cat); printf "bootstrap_bytes=%s\\n" "${#input}" >> "$MOCK_LOG"; printf "STAGING_BOOTSTRAP_CREATED\\n";; *"exec -i fleetum_staging_backend"*) input=$(cat); [ "$input" = \'{"error":"PLATFORM_IP_FORBIDDEN"}\' ] || exit 25;; esac');
+    // Strict Platform allows loopback health but rejects this public caller.
+    // --fail on the public endpoint is the original deployment regression.
+    mock("curl", 'printf "health\\n" >> "$MOCK_LOG"; case "$*" in *platform-staging.fleetum.it*) case "$*" in *--fail*|*-fsS*) exit 22;; esac; printf \'{"error":"PLATFORM_IP_FORBIDDEN"}\\n403\';; esac');
     // Match Ubuntu sudo env_reset; do not let the mock hide missing image refs.
     mock("sudo", '[ "$1" = -n ] || exit 22; shift; exec /usr/bin/env -i PATH="$PATH" MOCK_LOG="$MOCK_LOG" "$@"');
     const dockerPath = path.join(bin, "docker");
     const dockerSource = readFileSync(dockerPath, "utf8");
-    const imageChecks = '[ "$FLEETUM_BACKEND_IMAGE" = "ghcr.io/silviomasuccio6/fleetum-backend@sha256:' + "b".repeat(64) + '" ] && [ "$FLEETUM_FRONTEND_IMAGE" = "ghcr.io/silviomasuccio6/fleetum-frontend@sha256:' + "c".repeat(64) + '" ] || { echo "Required immutable image variables missing" >&2; exit 23; }\n';
+    const imageChecks = 'case "$*" in *" compose "*) [ "$FLEETUM_BACKEND_IMAGE" = "ghcr.io/silviomasuccio6/fleetum-backend@sha256:' + "b".repeat(64) + '" ] && [ "$FLEETUM_FRONTEND_IMAGE" = "ghcr.io/silviomasuccio6/fleetum-frontend@sha256:' + "c".repeat(64) + '" ] || { echo "Required immutable image variables missing" >&2; exit 23; };; esac\n';
     const ambientCheck = dockerMode === "sudo" ? '[ -z "${SYNTHETIC_AMBIENT_TOKEN+x}" ] || exit 24;\n' : "";
     writeFileSync(dockerPath, dockerSource.replace('printf "%s\\n" "$*"', imageChecks + ambientCheck + 'printf "%s\\n" "$*"'), { mode: 0o700 });
 
@@ -116,6 +119,12 @@ for (const shell of ["sh", "bash", "dash"]) for (const dockerMode of ["direct", 
     const again = spawnSync("bash", [script, ...args.slice(0, 4), "false", dockerMode], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log, SYNTHETIC_AMBIENT_TOKEN: "synthetic_ambient_must_not_be_preserved" } });
     assert.equal(again.status, 0, again.stderr);
     assert.doesNotMatch(readFileSync(log, "utf8"), /staging-bootstrap.js/);
+    rmSync(path.join(bundle, "trusted-platform-health.sh"));
+    writeFileSync(log, "");
+    const noHealth = spawnSync("bash", [script, ...args], { encoding: "utf8", input: payload, env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log } });
+    assert.equal(noHealth.status, 1);
+    assert.equal(readFileSync(log, "utf8"), "", "missing trusted health control must stop before copying or Docker mutations");
+    writeFileSync(path.join(bundle, "trusted-platform-health.sh"), readFileSync(new URL("../staging/check-platform-health.sh", import.meta.url), "utf8").replaceAll("/opt/fleetum-staging", base));
     rmSync(path.join(bundle, "docker-compose.staging.shared.yml"));
     writeFileSync(log, "");
     const missing = spawnSync("bash", [script, ...args], { encoding: "utf8", input: payload, env: { PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log, SYNTHETIC_AMBIENT_TOKEN: "synthetic_ambient_must_not_be_preserved" } });
