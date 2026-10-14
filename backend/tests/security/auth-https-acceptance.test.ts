@@ -160,6 +160,14 @@ describe("account boundaries through real HTTPS and temporary PostgreSQL", () =>
         if (args[1] && typeof args[1] === "object") localOnly(args[1]);
         return Reflect.apply(original, transport, args);
       }) as typeof transport.request;
+      // Node's get implementation can call its internal request function
+      // directly. Guard both exports rather than assuming it uses the wrapper.
+      const originalGet = transport.get;
+      transport.get = ((...args: any[]) => {
+        localOnly(args[0]);
+        if (args[1] && typeof args[1] === "object") localOnly(args[1]);
+        return Reflect.apply(originalGet, transport, args);
+      }) as typeof transport.get;
     }
     syncBuiltinESMExports();
     const originalFetch = globalThis.fetch;

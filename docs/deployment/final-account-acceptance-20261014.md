@@ -66,6 +66,13 @@ It retains the seven required case identities, retry/skip policies and timeouts.
 The PostgreSQL suite already checks foreign, inactive and deleted vehicle
 assignment; historical unchanged-vehicle behavior is covered separately.
 
+The fresh-browser rehearsal exposed a first-access privacy notice intercepting
+the booking click. The contract case now follows its real acknowledgement
+button, requires a successful CSRF-protected response and re-reads the current
+version's persisted acceptance. It does not hide the notice, force clicks,
+preload consent or opt into optional tracking. This is synthetic test acceptance,
+not approval of the notice's legal wording or the retention policy.
+
 ## Recovery and providers
 
 The first commit containing the role fix is a candidate reserve for local

@@ -70,6 +70,30 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
       await consentDialog.getByRole("button", { name: "Solo necessari", exact: true }).click();
     }
 
+    // A fresh browser must follow the application's first-access notice before
+    // interacting with calendar controls underneath it. Verify persistence so
+    // the UI's local network-error fallback cannot make this test pass.
+    const privacyBefore = await auth.api.get("auth/privacy/current");
+    expect(privacyBefore.ok()).toBe(true);
+    const privacy = await privacyBefore.json();
+    if (!privacy.accepted) {
+      const acknowledge = page.getByRole("button", { name: "Accetto", exact: true });
+      await expect(acknowledge).toBeVisible();
+      const acceptedResponse = page.waitForResponse(response =>
+        response.request().method() === "POST"
+        && new URL(response.url()).pathname === "/api/auth/privacy/accept");
+      await acknowledge.click();
+      const accepted = await acceptedResponse;
+      expect(accepted.ok()).toBe(true);
+      expect((await accepted.json()).accepted).toBe(true);
+      await expect(acknowledge).not.toBeVisible();
+    }
+    const privacyAfter = await auth.api.get("auth/privacy/current");
+    expect(privacyAfter.ok()).toBe(true);
+    const persistedPrivacy = await privacyAfter.json();
+    expect(persistedPrivacy.accepted).toBe(true);
+    expect(persistedPrivacy.notice.version).toBe(privacy.notice.version);
+
     const initialAvailabilityPromise = page.waitForResponse((response) => {
       return response.request().method() === "GET"
         && new URL(response.url()).pathname === "/api/rental-bookings/availability/month";
