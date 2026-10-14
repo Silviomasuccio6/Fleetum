@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { hasTenantCredentials } from "./helpers/env";
 import { createAuthenticatedApi, csrfHeaders, saveStorageStateFromApi } from "./helpers/auth";
 import { createDemoDataset } from "./helpers/demo-data";
+import { openBookingMonth } from "./helpers/calendar.mjs";
 
 const tinySignaturePng =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lZr0xQAAAABJRU5ErkJggg==";
@@ -69,8 +70,15 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
       await consentDialog.getByRole("button", { name: "Solo necessari", exact: true }).click();
     }
 
+    const initialAvailabilityPromise = page.waitForResponse((response) => {
+      return response.request().method() === "GET"
+        && new URL(response.url()).pathname === "/api/rental-bookings/availability/month";
+    });
     await page.goto(`/booking?bookingId=${dataset.booking.id}`);
     await expect(page.getByText(dataset.booking.code, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+    const initialAvailability = await initialAvailabilityPromise;
+    expect(initialAvailability.ok()).toBeTruthy();
+    await openBookingMonth(page, dataset.booking.pickupAt, (await initialAvailability.json()).month);
 
     const selectedPanel = page.locator("aside").filter({ hasText: "Control Booking" });
     const expectSelectedBooking = async (booking: { id: string; code: string }) => {
