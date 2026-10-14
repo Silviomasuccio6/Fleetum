@@ -365,6 +365,7 @@ jobs:
             ./ "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/"
           rsync -az -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" .fleetum-control/ops/staging/run-deploy.sh "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-run-deploy.sh"
           rsync -az -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" .fleetum-control/ops/staging/target-preflight.sh "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-preflight.sh"
+          rsync -az -e "ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging" .fleetum-control/ops/staging/check-platform-health.sh "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST:$FLEETUM_STAGING_APP_DIR/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-platform-health.sh"
 
       - name: Pull immutable images, migrate and restart staging
         env:
@@ -422,8 +423,15 @@ jobs:
         run: node .fleetum-control/ops/e2e/capture-staging-runtime.mjs deploy staging-runtime-isolation.json
 
       - name: Staging health checks
+        env:
+          FLEETUM_RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          DOCKER_MODE: ${{ vars.FLEETUM_STAGING_DOCKER_MODE || 'direct' }}
         run: |
           set -euo pipefail
+          [[ "$FLEETUM_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          case "$DOCKER_MODE" in direct|sudo) ;; *) exit 1 ;; esac
           for attempt in {1..12}; do
             if curl -fsS --max-time 20 https://api-staging.fleetum.it/api/ready; then
               break
@@ -435,7 +443,7 @@ jobs:
             sleep 5
           done
           curl -fsS --max-time 20 https://staging.fleetum.it/ | grep -q "Fleetum"
-          curl -fsS --max-time 20 https://platform-staging.fleetum.it/platform-api/health
+          ssh -F /dev/null -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o IdentitiesOnly=yes -i ~/.ssh/fleetum_staging "$FLEETUM_STAGING_USER@$FLEETUM_STAGING_HOST" "bash '/opt/fleetum-staging/app/.deploy-staging/$FLEETUM_RELEASE_SHA/trusted-platform-health.sh' '$DOCKER_MODE'"
 
       - name: Publish staging release proof
         env:

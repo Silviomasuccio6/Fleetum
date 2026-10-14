@@ -23,6 +23,7 @@ umask 077
 app=/opt/fleetum-staging/app
 bundle="$app/.deploy-staging/$release_sha"
 [ -f "$bundle/trusted-preflight.sh" ] || reject
+[ -f "$bundle/trusted-platform-health.sh" ] || reject
 [ -f "$bundle/docker-compose.staging.yml" ] && [ -d "$bundle/deploy" ] || reject
 if [ "$ingress_mode" = shared ]; then
   [ -f "$bundle/docker-compose.staging.shared.yml" ] || reject
@@ -63,5 +64,5 @@ for attempt in {1..12}; do
 done
 [ "$ready" = true ] || { echo 'Staging readiness failed; retain evidence and review recovery.' >&2; exit 1; }
 curl --fail --silent --show-error --max-time 20 --output /dev/null https://staging.fleetum.it/
-curl --fail --silent --show-error --max-time 20 --output /dev/null https://platform-staging.fleetum.it/platform-api/health
+bash "$bundle/trusted-platform-health.sh" "$docker_mode"
 echo 'Staging deployment and readiness completed.'
