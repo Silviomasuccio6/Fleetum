@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { assertProviderQaIsolation } from "./provider-qa-safety.js";
 import {
   assertStagingIsolation,
   environmentDefaults,
@@ -74,11 +75,11 @@ const BILLING_DUNNING_CRON_ENABLED = toBool(
   process.env.BILLING_DUNNING_CRON_ENABLED ?? String(ENVIRONMENT_DEFAULTS.billingDunningCronEnabled)
 );
 const RESEND_API_KEY =
-  FLEETUM_ENVIRONMENT === "staging"
+  FLEETUM_ENVIRONMENT !== "production"
     ? process.env.RESEND_API_KEY
     : required("RESEND_API_KEY", isCiOrTest ? "re_ci_placeholder" : undefined);
 const RESEND_FROM =
-  FLEETUM_ENVIRONMENT === "staging"
+  FLEETUM_ENVIRONMENT !== "production"
     ? process.env.RESEND_FROM
     : required("RESEND_FROM", isCiOrTest ? "Fleetum <onboarding@resend.dev>" : undefined);
 const PLATFORM_ADMIN_PASSWORD_HASH = required(
@@ -122,6 +123,18 @@ assertStagingIsolation({
   platformCorsOrigin: PLATFORM_CORS_ORIGIN,
   databaseUrl: DATABASE_URL,
   emailProvider: EMAIL_PROVIDER,
+  storageProvider: STORAGE_PROVIDER,
+  privacyRetentionCronEnabled: PRIVACY_RETENTION_CRON_ENABLED,
+  privacyRetentionGlobalEnabled: PRIVACY_RETENTION_GLOBAL_ENABLED,
+  billingDunningCronEnabled: BILLING_DUNNING_CRON_ENABLED,
+  rawEnv: process.env
+});
+
+assertProviderQaIsolation({
+  environment: FLEETUM_ENVIRONMENT,
+  appUrl: APP_URL, backendPublicUrl: BACKEND_PUBLIC_URL,
+  corsOrigin: CORS_ORIGIN, platformCorsOrigin: PLATFORM_CORS_ORIGIN,
+  databaseUrl: DATABASE_URL, emailProvider: EMAIL_PROVIDER,
   storageProvider: STORAGE_PROVIDER,
   privacyRetentionCronEnabled: PRIVACY_RETENTION_CRON_ENABLED,
   privacyRetentionGlobalEnabled: PRIVACY_RETENTION_GLOBAL_ENABLED,

@@ -56,6 +56,9 @@ export const createEmailSender = (
     if (config.environment === "staging") {
       throw new AppError("Invio email disabilitato in staging", 503, "STAGING_EMAIL_DISABLED");
     }
+    if (config.environment === "provider-qa") {
+      throw new AppError("Invio email disabilitato nel laboratorio provider", 503, "PROVIDER_QA_EMAIL_DISABLED");
+    }
     if (config.provider === "disabled") {
       throw new AppError("Provider email disabilitato", 503, "EMAIL_PROVIDER_DISABLED");
     }

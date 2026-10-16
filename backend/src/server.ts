@@ -14,6 +14,10 @@ import { PrismaAuditLogRepository } from "./infrastructure/repositories/prisma-a
 import { emailQueueCronService, licensePolicyService, reminderCronUseCase } from "./interfaces/http/routes/index.js";
 import { env } from "./shared/config/env.js";
 
+if (env.FLEETUM_ENVIRONMENT === "provider-qa") {
+  throw new Error("Provider QA requires the dedicated loopback-only runner; server.ts is refused");
+}
+
 const app = createApp();
 const platformApp = createPlatformApp();
 
