@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { hasTenantCredentials } from "./helpers/env";
+import { e2eEnv, hasTenantCredentials } from "./helpers/env";
 import { createAuthenticatedApi, csrfHeaders, saveStorageStateFromApi } from "./helpers/auth";
 import { createDemoDataset } from "./helpers/demo-data";
 import { openBookingMonth } from "./helpers/calendar.mjs";
@@ -24,6 +24,17 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
     });
     const auth = await createAuthenticatedApi();
     await saveStorageStateFromApi(context, auth);
+
+    // A host-only API CSRF cookie is unreadable on the frontend host. Its first
+    // write may refresh the session, so follow-up API calls must share the
+    // browser's live cookie jar instead of the earlier cloned request context.
+    const browserApi = context.request;
+    const apiUrl = (endpoint: string) => new URL(endpoint, e2eEnv.apiUrl).href;
+    const browserCsrfHeaders = async () => {
+      const cookie = (await context.cookies(e2eEnv.apiUrl)).find((entry) => entry.name === "fermi_csrf");
+      if (!cookie?.value) throw new Error("Current browser CSRF cookie is missing");
+      return csrfHeaders(cookie.value);
+    };
 
     const dataset = await createDemoDataset(auth.api, auth.csrfToken);
     const secondDataset = await createDemoDataset(auth.api, auth.csrfToken);
@@ -73,8 +84,8 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
     // A fresh browser must follow the application's first-access notice before
     // interacting with calendar controls underneath it. Verify persistence so
     // the UI's local network-error fallback cannot make this test pass.
-    const privacyBefore = await auth.api.get("auth/privacy/current");
-    expect(privacyBefore.ok()).toBe(true);
+    const privacyBefore = await browserApi.get(apiUrl("auth/privacy/current"));
+    expect(privacyBefore.ok(), `privacy read failed with HTTP ${privacyBefore.status()}`).toBe(true);
     const privacy = await privacyBefore.json();
     if (!privacy.accepted) {
       const acknowledge = page.getByRole("button", { name: "Accetto", exact: true });
@@ -88,8 +99,8 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
       expect((await accepted.json()).accepted).toBe(true);
       await expect(acknowledge).not.toBeVisible();
     }
-    const privacyAfter = await auth.api.get("auth/privacy/current");
-    expect(privacyAfter.ok()).toBe(true);
+    const privacyAfter = await browserApi.get(apiUrl("auth/privacy/current"));
+    expect(privacyAfter.ok(), `privacy reread failed with HTTP ${privacyAfter.status()}`).toBe(true);
     const persistedPrivacy = await privacyAfter.json();
     expect(persistedPrivacy.accepted).toBe(true);
     expect(persistedPrivacy.notice.version).toBe(privacy.notice.version);
@@ -122,18 +133,18 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
     await page.goForward();
     await expectSelectedBooking(secondDataset.booking);
 
-    const generate = await auth.api.post(`rental-bookings/${dataset.booking.id}/contract/generate`, {
-      headers: csrfHeaders(auth.csrfToken)
+    const generate = await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/generate`), {
+      headers: await browserCsrfHeaders()
     });
     expect(generate.ok()).toBeTruthy();
 
-    const pdf = await auth.api.get(`rental-bookings/${dataset.booking.id}/contract/pdf`);
+    const pdf = await browserApi.get(apiUrl(`rental-bookings/${dataset.booking.id}/contract/pdf`));
     expect(pdf.ok()).toBeTruthy();
     expect(pdf.headers()["content-type"]).toContain("application/pdf");
     expect((await pdf.body()).byteLength).toBeGreaterThan(1000);
 
-    const sign = await auth.api.post(`rental-bookings/${dataset.booking.id}/contract/mark-signed`, {
-      headers: csrfHeaders(auth.csrfToken),
+    const sign = await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/mark-signed`), {
+      headers: await browserCsrfHeaders(),
       data: {
         signedAt: new Date().toISOString(),
         signatureDataUrl: tinySignaturePng
@@ -143,7 +154,7 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
     const signedContract = await sign.json();
     expect(signedContract.status).toBe("SIGNED");
 
-    const contract = await auth.api.get(`rental-bookings/${dataset.booking.id}/contract`);
+    const contract = await browserApi.get(apiUrl(`rental-bookings/${dataset.booking.id}/contract`));
     expect(contract.ok()).toBeTruthy();
     expect((await contract.json()).status).toBe("SIGNED");
     expect(availabilityRequests, "booking selection must preserve the mounted page and avoid a request loop").toBeGreaterThan(0);
