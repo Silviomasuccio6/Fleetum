@@ -42,7 +42,7 @@ def run_node(args, cwd, env, timeout, text=False):
     return subprocess.CompletedProcess(['local-node-stage-output-withheld'], process.returncode, stdout, stderr)
 
 
-def main():
+def main(integration=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--evidence-dir', required=True)
     arguments = parser.parse_args()
@@ -103,6 +103,7 @@ def main():
     database_password = secrets.token_hex(24)
     password = secrets.token_urlsafe(24)
     server = None
+    integration_context = None
     container_id = network_id = None
     result = {'status': 'IN_PROGRESS', 'startedAtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'mode': 'stripe-startup', 'externalProviderRequests': 0, 'providerWrites': 0,
@@ -129,7 +130,9 @@ def main():
                     receipt.get('requests') == 7 and receipt.get('methods') == ['GET']):
                 result['providerPreflight'] = {key: receipt[key] for key in
                     ['account', 'livemode', 'prices', 'products', 'portal', 'requests', 'methods', 'completedAt']}
-                result['externalProviderRequests'] = 7
+                result['externalProviderRequests'] = 7 if integration is None else None
+                if integration is not None:
+                    result['preflightProviderRequests'] = 7
         except (OSError, ValueError, KeyError, TypeError):
             result['preflightReceiptConfirmed'] = False
     previous_handler = signal.signal(signal.SIGTERM, interrupt)
@@ -172,6 +175,8 @@ def main():
             'QA_FIXTURE_PASSWORD': password, 'QA_FIXTURE_RUN_ID': run, **stripe_config}
         database_environment = {key: value for key, value in environment.items() if not key.startswith('STRIPE_')}
         database_environment['FLEETUM_PROVIDER_QA_MODE'] = 'offline'
+        if integration is not None:
+            database_environment['QA_STRIPE_FLOW_FIXTURE'] = 'true'
         progress('apply-real-migrations-to-empty-temporary-database')
         migration = run_node([node, 'node_modules/prisma/build/index.js', 'migrate', 'deploy',
                                     '--schema', 'backend/prisma/schema.prisma'], cwd=repository,
@@ -187,8 +192,9 @@ for(const key of ['billing:read','billing:manage','rental-payments:read','rental
 const permission=await tx.permission.upsert({where:{key},update:{},create:{key,description:'Synthetic provider QA fixture'}});
 await tx.rolePermission.upsert({where:{roleId_permissionId:{roleId:role.id,permissionId:permission.id}},update:{},create:{roleId:role.id,permissionId:permission.id}});}
 const passwordHash=await bcrypt.hash(process.env.QA_FIXTURE_PASSWORD,12);
+const flow=process.env.QA_STRIPE_FLOW_FIXTURE==='true';
 for(const suffix of ['a','b'])await tx.tenant.create({data:{id:'provider-qa-'+process.env.QA_FIXTURE_RUN_ID+'-'+suffix,name:'Synthetic provider QA '+suffix,
-tenantSubscription:{create:{provider:'local',plan:'ENTERPRISE',status:'ACTIVE',seats:10,currentPeriodEnd:new Date(Date.now()+86400000)}},
+tenantSubscription:{create:{provider:'local',plan:flow?'STARTER':'ENTERPRISE',status:flow?'PENDING':'ACTIVE',seats:flow?3:10,currentPeriodEnd:flow?null:new Date(Date.now()+86400000)}},
 users:{create:{email:'qa-'+suffix+'@fleetum-provider-qa.invalid',passwordHash,firstName:'Synthetic',lastName:suffix,isEmailVerified:true,roles:{create:{roleId:role.id}}}}}});
 });console.log(JSON.stringify({tenants:await db.tenant.count(),users:await db.user.count()}));}
 catch(error){console.log(JSON.stringify({status:'FAIL',errorType:error.constructor.name,code:typeof error.code==='string'?error.code:null}));process.exitCode=1;}
@@ -204,12 +210,22 @@ finally{await db.$disconnect();}'''
         require(seed.returncode == 0, 'SYNTHETIC_SEED_FAILED_OUTPUT_WITHHELD')
         result['syntheticCounts'] = json.loads(seed.stdout)
         require(result['syntheticCounts'] == {'tenants': 2, 'users': 2}, 'SYNTHETIC_SEED_COUNT_DRIFT')
+        if integration is not None:
+            require(isinstance(integration.lease_seconds, int) and 120 <= integration.lease_seconds <= 1800,
+                    'INTEGRATION_DURATION_REFUSED')
+            environment['FLEETUM_PROVIDER_QA_MAX_SECONDS'] = str(integration.lease_seconds)
+            integration_context = {'repository': repository, 'root': root, 'run': run, 'node': node,
+                'environment': environment, 'database_environment': database_environment,
+                'evidence': evidence, 'result': result, 'progress': progress, 'password': password,
+                'run_node': run_node, 'require': require}
+            integration.prepare(integration_context)
         # The request count is unknown until a complete preflight receipt is observed.
         result['externalProviderRequests'] = None
         progress('start-loopback-api-with-readonly-stripe-preflight')
         server = subprocess.Popen([node, '--import', 'tsx', 'ops/provider-qa/serve-stripe.mts'], cwd=repository,
                                   env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL, start_new_session=True)
+        result['ownedApiPid'] = server.pid
         deadline = time.monotonic() + 45
         while not (root / 'ready.json').exists():
             capture_preflight()
@@ -222,7 +238,7 @@ finally{await db.$disconnect();}'''
         preflight = json.loads((root / 'stripe-preflight.json').read_text())
         require(preflight['requests'] == 7 and preflight['methods'] == ['GET'], 'PREFLIGHT_REQUEST_DRIFT')
         result['providerPreflight'] = preflight
-        result['externalProviderRequests'] = preflight['requests']
+        result['externalProviderRequests'] = preflight['requests'] if integration is None else None
         progress('local-readiness-and-synthetic-login')
         jar = http.cookiejar.CookieJar()
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(jar))
@@ -237,52 +253,55 @@ finally{await db.$disconnect();}'''
         with opener.open('http://127.0.0.1:4200/api/auth/me', timeout=10) as response:
             require(response.status == 200, 'AUTHENTICATED_PROFILE_FAILED')
             response.read(65536)
-        event = {'id': 'evt_qa' + run, 'object': 'event', 'created': int(time.time()),
-                 'livemode': False, 'type': 'checkout.session.expired',
-                 'data': {'object': {'id': 'cs_test_synthetic' + run, 'object': 'checkout.session',
-                                    'metadata': {'tenantId': 'provider-qa-' + run + '-a'}}}}
-        payload = json.dumps(event).encode()
-        timestamp = str(int(time.time()))
-        digest = hmac.new(local_signing_secret.encode(), timestamp.encode() + b'.' + payload, hashlib.sha256).hexdigest()
-        signature = 't=' + timestamp + ',v1=' + digest
-        progress('local-synthetic-signatures-and-ignored-event-replays')
-        def webhook(value):
-            request = urllib.request.Request('http://127.0.0.1:4200/api/billing/webhook', data=payload,
-                                            headers={'Content-Type': 'application/json', **({'stripe-signature': value} if value else {})})
-            client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            try:
-                with client.open(request, timeout=10) as response:
-                    return response.status, json.load(response)
-            except urllib.error.HTTPError as error:
-                error.read(65536)
-                return error.code, {}
-        require(webhook(None)[0] == 400, 'MISSING_SIGNATURE_NOT_REFUSED')
-        require(webhook('t=' + timestamp + ',v1=' + '0' * 64)[0] == 400, 'INVALID_SIGNATURE_NOT_REFUSED')
-        for _ in range(2):
-            code, body = webhook(signature)
-            require(code == 200 and body.get('received') is True and body.get('ignored') is True, 'LOCAL_SYNTHETIC_EVENT_FAILED')
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            concurrent = list(pool.map(webhook, [signature, signature]))
-        require(all(code == 200 and body.get('ignored') is True for code, body in concurrent), 'IGNORED_EVENT_RACE_FAILED')
-        inspect_code = '''import {PrismaClient} from '@prisma/client';const db=new PrismaClient();try{
-const run=process.env.QA_FIXTURE_RUN_ID;
-const event=await db.billingEvent.findUnique({where:{eventId:'evt_qa'+run},select:{tenantId:true,status:true}});
-const rows=await db.tenantSubscription.findMany({select:{tenantId:true,provider:true,plan:true,status:true,seats:true}});
-const expected=['provider-qa-'+run+'-a','provider-qa-'+run+'-b'];
-console.log(JSON.stringify({eventRows:await db.billingEvent.count(),boundToTenantA:event?.tenantId===expected[0],ignored:event?.status==='IGNORED',
-licensesUnchanged:rows.length===2&&rows.every(r=>expected.includes(r.tenantId)&&r.provider==='local'&&r.plan==='ENTERPRISE'&&r.status==='ACTIVE'&&r.seats===10)}));
-}finally{await db.$disconnect();}'''
-        inspected = run_node([node, '--input-type=module', '-e', inspect_code], cwd=repository,
-                             env=database_environment, text=True, timeout=15)
-        require(inspected.returncode == 0, 'LOCAL_DATABASE_INSPECTION_FAILED_OUTPUT_WITHHELD')
-        observed = json.loads(inspected.stdout)
-        require(observed == {'eventRows': 1, 'boundToTenantA': True, 'ignored': True, 'licensesUnchanged': True}, 'LOCAL_EVENT_OR_TENANT_DRIFT')
-        result['webhookLocalChecks'] = {'missingSignatureStatus': 400, 'invalidSignatureStatus': 400,
-            'sequentialDeliveries': 2, 'concurrentDeliveries': 2, **observed,
-            'scope': 'locally signed ignored event; not paid-event replay or actual Stripe forwarding'}
-        result.update({'readinessStatus': 200, 'loginStatus': 200, 'authenticatedProfileStatus': 200,
-                       'cookieValuesRetained': False, 'providerCredentialsPresent': True,
-                       'realEmailsSent': 0, 'status': 'PASS'})
+        if integration is not None:
+            result.update(integration.run(integration_context, opener, jar))
+        else:
+            event = {'id': 'evt_qa' + run, 'object': 'event', 'created': int(time.time()),
+                     'livemode': False, 'type': 'checkout.session.expired',
+                     'data': {'object': {'id': 'cs_test_synthetic' + run, 'object': 'checkout.session',
+                                        'metadata': {'tenantId': 'provider-qa-' + run + '-a'}}}}
+            payload = json.dumps(event).encode()
+            timestamp = str(int(time.time()))
+            digest = hmac.new(local_signing_secret.encode(), timestamp.encode() + b'.' + payload, hashlib.sha256).hexdigest()
+            signature = 't=' + timestamp + ',v1=' + digest
+            progress('local-synthetic-signatures-and-ignored-event-replays')
+            def webhook(value):
+                request = urllib.request.Request('http://127.0.0.1:4200/api/billing/webhook', data=payload,
+                                                headers={'Content-Type': 'application/json', **({'stripe-signature': value} if value else {})})
+                client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                try:
+                    with client.open(request, timeout=10) as response:
+                        return response.status, json.load(response)
+                except urllib.error.HTTPError as error:
+                    error.read(65536)
+                    return error.code, {}
+            require(webhook(None)[0] == 400, 'MISSING_SIGNATURE_NOT_REFUSED')
+            require(webhook('t=' + timestamp + ',v1=' + '0' * 64)[0] == 400, 'INVALID_SIGNATURE_NOT_REFUSED')
+            for _ in range(2):
+                code, body = webhook(signature)
+                require(code == 200 and body.get('received') is True and body.get('ignored') is True, 'LOCAL_SYNTHETIC_EVENT_FAILED')
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                concurrent = list(pool.map(webhook, [signature, signature]))
+            require(all(code == 200 and body.get('ignored') is True for code, body in concurrent), 'IGNORED_EVENT_RACE_FAILED')
+            inspect_code = '''import {PrismaClient} from '@prisma/client';const db=new PrismaClient();try{
+    const run=process.env.QA_FIXTURE_RUN_ID;
+    const event=await db.billingEvent.findUnique({where:{eventId:'evt_qa'+run},select:{tenantId:true,status:true}});
+    const rows=await db.tenantSubscription.findMany({select:{tenantId:true,provider:true,plan:true,status:true,seats:true}});
+    const expected=['provider-qa-'+run+'-a','provider-qa-'+run+'-b'];
+    console.log(JSON.stringify({eventRows:await db.billingEvent.count(),boundToTenantA:event?.tenantId===expected[0],ignored:event?.status==='IGNORED',
+    licensesUnchanged:rows.length===2&&rows.every(r=>expected.includes(r.tenantId)&&r.provider==='local'&&r.plan==='ENTERPRISE'&&r.status==='ACTIVE'&&r.seats===10)}));
+    }finally{await db.$disconnect();}'''
+            inspected = run_node([node, '--input-type=module', '-e', inspect_code], cwd=repository,
+                                 env=database_environment, text=True, timeout=15)
+            require(inspected.returncode == 0, 'LOCAL_DATABASE_INSPECTION_FAILED_OUTPUT_WITHHELD')
+            observed = json.loads(inspected.stdout)
+            require(observed == {'eventRows': 1, 'boundToTenantA': True, 'ignored': True, 'licensesUnchanged': True}, 'LOCAL_EVENT_OR_TENANT_DRIFT')
+            result['webhookLocalChecks'] = {'missingSignatureStatus': 400, 'invalidSignatureStatus': 400,
+                'sequentialDeliveries': 2, 'concurrentDeliveries': 2, **observed,
+                'scope': 'locally signed ignored event; not paid-event replay or actual Stripe forwarding'}
+            result.update({'readinessStatus': 200, 'loginStatus': 200, 'authenticatedProfileStatus': 200,
+                           'cookieValuesRetained': False, 'providerCredentialsPresent': True,
+                           'realEmailsSent': 0, 'status': 'PASS'})
     except BaseException as error:
         failed = error
         result.update({'status': 'FAIL', 'errorType': type(error).__name__,
@@ -290,6 +309,12 @@ licensesUnchanged:rows.length===2&&rows.every(r=>expected.includes(r.tenantId)&&
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         capture_preflight()
+        if integration is not None and integration_context is not None:
+            try:
+                integration.cleanup(integration_context)
+            except Exception as cleanup_error:
+                result['integrationCleanupErrorType'] = type(cleanup_error).__name__
+                result['status'] = 'FAIL'
         result['lastTestStage'] = result.get('stage')
         progress('cleanup-owned-local-resources')
         cleanup = []
@@ -341,7 +366,9 @@ licensesUnchanged:rows.length===2&&rows.every(r=>expected.includes(r.tenantId)&&
         shutil.rmtree(root)
         result['ownedTemporaryRootAbsent'] = not root.exists()
         cleanup.append(result['ownedTemporaryRootAbsent'])
-        result['cleanupPassed'] = all(cleanup)
+        result['localCleanupPassed'] = all(cleanup)
+        result['cleanupPassed'] = all(cleanup) and (integration is None or
+            result.get('stripeFixtureCleanup', {}).get('status') == 'PASS')
         if not result['cleanupPassed']:
             result['status'] = 'FAIL'
         result['finishedAtUtc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
