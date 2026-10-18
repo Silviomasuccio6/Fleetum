@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from stripe_flow_support import EVENT_TYPES, RequestBudget, belongs_to_fixture, nested, stripe_id, verify_signature
+from stripe_flow_support import EVENT_TYPES, RequestBudget, belongs_to_fixture, nested, stripe_id, verify_signature, validate_fixture_snapshot, refresh_fixture_session
 
 spec = importlib.util.spec_from_file_location('stripe_startup_fixture', Path(__file__).with_name('verify-stripe-startup.py'))
 startup = importlib.util.module_from_spec(spec)
@@ -268,6 +268,9 @@ class StripeFlow:
 
     def api(self, path, method='GET', data=None, tenant='a', csrf=True):
         client, jar = (self.client_a, self.jar_a) if tenant == 'a' else (self.client_b, self.jar_b)
+        if csrf and refresh_fixture_session(client, jar, time.time()):
+            renewals = self.ctx['result'].setdefault('sessionRenewals', {})
+            renewals[tenant] = renewals.get(tenant, 0) + 1
         headers = {'Content-Type': 'application/json', 'Origin': 'http://localhost:5273'}
         if csrf:
             headers['X-CSRF-Token'] = next(cookie.value for cookie in jar if cookie.name == 'fermi_csrf')
@@ -275,6 +278,7 @@ class StripeFlow:
             data=json.dumps(data).encode() if data is not None else None, headers=headers, method=method)
         try:
             with client.open(request, timeout=25) as response:
+                self.ctx['result']['lastApiResponse'] = {'path': path, 'method': method, 'status': response.status}
                 return response.status, json.load(response)
         except urllib.error.HTTPError as error:
             raw = error.read(65536)
@@ -282,6 +286,8 @@ class StripeFlow:
                 body = json.loads(raw)
             except ValueError:
                 body = {}
+            self.ctx['result']['lastApiResponse'] = {'path': path, 'method': method,
+                'status': error.code, 'code': body.get('code')}
             return error.code, {'code': body.get('code'), 'ownedResourceIdLeaked': any(
                 identifier.encode() in raw for identifier in self.customers | self.subscriptions)}
 
@@ -294,11 +300,8 @@ console.log(JSON.stringify({rows,events}));}finally{await db.$disconnect();}'''
             cwd=self.ctx['repository'], env=self.ctx['database_environment'], text=True, timeout=15)
         require(result.returncode == 0, 'QA_FLOW_DATABASE_INSPECTION_FAILED')
         observed = json.loads(result.stdout)
-        require(len(observed['rows']) == 2, 'QA_FIXTURE_TENANT_COUNT_CHANGED')
-        if hasattr(self, 'baseline_b'):
-            require(next(row for row in observed['rows'] if row['tenantId'] == self.tenant_b) == self.baseline_b,
-                    'QA_CONTROL_TENANT_MUTATED')
-            require(all(event['tenantId'] == self.tenant_a for event in observed['events']), 'QA_EVENT_TENANT_LEAK')
+        self.ctx['result']['lastDatabaseSnapshot'] = observed
+        validate_fixture_snapshot(observed, self.tenant_a, self.tenant_b, getattr(self, 'baseline_b', None))
         return observed
 
     def target(self, purpose, url):

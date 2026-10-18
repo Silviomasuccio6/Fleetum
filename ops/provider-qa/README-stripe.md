@@ -97,6 +97,18 @@ within its signature tolerance. Checks include trial and paid period ends,
 unchanged control tenant, portal card default, and PRO price overriding historical
 STARTER metadata. This covers backend/hosted-provider integration; it does not
 replace a full Fleetum frontend journey or production endpoint verification.
+An initial zero-value invoice can be ignored before any customer/subscription
+binding exists. Only an IGNORED event with a null tenant is allowed in that case;
+processed unbound events, explicitly foreign events (even ignored), and every
+change to the control tenant remain failures. The last synthetic database
+snapshot is retained for diagnostics even if its validation fails.
+The human flow can outlast the normal 15-minute access token. Before an ordinary
+authenticated request, the fixture uses the existing refresh endpoint with the
+same tenant's cookie jar and current CSRF token when expiry is within 30 seconds.
+The decoded expiry is only a scheduling hint; the server still verifies refresh
+credentials, revocation and tenant state. The fixture requires rotated access and
+CSRF cookies, records only renewal counts/status codes, never retries a business
+write, and skips renewal for the deliberate missing-CSRF negative check.
 
 Cleanup expires the owned open checkout, cancels only the owned test subscription,
 deletes only its synthetic customer after checking ownership, stops CLI/proxy/

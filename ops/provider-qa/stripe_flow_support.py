@@ -2,6 +2,10 @@
 import hashlib
 import hmac
 import threading
+import base64
+import json
+import urllib.request
+import urllib.error
 
 EVENT_TYPES = frozenset({'checkout.session.completed', 'customer.subscription.created',
     'customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid',
@@ -53,6 +57,54 @@ def belongs_to_fixture(event, tenant_id, customers, subscriptions):
     if source.get('object') == 'subscription':
         subscription = stripe_id(source.get('id'))
     return stripe_id(source.get('customer')) in customers or subscription in subscriptions
+
+
+def refresh_fixture_session(client, jar, now):
+    cookies = {cookie.name: cookie.value for cookie in jar}
+    token = cookies.get('fermi_access', '')
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(token.split('.')[1] + '=='))
+        expires_at = payload['exp']
+        if type(expires_at) not in {int, float} or expires_at > now + 30:
+            return False
+    except (ValueError, IndexError, KeyError, TypeError):
+        return False
+    if not cookies.get('fermi_refresh') or not cookies.get('fermi_csrf'):
+        return False
+    # This unverified expiry is a client scheduling hint, never authorization.
+    # The normal auth endpoint validates and rotates the actual refresh cookie.
+    request = urllib.request.Request('http://127.0.0.1:4200/api/auth/refresh',
+        data=b'{}', method='POST', headers={'Content-Type': 'application/json',
+        'Origin': 'http://localhost:5273', 'X-CSRF-Token': cookies['fermi_csrf']})
+    try:
+        with client.open(request, timeout=10) as response:
+            if response.status != 200:
+                raise RuntimeError('QA_SESSION_REFRESH_UNEXPECTED_STATUS')
+            response.read(65536)  # Do not retain the body or any tokens.
+    except urllib.error.HTTPError as error:
+        error.read(65536)
+        raise RuntimeError('QA_SESSION_REFRESH_HTTP_' + str(error.code)) from None
+    updated = {cookie.name: cookie.value for cookie in jar}
+    if (updated.get('fermi_access') in {None, token} or
+            updated.get('fermi_csrf') in {None, cookies['fermi_csrf']}):
+        raise RuntimeError('QA_SESSION_REFRESH_COOKIES_NOT_ROTATED')
+    return True
+
+
+def validate_fixture_snapshot(observed, tenant_a, tenant_b, baseline_b=None):
+    rows = observed['rows']
+    if len(rows) != 2 or {row['tenantId'] for row in rows} != {tenant_a, tenant_b}:
+        raise RuntimeError('QA_FIXTURE_TENANT_COUNT_CHANGED')
+    if baseline_b is not None:
+        if next(row for row in rows if row['tenantId'] == tenant_b) != baseline_b:
+            raise RuntimeError('QA_CONTROL_TENANT_MUTATED')
+        # A zero-value invoice may arrive before Checkout establishes any binding.
+        # An ignored, unbound event is not a mutation of another tenant. Processed
+        # or explicitly foreign events must still fail, including foreign IGNORED.
+        if any(event['tenantId'] != tenant_a and not
+               (event['tenantId'] is None and event['status'] == 'IGNORED')
+               for event in observed['events']):
+            raise RuntimeError('QA_EVENT_TENANT_LEAK')
 
 
 class RequestBudget:
