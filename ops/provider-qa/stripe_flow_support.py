@@ -59,6 +59,25 @@ def belongs_to_fixture(event, tenant_id, customers, subscriptions):
     return stripe_id(source.get('customer')) in customers or subscription in subscriptions
 
 
+def is_period_end_cancellation(subscription):
+    items = nested(subscription, 'items', 'data')
+    if items is not None and (not isinstance(items, list) or len(items) != 1):
+        return False
+    period_end = subscription.get('current_period_end')
+    if period_end is None and items:
+        period_end = items[0].get('current_period_end')
+    if type(period_end) is not int or period_end <= 0:
+        return False
+    flag, cancel_at = subscription.get('cancel_at_period_end'), subscription.get('cancel_at')
+    if type(flag) is not bool:
+        return False
+    if cancel_at is None:
+        return flag is True
+    # Flexible-billing portal cancellation can set an explicit cancel_at while
+    # leaving cancel_at_period_end false. Require exact equality to the period.
+    return type(cancel_at) is int and cancel_at == period_end
+
+
 def refresh_fixture_session(client, jar, now):
     cookies = {cookie.name: cookie.value for cookie in jar}
     token = cookies.get('fermi_access', '')

@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from stripe_flow_support import EVENT_TYPES, RequestBudget, belongs_to_fixture, nested, stripe_id, verify_signature, validate_fixture_snapshot, refresh_fixture_session
+from stripe_flow_support import EVENT_TYPES, RequestBudget, belongs_to_fixture, nested, stripe_id, verify_signature, validate_fixture_snapshot, refresh_fixture_session, is_period_end_cancellation
 
 spec = importlib.util.spec_from_file_location('stripe_startup_fixture', Path(__file__).with_name('verify-stripe-startup.py'))
 startup = importlib.util.module_from_spec(spec)
@@ -524,10 +524,15 @@ console.log(JSON.stringify({rows,events}));}finally{await db.$disconnect();}'''
             subscription = self.subscription()
             observed = self.snapshot()
             row_a = next(row for row in observed['rows'] if row['tenantId'] == self.tenant_a)
-            require(subscription.get('cancel_at_period_end') is True and subscription['status'] == 'active' and
+            self.ctx['result']['cancellationObservation'] = {'cancelAtPeriodEndFlag': subscription.get('cancel_at_period_end'),
+                'cancelAt': subscription.get('cancel_at'), 'stripeStatus': subscription['status'], 'licenseStatus': row_a['status']}
+            require(is_period_end_cancellation(subscription) and subscription['status'] == 'active' and
                     row_a['status'] == 'ACTIVE' and row_a['plan'] == 'PRO', 'QA_PERIOD_END_CANCELLATION_NOT_READY')
+            self.verify_period(row_a, subscription, 'QA_CANCELLATION_PERIOD_NOT_SYNCED')
             self.cases.add('cancellationScheduledInPortal')
-            return {'status': 'PASS', 'cancelAtPeriodEnd': True, 'licenseRemainsActiveUntilPeriodEnd': True}
+            return {'status': 'PASS', 'cancellationAtPeriodEnd': True,
+                'stripeCancelAtPeriodEndFlag': subscription.get('cancel_at_period_end'),
+                'stripeCancelAt': subscription.get('cancel_at'), 'licenseRemainsActiveUntilPeriodEnd': True}
         if action == 'finish':
             missing = sorted(self.required_cases - self.cases)
             if missing:

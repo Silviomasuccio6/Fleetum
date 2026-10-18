@@ -117,6 +117,36 @@ class ForwardingSafety(unittest.TestCase):
             support.validate_fixture_snapshot(observed, 'tenant-qa-a', 'tenant-qa-b', baseline)
 
 
+class CancellationSchedule(unittest.TestCase):
+    def subscription(self, flag=False, cancel_at=1800000000):
+        return {'cancel_at_period_end': flag, 'cancel_at': cancel_at,
+                'items': {'data': [{'current_period_end': 1800000000}]}}
+
+    def test_legacy_flag_and_period_are_accepted(self):
+        value = {'cancel_at_period_end': True, 'cancel_at': None, 'current_period_end': 1800000000}
+        self.assertTrue(support.is_period_end_cancellation(value))
+
+    def test_explicit_cancel_at_equal_to_item_end_is_accepted(self):
+        self.assertTrue(support.is_period_end_cancellation(self.subscription()))
+
+    def test_mid_period_or_absent_cancellation_is_rejected(self):
+        for when in [1799999999, None, 0]:
+            self.assertFalse(support.is_period_end_cancellation(self.subscription(cancel_at=when)))
+
+    def test_conflicting_flag_and_explicit_date_is_rejected(self):
+        self.assertFalse(support.is_period_end_cancellation(self.subscription(True, 1799999999)))
+
+    def test_missing_period_or_multiple_items_are_rejected(self):
+        self.assertFalse(support.is_period_end_cancellation({'cancel_at_period_end': True}))
+        value = self.subscription(True, None)
+        value['items']['data'].append({'current_period_end': 1800000001})
+        self.assertFalse(support.is_period_end_cancellation(value))
+
+    def test_boolean_or_string_timestamps_are_not_dates(self):
+        for when in [True, '1800000000']:
+            self.assertFalse(support.is_period_end_cancellation(self.subscription(cancel_at=when)))
+
+
 class SessionRenewal(unittest.TestCase):
     def cookies(self, expiry=1000, suffix='a'):
         payload = base64.urlsafe_b64encode(json.dumps({'exp': expiry}).encode()).decode().rstrip('=')

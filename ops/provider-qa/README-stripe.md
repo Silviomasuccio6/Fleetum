@@ -109,6 +109,10 @@ The decoded expiry is only a scheduling hint; the server still verifies refresh
 credentials, revocation and tenant state. The fixture requires rotated access and
 CSRF cookies, records only renewal counts/status codes, never retries a business
 write, and skips renewal for the deliberate missing-CSRF negative check.
+Period-end cancellation accepts either the legacy boolean flag or an explicit
+cancel_at equal to the single subscription item's period end. A mid-period date,
+missing period, conflicting flag/date or ambiguous multi-item period is refused;
+the license must remain ACTIVE/PRO with its expiry equal to that period end.
 
 Cleanup expires the owned open checkout, cancels only the owned test subscription,
 deletes only its synthetic customer after checking ownership, stops CLI/proxy/
