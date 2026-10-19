@@ -373,7 +373,7 @@ describe("persistent scheduled report cursor", () => {
       data: { lastSkippedFrom: earlier, lastSkippedThrough: earlier, lastSkipReason: "BACKLOG" }
     });
     const now = new Date();
-    const newHour = (now.getHours() + 1) % 24;
+    const newHour = (now.getHours() + 2) % 24;
     const settingsService = new SettingsService(new PrismaAuditLogRepository());
     await settingsService.setByResource(tenantIds.changed, undefined, "reports", {
       enabled: true,
