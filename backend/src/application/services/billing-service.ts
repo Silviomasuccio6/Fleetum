@@ -968,7 +968,9 @@ export class BillingService {
     const priceSelection = resolvePlanAndCycleFromStripePrice(source);
     const plan = priceSelection?.plan ?? ensureKnownPlan(String(metadata.plan ?? current?.plan ?? "STARTER"));
     const billingCycle = priceSelection?.billingCycle ?? normalizeBillingCycle(String(metadata.billingCycle ?? current?.billingCycle ?? "monthly"));
-    const currentPeriodEnd = source.current_period_end ?? getNested(source, "lines.data.0.period.end");
+    const currentPeriodEnd = source.current_period_end
+      ?? getNested(source, "items.data.0.current_period_end")
+      ?? getNested(source, "lines.data.0.period.end");
     const expiresAt = unixToIso(currentPeriodEnd) ?? current?.expiresAt ?? null;
     const customerId = stripeId(source.customer) ?? fallback?.fallbackCustomerId ?? current?.stripeCustomerId ?? null;
     const subscriptionId = options?.expectedSubscriptionId

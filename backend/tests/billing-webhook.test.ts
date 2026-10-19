@@ -1256,3 +1256,36 @@ test("billing webhook rejects missing or invalid Stripe signature", async () => 
     (error) => error instanceof AppError && error.statusCode === 400 && error.code === "STRIPE_SIGNATURE_INVALID"
   );
 });
+
+test("current Stripe item periods set trial and renewed license expiry", async (t) => {
+  for (const scenario of [
+    { key: "trial", status: "trialing", expectedStatus: "TRIAL", previousExpiry: null },
+    { key: "renewal", status: "active", expectedStatus: "ACTIVE", previousExpiry: "2026-10-01T00:00:00.000Z" }
+  ] as const) {
+    await t.test(scenario.key, async () => {
+      const harness = makeHarness();
+      (env as Record<string, unknown>).STRIPE_PRICE_STARTER_MONTHLY = "price_current_item_period";
+      const tenantId = "tenant_current_period_" + scenario.key;
+      const subscriptionId = "sub_current_period_" + scenario.key;
+      const customerId = "cus_current_period_" + scenario.key;
+      const periodEnd = 1_800_000_000;
+      if (scenario.previousExpiry) harness.subscriptions.set(tenantId, {
+        provider: "stripe", plan: "STARTER", status: "ACTIVE", seats: 3, billingCycle: "monthly",
+        stripeSubscriptionId: subscriptionId, stripeCustomerId: customerId, priceMonthly: 149,
+        expiresAt: scenario.previousExpiry, updatedAt: "2026-09-01T00:00:00.000Z"
+      });
+      const subscription = {
+        id: subscriptionId, object: "subscription", livemode: false, status: scenario.status,
+        customer: customerId, metadata: { tenantId, plan: "STARTER", billingCycle: "monthly" },
+        items: { data: [{ id: "si_current_period", current_period_start: periodEnd - 86400,
+          current_period_end: periodEnd, price: { id: "price_current_item_period" } }] }
+      };
+      harness.authoritativeSubscriptions.set(subscriptionId, subscription);
+      await harness.service.handleWebhook(harness.sign(baseEvent("evt_current_period_" + scenario.key,
+        "customer.subscription.updated", subscription)));
+      const license = harness.subscriptions.get(tenantId);
+      assert.equal(license?.status, scenario.expectedStatus);
+      assert.equal(license?.expiresAt, new Date(periodEnd * 1000).toISOString());
+    });
+  }
+});

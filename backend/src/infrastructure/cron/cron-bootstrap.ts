@@ -16,7 +16,7 @@ export const startAutomaticCronTasks = (
   environment: FleetumEnvironment,
   starters: AutomaticCronStarters
 ): AutomaticCronTask[] => {
-  if (environment === "staging") return [];
+  if (environment !== "production") return [];
 
   return [
     starters.reminder(),

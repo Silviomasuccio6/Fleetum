@@ -1,4 +1,4 @@
-export type FleetumEnvironment = "production" | "staging";
+export type FleetumEnvironment = "production" | "staging" | "provider-qa";
 export type FleetumEmailProvider = "resend" | "disabled";
 
 export const STAGING_CANONICAL = {
@@ -10,14 +10,14 @@ export const STAGING_CANONICAL = {
 
 export const resolveFleetumEnvironment = (value?: string): FleetumEnvironment => {
   const normalized = (value ?? "production").trim().toLowerCase();
-  if (normalized !== "production" && normalized !== "staging") {
-    throw new Error("FLEETUM_ENVIRONMENT must be production or staging");
+  if (!["production", "staging", "provider-qa"].includes(normalized)) {
+    throw new Error("FLEETUM_ENVIRONMENT must be production, staging or provider-qa");
   }
-  return normalized;
+  return normalized as FleetumEnvironment;
 };
 
 export const environmentDefaults = (environment: FleetumEnvironment) => ({
-  emailProvider: environment === "staging" ? ("disabled" as const) : ("resend" as const),
+  emailProvider: environment === "production" ? ("resend" as const) : ("disabled" as const),
   privacyRetentionCronEnabled: false,
   billingDunningCronEnabled: environment === "production"
 });
@@ -30,16 +30,19 @@ export const resolveEmailProvider = (
   if (normalized !== "resend" && normalized !== "disabled") {
     throw new Error("EMAIL_PROVIDER must be resend or disabled");
   }
-  if (normalized === "disabled" && environment !== "staging") {
-    throw new Error("EMAIL_PROVIDER=disabled is allowed only in staging");
+  if (normalized === "disabled" && environment === "production") {
+    throw new Error("EMAIL_PROVIDER=disabled is allowed only in staging or provider-qa");
   }
   if (environment === "staging" && normalized !== "disabled") {
     throw new Error("EMAIL_PROVIDER must be disabled in staging");
   }
+  if (environment === "provider-qa" && normalized !== "disabled") {
+    throw new Error("EMAIL_PROVIDER must be disabled in provider-qa");
+  }
   return normalized;
 };
 
-type StagingIsolationConfig = {
+export type StagingIsolationConfig = {
   environment: FleetumEnvironment;
   appUrl: string;
   backendPublicUrl: string;
