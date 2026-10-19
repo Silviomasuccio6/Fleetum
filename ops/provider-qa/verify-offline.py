@@ -27,6 +27,9 @@ def main():
     arguments = parser.parse_args()
     require(sys.platform == 'darwin', 'THIS_PROBE_IS_LOCAL_MAC_ONLY')
     repository = Path(__file__).resolve().parents[2]
+    # Prisma discovers dotenv separately from the application's DOTENV_CONFIG_PATH.
+    require(not any((repository / name).exists() for name in
+                    ['.env', 'backend/.env', 'backend/prisma/.env']), 'REAL_ENV_DISCOVERY_REFUSED')
     evidence = Path(arguments.evidence_dir)
     require(evidence.is_absolute() and not evidence.exists(), 'NEW_EVIDENCE_DIRECTORY_REQUIRED')
     evidence.mkdir(mode=0o700)

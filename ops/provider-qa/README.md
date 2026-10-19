@@ -1,9 +1,11 @@
 # Local provider QA laboratory
 
-This profile prepares Stripe/Google testing without changing the provider-free
-staging baseline. It is local preparation, not an external-provider acceptance.
-The dedicated entrypoint currently accepts **offline mode only**. Other modes
-fail before loading the application; no external execution has been armed.
+This profile supports local Stripe/Google testing without changing the
+provider-free staging baseline. `serve.mts` accepts **offline mode only**;
+separate entrypoints and launchers are documented in [Stripe QA](README-stripe.md)
+and [Google QA](README-google.md). Starting a provider flow requires its reviewed
+test configuration and authorization; the launch flag itself is not consent.
+These tools do not certify staging or production integrations.
 
 ## Boundaries
 
@@ -29,6 +31,9 @@ fail before loading the application; no external execution has been armed.
   published only on127.0.0.1. No remote resource is used by the offline probe.
 - The launcher receives a newly constructed environment. It does not load real
   dotenv files, print credentials/cookies, retain raw app output or send email.
+  Launchers refuse a checkout containing `.env`, `backend/.env` or
+  `backend/prisma/.env` before Prisma can discover these files. Do not remove
+  an existing configuration to bypass this check; use a separate QA checkout.
 
 ## Run the offline proof on the Mac
 
@@ -45,9 +50,9 @@ readiness, login and authenticated profile over loopback. It checks ownership
 before deleting only its own container/network and removes its temporary root.
 Do not change the evidence path to overwrite an earlier attempt.
 
-## External execution remains pending
+## Before external execution
 
-Before arming an external entrypoint, review the exact source and prepare one
+Before starting an external entrypoint, review the exact source and prepare one
 bounded execution proposal with:
 
 1. Stripe sandbox ID, test-only key delivery through a protected destination,
@@ -71,5 +76,5 @@ Official references checked16October2026:
 
 No migration, dependency, production/staging manifest or UI change. Existing
 production/staging defaults and provider restrictions are preserved and tested.
-This branch is local and unpublished. Discarding/reverting its commit removes
-the new profile; the installed staging release is unaffected.
+Reverting the profile's commits removes the local tooling. Discarding a QA
+checkout does not change an installed release or provider configuration.
