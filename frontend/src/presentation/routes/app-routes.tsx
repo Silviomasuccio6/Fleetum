@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
+import { syncWorkspaceAppearance } from "../../infrastructure/theme/workspace-appearance";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "../components/layout/app-layout";
 import { PageLoader } from "../components/ui/page-loader";
@@ -16,6 +17,7 @@ import { getRequiredFeatureForAppPath } from "../../domain/policies/feature-visi
 import { FeatureProtectedRoute } from "./feature-protected-route";
 import { AppErrorBoundary } from "../components/errors/app-error-boundary";
 
+const ContractSigningPage = lazy(() => import("../pages/contracts/contract-signing-page").then(m=>({default:m.ContractSigningPage})));
 const DashboardPage = lazy(() => import("../pages/dashboard/dashboard-page").then((m) => ({ default: m.DashboardPage })));
 const StoppagesListPage = lazy(() => import("../pages/stoppages/stoppages-list-page").then((m) => ({ default: m.StoppagesListPage })));
 const StoppageDetailPage = lazy(() => import("../pages/stoppages/stoppage-detail-page").then((m) => ({ default: m.StoppageDetailPage })));
@@ -67,12 +69,16 @@ const ContinueOnPublicSite = () => {
   return <PageLoader />;
 };
 
-export const AppRoutes = () => (
+export const AppRoutes = () => {
+  const { pathname } = useLocation();
+  useLayoutEffect(() => { syncWorkspaceAppearance(pathname); }, [pathname]);
+  return (
   <>
     <GlobalTextTranslator />
     <CookieConsentBanner />
     <RouteErrorBoundary>
       <Routes>
+      <Route path="/firma-contratto" element={withPageLoader(<ContractSigningPage />)} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -149,3 +155,4 @@ export const AppRoutes = () => (
     </RouteErrorBoundary>
   </>
 );
+};

@@ -180,6 +180,9 @@ export const env = {
   APPLE_REDIRECT_URI: process.env.APPLE_REDIRECT_URI ?? `${BACKEND_PUBLIC_URL}/api/auth/apple/callback`,
 
   UPLOAD_DIR: process.env.UPLOAD_DIR ?? "uploads",
+  // Dedicated CARGOS key: 32 random bytes encoded as 64 hex digits. Never reuse JWT/provider secrets.
+  CARGOS_DATA_ENCRYPTION_KEY: process.env.CARGOS_DATA_ENCRYPTION_KEY ?? "",
+  CONTRACT_SIGNING_KEY: process.env.CONTRACT_SIGNING_KEY ?? "",
   FILE_MAX_IMAGE_MB: toIntInRange(process.env.FILE_MAX_IMAGE_MB ?? "5", "FILE_MAX_IMAGE_MB", 1, 50),
   FILE_MAX_DOCUMENT_MB: toIntInRange(process.env.FILE_MAX_DOCUMENT_MB ?? "12", "FILE_MAX_DOCUMENT_MB", 1, 100),
   FILE_MAX_LOGO_MB: toIntInRange(process.env.FILE_MAX_LOGO_MB ?? "4", "FILE_MAX_LOGO_MB", 1, 20),

@@ -2,6 +2,8 @@ import { StoppageOpsRepository, StoppageEventRow } from "../../domain/repositori
 import { prisma } from "../database/prisma/client.js";
 import { lockOwnedStoppage, lockStoppageUser, ownedStoppageEventsWhere, ownedStoppageWhere, stoppageReferenceId } from "./stoppage-tenant-scope.js";
 
+import { siteAccessForTenant } from "../auth/site-access-context.js";
+
 export class PrismaStoppageOpsRepository implements StoppageOpsRepository {
   async createEvent(input: {
     tenantId: string;
@@ -52,8 +54,14 @@ export class PrismaStoppageOpsRepository implements StoppageOpsRepository {
   }
 
   async listActiveUsers(tenantId: string): Promise<Array<{ id: string; firstName: string; lastName: string; email: string }>> {
+    const scope = siteAccessForTenant(tenantId);
     return prisma.user.findMany({
-      where: { tenantId, deletedAt: null, status: "ACTIVE" },
+      where: { tenantId, deletedAt: null, status: "ACTIVE", ...(scope && !scope.allSites ? {
+        AND: scope.siteIds.length ? [{ OR: [
+          { assignedSite: { is: { id: { in: scope.siteIds }, tenantId, isActive: true, deletedAt: null } } },
+          { roles: { some: { role: { key: { in: ["ADMIN", "MANAGER"] } } } } }
+        ] }] : [{ id: { in: [] } }]
+      } : {}) },
       select: { id: true, firstName: true, lastName: true, email: true }
     });
   }

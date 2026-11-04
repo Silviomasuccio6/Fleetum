@@ -5,6 +5,8 @@ import { snapshotFromRow } from "../../application/services/tenant-subscription-
 import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../database/prisma/client.js";
 import { logger } from "../logging/logger.js";
+import { assertPaymentBookingVisible, capturePaymentSiteAuthorization, paymentNoticeAuthorizationReason } from "../repositories/payment-site-scope.js";
+import { legacySiteCommandReason } from "./site-access-legacy.js";
 import { createAuditLog } from "../repositories/prisma-audit-log-repository.js";
 import type { EmailQueueService } from "./email-queue-service.js";
 import type { emailSender } from "./email-sender.js";
@@ -163,8 +165,14 @@ export const requestExtraChargeNotice = async (
   input: { tenantId: string; extraChargeId: string; userId: string },
   queueService: Pick<EmailQueueService, "enqueueManyOnce">
 ) => {
+  const siteAuthorization = capturePaymentSiteAuthorization(input.tenantId,input.userId);
   const extra = await prisma.$transaction(async (tx) => {
     const locked = await lockContext(tx, input.tenantId, input.extraChargeId);
+    await assertPaymentBookingVisible(input.tenantId,locked.extra.bookingId,locked.extra,tx);
+    if (siteAuthorization) {
+      const reason=await paymentNoticeAuthorizationReason(tx,input.tenantId,locked.extra.bookingId,siteAuthorization);
+      if(reason)deny(reason);
+    }
     const actor = await tx.user.findFirst({ where: { id: input.userId, tenantId: input.tenantId, status: "ACTIVE", deletedAt: null }, select: { id: true } });
     if (!actor) deny("ACTOR_UNAVAILABLE");
     const key = keyFor(input.tenantId, locked.extra.id);
@@ -178,7 +186,8 @@ export const requestExtraChargeNotice = async (
     const meta = {
       tenantId: input.tenantId, extraChargeId: locked.extra.id, bookingId: locked.extra.bookingId,
       rentalCustomerId: locked.extra.rentalCustomerId, type: locked.extra.type, actorUserId: input.userId,
-      contextVersion: 1, noticeContext: locked.context, contextHash: fingerprint(locked.context, locked.payload)
+      contextVersion: 1, noticeContext: locked.context, contextHash: fingerprint(locked.context, locked.payload),
+      ...(siteAuthorization ? {siteAuthorization} : {})
     };
     await queueService.enqueueManyOnce([{ tenantId: input.tenantId, type: noticeType, ...locked.payload, meta, deduplicationKey: key }], tx);
     const queued = await tx.emailQueue.findFirst({ where: { tenantId: input.tenantId, type: noticeType, deduplicationKey: key } });
@@ -197,17 +206,21 @@ export const dispatchExtraChargeNotice = async (
   const delivery: { outcome?: Promise<{ receipt: Receipt } | { error: unknown }> } = {};
   try {
     await prisma.$transaction(async (tx) => {
-      let reason: string | null = null;
+      let reason: string | null = legacySiteCommandReason("RENTAL_EXTRA_CHARGE_NOTICE",meta);
       let licenseExpiresAt: number | null = null;
       const context = verifiedContext(item);
-      if (!context || ["html", "replyTo", "fromName", "attachments"].some((key) => Object.hasOwn(meta, key))) reason = "METADATA_INVALID";
-      else {
+      if (!reason && (!context || ["html", "replyTo", "fromName", "attachments"].some((key) => Object.hasOwn(meta, key)))) reason = "METADATA_INVALID";
+      else if(!reason && context) {
         try {
           const current = await lockContext(tx, context.tenantId, context.extraChargeId);
           licenseExpiresAt = current.licenseExpiresAt;
           if (current.extra.status !== "APPROVED") reason = "EXTRA_STATUS_CHANGED";
           else if (fingerprint(current.context, current.payload) !== meta.contextHash) reason = "CONTEXT_CHANGED";
           else if (await tx.auditLog.findFirst({ where: { tenantId: context.tenantId, resource: "tenant", action: "PLATFORM_TENANT_STATUS_CHANGED", createdAt: { gte: item.createdAt } }, select: { id: true } })) reason = "TENANT_STATUS_CHANGED";
+          if (!reason && Object.hasOwn(meta,"siteAuthorization")) {
+            if ((meta.siteAuthorization as any)?.userId !== meta.actorUserId) reason="REQUESTER_MISMATCH";
+            else reason=await paymentNoticeAuthorizationReason(tx,context.tenantId,context.bookingId,meta.siteAuthorization);
+          }
         } catch (error) {
           if (!(error instanceof AppError)) throw error;
           reason = error.code;
@@ -218,6 +231,7 @@ export const dispatchExtraChargeNotice = async (
       if (owned.count !== 1) return;
       // Row locks cannot freeze wall time. The license may expire while a
       // domain/queue lock is being acquired after the initial policy check.
+      if (!reason && context && Object.hasOwn(meta,"siteAuthorization")) reason=await paymentNoticeAuthorizationReason(tx,context.tenantId,context.bookingId,meta.siteAuthorization);
       if (!reason && licenseExpiresAt !== null && licenseExpiresAt < Date.now()) reason = "LICENSE_EXPIRED";
       if (reason) {
         await tx.emailQueue.updateMany({ where: { id: item.id, status: "PENDING", processingToken }, data: {

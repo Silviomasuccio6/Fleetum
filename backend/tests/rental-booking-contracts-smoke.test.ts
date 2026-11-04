@@ -38,8 +38,10 @@ const createMockResponse = (): MockResponse => {
   return res;
 };
 
-test("contracts smoke: generateContract sets booking contractStatus READY", async () => {
+test("contracts smoke: generateContract delegates the atomic contract and workflow write", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_1" },
@@ -61,9 +63,7 @@ test("contracts smoke: generateContract sets booking contractStatus READY", asyn
 
     assert.equal(response.statusCode, 201);
     assert.deepEqual(response.body, { id: "contract_1", bookingId: "booking_1" });
-    assert.ok(capturedUpdate);
-    assert.equal(capturedUpdate.where.id, "booking_1");
-    assert.equal(capturedUpdate.data.contractStatus, "READY");
+    assert.equal(capturedUpdate,null,"Workflow write belongs to the atomic generation transaction");
   } finally {
     (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
   }
@@ -71,6 +71,8 @@ test("contracts smoke: generateContract sets booking contractStatus READY", asyn
 
 test("contracts smoke: updateContractDocument sanitizes unsafe content", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_2" },
@@ -84,6 +86,8 @@ test("contracts smoke: updateContractDocument sanitizes unsafe content", async (
     }
   } as any;
 
+  const originalTransaction=prisma.$transaction;
+  (prisma as any).$transaction=async (callback:any)=>callback({bookingContract:{update:(input:unknown)=>(prisma.bookingContract as any).update(input),findFirst:async()=>({id:"contract_1",status:"READY"})}});
   const originalBookingContractUpdate = prisma.bookingContract.update;
   let capturedUpdate: any = null;
   (prisma.bookingContract as any).update = async (input: unknown) => {
@@ -110,6 +114,7 @@ test("contracts smoke: updateContractDocument sanitizes unsafe content", async (
     assert.equal(capturedUpdate.data.status, "READY");
     assert.equal(capturedEvent.type, "UPDATED");
   } finally {
+    (prisma as any).$transaction=originalTransaction;
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
   }
 });
@@ -125,6 +130,8 @@ test("contracts smoke: sendContractEmail reports the queue SENT state without fi
     },
     processPending: async () => ({ processed: 1 })
   } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_3" },
@@ -214,6 +221,8 @@ test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queu
     enqueue: async () => ({ id: "queue_pending" }),
     processPending: async () => ({ processed: 0 })
   } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_pending" },
@@ -293,6 +302,8 @@ test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queu
 
 test("contracts smoke: sendContractEmail requires a valid idempotency key", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
 
   for (const headers of [undefined, { "x-idempotency-key": "short" }, { "x-idempotency-key": "x".repeat(129) }]) {
@@ -317,6 +328,8 @@ test("contracts smoke: sendContractEmail requires a valid idempotency key", asyn
 
 test("contracts smoke: sendContractEmail fails when recipient is missing", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_4" },
@@ -362,6 +375,8 @@ test("contracts smoke: sendContractEmail fails when recipient is missing", async
 
 test("contracts smoke: markContractSigned updates contract and booking status", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_5" },
@@ -418,6 +433,8 @@ test("contracts smoke: markContractSigned updates contract and booking status", 
 
 test("contracts smoke: markContractSigned persists graphical signature metadata", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_6" },

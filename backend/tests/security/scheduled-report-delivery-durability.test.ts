@@ -1,3 +1,4 @@
+import {createReportActor,reportAuthorization,removeReportActors,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
@@ -38,12 +39,13 @@ const createScheduledTenant = async (input: {
   await prisma.tenant.create({
     data: { id: input.tenantId, name: `${runId} synthetic tenant` }
   });
+  await createReportActor(input.tenantId);
   await prisma.auditLog.create({
     data: {
       tenantId: input.tenantId,
       action: "SETTINGS_REPORTS",
       resource: "reports",
-      details: dailySettings(input.slot, input.recipients),
+      details: {...dailySettings(input.slot, input.recipients),__siteAuthorization:reportAuthorization(input.tenantId)},
       createdAt: input.settingsCreatedAt
     }
   });
@@ -64,6 +66,7 @@ describe("scheduled report delivery durability", () => {
   after(async () => {
     await prisma.emailQueue.deleteMany({ where: { tenantId: { in: allTenantIds } } });
     await prisma.auditLog.deleteMany({ where: { tenantId: { in: allTenantIds } } });
+    await removeReportActors(allTenantIds);
     await prisma.tenant.deleteMany({ where: { id: { in: allTenantIds } } });
     await prisma.$disconnect();
   });

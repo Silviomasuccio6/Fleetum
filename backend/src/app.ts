@@ -71,7 +71,7 @@ const applyCommon = (
   app: express.Express,
   corsOrigin: string,
   localDevOrigins: string[],
-  allowAppleFormPost = false
+  options: { allowAppleFormPost?: boolean; siteContextHeaders?: boolean } = {}
 ) => {
   const allowedOrigins = getAllowedOrigins(corsOrigin, localDevOrigins);
   const styleSrc = env.NODE_ENV === "production" ? ["'self'"] : ["'self'", "'unsafe-inline'"];
@@ -108,6 +108,7 @@ const applyCommon = (
   });
 
   const corsMiddleware = cors({
+    exposedHeaders: options.siteContextHeaders ? ["X-Fleetum-Site-Revision", "X-Fleetum-Site-View"] : [],
     origin: (origin, callback) => {
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
@@ -121,7 +122,7 @@ const applyCommon = (
     // Apple navigates back with a cross-site form POST, including Origin (or
     // null after a redirect). The callback still requires single-use state and
     // its browser binding; no other route or Platform app gets this exception.
-    const appleFormPost = allowAppleFormPost &&
+    const appleFormPost = options.allowAppleFormPost &&
       req.method === "POST" && req.path === "/api/auth/apple/callback" &&
       (req.headers.origin === "https://appleid.apple.com" || req.headers.origin === "null");
     if (appleFormPost) {
@@ -161,7 +162,7 @@ const applyCommon = (
 
 export const createApp = () => {
   const app = express();
-  applyCommon(app, env.CORS_ORIGIN, localTenantOrigins, true);
+  applyCommon(app, env.CORS_ORIGIN, localTenantOrigins, { allowAppleFormPost: true, siteContextHeaders: true });
   app.get("/api/metrics", metricsHandler);
   app.use("/api", apiRouter);
   app.use(notFoundHandler);

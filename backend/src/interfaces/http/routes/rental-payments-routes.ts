@@ -5,6 +5,7 @@ import { asyncHandler } from "./async-handler.js";
 
 export const rentalPaymentsRoutes = (controller: RentalPaymentsController) => {
   const router = Router();
+  router.use((_req,res,next)=>{res.setHeader("Cache-Control","private, no-store");next();});
 
   router.get("/bookings/:bookingId/summary", requirePermissions("rental-payments:read"), asyncHandler(controller.summary));
   router.post("/bookings/:bookingId/setup-session", requirePermissions("rental-payments:write"), asyncHandler(controller.setupSession));

@@ -8,6 +8,7 @@ import { AppErrorBoundary } from "./presentation/components/errors/app-error-bou
 import { AppRoutes } from "./presentation/routes/app-routes";
 import "./presentation/styles/fonts.css";
 import "./presentation/styles/global.css";
+import "./presentation/styles/workspace.css";
 
 initTheme();
 

@@ -1,4 +1,5 @@
-import { httpClient } from "../../infrastructure/api/http-client";
+import { scopedFetch } from "../../infrastructure/api/scoped-fetch";
+import { getOptionalResource, httpClient } from "../../infrastructure/api/http-client";
 import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
 import type { RentalBookingDto, RentalBookingListResponseDto } from "../dtos/rental-bookings-dto";
 
@@ -424,7 +425,7 @@ export const rentalBookingsUseCases = {
   setContractStatus: (id: string, input: { status: RentalContractStatus; signedAt?: string; note?: string }) =>
     httpClient.post<RentalBookingDto>(`/rental-bookings/${id}/contract`, input),
   generateContract: (bookingId: string) => httpClient.post<BookingContract>(`/rental-bookings/${bookingId}/contract/generate`),
-  getContract: (bookingId: string) => httpClient.get<BookingContract>(`/rental-bookings/${bookingId}/contract`),
+  getContract: (bookingId: string) => getOptionalResource<BookingContract>(`/rental-bookings/${bookingId}/contract`),
   updateContract: (
     bookingId: string,
     input: {
@@ -782,14 +783,14 @@ export const rentalBookingsUseCases = {
   deleteCustomerAttachment: (attachmentId: string) =>
     httpClient.delete(`/uploads/rental-customer-attachments/${attachmentId}`),
   downloadCustomerAttachment: async (attachmentId: string) => {
-    const response = await fetch(`${API_BASE_URL}/uploads/rental-customer-attachments/${attachmentId}/file`, {
+    const response = await scopedFetch(`${API_BASE_URL}/uploads/rental-customer-attachments/${attachmentId}/file`, {
       credentials: "include"
     });
     if (!response.ok) throw new Error("Download allegato cliente fallito");
     return response.blob();
   },
   downloadContractPdf: async (bookingId: string) => {
-    const response = await fetch(`${API_BASE_URL}/rental-bookings/${bookingId}/contract/pdf?t=${Date.now()}`, {
+    const response = await scopedFetch(`${API_BASE_URL}/rental-bookings/${bookingId}/contract/pdf?t=${Date.now()}`, {
       credentials: "include",
       cache: "no-store"
     });
@@ -819,7 +820,7 @@ export const rentalBookingsUseCases = {
   },
   removeDefaultContractTemplateLogo: () => httpClient.delete("/contract-templates/default/logo"),
   downloadDefaultContractTemplateLogo: async () => {
-    const response = await fetch(`${API_BASE_URL}/contract-templates/default/logo/file`, {
+    const response = await scopedFetch(`${API_BASE_URL}/contract-templates/default/logo/file`, {
       credentials: "include"
     });
     if (!response.ok) throw new Error("Logo template non disponibile");

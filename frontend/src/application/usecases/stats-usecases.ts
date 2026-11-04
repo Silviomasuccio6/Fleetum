@@ -1,3 +1,4 @@
+import { scopedFetch } from "../../infrastructure/api/scoped-fetch";
 import { httpClient } from "../../infrastructure/api/http-client";
 import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
 import type {
@@ -28,7 +29,7 @@ export const statsUseCases = {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
     });
     const base = getApiBaseUrl();
-    const response = await fetch(`${base}/stats/analytics/export.xlsx?${query.toString()}`, {
+    const response = await scopedFetch(`${base}/stats/analytics/export.xlsx?${query.toString()}`, {
       credentials: "include"
     });
     if (!response.ok) {
@@ -54,7 +55,7 @@ export const statsUseCases = {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
     });
     const base = getApiBaseUrl();
-    const response = await fetch(`${base}/stats/analytics/export.csv?${query.toString()}`, {
+    const response = await scopedFetch(`${base}/stats/analytics/export.csv?${query.toString()}`, {
       credentials: "include"
     });
     if (!response.ok) {
@@ -83,7 +84,7 @@ export const statsUseCases = {
       if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
     });
     const base = getApiBaseUrl();
-    const response = await fetch(`${base}/stats/vehicles/profitability/export.${format}?${query.toString()}`, {
+    const response = await scopedFetch(`${base}/stats/vehicles/profitability/export.${format}?${query.toString()}`, {
       credentials: "include"
     });
     if (!response.ok) {

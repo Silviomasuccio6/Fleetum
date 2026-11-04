@@ -1,3 +1,4 @@
+import {grantSyntheticAdmin,commandAuthorization,removeSyntheticActorRoles,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
@@ -23,6 +24,7 @@ const fixture = async (suffix: string) => {
     tenantId: tenant.id, email: `${label}@example.test`, passwordHash: "synthetic-unused-hash",
     firstName: "Synthetic", lastName: "Routing"
   } });
+  await grantSyntheticAdmin(user.id);
   const site = await prisma.site.create({ data: { tenantId: tenant.id, name: "Synthetic Site", address: "Synthetic Address", city: "TestCity" } });
   const vehicle = await prisma.vehicle.create({ data: { tenantId: tenant.id, siteId: site.id, plate: `ROUTE-${sequence}`, brand: "Synthetic", model: "Vehicle" } });
   const workshop = await prisma.workshop.create({ data: { tenantId: tenant.id, name: "Synthetic Workshop", email: `${label}-workshop@example.test` } });
@@ -35,7 +37,7 @@ const fixture = async (suffix: string) => {
     tenantId: tenant.id, firstName: "Synthetic", lastName: "Customer", email: `${label}-customer@example.test`
   } });
   const booking = await prisma.rentalBooking.create({ data: {
-    tenantId: tenant.id, vehicleId: vehicle.id, customerId: customer.id, code: `ROUTE-${label}`,
+    tenantId: tenant.id, siteId:site.id,pickupSiteId:site.id,returnSiteId:site.id,vehicleId: vehicle.id, customerId: customer.id, code: `ROUTE-${label}`,
     customerName: "Synthetic Customer", pickupAt: new Date("2030-01-01T00:00:00.000Z"), returnAt: new Date("2030-01-02T00:00:00.000Z")
   } });
   const extraCharge = await prisma.rentalExtraCharge.create({ data: {
@@ -63,13 +65,13 @@ const fixture = async (suffix: string) => {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 const contractMeta = (data: Fixture): Record<string, unknown> => ({
-  tenantId: data.tenant.id, bookingId: data.booking.id, contractId: data.contract.id, contractDeliveryId: data.contractDelivery.id
+  tenantId: data.tenant.id, actorUserId:data.user.id,siteAuthorization:commandAuthorization(data.user.id),bookingId: data.booking.id, contractId: data.contract.id, contractDeliveryId: data.contractDelivery.id
 });
 const invoiceMeta = (data: Fixture): Record<string, unknown> => ({
   tenantId: data.tenant.id, invoiceId: data.invoice.id, invoiceDeliveryId: data.invoiceDelivery.id
 });
 const reminderMeta = (data: Fixture): Record<string, unknown> => ({
-  tenantId: data.tenant.id, stoppageId: data.stoppage.id, reminderType: "MANUAL"
+  tenantId: data.tenant.id,siteAuthorization:commandAuthorization(data.user.id),stoppageId: data.stoppage.id, reminderType: "MANUAL"
 });
 const legacyExtraMeta = (data: Fixture): Record<string, unknown> => ({
   bookingId: data.booking.id, extraChargeId: data.extraCharge.id, type: "DAMAGE"
@@ -78,7 +80,7 @@ const legacyExtraMeta = (data: Fixture): Record<string, unknown> => ({
 const enqueue = async (data: Fixture, type: string, meta: Record<string, unknown>, options: { noQueueTenant?: boolean; maxAttempts?: number } = {}) => {
   const row = await queue.enqueue({
     tenantId: options.noQueueTenant ? undefined : data.tenant.id, type,
-    recipient: data.workshop.email!, subject: "Synthetic routing email", body: "Synthetic routing body", meta
+    recipient: type==="BOOKING_CONTRACT"?data.contractDelivery.recipient:data.workshop.email!, subject: type==="BOOKING_CONTRACT"?data.contractDelivery.subject:"Synthetic routing email", body: type==="BOOKING_CONTRACT"?data.contractDelivery.body:"Synthetic routing body", meta
   });
   queueIds.push(row.id);
   if (options.maxAttempts) await prisma.emailQueue.update({ where: { id: row.id }, data: { maxAttempts: options.maxAttempts } });
@@ -88,7 +90,7 @@ const enqueue = async (data: Fixture, type: string, meta: Record<string, unknown
 const enqueueApprovedExtraNotice = async (
   data: Fixture, additionalMeta: Record<string, unknown> = {}, maxAttempts?: number
 ) => {
-  await payments.notifyExtraCharge({ tenantId: data.tenant.id, extraChargeId: data.extraCharge.id, userId: data.user.id });
+  await withCompanyScope(data.tenant.id,()=>payments.notifyExtraCharge({ tenantId: data.tenant.id, extraChargeId: data.extraCharge.id, userId: data.user.id }));
   const row = await prisma.emailQueue.findFirstOrThrow({ where: {
     tenantId: data.tenant.id, type: "RENTAL_EXTRA_CHARGE_NOTICE",
     meta: { path: ["extraChargeId"], equals: data.extraCharge.id }
@@ -165,6 +167,7 @@ describe("email queue dispatch and domain finalization follow the declared type"
     await prisma.vehicle.deleteMany({ where: { tenantId: owned } });
     await prisma.workshop.deleteMany({ where: { tenantId: owned } });
     await prisma.site.deleteMany({ where: { tenantId: owned } });
+    await removeSyntheticActorRoles(tenantIds);
     await prisma.user.deleteMany({ where: { tenantId: owned } });
     await prisma.auditLog.deleteMany({ where: { tenantId: owned } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: owned } });

@@ -5,7 +5,10 @@ import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import type { User } from "../../../domain/entities/models";
-import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
+import { AccessShell, AccessNotice } from "../../components/layout/access-shell";
+import { getCompanyOnboardingPath, getSocialAccessDestination, getAccessLoginPath } from "./access-flow";
+import { Button } from "../../components/ui/button";
+import { FleetumLogoLoader } from "../../components/brand/fleetum-logo-loader";
 import { getSafeReturnTo } from "../../routes/safe-return-to";
 
 export const SocialAuthCallbackPage = () => {
@@ -62,13 +65,14 @@ export const SocialAuthCallbackPage = () => {
             const profile = await tenantProfileUseCases.getProfile().catch(() => null);
             if (cancelled) return;
             if (!isCompanyProfileReadyForBilling(profile)) {
-              nextPath = "/onboarding/azienda?from=social";
+              nextPath = getCompanyOnboardingPath(getSocialAccessDestination(returnTo));
             } else if (!nextPath.startsWith("/activate") && !nextPath.startsWith("/upgrade")) {
-              nextPath = "/activate?billing=required";
+              const destination = getSocialAccessDestination(returnTo);
+              nextPath = "/activate?billing=required" + (destination === "/dashboard" ? "" : `&returnTo=${encodeURIComponent(destination)}`);
             }
           }
         } catch {
-          nextPath = "/onboarding/azienda?from=social";
+          nextPath = getCompanyOnboardingPath(getSocialAccessDestination(returnTo));
         }
 
         if (!cancelled) navigate(nextPath, { replace: true });
@@ -84,25 +88,7 @@ export const SocialAuthCallbackPage = () => {
     };
   }, [hashParams, navigate, setSession]);
 
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">Accesso social</h1>
-        {error ? (
-          <>
-            <p className="mt-3 text-sm text-rose-600">{error}</p>
-            <button
-              type="button"
-              className="mt-5 inline-flex rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              onClick={() => navigate("/login", { replace: true })}
-            >
-              Torna al login
-            </button>
-          </>
-        ) : (
-          <FleetumBlockLoader label="Verifica in corso" className="min-h-[220px]" />
-        )}
-      </section>
-    </main>
-  );
+  return <AccessShell title="Accesso social" description="Verifichiamo la sessione e lo stato dell’azienda prima di aprire il gestionale.">
+    {error ? <><AccessNotice focus>{error}</AccessNotice><Button variant="outline" onClick={() => navigate(getAccessLoginPath("?next=" + encodeURIComponent(getSocialAccessDestination(hashParams.get("returnTo")))), { replace: true })}>Torna al login</Button></> : <div role="status"><div className="access-social-loading"><FleetumLogoLoader variant="light" decorative className="access-loader-light"/><FleetumLogoLoader variant="dark" decorative className="access-loader-dark"/><p className="access-footnote">Verifica accesso in corso</p></div><p className="access-footnote">Non chiudere questa pagina durante la verifica.</p></div>}
+  </AccessShell>;
 };

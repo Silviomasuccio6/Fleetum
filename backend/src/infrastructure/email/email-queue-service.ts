@@ -1,9 +1,13 @@
+import {contractSigningService} from "../../application/services/contract-signing-service.js";
+import type {SendEmailInput} from "./email-sender.js";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma/client.js";
 import { emailSender } from "./email-sender.js";
 import { dispatchScheduledReport } from "./scheduled-report-dispatch.js";
 import { dispatchReminderEmail, openReminderStatuses } from "./reminder-email-dispatch.js";
+import { dispatchContractEmail } from "./contract-email-dispatch.js";
+import { ContractDispatchBlocked } from "./contract-site-authorization.js";
 import {
   dispatchExtraChargeNotice,
   finalizeExtraNotice,
@@ -143,6 +147,8 @@ export class EmailQueueService {
       });
       processed += 1;
       const meta = (item.meta ?? {}) as Record<string, unknown>;
+      const signingEmail=["CONTRACT_SIGNING_INVITE","CONTRACT_SIGNING_OTP","CONTRACT_SIGNING_COPY"].includes(item.type);
+      const safeSigningMeta=Object.fromEntries(Object.entries(meta).filter(([key])=>!signingEmail||key!=="payloadEncrypted"));
       let contractTarget: {
         tenantId: string;
         values: Record<"contractDeliveryId" | "contractId" | "bookingId", string>;
@@ -202,7 +208,7 @@ export class EmailQueueService {
             : Boolean(storedProviderMessageId));
         providerAcceptedAt = metaString(meta, "providerAcceptedAt") ??
           (item.type === "RENTAL_EXTRA_CHARGE_NOTICE" ? null : currentTime().toISOString());
-        const startDelivery = () => {
+        const startDelivery = (overrides:Partial<SendEmailInput>={}) => {
           providerStarted = true;
           return emailSender.send({
             to: item.recipient,
@@ -212,11 +218,16 @@ export class EmailQueueService {
             fromName,
             replyTo,
             attachments,
+            ...overrides,
             idempotencyKey: providerIdempotencyKey(item.id)
           });
         };
-        sent = hasStoredProviderReceipt
+        sent = signingEmail
+          ? await contractSigningService.dispatchEmail(item,token,currentTime,EMAIL_QUEUE_LEASE_MS,startDelivery,hasStoredProviderReceipt?{provider:"resend",id:storedProviderMessageId!}:null)
+          : hasStoredProviderReceipt
           ? { provider: "resend" as const, id: storedProviderMessageId! }
+          : item.type === "BOOKING_CONTRACT"
+            ? await dispatchContractEmail(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
           : item.type === "SCHEDULED_REPORT"
             ? await dispatchScheduledReport(item, token, currentTime, EMAIL_QUEUE_LEASE_MS, startDelivery)
             : item.type === "REMINDER_EMAIL"
@@ -264,7 +275,7 @@ export class EmailQueueService {
               processingStartedAt: null,
               leaseExpiresAt: null,
               meta: {
-                ...meta,
+                ...safeSigningMeta,
                 emailProvider: accepted.provider,
                 providerMessageId: accepted.id,
                 providerAcceptedAt,
@@ -294,11 +305,12 @@ export class EmailQueueService {
               },
               data: { status: "SENT", sentAt: finalizedAt, errorMessage: null }
             }), "consegna contratto");
-            requireSingleUpdate(await tx.bookingContract.updateMany({
+            const contractUpdated = await tx.bookingContract.updateMany({
               where: {
                 id: contractTarget.values.contractId,
                 tenantId: contractTarget.tenantId,
-                bookingId: contractTarget.values.bookingId
+                bookingId: contractTarget.values.bookingId,
+                status: { not: "SIGNED" }
               },
               data: {
                 emailTo: item.recipient,
@@ -309,7 +321,11 @@ export class EmailQueueService {
                 errorMessage: null,
                 updatedByUserId: metaString(meta, "actorUserId") ?? undefined
               }
-            }), "contratto");
+            });
+            if(contractUpdated.count!==1)requireSingleUpdate(await tx.bookingContract.updateMany({
+              where:{id:contractTarget.values.contractId,tenantId:contractTarget.tenantId,bookingId:contractTarget.values.bookingId,status:"SIGNED"},
+              data:{lastSentAt:finalizedAt,errorMessage:null}
+            }),"contratto firmato");
             await tx.bookingContractEvent.create({
               data: {
                 tenantId: contractTarget.tenantId,
@@ -405,7 +421,7 @@ export class EmailQueueService {
           continue;
         }
 
-        const hasAttemptsLeft = nextAttempts < item.maxAttempts;
+        const hasAttemptsLeft = !(error instanceof ContractDispatchBlocked) && nextAttempts < item.maxAttempts;
 
         try {
           await prisma.$transaction(async (tx) => {
@@ -418,12 +434,28 @@ export class EmailQueueService {
                 status: hasAttemptsLeft ? "PENDING" : "FAILED",
                 nextAttemptAt: hasAttemptsLeft ? nextAttemptAt : item.nextAttemptAt,
                 lastError: errorMessage,
+                ...(signingEmail&&!hasAttemptsLeft?{meta:safeSigningMeta as Prisma.InputJsonValue}:{}),
                 processingToken: null,
                 processingStartedAt: null,
                 leaseExpiresAt: null
               }
             });
             if (released.count !== 1) return;
+
+            if (error instanceof ContractDispatchBlocked && contractTarget) {
+              // A rejected command is terminal, not a failed provider attempt.
+              // Mark only a proven owned delivery; do not rewrite the document
+              // or a foreign/corrupt target while blocking an email.
+              const owned = await tx.bookingContract.findFirst({where:{
+                id:contractTarget.values.contractId,tenantId:contractTarget.tenantId,
+                bookingId:contractTarget.values.bookingId,booking:{is:{tenantId:contractTarget.tenantId}}
+              },select:{id:true}});
+              if (owned) await tx.bookingContractDelivery.updateMany({where:{
+                id:contractTarget.values.contractDeliveryId,tenantId:contractTarget.tenantId,
+                bookingId:contractTarget.values.bookingId,contractId:owned.id
+              },data:{status:"FAILED",errorMessage}});
+              return;
+            }
 
             if (reminderTarget && failedStoppage && providerStarted) {
               await tx.reminder.create({
@@ -451,14 +483,18 @@ export class EmailQueueService {
               }), "consegna contratto fallita");
 
               if (!hasAttemptsLeft) {
-                requireSingleUpdate(await tx.bookingContract.updateMany({
+                const contractUpdated = await tx.bookingContract.updateMany({
                   where: {
                     id: contractTarget.values.contractId,
                     tenantId: contractTarget.tenantId,
-                    bookingId: contractTarget.values.bookingId
+                    bookingId: contractTarget.values.bookingId,
+                    status: { not: "SIGNED" }
                   },
                   data: { status: "ERROR", errorMessage }
-                }), "contratto fallito");
+                });
+                if(contractUpdated.count!==1)requireSingleUpdate(await tx.bookingContract.updateMany({
+                  where:{id:contractTarget.values.contractId,tenantId:contractTarget.tenantId,bookingId:contractTarget.values.bookingId,status:"SIGNED"},data:{errorMessage}
+                }),"contratto firmato");
                 await tx.bookingContractEvent.create({
                   data: {
                     tenantId: contractTarget.tenantId,

@@ -7,7 +7,9 @@ import { statsUseCases } from "../../../application/usecases/stats-usecases";
 import { stoppageStatusLabel } from "../../../domain/constants/stoppage-status";
 import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 import { CardStat } from "../../components/common/table";
-import { PageHeader } from "../../components/layout/page-header";
+import { WorkspacePageHeader } from "../../components/ui/workspace-ui";
+import { DashboardOverview } from "../../components/dashboard/dashboard-overview";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -38,17 +40,17 @@ const trendViews = [
 ] as const;
 
 const chartAxisTick = {
-  fill: "rgba(13,15,46,0.55)",
+  fill: "currentColor",
   fontSize: 11,
-  fontFamily: "JetBrains Mono, monospace"
+  fontFamily: "Inter, sans-serif"
 };
 
 const chartTooltipStyle = {
-  background: "rgba(255,255,255,0.96)",
-  border: "1px solid rgba(99,102,241,0.2)",
-  borderRadius: 12,
-  boxShadow: "0 10px 30px rgba(99,102,241,0.16)",
-  color: "#0D0F2E"
+  background: "hsl(var(--card))",
+  border: "1px solid var(--ws-line)",
+  borderRadius: 10,
+  boxShadow: "var(--ws-soft-shadow)",
+  color: "hsl(var(--foreground))"
 };
 
 const formatCurrency = (value?: number | string | null) => {
@@ -76,286 +78,29 @@ const compactNumber = (value?: number | string | null, suffix = "") => {
   return `${new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 }).format(parsed)}${suffix}`;
 };
 
-const formatDateTime = (value?: string | Date | null) => {
-  if (!value) return "-";
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-};
-
-const statusBadgeVariant = (status?: string) => {
-  if (["SIGNED", "CLOSED", "SENT", "READY"].includes(status ?? "")) return "success" as const;
-  if (["ERROR", "FAILED", "CANCELED"].includes(status ?? "")) return "destructive" as const;
-  if (["DRAFT", "NOT_READY", "HOLD"].includes(status ?? "")) return "warning" as const;
-  return "secondary" as const;
-};
-
-const DashboardActionButton = ({
-  label,
-  onClick,
-  variant = "outline"
-}: {
-  label: string;
-  onClick: () => void;
-  variant?: "default" | "outline" | "secondary";
-}) => (
-  <Button type="button" variant={variant} size="sm" className="h-9 justify-start rounded-xl px-3" onClick={onClick}>
-    {label}
-  </Button>
-);
-
-const CompactBookingRow = ({
-  title,
-  subtitle,
-  meta,
-  badge,
-  onOpen
-}: {
-  title: string;
-  subtitle: string;
-  meta: string;
-  badge?: string;
-  onOpen: () => void;
-}) => (
-  <button
-    type="button"
-    className="dashboard-enterprise-item w-full rounded-xl border border-border/80 bg-background/75 p-3 text-left transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_18px_34px_-26px_rgba(37,99,235,0.65)]"
-    onClick={onOpen}
-  >
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-foreground">{title}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
-      </div>
-      {badge ? <Badge variant={statusBadgeVariant(badge)}>{badge}</Badge> : null}
-    </div>
-    <p className="mt-2 text-xs font-medium text-slate-500 dark:text-slate-300">{meta}</p>
-  </button>
-);
-
-const BookingControlRoom = ({ booking, onNavigate }: { booking: any; onNavigate: (to: string) => void }) => {
-  const kpis = booking?.kpis ?? {};
-  const contracts = booking?.contractKpis ?? {};
-  const economics = booking?.economicKpis ?? {};
-  const charts = booking?.charts ?? {};
-  const lists = booking?.lists ?? {};
-  const trend = (charts.trend ?? []).map((item: any) => ({
-    ...item,
-    day: typeof item.day === "string" ? item.day.slice(5) : "-"
-  }));
-  const utilization = (charts.utilization ?? []).map((item: any) => ({
-    ...item,
-    day: typeof item.day === "string" ? item.day.slice(5) : "-"
-  }));
-  const topVehicles = charts.topVehicles ?? [];
-  const contractDistribution = charts.contractStatusDistribution ?? [];
-  const criticalBookings = lists.criticalBookings ?? [];
-  const nextPickups = lists.nextPickups ?? [];
-  const nextReturns = lists.nextReturns ?? [];
-
-  return (
-    <div className="space-y-4">
-      <Card className="saas-surface dashboard-enterprise-card overflow-hidden">
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">Control Room Noleggi</p>
-              <h2 className="mt-1 text-2xl font-semibold tracking-tight">Booking Noleggi</h2>
-              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                Disponibilita, uscite, rientri, contratti e criticita operative in un unico pannello.
-              </p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <DashboardActionButton label="Nuova prenotazione" variant="default" onClick={() => onNavigate("/booking")} />
-              <DashboardActionButton label="Apri Booking" onClick={() => onNavigate("/booking")} />
-              <DashboardActionButton label="Contratti" onClick={() => onNavigate("/booking/contratti")} />
-              <DashboardActionButton label="Listini" onClick={() => onNavigate("/booking/listini")} />
-              <DashboardActionButton label="Nuovo cliente" onClick={() => onNavigate("/anagrafiche/clienti")} />
-              <DashboardActionButton label="Scadenziario" onClick={() => onNavigate("/anagrafiche/scadenziario")} />
-              <DashboardActionButton label="Manutenzioni" onClick={() => onNavigate("/anagrafiche/manutenzioni")} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <CardStat className="dashboard-enterprise-kpi" title="Disponibili oggi" value={kpis.availableToday ?? 0} extra={<p className="mt-1 text-xs text-muted-foreground">Su {kpis.totalRentalVehicles ?? 0} veicoli noleggio</p>} />
-        <CardStat className="dashboard-enterprise-kpi" title="Occupati oggi" value={kpis.occupiedToday ?? 0} extra={<p className="mt-1 text-xs text-muted-foreground">Occupazione {compactNumber(kpis.utilizationRateToday, "%")}</p>} />
-        <CardStat className="dashboard-enterprise-kpi" title="Uscite oggi" value={kpis.pickupsToday ?? 0} extra={<p className="mt-1 text-xs text-muted-foreground">Da preparare e consegnare</p>} />
-        <CardStat className="dashboard-enterprise-kpi" title="Rientri oggi" value={kpis.returnsToday ?? 0} extra={<p className="mt-1 text-xs text-muted-foreground">{kpis.overdueReturns ?? 0} rientri scaduti</p>} />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <CardStat className="dashboard-enterprise-kpi" title="Contratti da generare" value={contracts.toGenerate ?? 0} />
-        <CardStat className="dashboard-enterprise-kpi" title="Contratti da inviare" value={contracts.toSend ?? 0} />
-        <CardStat className="dashboard-enterprise-kpi" title="Contratti inviati oggi" value={contracts.sentToday ?? 0} />
-        <CardStat className="dashboard-enterprise-kpi" title="Contratti firmati" value={contracts.signed ?? 0} />
-        <CardStat className="dashboard-enterprise-kpi" title="Contratti in errore" value={contracts.errors ?? 0} />
-        <CardStat className="dashboard-enterprise-kpi" title="Senza firma" value={contracts.unsigned ?? 0} />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="saas-surface dashboard-enterprise-card xl:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Trend booking operativo</CardTitle>
-            <p className="text-xs text-muted-foreground">Prenotazioni create, uscite e rientri negli ultimi 30 giorni.</p>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px]">
-              {trend.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trend}>
-                    <defs>
-                      <linearGradient id="bookingCreated" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.24} />
-                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={chartAxisTick} />
-                    <YAxis axisLine={false} tickLine={false} tick={chartAxisTick} />
-                    <Tooltip cursor={false} isAnimationActive={false} wrapperStyle={{ pointerEvents: "none" }} contentStyle={chartTooltipStyle} />
-                    <Area type="monotone" dataKey="created" name="Create" stroke="#4f46e5" fill="url(#bookingCreated)" strokeWidth={2} />
-                    <Line type="monotone" dataKey="pickups" name="Uscite" stroke="#059669" strokeWidth={2.4} dot={false} />
-                    <Line type="monotone" dataKey="returns" name="Rientri" stroke="#f59e0b" strokeWidth={2.4} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="grid h-full place-items-center rounded-xl border border-dashed text-sm text-muted-foreground">Nessun dato booking disponibile.</div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Economia noleggio</CardTitle>
-            <p className="text-xs text-muted-foreground">Mese corrente, previsto vs consuntivo.</p>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            <div className="rounded-xl border border-border/80 bg-background/75 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Ricavi previsti</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(economics.expectedRevenueMonth)}</p>
-            </div>
-            <div className="rounded-xl border border-border/80 bg-background/75 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Ricavi consuntivi</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(economics.finalRevenueMonth)}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <span className="rounded-lg bg-muted/50 p-2">Ticket medio<br /><b>{formatCurrency(economics.averageTicket)}</b></span>
-              <span className="rounded-lg bg-muted/50 p-2">€/veicolo<br /><b>{formatCurrency(economics.revenuePerVehicle)}</b></span>
-              <span className="rounded-lg bg-muted/50 p-2">€/giorno<br /><b>{formatCurrency(economics.revenuePerRentalDay)}</b></span>
-              <span className="rounded-lg bg-muted/50 p-2">Extra km<br /><b>{compactNumber(economics.extraKmActual)} reali</b></span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base"><CalendarDays className="h-4 w-4" /> Prossime uscite</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {nextPickups.length ? nextPickups.map((item: any) => (
-              <CompactBookingRow key={item.id} title={item.customer} subtitle={item.vehicle} meta={`${formatDateTime(item.pickupAt)} · ${item.code}`} badge={item.contractStatus} onOpen={() => onNavigate("/booking")} />
-            )) : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Nessuna uscita programmata.</p>}
-          </CardContent>
-        </Card>
-
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base"><Car className="h-4 w-4" /> Prossimi rientri</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {nextReturns.length ? nextReturns.map((item: any) => (
-              <CompactBookingRow key={item.id} title={item.customer} subtitle={item.vehicle} meta={`${formatDateTime(item.returnAt)} · Km: ${item.returnKm ?? "mancanti"}`} badge={item.contractStatus} onOpen={() => onNavigate("/booking")} />
-            )) : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Nessun rientro programmato.</p>}
-          </CardContent>
-        </Card>
-
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4" /> Prenotazioni critiche</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {criticalBookings.length ? criticalBookings.slice(0, 6).map((item: any) => (
-              <CompactBookingRow key={`${item.bookingId}-${item.type}`} title={item.reason} subtitle={`${item.customer} · ${item.vehicle}`} meta={`${item.code} · ${formatDateTime(item.pickupAt)}`} badge={item.severity} onOpen={() => onNavigate("/booking")} />
-            )) : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Nessuna criticita booking.</p>}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base"><Gauge className="h-4 w-4" /> Occupazione flotta</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={utilization}>
-                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={chartAxisTick} />
-                  <YAxis axisLine={false} tickLine={false} tick={chartAxisTick} />
-                  <Tooltip cursor={false} isAnimationActive={false} wrapperStyle={{ pointerEvents: "none" }} contentStyle={chartTooltipStyle} />
-                  <Area type="monotone" dataKey="utilization" name="Occupazione %" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Stato contratti</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {contractDistribution.map((item: any) => (
-              <div key={item.status} className="flex items-center justify-between rounded-xl border border-border/80 bg-background/75 px-3 py-2">
-                <span className="text-sm font-medium">{item.status}</span>
-                <Badge variant={statusBadgeVariant(item.status)}>{item.count}</Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="saas-surface dashboard-enterprise-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base"><Wrench className="h-4 w-4" /> Top veicoli noleggiati</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {topVehicles.length ? topVehicles.map((item: any) => (
-              <div key={item.plate} className="rounded-xl border border-border/80 bg-background/75 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{item.plate}</p>
-                    <p className="truncate text-xs text-muted-foreground">{item.model}</p>
-                  </div>
-                  <p className="text-right text-sm font-semibold">{compactNumber(item.occupiedDays)} gg</p>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">Ricavo: {formatCurrency(item.revenue)}</p>
-              </div>
-            )) : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Nessun ranking veicoli.</p>}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-};
-
 export const DashboardPage = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<"overview" | "operations" | "activity">("overview");
   const [trendRange, setTrendRange] = useState<TrendRange>("30d");
   const [trendIndex, setTrendIndex] = useState(0);
-  const { can } = useEntitlements();
-  const canReportsAdvanced = can("reports_advanced");
+  const [reloadKey, setReloadKey] = useState(0);
+  const permissions = useAuthStore(state => state.user?.permissions) ?? [];
+  const has = (permission: string) => permissions.includes("*") || permissions.includes(permission);
+  const { can, loaded: entitlementsLoaded } = useEntitlements();
+  const canReadDashboard = has("stats:read") && can("reports_basic");
+  const canReadStoppages = canReadDashboard && has("stoppages:read");
+  const canOpenBookings = has("vehicles:read");
+  const refresh = () => setReloadKey(key => key + 1);
+  const secondaryMetric = (query: { loading: boolean; error: string | null }, value: unknown, suffix = "") =>
+    query.loading || query.error || value === undefined || value === null ? "—" : `${value}${suffix}`;
+  const canReportsAdvanced = canReadDashboard && can("reports_advanced");
 
-  const { data, loading, error } = useAsync(() => statsUseCases.dashboard(), []);
-  const assignments = useAsync(() => stoppagesUseCases.assignmentSuggestions(), []);
-  const costs = useAsync(() => stoppagesUseCases.costsSummary(), []);
-  const escalations = useAsync(() => stoppagesUseCases.slaEscalations(), []);
-  const preventive = useAsync(() => stoppagesUseCases.preventiveDue({ intervalDays: 180 }), []);
-  const variance = useAsync(() => stoppagesUseCases.costsVariance(), []);
+  const { data, loading, error } = useAsync(() => canReadDashboard ? statsUseCases.dashboard() : Promise.resolve(null), [canReadDashboard, reloadKey]);
+  const assignments = useAsync(() => canReadStoppages ? stoppagesUseCases.assignmentSuggestions() : Promise.resolve(null), [canReadStoppages, reloadKey]);
+  const costs = useAsync(() => canReadStoppages ? stoppagesUseCases.costsSummary() : Promise.resolve(null), [canReadStoppages, reloadKey]);
+  const escalations = useAsync(() => canReadStoppages ? stoppagesUseCases.slaEscalations() : Promise.resolve(null), [canReadStoppages, reloadKey]);
+  const preventive = useAsync(() => canReadStoppages ? stoppagesUseCases.preventiveDue({ intervalDays: 180 }) : Promise.resolve(null), [canReadStoppages, reloadKey]);
+  const variance = useAsync(() => canReadStoppages ? stoppagesUseCases.costsVariance() : Promise.resolve(null), [canReadStoppages, reloadKey]);
 
   const trendStats = useAsync(() => {
     if (!canReportsAdvanced) {
@@ -393,7 +138,7 @@ export const DashboardPage = () => {
       dateFrom: start.toISOString(),
       dateTo: end.toISOString()
     });
-  }, [canReportsAdvanced, trendRange]);
+  }, [canReportsAdvanced, trendRange, reloadKey]);
 
   const trendData = useMemo(
     () =>
@@ -418,32 +163,24 @@ export const DashboardPage = () => {
   const goPrevTrend = () => setTrendIndex((prev) => (prev - 1 + trendViews.length) % trendViews.length);
   const goNextTrend = () => setTrendIndex((prev) => (prev + 1) % trendViews.length);
 
+  if (!entitlementsLoaded) return <FleetumBlockLoader label="Caricamento autorizzazioni dashboard" />;
+  if (!canReadDashboard) return <section className="dashboard-workspace dashboard-access-state"><h1>Dashboard</h1><p>Il tuo ruolo o piano non consente di visualizzare questa sezione.</p></section>;
   if (loading) return <FleetumBlockLoader label="Caricamento dashboard" />;
-  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (error) return <section className="dashboard-workspace dashboard-access-state" aria-label="Errore dashboard"><h1>Dashboard non disponibile</h1><p role="alert">{error}</p><Button onClick={refresh}>Riprova dashboard</Button></section>;
   if (!data) return <FleetumBlockLoader label="Preparazione dashboard" />;
 
   return (
-    <section className="dashboard-enterprise space-y-4">
-      <PageHeader
-        title="Dashboard"
-        subtitle="Panoramica manageriale: stato generale, priorita operative e attivita recenti."
-        actions={
-          <>
-            <Button variant={view === "overview" ? "default" : "outline"} size="sm" onClick={() => setView("overview")}>
-              Overview
-            </Button>
-            <Button variant={view === "operations" ? "default" : "outline"} size="sm" onClick={() => setView("operations")}>
-              Operativita
-            </Button>
-            <Button variant={view === "activity" ? "default" : "outline"} size="sm" onClick={() => setView("activity")}>
-              Attivita Recenti
-            </Button>
-          </>
-        }
-      />
+    <section className="dashboard-workspace dashboard-enterprise space-y-5" aria-label="Dashboard operativa">
+      <WorkspacePageHeader eyebrow="LA TUA ATTIVITÀ" title="Dashboard" description="Le priorità di oggi, la flotta e l’andamento del noleggio." actions={<><Button variant="outline" onClick={refresh}>Aggiorna dashboard</Button>{canOpenBookings ? <Button onClick={() => navigate("/booking")}>Apri prenotazioni</Button> : null}</>} />
+      <div className="dashboard-view-switch" role="group" aria-label="Vista dashboard">
+        {([['overview', 'Panoramica'], ['operations', 'Fermi e manutenzioni'], ['activity', 'Attività recenti']] as const).map(([key, label]) => <Button key={key} variant={view === key ? "default" : "ghost"} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}
+      </div>
+      {canReadStoppages && [assignments, costs, escalations, preventive, variance].some(query => query.error) ? <div className="dashboard-notice" role="status">Alcuni dati di fermi o manutenzioni non sono disponibili. I riepiloghi senza dati mostrano un trattino.<Button variant="outline" onClick={refresh}>Riprova sezioni</Button></div> : null}
 
       {view === "overview" ? (
         <>
+          <DashboardOverview booking={data.booking} onNavigate={navigate} canOpenBookings={canOpenBookings} canOpenCustomers={canOpenBookings} />
+          <details className="dashboard-technical-summary"><summary>Fermi tecnici: riepilogo e trend</summary><div className="dashboard-technical-content">
           <div className="g-stats-grid grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
             <CardStat
               className="dashboard-enterprise-kpi xl:col-span-3"
@@ -466,7 +203,7 @@ export const DashboardPage = () => {
             <CardStat
               className="dashboard-enterprise-kpi xl:col-span-3"
               title="Costo stimato cumulato"
-              value={formatCurrency(costs.data?.kpis?.estimatedTotalCost)}
+              value={costs.loading || costs.error || !canReadStoppages ? "—" : formatCurrency(costs.data?.kpis?.estimatedTotalCost)}
               valueClassName="font-semibold"
               extra={<p className="mt-1 text-xs text-muted-foreground">Impatto economico corrente</p>}
             />
@@ -488,6 +225,7 @@ export const DashboardPage = () => {
                         size="sm"
                         variant={trendRange === option.value ? "default" : "ghost"}
                         className="h-7 px-3"
+                        aria-pressed={trendRange === option.value}
                         onClick={() => setTrendRange(option.value)}
                       >
                         {option.label}
@@ -538,10 +276,10 @@ export const DashboardPage = () => {
                               isAnimationActive={false}
                               wrapperStyle={{ pointerEvents: "none" }}
                               contentStyle={chartTooltipStyle}
-                              labelStyle={{ color: "rgba(13,15,46,0.56)" }}
+                              labelStyle={{ color: "hsl(var(--foreground))" }}
                             />
-                            <Line type="monotone" dataKey="opened" stroke="#2563eb" strokeWidth={2} name="Aperti" />
-                            <Line type="monotone" dataKey="closed" stroke="#059669" strokeWidth={2} name="Chiusi" />
+                            <Line type="linear" dataKey="opened" stroke="var(--dashboard-blue)" strokeWidth={2} name="Aperti" isAnimationActive={false} />
+                            <Line type="linear" dataKey="closed" stroke="var(--dashboard-teal)" strokeWidth={2} name="Chiusi" isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       ) : trendIndex === 1 ? (
@@ -554,9 +292,9 @@ export const DashboardPage = () => {
                               isAnimationActive={false}
                               wrapperStyle={{ pointerEvents: "none" }}
                               contentStyle={chartTooltipStyle}
-                              labelStyle={{ color: "rgba(13,15,46,0.56)" }}
+                              labelStyle={{ color: "hsl(var(--foreground))" }}
                             />
-                            <Bar dataKey="reminders" name="Reminder" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                            <Bar dataKey="reminders" name="Reminder" fill="var(--dashboard-amber)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
                           </BarChart>
                         </ResponsiveContainer>
                       ) : (
@@ -569,9 +307,9 @@ export const DashboardPage = () => {
                               isAnimationActive={false}
                               wrapperStyle={{ pointerEvents: "none" }}
                               contentStyle={chartTooltipStyle}
-                              labelStyle={{ color: "rgba(13,15,46,0.56)" }}
+                              labelStyle={{ color: "hsl(var(--foreground))" }}
                             />
-                            <Line type="monotone" dataKey="balance" stroke="#d97706" strokeWidth={2} name="Saldo" />
+                            <Line type="linear" dataKey="balance" stroke="var(--dashboard-amber)" strokeWidth={2} name="Saldo" isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       )}
@@ -589,7 +327,8 @@ export const DashboardPage = () => {
                           type="button"
                           onClick={() => setTrendIndex(idx)}
                           aria-label={`Vai al trend ${idx + 1}`}
-                          className={`h-2.5 w-2.5 rounded-full transition ${idx === trendIndex ? "bg-primary" : "bg-muted"}`}
+                          aria-pressed={idx === trendIndex}
+                          className={`h-11 w-11 rounded-full border transition ${idx === trendIndex ? "bg-primary" : "bg-muted"}`}
                         />
                       ))}
                     </div>
@@ -622,7 +361,7 @@ export const DashboardPage = () => {
             </Card>
           </div>
 
-          <BookingControlRoom booking={data.booking} onNavigate={navigate} />
+          </div></details>
         </>
       ) : null}
 
@@ -633,12 +372,12 @@ export const DashboardPage = () => {
             <CardStat className="dashboard-enterprise-kpi" title="Nuovi fermi (30gg)" value={data.kpis.newStoppagesLast30} />
             <CardStat className="dashboard-enterprise-kpi" title="Chiusi (30gg)" value={data.kpis.closedLast30} />
             <CardStat className="dashboard-enterprise-kpi" title="Durata media chiusura" value={`${data.kpis.averageClosureDays} gg`} />
-            <CardStat className="dashboard-enterprise-kpi" title="Escalation L3" value={escalations.data?.kpis?.level3 ?? 0} />
-            <CardStat className="dashboard-enterprise-kpi" title="Preventiva gg in scadenza" value={preventive.data?.kpis?.dueSoonDays ?? 0} />
-            <CardStat className="dashboard-enterprise-kpi" title="Preventiva gg scaduta" value={preventive.data?.kpis?.dueNowDays ?? 0} />
-            <CardStat className="dashboard-enterprise-kpi" title="Preventiva km in scadenza" value={preventive.data?.kpis?.dueSoonKm ?? 0} />
-            <CardStat className="dashboard-enterprise-kpi" title="Preventiva km scaduta" value={preventive.data?.kpis?.dueNowKm ?? 0} />
-            <CardStat className="dashboard-enterprise-kpi" title="Scostamento costi" value={`EUR ${variance.data?.kpis?.varianceTotal ?? 0}`} />
+            <CardStat className="dashboard-enterprise-kpi" title="Escalation L3" value={secondaryMetric(escalations, escalations.data?.kpis?.level3)} />
+            <CardStat className="dashboard-enterprise-kpi" title="Preventiva gg in scadenza" value={secondaryMetric(preventive, preventive.data?.kpis?.dueSoonDays)} />
+            <CardStat className="dashboard-enterprise-kpi" title="Preventiva gg scaduta" value={secondaryMetric(preventive, preventive.data?.kpis?.dueNowDays)} />
+            <CardStat className="dashboard-enterprise-kpi" title="Preventiva km in scadenza" value={secondaryMetric(preventive, preventive.data?.kpis?.dueSoonKm)} />
+            <CardStat className="dashboard-enterprise-kpi" title="Preventiva km scaduta" value={secondaryMetric(preventive, preventive.data?.kpis?.dueNowKm)} />
+            <CardStat className="dashboard-enterprise-kpi" title="Scostamento costi" value={variance.loading || variance.error || !canReadStoppages ? "—" : formatCurrency(variance.data?.kpis?.varianceTotal)} />
           </div>
 
           <div className="g-charts-row grid gap-4 xl:grid-cols-3">
@@ -647,7 +386,7 @@ export const DashboardPage = () => {
                 <CardTitle className="text-base">Distribuzione stati fermi</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-[300px]">
+                {!data.charts.byStatus.length ? <p className="dashboard-empty">Nessun fermo nel periodo.</p> : <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data.charts.byStatus.map((x: any) => ({ ...x, status: stoppageStatusLabel[x.status] ?? x.status }))}>
                       <XAxis dataKey="status" axisLine={false} tickLine={false} tick={chartAxisTick} />
@@ -657,12 +396,12 @@ export const DashboardPage = () => {
                         isAnimationActive={false}
                         wrapperStyle={{ pointerEvents: "none" }}
                         contentStyle={chartTooltipStyle}
-                        labelStyle={{ color: "rgba(13,15,46,0.56)" }}
+                        labelStyle={{ color: "hsl(var(--foreground))" }}
                       />
-                      <Bar dataKey="count" fill="#2563eb" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="count" fill="var(--dashboard-blue)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
+                </div>}
               </CardContent>
             </Card>
 
@@ -671,7 +410,8 @@ export const DashboardPage = () => {
                 <CardTitle className="text-base">Suggerimenti assegnazione</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {(assignments.data?.suggestions ?? []).map((item: any) => (
+                {!canReadStoppages ? <p className="dashboard-empty">Sezione riservata ai ruoli con accesso ai fermi.</p> : assignments.loading ? <p role="status">Caricamento assegnazioni...</p> : assignments.error ? <p role="alert">{assignments.error}</p> : !(assignments.data?.suggestions ?? []).length ? <p className="dashboard-empty">Nessun suggerimento di assegnazione.</p> : null}
+                {(assignments.error || assignments.loading || !canReadStoppages ? [] : assignments.data?.suggestions ?? []).map((item: any) => (
                   <div key={item.userId} className="dashboard-enterprise-item rounded-lg border border-border/80 bg-background/75 p-2">
                     <p className="text-sm font-medium">{item.name}</p>
                     <p className="text-xs text-muted-foreground">{item.email}</p>
@@ -691,6 +431,7 @@ export const DashboardPage = () => {
               <CardTitle className="text-base">Ultimi utenti iscritti</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {!data.feeds.recentUsers.length ? <p className="dashboard-empty">Nessun utente recente.</p> : null}
               {data.feeds.recentUsers.map((user: any) => (
                 <div key={user.id} className="dashboard-enterprise-item rounded-lg border border-border/80 bg-background/75 p-2">
                   <p className="text-sm font-medium">{user.firstName} {user.lastName}</p>
@@ -705,6 +446,7 @@ export const DashboardPage = () => {
               <CardTitle className="text-base">Ultimi fermi creati</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {!data.feeds.recentStoppages.length ? <p className="dashboard-empty">Nessun fermo recente.</p> : null}
               {data.feeds.recentStoppages.map((row: any) => (
                 <div key={row.id} className="dashboard-enterprise-item rounded-lg border border-border/80 bg-background/75 p-2">
                   <p className="text-sm font-medium">{row.plate} · {row.brand} {row.model}</p>
@@ -720,6 +462,7 @@ export const DashboardPage = () => {
               <CardTitle className="text-base">Ultimi reminder inviati</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {!data.feeds.recentReminders.length ? <p className="dashboard-empty">Nessun reminder recente.</p> : null}
               {data.feeds.recentReminders.map((reminder: any) => (
                 <div key={reminder.id} className="dashboard-enterprise-item rounded-lg border border-border/80 bg-background/75 p-2">
                   <div className="mb-1 flex items-center justify-between gap-2">

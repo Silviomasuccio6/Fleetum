@@ -1,3 +1,6 @@
+import { contractSigningPublicRoutes } from "./contract-signing-routes.js";
+import { requireCompanyResourceView } from "../middlewares/company-resources.js";
+import { requirePermissions } from "../middlewares/permissions.js";
 import rateLimit from "express-rate-limit";
 import crypto from "node:crypto";
 import { Router, type Request, type Response } from "express";
@@ -62,6 +65,7 @@ import { RentalBookingsController } from "../controllers/rental-bookings-control
 import { RentalPricingController } from "../controllers/rental-pricing-controller.js";
 import { TenantProfileController } from "../controllers/tenant-profile-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
+import { requireSiteAccess } from "../middlewares/site-access.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
 import { createRequireFeature } from "../middlewares/feature-entitlements.js";
 import { requireValidLicense } from "../middlewares/license-guard.js";
@@ -414,12 +418,20 @@ apiRouter.get("/ready", async (_req, res) => {
   }
 });
 apiRouter.use("/auth", authRoutes(authController));
+apiRouter.use("/contracts/signing",contractSigningPublicRoutes());
 apiRouter.use(requireAuth);
+apiRouter.use(requireSiteAccess);
+apiRouter.use(["/billing", "/tenant", "/users", "/settings", "/contract-templates", "/master-data/sites", "/master-data/workshops"], (_req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  next();
+});
 apiRouter.use("/billing", requireCsrfProtection, billingRoutes(billingController));
 apiRouter.use("/tenant", requireCsrfProtection, tenantProfileRoutes(tenantProfileController));
 apiRouter.post(
   "/tenant/onboarding/company-verification-document",
   requireCsrfProtection,
+  requirePermissions("users:write"),
+  requireCompanyResourceView,
   cleanupOnUploadFailure(uploadCompanyVerificationDocument.single("file")),
   asyncHandler(tenantProfileController.uploadCompanyVerificationDocument)
 );

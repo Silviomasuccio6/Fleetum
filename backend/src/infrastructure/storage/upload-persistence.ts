@@ -313,7 +313,7 @@ export const persistNewUploadedFiles = async <T>(input: {
   }
 };
 
-export const persistNewBuffer = async (input: {
+export const persistNewBuffer = async <T = undefined>(input: {
   tenantId: string;
   category: string;
   resourceType: string;
@@ -321,6 +321,7 @@ export const persistNewBuffer = async (input: {
   originalName: string;
   mimeType: string;
   buffer: Buffer;
+  commit?: (tx: Prisma.TransactionClient, key: string) => Promise<T>;
 }) => {
   const metadata: StoredFileMetadata = {
     tenantId: input.tenantId,
@@ -341,7 +342,7 @@ export const persistNewBuffer = async (input: {
   }
 
   const checksumSha256 = crypto.createHash("sha256").update(input.buffer).digest("hex");
-  const completed: { value?: { id: string } } = {};
+  const completed: { value?: { id: string; result: T | undefined } } = {};
   try {
     const storedFileObject = await prisma.$transaction(async (tx) => {
       const stored = await tx.storedFileObject.create({
@@ -360,11 +361,12 @@ export const persistNewBuffer = async (input: {
         },
         select: { id: true }
       });
+      const result = await input.commit?.(tx, key);
       await assertTenantStorageQuota(tx, input.tenantId);
-      completed.value = stored;
-      return stored;
+      completed.value = { ...stored, result };
+      return completed.value;
     }, { isolationLevel: "Serializable" });
-    return { key, checksumSha256, storedFileObjectId: storedFileObject.id };
+    return { key, checksumSha256, storedFileObjectId: storedFileObject.id, ...(input.commit ? { result: storedFileObject.result } : {}) };
   } catch (error) {
     if (completed.value && !isSerializationRollback(error)) {
       await recoverCompletedUploadCommit({
@@ -372,7 +374,7 @@ export const persistNewBuffer = async (input: {
         resourceType: input.resourceType,
         objects: [{ id: completed.value.id, storageKey: key, checksumSha256, sizeBytes: input.buffer.length }]
       });
-      return { key, checksumSha256, storedFileObjectId: completed.value.id };
+      return { key, checksumSha256, storedFileObjectId: completed.value.id, ...(input.commit ? { result: completed.value.result } : {}) };
     }
     const cleanup = await cleanupPhysicalObjects([key], input.resourceType);
     await recordFailedCompensationObjects({

@@ -1,4 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {WorkspacePageHeader} from "../../components/ui/workspace-ui";
+import {DiscardDialog,useOperationsAccess,useStoppageFilters,operationsHref,localDateTimeInput} from "../../components/operations/operations-workspace";
+import { FormEvent, useEffect, useMemo, useState,useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { usersUseCases } from "../../../application/usecases/users-usecases";
@@ -28,6 +30,10 @@ const localNowForInput = () => {
 export const StoppageFormPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const {canRead,canWrite,has}=useOperationsAccess();const{filters}=useStoppageFilters();
+  const [saving,setSaving]=useState(false),[dirty,setDirty]=useState(false),[discard,setDiscard]=useState(false);const lock=useRef(false),quickLock=useRef(false);const[quickBusy,setQuickBusy]=useState(false);const currentDetail=useRef<any>(null);const[loadKey,setLoadKey]=useState(0);const errorRef=useRef<HTMLDivElement>(null);
+  const goBack=()=>navigate(operationsHref("/fermi",filters));const cancel=()=>{if(saving||quickLock.current)return;if(dirty)setDiscard(true);else goBack()};
+  useEffect(()=>{if(!dirty)return;const protect=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=""};window.addEventListener("beforeunload",protect);return()=>window.removeEventListener("beforeunload",protect)},[dirty]);
 
   const [sites, setSites] = useState<any[]>([]);
   const [workshops, setWorkshops] = useState<any[]>([]);
@@ -77,14 +83,16 @@ export const StoppageFormPage = () => {
   });
   const [error, setError] = useState<string | null>(null);
 
+  const withCurrent=(items:any[],entry:any)=>entry&&!items.some(x=>x.id===entry.id)?[entry,...items]:items;
   const loadMasterData = async () => {
+    if(!canRead)return;
     setError(null);
 
     const results = await Promise.allSettled([
-      masterDataUseCases.listSites({ page: 1, pageSize: 100 }),
-      masterDataUseCases.listWorkshops({ page: 1, pageSize: 100 }),
-      masterDataUseCases.listVehicles({ page: 1, pageSize: 200 }),
-      usersUseCases.list()
+      has("sites:read")?masterDataUseCases.listSites({ page: 1, pageSize: 100 }):Promise.resolve({data:[]}),
+      has("workshops:read")?masterDataUseCases.listWorkshops({ page: 1, pageSize: 100 }):Promise.resolve({data:[]}),
+      has("vehicles:read")?masterDataUseCases.listVehicles({ page: 1, pageSize: 200 }):Promise.resolve({data:[]}),
+      has("users:read")?usersUseCases.list():Promise.resolve({data:[]})
     ]);
 
     const sitesData = results[0].status === "fulfilled" ? toList(results[0].value) : [];
@@ -92,10 +100,10 @@ export const StoppageFormPage = () => {
     const vehiclesData = results[2].status === "fulfilled" ? toList(results[2].value) : [];
     const usersData = results[3].status === "fulfilled" ? toList(results[3].value) : [];
 
-    setSites(sitesData);
-    setWorkshops(workshopsData);
-    setVehicles(vehiclesData);
-    setUsers(usersData);
+    setSites(withCurrent(sitesData,currentDetail.current?.site));
+    setWorkshops(withCurrent(workshopsData,currentDetail.current?.workshop));
+    setVehicles(withCurrent(vehiclesData,currentDetail.current?.vehicle));
+    setUsers(withCurrent(usersData,currentDetail.current?.assignedToUser));
 
     if (!id) {
       if (!selectedSiteId && sitesData[0]?.id) setSelectedSiteId(sitesData[0].id);
@@ -110,19 +118,20 @@ export const StoppageFormPage = () => {
   useEffect(() => {
     loadMasterData().catch((err: Error) => setError(err.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canRead]);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id||!canRead) return;
     let mounted = true;
 
     const loadStoppage = async () => {
-      setLoadingDetail(true);
+      currentDetail.current=null;setLoadingDetail(true);
       setError(null);
       try {
         const detail = await stoppagesUseCases.getById(id);
         if (!mounted) return;
 
+        currentDetail.current=detail;setSites(old=>withCurrent(old,detail.site));setVehicles(old=>withCurrent(old,detail.vehicle));setWorkshops(old=>withCurrent(old,detail.workshop));setUsers(old=>withCurrent(old,detail.assignedToUser));
         setSelectedSiteId(String(detail.siteId ?? ""));
         setSelectedWorkshopId(String(detail.workshopId ?? ""));
         setSelectedVehicleId(String(detail.vehicleId ?? ""));
@@ -130,9 +139,9 @@ export const StoppageFormPage = () => {
           status: String(detail.status ?? "OPEN"),
           priority: String(detail.priority ?? "MEDIUM"),
           assignedToUserId: String(detail.assignedToUserId ?? ""),
-          openedAt: detail.openedAt ? new Date(detail.openedAt).toISOString().slice(0, 16) : localNowForInput(),
+          openedAt: detail.openedAt ? localDateTimeInput(detail.openedAt) : localNowForInput(),
           reminderAfterDays: detail.reminderAfterDays ? String(detail.reminderAfterDays) : "",
-          estimatedCostPerDay: detail.estimatedCostPerDay ? String(detail.estimatedCostPerDay) : "",
+          estimatedCostPerDay: detail.estimatedCostPerDay!=null ? String(detail.estimatedCostPerDay) : "",
           reason: String(detail.reason ?? ""),
           notes: String(detail.notes ?? "")
         });
@@ -149,7 +158,7 @@ export const StoppageFormPage = () => {
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id,canRead,loadKey]);
 
   const filteredVehicles = useMemo(() => {
     if (!selectedSiteId) return vehicles;
@@ -158,6 +167,7 @@ export const StoppageFormPage = () => {
   }, [selectedSiteId, vehicles]);
 
   useEffect(() => {
+    if(id)return;
     if (!filteredVehicles.length) {
       setSelectedVehicleId("");
       return;
@@ -168,6 +178,7 @@ export const StoppageFormPage = () => {
   }, [filteredVehicles, selectedVehicleId]);
 
   const onQuickSiteCreate = async () => {
+    if(!has("sites:write")||saving||quickLock.current)return;
     setQuickSiteError(null);
     setQuickSiteSuccess(null);
 
@@ -187,6 +198,7 @@ export const StoppageFormPage = () => {
       return;
     }
 
+    quickLock.current=true;setQuickBusy(true);
     try {
       const created = (await masterDataUseCases.createSite(payload)) as any;
       await loadMasterData();
@@ -198,10 +210,11 @@ export const StoppageFormPage = () => {
       setShowQuickSite(false);
     } catch (err) {
       setQuickSiteError((err as Error).message);
-    }
+    }finally{quickLock.current=false;setQuickBusy(false)}
   };
 
   const onQuickWorkshopCreate = async () => {
+    if(!has("workshops:write")||saving||quickLock.current)return;
     setQuickWorkshopError(null);
     setQuickWorkshopSuccess(null);
 
@@ -222,6 +235,7 @@ export const StoppageFormPage = () => {
       return;
     }
 
+    quickLock.current=true;setQuickBusy(true);
     try {
       const created = (await masterDataUseCases.createWorkshop(payload)) as any;
       await loadMasterData();
@@ -235,10 +249,11 @@ export const StoppageFormPage = () => {
       setShowQuickWorkshop(false);
     } catch (err) {
       setQuickWorkshopError((err as Error).message);
-    }
+    }finally{quickLock.current=false;setQuickBusy(false)}
   };
 
   const onQuickVehicleCreate = async () => {
+    if(!has("vehicles:write")||saving||quickLock.current)return;
     setQuickVehicleError(null);
     setQuickVehicleSuccess(null);
 
@@ -256,6 +271,7 @@ export const StoppageFormPage = () => {
       return;
     }
 
+    quickLock.current=true;setQuickBusy(true);
     try {
       const created = (await masterDataUseCases.createVehicle(payload)) as any;
       await loadMasterData();
@@ -284,11 +300,12 @@ export const StoppageFormPage = () => {
         // Best-effort fallback: keep original backend error message below.
       }
       setQuickVehicleError((err as Error).message);
-    }
+    }finally{quickLock.current=false;setQuickBusy(false)}
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if(!canWrite||lock.current||quickLock.current)return;
     setError(null);
 
     const form = new FormData(event.currentTarget);
@@ -298,12 +315,13 @@ export const StoppageFormPage = () => {
       return;
     }
 
-    const openedAtIso = new Date(openedAtRaw).toISOString();
-    if (Number.isNaN(new Date(openedAtIso).getTime())) {
+    const openedAtDate=new Date(openedAtRaw);
+    if (Number.isNaN(openedAtDate.getTime())) {
       setError("Data apertura non valida.");
       return;
     }
 
+    const openedAtIso=openedAtDate.toISOString();
     const payload = {
       siteId: selectedSiteId,
       vehicleId: selectedVehicleId,
@@ -313,7 +331,7 @@ export const StoppageFormPage = () => {
       status: String(form.get("status") || "") || "OPEN",
       priority: String(form.get("priority") || "") || "MEDIUM",
       assignedToUserId: String(form.get("assignedToUserId") || "") || null,
-      estimatedCostPerDay: Number(form.get("estimatedCostPerDay") || 0) || null,
+      estimatedCostPerDay: String(form.get("estimatedCostPerDay")??"").trim()===""?null:Number(form.get("estimatedCostPerDay")),
       openedAt: openedAtIso,
       reminderAfterDays: Number(form.get("reminderAfterDays") || 0) || null
     };
@@ -323,56 +341,61 @@ export const StoppageFormPage = () => {
       return;
     }
 
+    lock.current=true;setSaving(true);
     try {
       if (id) await stoppagesUseCases.update(id, payload);
       else await stoppagesUseCases.create(payload);
-      navigate("/fermi");
+      setDirty(false);goBack();
     } catch (err) {
       setError((err as Error).message);
-    }
+    }finally{lock.current=false;setSaving(false)}
   };
+  useEffect(()=>{if(error)errorRef.current?.focus()},[error]);
 
+  if(!canRead)return <section className="operations-workspace"><h1>Fermo</h1><p>Il tuo ruolo non consente l’accesso ai fermi.</p></section>;
   if (loadingDetail) {
     return <FleetumBlockLoader label="Caricamento fermo" />;
   }
 
+  if(id&&currentDetail.current?.id!==id)return <section className="operations-workspace"><h1>Modifica fermo</h1><div role="alert">{error||"Fermo non disponibile."}</div><div><Button variant="outline" onClick={goBack}>Torna ai fermi</Button><Button onClick={()=>setLoadKey(k=>k+1)}>Riprova fermo</Button></div></section>;
   return (
-    <section className="space-y-4">
-      <PageHeader
+    <section className="operations-workspace operations-form-page">
+      <WorkspacePageHeader eyebrow="INTERVENTO OPERATIVO"
         title={id ? "Modifica fermo" : "Nuovo fermo"}
-        subtitle="Compila i dati operativi, imposta priorità e reminder, allega il contesto del fermo."
+        description="Veicolo, responsabilità e condizioni del fermo. Tutti i dati operativi, in ordine."
+        actions={<Button variant="outline" onClick={cancel}>Torna ai fermi</Button>}
       />
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-base">Dati fermo</CardTitle>
         </CardHeader>
         <CardContent>
-          <form key={`${id ?? "new"}-${formVersion}`} className="grid gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
+          <form key={`${id ?? "new"}-${formVersion}`} className="operations-form" onChangeCapture={()=>setDirty(true)} onSubmit={onSubmit}><fieldset className="operations-form-fields" disabled={!canWrite||saving||quickBusy}><section className="operations-form-section"><h2>Veicolo e struttura</h2><div className="operations-form-grid">
             <div className="grid gap-2">
-              <Label>Sede</Label>
-              <Select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)} required>
+              <Label htmlFor="stoppage-form-1">Sede</Label>
+              <Select id="stoppage-form-1" value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)} required>
                 <option value="" disabled>Seleziona sede</option>
                 {sites.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                  <option translate="no" key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </Select>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickSite((prev) => !prev)}>
+                <Button type="button" variant="outline" size="sm" disabled={!has("sites:write")||quickBusy} onClick={() => setShowQuickSite((prev) => !prev)}>
                   {showQuickSite ? "Chiudi creazione sede" : "Sede non presente? Creala qui"}
                 </Button>
               </div>
             </div>
 
             <div className="grid gap-2">
-              <Label>Veicolo</Label>
-              <Select value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)} required>
+              <Label htmlFor="stoppage-form-2">Veicolo</Label>
+              <Select id="stoppage-form-2" value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)} required>
                 <option value="" disabled>Seleziona veicolo</option>
                 {filteredVehicles.map((v) => (
-                  <option key={v.id} value={v.id}>{v.plate} - {v.brand} {v.model}</option>
+                  <option translate="no" key={v.id} value={v.id}>{v.plate} - {v.brand} {v.model}</option>
                 ))}
               </Select>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickVehicle((prev) => !prev)}>
+                <Button type="button" variant="outline" size="sm" disabled={!has("vehicles:write")||quickBusy} onClick={() => setShowQuickVehicle((prev) => !prev)}>
                   {showQuickVehicle ? "Chiudi inserimento veicolo" : "Veicolo non presente? Inseriscilo qui"}
                 </Button>
               </div>
@@ -463,15 +486,15 @@ export const StoppageFormPage = () => {
             )}
 
             <div className="grid gap-2">
-              <Label>Officina</Label>
-              <Select value={selectedWorkshopId} onChange={(e) => setSelectedWorkshopId(e.target.value)} required>
+              <Label htmlFor="stoppage-form-3">Officina</Label>
+              <Select id="stoppage-form-3" value={selectedWorkshopId} onChange={(e) => setSelectedWorkshopId(e.target.value)} required>
                 <option value="" disabled>Seleziona officina</option>
                 {workshops.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
+                  <option translate="no" key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </Select>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickWorkshop((prev) => !prev)}>
+                <Button type="button" variant="outline" size="sm" disabled={!has("workshops:write")||quickBusy} onClick={() => setShowQuickWorkshop((prev) => !prev)}>
                   {showQuickWorkshop ? "Chiudi creazione officina" : "Officina non presente? Creala qui"}
                 </Button>
               </div>
@@ -544,9 +567,9 @@ export const StoppageFormPage = () => {
               </div>
             )}
 
-            <div className="grid gap-2">
-              <Label>Stato</Label>
-              <Select name="status" defaultValue={formDefaults.status}>
+</div></section><section className="operations-form-section"><h2>Stato e responsabilità</h2><div className="operations-form-grid">            <div className="grid gap-2">
+              <Label htmlFor="stoppage-form-4">Stato</Label>
+              <Select id="stoppage-form-4" name="status" defaultValue={formDefaults.status}>
                 <option value="OPEN">Aperto</option>
                 <option value="IN_PROGRESS">In lavorazione</option>
                 <option value="WAITING_PARTS">In attesa ricambi</option>
@@ -557,8 +580,8 @@ export const StoppageFormPage = () => {
             </div>
 
             <div className="grid gap-2">
-              <Label>Priorita</Label>
-              <Select name="priority" defaultValue={formDefaults.priority}>
+              <Label htmlFor="stoppage-form-5">Priorita</Label>
+              <Select id="stoppage-form-5" name="priority" defaultValue={formDefaults.priority}>
                 <option value="LOW">Bassa</option>
                 <option value="MEDIUM">Media</option>
                 <option value="HIGH">Alta</option>
@@ -567,43 +590,44 @@ export const StoppageFormPage = () => {
             </div>
 
             <div className="grid gap-2">
-              <Label>Assegnato a</Label>
-              <Select name="assignedToUserId" defaultValue={formDefaults.assignedToUserId}>
+              <Label htmlFor="stoppage-form-6">Assegnato a</Label>
+              <Select id="stoppage-form-6" name="assignedToUserId" defaultValue={formDefaults.assignedToUserId}>
                 <option value="">Non assegnato</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                {users.map((u) => <option translate="no" key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
               </Select>
             </div>
 
-            <div className="grid gap-2">
-              <Label>Data apertura</Label>
-              <Input type="datetime-local" name="openedAt" defaultValue={formDefaults.openedAt} required />
+</div></section><section className="operations-form-section"><h2>Date e condizioni</h2><div className="operations-form-grid">            <div className="grid gap-2">
+              <Label htmlFor="stoppage-form-7">Data apertura</Label>
+              <Input id="stoppage-form-7" type="datetime-local" name="openedAt" defaultValue={formDefaults.openedAt} required />
             </div>
 
             <div className="grid gap-2">
-              <Label>Reminder dopo giorni</Label>
-              <Input type="number" min={1} name="reminderAfterDays" defaultValue={formDefaults.reminderAfterDays} />
+              <Label htmlFor="stoppage-form-8">Reminder dopo giorni</Label>
+              <Input id="stoppage-form-8" type="number" min={1} name="reminderAfterDays" defaultValue={formDefaults.reminderAfterDays} />
             </div>
 
             <div className="grid gap-2">
-              <Label>Costo stimato fermo/giorno (€)</Label>
-              <Input type="number" min={0} step="0.01" name="estimatedCostPerDay" defaultValue={formDefaults.estimatedCostPerDay} />
+              <Label htmlFor="stoppage-form-9">Costo stimato fermo/giorno (€)</Label>
+              <Input id="stoppage-form-9" type="number" min={0} step="0.01" name="estimatedCostPerDay" defaultValue={formDefaults.estimatedCostPerDay} />
+            </div>
+
+</div></section><section className="operations-form-section"><h2>Motivo e note</h2><div className="operations-form-grid">            <div className="grid gap-2 sm:col-span-2">
+              <Label htmlFor="stoppage-form-10">Motivo</Label>
+              <Input id="stoppage-form-10" name="reason" defaultValue={formDefaults.reason} required />
             </div>
 
             <div className="grid gap-2 sm:col-span-2">
-              <Label>Motivo</Label>
-              <Input name="reason" defaultValue={formDefaults.reason} required />
+              <Label htmlFor="stoppage-form-11">Note</Label>
+              <Textarea id="stoppage-form-11" name="notes" rows={4} defaultValue={formDefaults.notes} />
             </div>
 
-            <div className="grid gap-2 sm:col-span-2">
-              <Label>Note</Label>
-              <Textarea name="notes" rows={4} defaultValue={formDefaults.notes} />
-            </div>
-
-            {error && <Alert className="sm:col-span-2 border-destructive/40 bg-destructive/10 text-destructive">{error}</Alert>}
-            <Button type="submit" className="sm:col-span-2">Salva fermo</Button>
-          </form>
+</div></section>            {error?<div ref={errorRef} tabIndex={-1} role="alert" className="commerce-notice commerce-error sm:col-span-2">{error}</div>:null}
+            <div className="operations-form-footer"><Button type="button" variant="outline" onClick={cancel}>Annulla</Button>{canWrite?<Button type="submit" disabled={saving}>{saving?"Salvataggio...":"Salva fermo"}</Button>:null}</div>
+          </fieldset></form>
         </CardContent>
       </Card>
+      {discard?<DiscardDialog onContinue={()=>setDiscard(false)} onDiscard={()=>{setDiscard(false);goBack()}}/>:null}
     </section>
   );
 };

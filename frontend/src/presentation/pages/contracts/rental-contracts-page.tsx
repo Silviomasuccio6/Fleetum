@@ -9,6 +9,11 @@ import {
 } from "../../../application/usecases/rental-bookings-usecases";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { FleetumBlockLoader, FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
+import { useAuthStore } from "../../../application/stores/auth-store";
+import { CommerceDrawer,CommerceCollection,CommerceNotice } from "../../components/ui/commerce-workspace";
+import { WorkspacePageHeader } from "../../components/ui/workspace-ui";
+import type { PanelMotionHandle } from "../../components/ui/panel-motion";
+import { Label } from "../../components/ui/label";
 import { PageHeader } from "../../components/layout/page-header";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -151,9 +156,16 @@ export const RentalContractsPage = () => {
   const signatureLastPointRef = useRef<{ x: number; y: number } | null>(null);
   const contractEmailRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
+  const permissions=useAuthStore(state=>state.user?.permissions)??[];
+  const has=(permission:string)=>permissions.includes('*')||permissions.includes(permission);
+  const canRead=has('vehicles:read'),canWrite=has('vehicles:write'),canReadSites=has('sites:read');
+  const listSequence=useRef(0),previewSequence=useRef(0),actionRowRef=useRef<string|null>(null),panelMotion=useRef<PanelMotionHandle|null>(null),panelOrigin=useRef<HTMLElement|null>(null),signatureStrokeRef=useRef(false);
+  const [sitesError,setSitesError]=useState<string|null>(null);
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
   const loadContracts = async (targetPage: number) => {
+    if(!canRead)return;const sequence=++listSequence.current;
     setLoading(true);
     setError(null);
     try {
@@ -168,14 +180,15 @@ export const RentalContractsPage = () => {
         dateFrom: period === "custom" && dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : undefined,
         dateTo: period === "custom" && dateTo ? new Date(`${dateTo}T23:59:59`).toISOString() : undefined
       });
+      if(sequence!==listSequence.current)return;
       setRows(response.data ?? []);
       setTimeline(response.timeline ?? []);
       setKpis(response.kpis ?? kpis);
       setTotal(response.total ?? 0);
     } catch (e) {
-      setError((e as Error).message);
+      if(sequence===listSequence.current)setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if(sequence===listSequence.current)setLoading(false);
     }
   };
 
@@ -189,10 +202,11 @@ export const RentalContractsPage = () => {
 
   useEffect(() => {
     void loadContracts(page);
-  }, [page, search, period, contractStatus, bookingStatus, siteId]);
+    return()=>{listSequence.current++};
+  }, [page, search, period, contractStatus, bookingStatus, siteId,canRead]);
 
   useEffect(() => {
-    let mounted = true;
+    if(!canRead||!canReadSites)return;let mounted = true;
     masterDataUseCases
       .listSites({ page: 1, pageSize: 200 })
       .then((result) => {
@@ -200,12 +214,12 @@ export const RentalContractsPage = () => {
         setSites(result.data ?? []);
       })
       .catch(() => {
-        if (mounted) setSites([]);
+        if (mounted){setSites([]);setSitesError("Sedi non disponibili. Gli altri filtri restano utilizzabili.")}
       });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [canRead,canReadSites]);
 
   useEffect(() => {
     return () => {
@@ -214,73 +228,36 @@ export const RentalContractsPage = () => {
   }, [actionPanelPreviewUrl]);
 
   useEffect(() => {
-    if (!actionPanelRow) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setActionPanelRow(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [actionPanelRow]);
-
-  useEffect(() => {
     if (!signatureModalRow) return;
     const timer = window.setTimeout(() => {
       setupSignatureCanvas();
     }, 0);
-    const onResize = () => setupSignatureCanvas();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeSignatureModal();
-    };
+    const onResize = () => setupSignatureCanvas(true);
     window.addEventListener("resize", onResize);
-    window.addEventListener("keydown", onKeyDown);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("resize", onResize);
-      window.removeEventListener("keydown", onKeyDown);
     };
   }, [signatureModalRow]);
 
-  const closeActionPanel = () => {
-    setActionPanelRow(null);
-    setActionPanelPreviewLoading(false);
-    setActionPanelPreviewError(null);
-    setActionPanelPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
+  const closeActionPanel=()=>{
+    if(actionBusyId||signatureModalRow)return;previewSequence.current++;actionRowRef.current=null;
+    const done=()=>{setActionPanelRow(null);setActionPanelPreviewLoading(false);setActionPanelPreviewError(null);setActionPanelPreviewUrl(prev=>{if(prev)URL.revokeObjectURL(prev);return null})};
+    if(panelMotion.current)panelMotion.current.dismiss(done);else done();
   };
-
-  const loadActionPanelPreview = async (row: RentalContractsMonitoringItem) => {
-    setActionPanelPreviewLoading(true);
-    setActionPanelPreviewError(null);
-    try {
-      const blob = await rentalBookingsUseCases.downloadContractPdf(row.bookingId);
-      const url = URL.createObjectURL(blob);
-      setActionPanelPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return url;
-      });
-    } catch (e) {
-      setActionPanelPreviewError((e as Error).message);
-      setActionPanelPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-    } finally {
-      setActionPanelPreviewLoading(false);
-    }
+  const loadActionPanelPreview=async(row:RentalContractsMonitoringItem)=>{
+    if(!canRead)return;const sequence=++previewSequence.current;setActionPanelPreviewLoading(true);setActionPanelPreviewError(null);
+    try{const blob=await rentalBookingsUseCases.downloadContractPdf(row.bookingId);if(sequence!==previewSequence.current||actionRowRef.current!==row.id)return;const url=URL.createObjectURL(blob);setActionPanelPreviewUrl(previous=>{if(previous)URL.revokeObjectURL(previous);return url})}
+    catch(e){if(sequence===previewSequence.current&&actionRowRef.current===row.id){setActionPanelPreviewError((e as Error).message);setActionPanelPreviewUrl(previous=>{if(previous)URL.revokeObjectURL(previous);return null})}}
+    finally{if(sequence===previewSequence.current)setActionPanelPreviewLoading(false)}
   };
+  const openActionPanel=(row:RentalContractsMonitoringItem,origin?:HTMLElement)=>{if(!canRead||actionBusyId)return;panelOrigin.current=origin??null;actionRowRef.current=row.id;setActionPanelPreviewUrl(null);setActionPanelRow(row);setError(null);void loadActionPanelPreview(row)};
+  useEffect(()=>()=>{previewSequence.current++;actionRowRef.current=null},[]);
 
-  const openActionPanel = (row: RentalContractsMonitoringItem) => {
-    setActionPanelRow(row);
-    void loadActionPanelPreview(row);
-  };
-
-  const setupSignatureCanvas = () => {
+  const setupSignatureCanvas = (preserve=false) => {
     const canvas = signatureCanvasRef.current;
     if (!canvas) return;
+    const keep=preserve&&signatureStrokeRef.current;const copy=keep?document.createElement("canvas"):null;if(copy){copy.width=canvas.width;copy.height=canvas.height;copy.getContext("2d")?.drawImage(canvas,0,0)}
     const width = Math.max(280, Math.floor(canvas.clientWidth || 640));
     const height = 220;
     const ratio = Math.max(1, window.devicePixelRatio || 1);
@@ -298,7 +275,7 @@ export const RentalContractsPage = () => {
     ctx.lineJoin = "round";
     signatureDrawingRef.current = false;
     signatureLastPointRef.current = null;
-    setSignatureHasStroke(false);
+    if(copy)ctx.drawImage(copy,0,0,width,height);signatureStrokeRef.current=keep;setSignatureHasStroke(keep);
   };
 
   const getSignaturePoint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -312,6 +289,7 @@ export const RentalContractsPage = () => {
   };
 
   const onSignaturePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if(!canWrite||signatureSubmitting)return;
     const canvas = signatureCanvasRef.current;
     const point = getSignaturePoint(event);
     if (!canvas || !point) return;
@@ -324,7 +302,7 @@ export const RentalContractsPage = () => {
     ctx.arc(point.x, point.y, 1.1, 0, Math.PI * 2);
     ctx.fillStyle = "#1f2937";
     ctx.fill();
-    setSignatureHasStroke(true);
+    signatureStrokeRef.current=true;setSignatureHasStroke(true);
   };
 
   const onSignaturePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -344,7 +322,7 @@ export const RentalContractsPage = () => {
     ctx.lineTo(point.x, point.y);
     ctx.stroke();
     signatureLastPointRef.current = point;
-    setSignatureHasStroke(true);
+    signatureStrokeRef.current=true;setSignatureHasStroke(true);
   };
 
   const endSignatureDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -358,6 +336,7 @@ export const RentalContractsPage = () => {
   };
 
   const closeSignatureModal = () => {
+    if(signatureSubmitting)return;
     setSignatureModalRow(null);
     setSignatureSubmitting(false);
     signatureDrawingRef.current = false;
@@ -365,10 +344,12 @@ export const RentalContractsPage = () => {
   };
 
   const openSignatureModal = (row: RentalContractsMonitoringItem) => {
+    if(!canWrite||actionBusyId)return;setError(null);
     setSignatureModalRow(row);
   };
 
   const runDownload = async (row: RentalContractsMonitoringItem) => {
+    if(!canRead||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
     try {
@@ -390,6 +371,7 @@ export const RentalContractsPage = () => {
   };
 
   const runSendEmail = async (row: RentalContractsMonitoringItem) => {
+    if(!canWrite||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
     try {
@@ -413,6 +395,7 @@ export const RentalContractsPage = () => {
   };
 
   const runSendWhatsapp = async (row: RentalContractsMonitoringItem) => {
+    if(!canWrite||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
     try {
@@ -434,6 +417,7 @@ export const RentalContractsPage = () => {
   };
 
   const runMarkSigned = async (row: RentalContractsMonitoringItem, signatureDataUrl?: string) => {
+    if(!canWrite||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
     try {
@@ -450,15 +434,16 @@ export const RentalContractsPage = () => {
       if (actionPanelRow?.id === row.id) {
         await loadActionPanelPreview(row);
       }
+      return true;
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message);return false;
     } finally {
       setActionBusyId(null);
     }
   };
 
   const submitSignature = async () => {
-    if (!signatureModalRow) return;
+    if (!signatureModalRow||!canWrite||signatureSubmitting) return;
     const canvas = signatureCanvasRef.current;
     if (!canvas) {
       setError("Canvas firma non disponibile.");
@@ -472,349 +457,55 @@ export const RentalContractsPage = () => {
     setSignatureSubmitting(true);
     try {
       const signatureDataUrl = canvas.toDataURL("image/png");
-      await runMarkSigned(signatureModalRow, signatureDataUrl);
-      closeSignatureModal();
+      const saved=await runMarkSigned(signatureModalRow, signatureDataUrl);
+      if(saved)closeSignatureModal();
     } finally {
       setSignatureSubmitting(false);
     }
   };
 
+  const code=(row:RentalContractsMonitoringItem)=><><button className="commerce-name" onClick={event=>openActionPanel(row,event.currentTarget)} aria-haspopup="dialog" aria-expanded={actionPanelRow?.id===row.id}><strong data-panel-origin-title translate="no">{contractCodeBySite(row)}</strong></button><small>{row.booking.code}</small></>;
+  const states=(row:RentalContractsMonitoringItem)=><div className="commerce-states"><span>Documento: <Badge variant={toBadgeVariant(row.status)}>{CONTRACT_STATUS_LABELS[row.status]}</Badge></span><span>Noleggio: <Badge variant={toBadgeVariant(row.booking.status)}>{BOOKING_STATUS_LABELS[row.booking.status]}</Badge></span></div>;
+  const columns=[
+   {key:'code',label:'Contratto',render:code},
+   {key:'customer',label:'Cliente',render:(row:RentalContractsMonitoringItem)=>row.booking.customer?.id?<button className="commerce-link" onClick={()=>navigate(`/anagrafiche/clienti?customerId=${row.booking.customer!.id}`)}>{row.booking.customerName}</button>:<span>{row.booking.customerName}</span>},
+   {key:'vehicle',label:'Veicolo',render:(row:RentalContractsMonitoringItem)=><><strong>{row.booking.vehicle?.plate||'—'}</strong><small>{row.booking.vehicle?.brand||'—'} {row.booking.vehicle?.model||''}</small></>},
+   {key:'trip',label:'Periodo noleggio',render:(row:RentalContractsMonitoringItem)=><><span>Uscita: {formatWhen(row.booking.pickupAt)}</span><small>Rientro: {formatWhen(row.booking.returnAt)}</small></>},
+   {key:'states',label:'Stati',render:states},
+   {key:'delivery',label:'Ultimo invio',render:(row:RentalContractsMonitoringItem)=>row.latestDelivery?<><span>{row.latestDelivery.channel} · {row.latestDelivery.status}</span><small>{formatWhen(row.latestDelivery.sentAt||row.latestDelivery.createdAt)}</small></>:<span>—</span>},
+   {key:'actions',label:'Azioni',render:(row:RentalContractsMonitoringItem)=><Button variant="outline" disabled={!!actionBusyId} onClick={event=>openActionPanel(row,event.currentTarget)} aria-label={`Apri contratto ${row.booking.code}`} aria-haspopup="dialog">Apri</Button>}
+  ];
+  const filterChange=(change:()=>void)=>{setPage(1);change()};
+  if(!canRead)return <section className="contracts-workspace commerce-workspace"><h1>Contratti</h1><p>Il tuo ruolo non consente l’accesso ai contratti.</p></section>;
   return (
-    <section className="dashboard-enterprise space-y-4">
-      <PageHeader
-        title="Contratti Noleggio"
-        subtitle="Monitoraggio operativo contratti, invii multicanale e collegamenti rapidi con booking/clienti."
-      />
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <ContractsKpiCard title="Da inviare" value={kpis.contractsToSend} hint="Contratti pronti ma non ancora inviati" valueTone="warning" />
-        <ContractsKpiCard title="Inviati oggi" value={kpis.sentToday} hint="Invii completati nelle ultime 24h" />
-        <ContractsKpiCard title="Firmati" value={kpis.signed} hint="Contratti con firma acquisita" valueTone="success" />
-        <ContractsKpiCard title="In errore" value={kpis.inError} hint="Invii o firme con esito KO" valueTone="danger" />
-        <ContractsKpiCard title="Uscite oggi" value={kpis.exitsToday} hint="Noleggi con handover in giornata" />
-        <ContractsKpiCard title="Rientri oggi" value={kpis.returnsToday} hint="Veicoli attesi al rientro oggi" />
-      </div>
-
-      <Card className="saas-surface dashboard-enterprise-card">
-        <CardContent className="space-y-3 px-4 py-4 md:px-5">
-          <div className="grid items-center gap-3 xl:grid-cols-[minmax(260px,1.25fr)_160px_190px_190px_210px_auto]">
-            <Input
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Cerca cliente, targa, codice booking..."
-              className="h-10"
-            />
-            <Select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)} className="h-10">
-              <option value="all">Periodo: tutto</option>
-              <option value="7d">Periodo: 7gg</option>
-              <option value="30d">Periodo: 30gg</option>
-              <option value="90d">Periodo: 90gg</option>
-              <option value="custom">Periodo: custom</option>
-            </Select>
-            <Select
-              value={contractStatus}
-              onChange={(event) => setContractStatus(event.target.value as "" | BookingContractStatus)}
-              className="h-10"
-            >
-              <option value="">Contratto: tutti</option>
-              <option value="DRAFT">Bozza</option>
-              <option value="READY">Pronto</option>
-              <option value="SENT">Inviato</option>
-              <option value="SIGNED">Firmato</option>
-              <option value="ERROR">Errore</option>
-            </Select>
-            <Select
-              value={bookingStatus}
-              onChange={(event) => setBookingStatus(event.target.value as "" | RentalBookingStatus)}
-              className="h-10"
-            >
-              <option value="">Prenotazione: tutti</option>
-              {Object.entries(BOOKING_STATUS_LABELS).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
-            </Select>
-            <Select value={siteId} onChange={(event) => setSiteId(event.target.value)} className="h-10">
-              <option value="">Tutte le sedi</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>{site.name}{site.city ? ` · ${site.city}` : ""}</option>
-              ))}
-            </Select>
-            <Button variant="outline" className="h-10 whitespace-nowrap px-4" onClick={() => void loadContracts(page)}>
-              Aggiorna
-            </Button>
-          </div>
-
-          {period === "custom" ? (
-            <div className="grid gap-3 sm:grid-cols-2 xl:max-w-[460px]">
-              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-10" />
-              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-10" />
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card className="saas-surface dashboard-enterprise-card">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Elenco contratti</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-0">
-          <Table className="text-xs">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="py-2">Contratto</TableHead>
-                  <TableHead className="py-2">Cliente</TableHead>
-                  <TableHead className="py-2">Veicolo</TableHead>
-                  <TableHead className="py-2">Uscita</TableHead>
-                  <TableHead className="py-2">Rientro</TableHead>
-                  <TableHead className="py-2">Stati</TableHead>
-                  <TableHead className="py-2">Ultimo invio</TableHead>
-                  <TableHead className="py-2 text-right">Azioni</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center">
-                      <FleetumInlineLoader label="Caricamento contratti" />
-                    </TableCell>
-                  </TableRow>
-                ) : rows.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="text-center text-xs text-muted-foreground">Nessun contratto trovato.</TableCell></TableRow>
-                ) : rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="py-2.5 align-top">
-                      <p className="font-medium leading-tight">{contractCodeBySite(row)}</p>
-                      <p className="text-[11px] leading-tight text-muted-foreground">{row.booking.code}</p>
-                    </TableCell>
-                    <TableCell className="py-2.5 align-top">
-                      <button
-                        type="button"
-                        className="text-left text-sm leading-tight transition-colors hover:text-primary hover:underline"
-                        onClick={() => row.booking.customer?.id && navigate(`/anagrafiche/clienti?customerId=${row.booking.customer.id}`)}
-                      >
-                        {row.booking.customerName}
-                      </button>
-                    </TableCell>
-                    <TableCell className="py-2.5 align-top">
-                      <p className="font-medium leading-tight">{row.booking.vehicle?.plate || "-"}</p>
-                      <p className="text-[11px] leading-tight text-muted-foreground">{row.booking.vehicle?.brand || "-"} {row.booking.vehicle?.model || ""}</p>
-                    </TableCell>
-                    <TableCell className="py-2.5 align-top text-[11px] leading-tight">{formatWhen(row.booking.pickupAt)}</TableCell>
-                    <TableCell className="py-2.5 align-top text-[11px] leading-tight">{formatWhen(row.booking.returnAt)}</TableCell>
-                    <TableCell className="py-2.5 align-top">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={toBadgeVariant(row.status)}>{CONTRACT_STATUS_LABELS[row.status]}</Badge>
-                        <Badge variant={toBadgeVariant(row.booking.status)}>{BOOKING_STATUS_LABELS[row.booking.status]}</Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-2.5 align-top">
-                      {row.latestDelivery ? (
-                        <div className="space-y-0.5 text-[11px] leading-tight">
-                          <p>{row.latestDelivery.channel} · {row.latestDelivery.status}</p>
-                          <p className="text-muted-foreground">{formatWhen(row.latestDelivery.sentAt || row.latestDelivery.createdAt)}</p>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-2.5 align-top">
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          className="h-8 min-w-[90px] px-3 text-xs"
-                          variant="outline"
-                          onClick={() => openActionPanel(row)}
-                          disabled={actionBusyId === row.id}
-                        >
-                          Azioni
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span className="leading-none">Pagina {page} / {totalPages} · Totale {total}</span>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-8 min-w-[96px]" disabled={page <= 1} onClick={() => setPage((prev) => prev - 1)}>
-                Precedente
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 min-w-[96px]"
-                disabled={page >= totalPages}
-                onClick={() => setPage((prev) => prev + 1)}
-              >
-                Successiva
-              </Button>
-              </div>
-            </div>
-        </CardContent>
-      </Card>
-
-      <Card className="saas-surface dashboard-enterprise-card mt-4">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Timeline operativa</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-0">
-          {timeline.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nessun evento recente.</p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {timeline.map((item, idx) => (
-                <article key={`${item.type}-${item.bookingId}-${idx}`} className="dashboard-enterprise-item rounded-xl border bg-card/70 px-3 py-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <Badge variant={item.type === "DELIVERY" ? "secondary" : "outline"}>
-                      {item.type === "PICKUP" ? "Uscita" : item.type === "RETURN" ? "Rientro" : `Invio ${item.channel ?? ""}`}
-                    </Badge>
-                    <span className="text-[11px] text-muted-foreground">{formatWhen(item.occurredAt)}</span>
-                  </div>
-                  <p className="mt-1.5 text-sm font-medium leading-tight">{item.bookingCode} · {item.customerName}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {(item.vehicle?.plate ?? "-")} {item.vehicle?.brand ?? ""} {item.vehicle?.model ?? ""}
-                  </p>
-                  {item.type === "DELIVERY" ? (
-                    <p className="text-xs text-muted-foreground">
-                      {item.recipient || "-"} · {item.deliveryStatus || "-"}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Stato prenotazione: {item.bookingStatus ? BOOKING_STATUS_LABELS[item.bookingStatus] : "-"}
-                    </p>
-                  )}
-                </article>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {actionPanelRow ? (
-        <>
-          <div className="fixed inset-0 z-[95] bg-black/55 backdrop-blur-sm" onClick={closeActionPanel} />
-          <div className="fixed inset-x-4 top-6 z-[96] mx-auto w-full max-w-[1180px] overflow-hidden rounded-2xl border bg-background shadow-2xl md:top-10">
-            <div className="flex items-start justify-between border-b px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold">Centro Azioni Contratto</p>
-                <p className="text-xs text-muted-foreground">
-                  {contractCodeBySite(actionPanelRow)} · {actionPanelRow.booking.customerName}
-                </p>
-              </div>
-              <Button size="sm" variant="outline" onClick={closeActionPanel}>
-                Chiudi
-              </Button>
-            </div>
-
-            <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_230px]">
-              <div className="rounded-xl border bg-muted/20 p-2">
-                {actionPanelPreviewLoading ? (
-                  <FleetumBlockLoader label="Caricamento anteprima PDF" className="h-[68vh] min-h-0" />
-                ) : actionPanelPreviewError ? (
-                  <div className="flex h-[68vh] flex-col items-center justify-center gap-3">
-                    <p className="text-sm text-destructive">{actionPanelPreviewError}</p>
-                    <Button size="sm" variant="outline" onClick={() => void loadActionPanelPreview(actionPanelRow)}>
-                      Riprova
-                    </Button>
-                  </div>
-                ) : actionPanelPreviewUrl ? (
-                  <iframe
-                    title={`Contratto ${actionPanelRow.booking.code}`}
-                    src={actionPanelPreviewUrl}
-                    className="h-[68vh] w-full rounded-lg border bg-background"
-                  />
-                ) : (
-                  <div className="flex h-[68vh] items-center justify-center text-sm text-muted-foreground">Anteprima non disponibile.</div>
-                )}
-              </div>
-
-              <aside className="space-y-2">
-                <div className="rounded-lg border bg-card/70 p-2">
-                  <p className="text-[10px] uppercase text-muted-foreground">Stato contratto</p>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    <Badge variant={toBadgeVariant(actionPanelRow.status)}>{CONTRACT_STATUS_LABELS[actionPanelRow.status]}</Badge>
-                    <Badge variant={toBadgeVariant(actionPanelRow.booking.status)}>{BOOKING_STATUS_LABELS[actionPanelRow.booking.status]}</Badge>
-                  </div>
-                </div>
-
-                <Button className="h-8 w-full justify-start" variant="outline" onClick={() => navigate(`/booking?bookingId=${actionPanelRow.bookingId}`)} disabled={actionBusyId === actionPanelRow.id}>
-                  Apri Booking
-                </Button>
-                <Button className="h-8 w-full justify-start" variant="outline" onClick={() => void runSendEmail(actionPanelRow)} disabled={actionBusyId === actionPanelRow.id}>
-                  Invia Email
-                </Button>
-                <Button className="h-8 w-full justify-start" variant="outline" onClick={() => void runSendWhatsapp(actionPanelRow)} disabled={actionBusyId === actionPanelRow.id}>
-                  Invia WhatsApp
-                </Button>
-                <Button className="h-8 w-full justify-start" onClick={() => openSignatureModal(actionPanelRow)} disabled={actionBusyId === actionPanelRow.id}>
-                  {actionPanelRow.status === "SIGNED" ? "Rifirma con touchpad/dito" : "Firma con touchpad/dito"}
-                </Button>
-                <Button className="h-8 w-full justify-start" variant="outline" onClick={() => void runDownload(actionPanelRow)} disabled={actionBusyId === actionPanelRow.id}>
-                  Scarica PDF
-                </Button>
-              </aside>
-            </div>
-          </div>
-        </>
-      ) : null}
-
-      {signatureModalRow ? (
-        <>
-          <div className="fixed inset-0 z-[109] bg-black/60 backdrop-blur-sm" onClick={closeSignatureModal} />
-          <div className="fixed inset-x-4 top-14 z-[110] mx-auto w-full max-w-3xl rounded-2xl border bg-background shadow-2xl">
-            <div className="flex items-start justify-between border-b px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold">
-                  {signatureModalRow.status === "SIGNED" ? "Rifirma Contratto Digitale" : "Firma Contratto Digitale"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Disegna la firma con dito, mouse o trackpad. Verrà applicata direttamente sul PDF.
-                </p>
-              </div>
-              <Button size="sm" variant="outline" onClick={closeSignatureModal} disabled={signatureSubmitting}>
-                Chiudi
-              </Button>
-            </div>
-
-            <div className="space-y-3 p-4">
-              <div className="rounded-xl border bg-muted/20 p-2">
-                <canvas
-                  ref={signatureCanvasRef}
-                  className="h-[220px] w-full touch-none rounded-lg border bg-white"
-                  onPointerDown={onSignaturePointerDown}
-                  onPointerMove={onSignaturePointerMove}
-                  onPointerUp={endSignatureDraw}
-                  onPointerLeave={endSignatureDraw}
-                  aria-label="Canvas firma contratto"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
-                  Contratto: {contractCodeBySite(signatureModalRow)} · Cliente: {signatureModalRow.booking.customerName}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={setupSignatureCanvas} disabled={signatureSubmitting}>
-                    Cancella firma
-                  </Button>
-                  <Button onClick={() => void submitSignature()} disabled={signatureSubmitting || !signatureHasStroke}>
-                    {signatureSubmitting
-                      ? "Salvataggio..."
-                      : signatureModalRow.status === "SIGNED"
-                        ? "Conferma rifirma e aggiorna PDF"
-                        : "Conferma firma e aggiorna PDF"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      ) : null}
+   <section className="contracts-workspace commerce-workspace" aria-label="Gestione contratti">
+    <WorkspacePageHeader eyebrow="I TUOI DOCUMENTI" title="Contratti" description="Documenti, firme e invii. Segui ogni contratto insieme alla sua prenotazione." actions={<>{canWrite?<Button variant="outline" onClick={()=>navigate('/booking?template=1'+(rows[0]?.bookingId?'&bookingId='+encodeURIComponent(rows[0].bookingId):''))}>Modello aziendale</Button>:null}<Button onClick={()=>navigate('/booking')}>Apri prenotazioni</Button></>}/>
+    {!actionPanelRow&&!signatureModalRow&&error?<CommerceNotice>{error}</CommerceNotice>:null}{success?<CommerceNotice tone="success">{success}</CommerceNotice>:null}
+    <dl className="commerce-kpis" aria-label="Riepilogo contratti">{([['Da inviare',kpis.contractsToSend,'Pronti, non ancora inviati'],['Inviati oggi',kpis.sentToday,'Invii completati oggi'],['Firmati',kpis.signed,'Firma acquisita'],['In errore',kpis.inError,'Esiti da verificare'],['Uscite oggi',kpis.exitsToday,'Consegne della giornata'],['Rientri oggi',kpis.returnsToday,'Veicoli attesi oggi']]as const).map(([title,value,hint])=><div key={title}><dt>{title}</dt><dd>{loading||error?'—':value??'—'}</dd><dd className="commerce-hint">{hint}</dd></div>)}</dl>
+    <section className="commerce-panel" aria-labelledby="contracts-list-title"><header className="commerce-panel-header"><div><h2 id="contracts-list-title">Elenco contratti <span>{loading?'—':total}</span></h2><p>Documenti generati e stato delle operazioni</p></div><Button variant="ghost" aria-label="Aggiorna contratti" disabled={loading} onClick={()=>void loadContracts(page)}>Aggiorna</Button></header>
+     <div className="commerce-filters contracts-filters">
+      <div><Label htmlFor="contracts-search">Cerca un contratto</Label><Input id="contracts-search" value={searchInput} onChange={event=>setSearchInput(event.target.value)} placeholder="Cliente, targa o codice prenotazione"/></div>
+      <div><Label htmlFor="contracts-period">Periodo</Label><Select id="contracts-period" value={period} onChange={event=>filterChange(()=>setPeriod(event.target.value as typeof period))}><option value="all">Tutto il periodo</option><option value="7d">Ultimi 7 giorni</option><option value="30d">Ultimi 30 giorni</option><option value="90d">Ultimi 90 giorni</option><option value="custom">Personalizzato</option></Select></div>
+      <div><Label htmlFor="contracts-status">Stato documento</Label><Select id="contracts-status" value={contractStatus} onChange={event=>filterChange(()=>setContractStatus(event.target.value as typeof contractStatus))}><option value="">Tutti i documenti</option>{Object.entries(CONTRACT_STATUS_LABELS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</Select></div>
+      <div><Label htmlFor="contracts-booking-status">Stato prenotazione</Label><Select id="contracts-booking-status" value={bookingStatus} onChange={event=>filterChange(()=>setBookingStatus(event.target.value as typeof bookingStatus))}><option value="">Tutte le prenotazioni</option>{Object.entries(BOOKING_STATUS_LABELS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</Select></div>
+      {canReadSites?<div><Label htmlFor="contracts-site">Sede</Label><Select id="contracts-site" value={siteId} onChange={event=>filterChange(()=>setSiteId(event.target.value))}><option value="">Tutte le sedi</option>{sites.map(site=><option translate="no" key={site.id} value={site.id}>{site.name}{site.city?' · '+site.city:''}</option>)}</Select></div>:null}
+      {period==='custom'?<><div><Label htmlFor="contracts-from">Dal giorno</Label><Input id="contracts-from" type="date" value={dateFrom} onChange={event=>setDateFrom(event.target.value)}/></div><div><Label htmlFor="contracts-to">Al giorno</Label><Input id="contracts-to" type="date" value={dateTo} onChange={event=>setDateTo(event.target.value)}/></div><Button variant="outline" onClick={()=>{setPage(1);void loadContracts(1)}}>Applica periodo</Button></>:null}
+     </div>
+     {sitesError?<p className="commerce-hint" role="status">{sitesError}</p>:null}
+     <div aria-busy={loading}>{loading?<div className="commerce-empty"><FleetumInlineLoader label="Caricamento contratti"/></div>:error&&!rows.length?<div className="commerce-empty"><p>Contratti non disponibili.</p><Button variant="outline" onClick={()=>void loadContracts(page)}>Riprova elenco contratti</Button></div>:!rows.length?<div className="commerce-empty"><h3>Nessun contratto trovato.</h3><p>Modifica i filtri oppure apri una prenotazione per preparare il contratto.</p><Button variant="outline" onClick={()=>navigate('/booking')}>Vai alle prenotazioni</Button></div>:<CommerceCollection rows={rows} columns={columns} caption="Contratti, clienti e stato degli invii" selectedId={actionPanelRow?.id}/>}</div>
+     <footer className="commerce-pagination"><p role="status">Pagina {page} di {totalPages} · Totale {loading?'—':total}</p><div><Button variant="outline" disabled={page<=1||loading} onClick={()=>setPage(value=>value-1)}>Precedente</Button><Button variant="outline" disabled={page>=totalPages||loading} onClick={()=>setPage(value=>value+1)}>Successiva</Button></div></footer>
     </section>
+    <details className="commerce-panel commerce-timeline" open><summary>Timeline operativa <span>Uscite, rientri e invii</span></summary>{!timeline.length?<p className="commerce-hint">Nessun evento recente.</p>:<ol>{timeline.map((item,index)=><li key={`${item.type}-${item.bookingId}-${index}`}><div><strong>{item.type==='PICKUP'?'Uscita':item.type==='RETURN'?'Rientro':`Invio ${item.channel??''}`}</strong><time>{formatWhen(item.occurredAt)}</time></div><p>{item.bookingCode} · {item.customerName}</p><small>{item.vehicle?.plate??'—'} {item.vehicle?.brand??''} {item.vehicle?.model??''}</small><small>{item.type==='DELIVERY'?`${item.recipient||'—'} · ${item.deliveryStatus||'—'}`:item.bookingStatus?BOOKING_STATUS_LABELS[item.bookingStatus]:'—'}</small></li>)}</ol>}</details>
+    {actionPanelRow?<CommerceDrawer translateTitle={false} translateDescription={false} title={contractCodeBySite(actionPanelRow)} description={actionPanelRow.booking.customerName} onClose={closeActionPanel} motionRef={panelMotion} origin={panelOrigin.current} busy={!!actionBusyId} footer={<><Button variant="outline" disabled={!!actionBusyId} onClick={closeActionPanel}>Chiudi</Button><Button variant="outline" disabled={!!actionBusyId} onClick={()=>navigate(`/booking?bookingId=${actionPanelRow.bookingId}`)}>Apri prenotazione</Button></>}>
+     {error?<CommerceNotice>{error}</CommerceNotice>:null}{states(actionPanelRow)}
+     <div className="contract-action-buttons">{canWrite?<><Button variant="outline" onClick={()=>void runSendEmail(actionPanelRow)} disabled={!!actionBusyId}>Invia Email</Button><Button variant="outline" onClick={()=>void runSendWhatsapp(actionPanelRow)} disabled={!!actionBusyId}>Invia WhatsApp</Button><Button onClick={()=>openSignatureModal(actionPanelRow)} disabled={!!actionBusyId}>{actionPanelRow.status==='SIGNED'?'Rifirma contratto':'Firma contratto'}</Button></>:<p className="commerce-hint">Modalità sola lettura.</p>}<Button variant="outline" onClick={()=>void runDownload(actionPanelRow)} disabled={!!actionBusyId}>Scarica PDF</Button></div>
+     <p className="commerce-hint">Preparazione e rigenerazione restano nella sezione Contratto della prenotazione.</p>
+     <section className="contract-preview" aria-label="Anteprima contratto">{actionPanelPreviewLoading?<FleetumBlockLoader label="Caricamento anteprima PDF" className="min-h-0 h-72"/>:actionPanelPreviewError?<div className="commerce-empty"><CommerceNotice>{actionPanelPreviewError}</CommerceNotice><Button variant="outline" onClick={()=>void loadActionPanelPreview(actionPanelRow)}>Riprova anteprima</Button></div>:actionPanelPreviewUrl?<iframe title={`Contratto ${actionPanelRow.booking.code}`} src={actionPanelPreviewUrl}/>:<p>Anteprima non disponibile.</p>}</section>
+    </CommerceDrawer>:null}
+    {signatureModalRow?<CommerceDrawer title={signatureModalRow.status==='SIGNED'?'Rifirma contratto':'Firma contratto'} description="Disegna con dito, mouse o trackpad. La firma verrà applicata al PDF." level={115} busy={signatureSubmitting} onClose={closeSignatureModal} footer={<><Button variant="outline" onClick={()=>setupSignatureCanvas()} disabled={signatureSubmitting}>Cancella firma</Button><Button onClick={()=>void submitSignature()} disabled={signatureSubmitting||!signatureHasStroke}>{signatureSubmitting?'Salvataggio...':'Conferma firma e aggiorna PDF'}</Button></>}>
+     <p>{contractCodeBySite(signatureModalRow)} · {signatureModalRow.booking.customerName}</p>{error?<CommerceNotice>{error}</CommerceNotice>:null}
+     <canvas ref={signatureCanvasRef} className="contract-signature" onPointerDown={onSignaturePointerDown} onPointerMove={onSignaturePointerMove} onPointerUp={endSignatureDraw} onPointerLeave={endSignatureDraw} aria-label="Canvas firma contratto"/>
+    </CommerceDrawer>:null}
+   </section>
   );
 };

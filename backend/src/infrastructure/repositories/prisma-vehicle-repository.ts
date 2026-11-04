@@ -2,7 +2,9 @@ import { VehicleRepository } from "../../domain/repositories/vehicle-repository.
 import type { Prisma } from "@prisma/client";
 import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../database/prisma/client.js";
-import { lockOwnedVehicle, lockVehicleSite, lockVehicleTenant, ownedVehicleWhere, scalarWriteFields, vehicleNotFound } from "./vehicle-tenant-scope.js";
+import { lockVehicleTenant, scalarWriteFields, vehicleNotFound } from "./vehicle-tenant-scope.js";
+
+import { lockVisibleVehicle as lockOwnedVehicle, lockVisibleVehicleSite as lockVehicleSite, visibleVehicleWhere as ownedVehicleWhere } from "./resource-site-scope.js";
 
 const writableFields = ["siteId", "plate", "brand", "model", "year", "currentKm", "maintenanceIntervalKm",
   "registrationDate", "lastRevisionAt", "revisionDueAt", "purchasePrice", "purchaseDate", "residualValue",

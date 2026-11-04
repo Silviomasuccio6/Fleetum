@@ -91,7 +91,10 @@ const fixture = (options: FixtureOptions = {}) => {
       };
       if (name.endsWith("/tenant-profile-usecases")) return load(resolve(root, "application/usecases/tenant-profile-usecases.ts"));
       if (name.endsWith("/safe-return-to")) return load(resolve(root, "presentation/routes/safe-return-to.ts"));
-      if (name.endsWith("/fleetum-logo-loader")) return { FleetumBlockLoader: () => null };
+      if (name.endsWith("/access-shell")) return { AccessShell: () => null, AccessNotice: () => null };
+      if (name.endsWith("/button")) return { Button: () => null };
+      if (name.endsWith("/access-flow")) return load(resolve(root, "presentation/pages/auth/access-flow.ts"));
+      if (name.endsWith("/fleetum-logo-loader")) return { FleetumLogoLoader: () => null };
       throw new Error(`Unexpected page dependency: ${name}`);
     };
     runInNewContext(output.outputText, {
@@ -304,3 +307,16 @@ test("OAuth signup navigation survives unavailable analytics storage", async () 
   assert.deepEqual(f.errors, []);
   assert.deepEqual(f.destinations, [{ path: "/dashboard", replace: true }]);
 });
+
+for (const ready of [false,true]) {
+  test(`OAuth preserves a requested business destination through signup onboarding: companyReady=${ready}`,async()=>{
+    const requested='/booking?view=list';
+    const hint='/onboarding/azienda?from=social&returnTo='+encodeURIComponent(requested);
+    const f=fixture({fragment:'#returnTo='+encodeURIComponent(hint),license:async()=>({status:'PENDING'}),profile:async()=>ready?completeProfile:null});
+    await flush();
+    const destination=new URL(f.destinations[0].path,'https://qa.invalid');
+    assert.equal(destination.pathname,ready?'/activate':'/onboarding/azienda');
+    assert.equal(destination.searchParams.get('returnTo'),requested);
+    assert.equal(f.sessions[0].user,trustedUser);
+  });
+}

@@ -11,17 +11,17 @@ export const slaSettingsSchema = z.object({
 
 export const playbooksSettingsSchema = z.object({
   WAITING_PARTS: z.object({
-    enabled: z.coerce.boolean(),
+    enabled: z.coerce.boolean().default(false),
     reminderEveryDays: z.coerce.number().int().min(1).max(60)
   }),
   SOLICITED: z.object({
-    enabled: z.coerce.boolean(),
+    enabled: z.coerce.boolean().default(false),
     reminderEveryDays: z.coerce.number().int().min(1).max(60)
   })
 });
 
 export const reportsSettingsSchema = z.object({
-  enabled: z.coerce.boolean(),
+  enabled: z.coerce.boolean().default(false),
   recipients: z.array(z.string().email()).max(50),
   frequency: z.enum(["daily", "weekly", "monthly"]),
   hour: z.coerce.number().int().min(0).max(23),

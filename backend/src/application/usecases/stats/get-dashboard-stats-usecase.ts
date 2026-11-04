@@ -4,6 +4,9 @@ import { exactMoneyReader } from "../../../infrastructure/database/exact-money-r
 import { ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
 import { ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 
+import { visibleVehicleWhere, visibleBookingWhere, visibleTeamUserWhere } from "../../../infrastructure/repositories/resource-site-scope.js";
+import { siteAccessForTenant } from "../../../infrastructure/auth/site-access-context.js";
+
 type AnalyticsFilters = {
   dateFrom?: Date;
   dateTo?: Date;
@@ -50,6 +53,7 @@ const median = (sorted: number[]) => {
 
 export class GetDashboardStatsUseCase {
   async dashboardOverview(tenantId: string) {
+    const scope = siteAccessForTenant(tenantId);
     const now = new Date();
     const last30 = new Date(now.getTime() - 30 * dayMs);
     const todayStart = startOfDay(now);
@@ -60,7 +64,7 @@ export class GetDashboardStatsUseCase {
       ownedStoppageWhere(tenantId),
       ownedStoppageWhere(tenantId, prisma, true)
     ]);
-    const historicalVehicleScope = ownedVehicleWhere(tenantId, true);
+    const historicalBookingScope = visibleBookingWhere(tenantId);
 
     const [
       stoppageRows,
@@ -81,7 +85,7 @@ export class GetDashboardStatsUseCase {
         orderBy: { createdAt: "desc" }
       }),
       prisma.user.findMany({
-        where: { tenantId, deletedAt: null },
+        where: { ...visibleTeamUserWhere(tenantId), deletedAt: null },
         orderBy: { createdAt: "desc" },
         take: 8,
         select: { id: true, firstName: true, lastName: true, email: true, status: true, createdAt: true }
@@ -99,7 +103,7 @@ export class GetDashboardStatsUseCase {
         }
       }),
       prisma.vehicle.findMany({
-        where: { ...ownedVehicleWhere(tenantId), isActive: true },
+        where: { ...visibleVehicleWhere(tenantId), isActive: true },
         select: {
           id: true,
           plate: true,
@@ -118,9 +122,8 @@ export class GetDashboardStatsUseCase {
       }),
       prisma.rentalBooking.findMany({
         where: {
-          tenantId,
+          ...historicalBookingScope,
           deletedAt: null,
-          vehicle: historicalVehicleScope,
           pickupAt: { lte: monthEnd },
           returnAt: { gte: new Date(todayStart.getTime() - 30 * dayMs) }
         },
@@ -142,6 +145,7 @@ export class GetDashboardStatsUseCase {
             }
           },
           pricingSnapshot: {
+            where: { tenantId },
             select: {
               id: true,
               expectedTotal: true,
@@ -154,12 +158,14 @@ export class GetDashboardStatsUseCase {
             }
           },
           contract: {
+            where: { tenantId },
             select: {
               id: true,
               status: true,
               lastSentAt: true,
               signedAt: true,
               deliveries: {
+                where: { tenantId },
                 orderBy: { createdAt: "desc" },
                 take: 1,
                 select: { channel: true, status: true, sentAt: true, errorMessage: true, createdAt: true }
@@ -169,11 +175,11 @@ export class GetDashboardStatsUseCase {
         }
       }),
       prisma.bookingContract.findMany({
-        where: { tenantId, deletedAt: null, booking: { tenantId, vehicle: historicalVehicleScope } },
+        where: { tenantId, deletedAt: null, booking: historicalBookingScope },
         select: { id: true, status: true, createdAt: true, updatedAt: true, lastSentAt: true, signedAt: true }
       }),
       prisma.bookingContractDelivery.findMany({
-        where: { tenantId, contract: { tenantId, booking: { tenantId, vehicle: historicalVehicleScope } } },
+        where: { tenantId, contract: { tenantId, booking: historicalBookingScope } },
         orderBy: { createdAt: "desc" },
         take: 50,
         select: { id: true, channel: true, status: true, sentAt: true, errorMessage: true, createdAt: true, bookingId: true }
@@ -261,6 +267,19 @@ export class GetDashboardStatsUseCase {
     const occupiedToday = rentalBookings.filter(
       (booking) => !closedRentalStatuses.has(booking.status) && booking.pickupAt <= todayEnd && booking.returnAt >= todayStart
     );
+    // Occupancy concerns the current fleet, even when the blocking practice
+    // is outside the readable history. Fetch dates/vehicle IDs only, never a
+    // hidden booking ID, customer, code or amount.
+    const occupancyRows = scope && rentalVehicles.length ? await prisma.rentalBooking.findMany({
+      where: { tenantId, deletedAt: null, vehicle: ownedVehicleWhere(tenantId, true),
+        vehicleId: { in: rentalVehicles.map(vehicle => vehicle.id) },
+        status: { notIn: ["CLOSED", "CANCELED", "NO_SHOW"] },
+        pickupAt: { lte: todayEnd }, returnAt: { gte: last30 } },
+      select: { vehicleId: true, pickupAt: true, returnAt: true }
+    }) : [];
+    const occupiedFleetCount = (from: Date, to: Date) => new Set(occupancyRows
+      .filter(row => row.pickupAt <= to && row.returnAt >= from).map(row => row.vehicleId)).size;
+    const occupiedTodayCount = scope ? occupiedFleetCount(todayStart, todayEnd) : occupiedToday.length;
     const pickupsToday = rentalBookings.filter((booking) => booking.pickupAt >= todayStart && booking.pickupAt <= todayEnd);
     const returnsToday = rentalBookings.filter((booking) => booking.returnAt >= todayStart && booking.returnAt <= todayEnd);
     const overdueReturns = rentalBookings.filter(
@@ -401,7 +420,7 @@ export class GetDashboardStatsUseCase {
     const utilizationTrend = trendRange.map((day) => {
       const dayStart = new Date(`${day}T00:00:00.000Z`);
       const dayEnd = new Date(`${day}T23:59:59.999Z`);
-      const occupied = rentalBookings.filter(
+      const occupied = scope ? occupiedFleetCount(dayStart, dayEnd) : rentalBookings.filter(
         (booking) => !closedRentalStatuses.has(booking.status) && booking.pickupAt <= dayEnd && booking.returnAt >= dayStart
       ).length;
       return {
@@ -426,6 +445,7 @@ export class GetDashboardStatsUseCase {
     }
 
     return {
+      ...(scope ? { siteScope: { allSites: scope.allSites, siteIds: [...scope.siteIds] } } : {}),
       kpis: {
         totalStoppages: stoppages.length,
         openStoppages: openStoppages.length,
@@ -455,12 +475,12 @@ export class GetDashboardStatsUseCase {
       booking: {
         kpis: {
           totalRentalVehicles: rentalVehicles.length,
-          availableToday: Math.max(0, rentalVehicles.length - occupiedToday.length),
-          occupiedToday: occupiedToday.length,
+          availableToday: Math.max(0, rentalVehicles.length - occupiedTodayCount),
+          occupiedToday: occupiedTodayCount,
           activeBookings: rentalBookings.filter((booking) => activeRentalStatuses.has(booking.status)).length,
           pickupsToday: pickupsToday.length,
           returnsToday: returnsToday.length,
-          utilizationRateToday: rentalVehicles.length ? Number(((occupiedToday.length / rentalVehicles.length) * 100).toFixed(1)) : 0,
+          utilizationRateToday: rentalVehicles.length ? Number(((occupiedTodayCount / rentalVehicles.length) * 100).toFixed(1)) : 0,
           overdueReturns: overdueReturns.length
         },
         contractKpis: {
@@ -838,7 +858,7 @@ export class GetDashboardStatsUseCase {
 
     const [users, stoppages] = await Promise.all([
       prisma.user.findMany({
-        where: { tenantId, deletedAt: null, status: "ACTIVE" },
+        where: { ...visibleTeamUserWhere(tenantId), deletedAt: null, status: "ACTIVE" },
         select: { id: true, firstName: true, lastName: true, email: true }
       }),
       prisma.stoppage.findMany({

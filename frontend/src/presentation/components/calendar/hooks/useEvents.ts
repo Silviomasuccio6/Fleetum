@@ -4,6 +4,8 @@ import { stoppagesUseCases } from "../../../../application/usecases/stoppages-us
 import { CALS_DEFAULT, CalendarEvent, CalendarItem } from "../calendar-types";
 import { addMinutes, minutesToTime, toDateKey, toMinuteValue } from "../calendar-utils";
 
+import {emptyStoppageFilters,type StoppageFilters,useOperationsAccess} from "../../operations/operations-workspace";
+
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const backendCalendarMap = ["work", "personal", "finance", "dev", "marketing"];
 
@@ -126,17 +128,28 @@ const eventToBackendPayload = (event: CalendarEvent, calendars: CalendarItem[]) 
   };
 };
 
-const fetchEventsRange = async (from: Date, to: Date): Promise<CalendarEvent[]> => {
+const fetchEventsRange = async (from: Date, to: Date,filters:StoppageFilters): Promise<CalendarEvent[]> => {
   // TODO: se il backend espone endpoint dedicato /calendar/events, collegare qui la fetch principale.
   const dateFrom = new Date(`${toDateKey(from)}T00:00:00`).toISOString();
   const dateTo = new Date(`${toDateKey(to)}T23:59:59`).toISOString();
 
   const [stoppagesRes, customRes] = await Promise.all([
     stoppagesUseCases.calendar({ dateFrom, dateTo }),
-    stoppagesUseCases.listCustomCalendarEvents({ dateFrom, dateTo }).catch(() => ({ data: [] as Array<Record<string, unknown>> }))
+    stoppagesUseCases.listCustomCalendarEvents({ dateFrom, dateTo })
   ]);
 
-  const stoppageEvents = (stoppagesRes?.data ?? []).map((row) => mapStoppageRow(row as Record<string, unknown>));
+  let allowed:Set<string>|null=null;
+  if(Object.values(filters).some(Boolean)){
+    allowed=new Set();let page=1,seen=0,total=1;
+    while(seen<total){
+      const result=await stoppagesUseCases.list({...filters,page,pageSize:200});
+      const rows=result.data??[];total=result.total??rows.length;
+      if(!rows.length&&seen<total)throw Error("Impossibile completare i filtri del calendario. Riprova.");
+      for(const row of rows)allowed.add(row.id);
+      seen+=rows.length;page++;
+    }
+  }
+  const stoppageEvents = (stoppagesRes?.data ?? []).filter(row=>!allowed||allowed.has(String(row.id))).map((row) => mapStoppageRow(row as Record<string, unknown>));
   const customEvents = (customRes?.data ?? []).map((row) => mapCustomRow(row as Record<string, unknown>));
 
   return [...customEvents, ...stoppageEvents].sort((a, b) => {
@@ -146,16 +159,25 @@ const fetchEventsRange = async (from: Date, to: Date): Promise<CalendarEvent[]> 
   });
 };
 
-export const useEvents = () => {
+export const useEvents = (filters:StoppageFilters=emptyStoppageFilters) => {
+  const {canRead,canWrite,identity}=useOperationsAccess();
+  const requestSequence=useRef(0);
+  const filterKey=JSON.stringify(filters);
+  const mutationLock=useRef(false),context=useRef(identity);context.current=identity;
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [calendars, setCalendars] = useState<CalendarItem[]>(CALS_DEFAULT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [mutating,setMutating]=useState(false);
+
   const cacheRef = useRef(new Map<string, { ts: number; events: CalendarEvent[] }>());
   const eventsRef = useRef<CalendarEvent[]>([]);
   const calendarsRef = useRef<CalendarItem[]>(CALS_DEFAULT);
   const activeRangeRef = useRef<{ from: Date; to: Date } | null>(null);
+
+  useEffect(()=>{requestSequence.current++;cacheRef.current.clear();setEvents([]);setLoading(false);return()=>{requestSequence.current++}},[identity,canRead,filterKey]);
+  useEffect(()=>{setMutating(false);mutationLock.current=false},[identity]);
 
   useEffect(() => {
     eventsRef.current = events;
@@ -190,7 +212,9 @@ export const useEvents = () => {
   );
 
   const loadRange = useCallback(async (from: Date, to: Date, force = false) => {
-    const rangeKey = `${toDateKey(from)}::${toDateKey(to)}`;
+    const sequence=++requestSequence.current;
+    if(!canRead)return;
+    const rangeKey = `${filterKey}::${identity}::${toDateKey(from)}::${toDateKey(to)}`;
     const now = Date.now();
     activeRangeRef.current = { from, to };
 
@@ -198,6 +222,7 @@ export const useEvents = () => {
     if (!force && cached && now - cached.ts < CACHE_TTL_MS) {
       setEvents(cached.events.map((event) => ({ ...event })));
       setError(null);
+      setLoading(false);
       return;
     }
 
@@ -205,7 +230,8 @@ export const useEvents = () => {
     setError(null);
 
     try {
-      const loaded = await fetchEventsRange(from, to);
+      const loaded = await fetchEventsRange(from, to,filters);
+      if(sequence!==requestSequence.current)return;
       cacheRef.current.set(rangeKey, {
         ts: now,
         events: loaded
@@ -213,133 +239,51 @@ export const useEvents = () => {
       setEvents(loaded);
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : "Errore caricamento eventi";
-      setError(message);
+      if(sequence===requestSequence.current)setError(message);
     } finally {
-      setLoading(false);
+      if(sequence===requestSequence.current)setLoading(false);
     }
-  }, []);
+  }, [canRead,identity,filterKey]);
 
   const refresh = useCallback(async () => {
     if (!activeRangeRef.current) return;
     await loadRange(activeRangeRef.current.from, activeRangeRef.current.to, true);
   }, [loadRange]);
 
-  const addEvent = useCallback(
-    async (input: Partial<CalendarEvent>) => {
-      const baseDate = input.date ?? toDateKey(new Date());
-      const optimistic: CalendarEvent = ensureEventRange({
-        id: `tmp:${Date.now()}`,
-        source: "custom",
-        title: input.title?.trim() || "Nuovo evento",
-        date: baseDate,
-        start: input.start ?? "09:00",
-        end: input.end ?? "10:00",
-        calendarId: input.calendarId ?? 0,
-        location: input.location ?? "",
-        description: input.description ?? "",
-        allDay: input.allDay ?? false,
-        color: input.color
-      });
+  const refreshRef=useRef(refresh);refreshRef.current=refresh;
 
-      const previous = eventsRef.current;
-      setEvents((prev) => [optimistic, ...prev]);
+  const mutate=useCallback(async<T,>(work:()=>Promise<T>,fallback:T)=>{
+    if(!canWrite||mutationLock.current)return fallback;
+    mutationLock.current=true;setMutating(true);setError(null);const scope=context.current;
+    try{return await work()}catch(e){if(context.current===scope){const message=e instanceof Error?e.message:"Operazione non riuscita";setError(message);snackbar.error(message)}return fallback}
+    finally{if(context.current===scope){mutationLock.current=false;setMutating(false)}}
+  },[canWrite]);
 
-      try {
-        const payload = eventToBackendPayload(optimistic, calendarsRef.current);
-        const createdRes = await stoppagesUseCases.createCustomCalendarEvent(payload);
-        const mapped = mapCustomRow((createdRes as any)?.data ?? createdRes ?? {});
-        const nextCalendarId = input.calendarId ?? mapped.calendarId;
-        const createdWithClientOverrides: CalendarEvent = {
-          ...mapped,
-          calendarId: nextCalendarId,
-          color: CALS_DEFAULT[nextCalendarId]?.color ?? mapped.color
-        };
+  const addEvent=useCallback((input:Partial<CalendarEvent>)=>mutate(async()=>{
+    const draft=ensureEventRange({id:`tmp:${Date.now()}`,source:"custom",title:input.title?.trim()||"Nuovo evento",date:input.date??toDateKey(new Date()),start:input.start??"09:00",end:input.end??"10:00",calendarId:input.calendarId??0,location:input.location??"",description:input.description??"",allDay:input.allDay??false,color:input.color});
+    const scope=identity;const result=await stoppagesUseCases.createCustomCalendarEvent(eventToBackendPayload(draft,calendarsRef.current));
+    if(context.current!==scope)return null;
+    const created=mapCustomRow((result as any)?.data??result??{});cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento creato");return created;
+  },null as CalendarEvent|null),[mutate,refresh,identity]);
 
-        setEvents((prev) => prev.map((event) => (event.id === optimistic.id ? createdWithClientOverrides : event)));
-        cacheRef.current.clear();
-        snackbar.success("Evento creato");
-        return createdWithClientOverrides;
-      } catch (createError) {
-        setEvents(previous);
-        const message = createError instanceof Error ? createError.message : "Errore creazione evento";
-        setError(message);
-        snackbar.error(message);
-        return null;
-      }
-    },
-    []
-  );
+  const updateEvent=useCallback((id:CalendarEvent["id"],patch:Partial<CalendarEvent>)=>mutate(async()=>{
+    const target=eventsRef.current.find(e=>String(e.id)===String(id));if(!target||target.readonly||target.source==="stoppage")return false;
+    const scope=identity;const merged=ensureEventRange({...target,...patch});
+    await stoppagesUseCases.updateCustomCalendarEvent(target.remoteId??String(target.id).replace(/^custom:/,""),eventToBackendPayload(merged,calendarsRef.current));
+    if(context.current!==scope)return false;
+    cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento aggiornato");return true;
+  },false),[mutate,refresh,identity]);
 
-  const updateEvent = useCallback(async (eventId: CalendarEvent["id"], patch: Partial<CalendarEvent>) => {
-    const target = eventsRef.current.find((event) => String(event.id) === String(eventId));
-    if (!target) return false;
-
-    if (target.readonly || target.source === "stoppage") {
-      snackbar.info("Questo evento è di sola lettura");
-      return false;
-    }
-
-    const previous = eventsRef.current;
-    const merged = ensureEventRange({ ...target, ...patch });
-
-    setEvents((prev) => prev.map((event) => (String(event.id) === String(eventId) ? merged : event)));
-
-    try {
-      const remoteId = target.remoteId ?? String(target.id).replace(/^custom:/, "");
-      const payload = eventToBackendPayload(merged, calendarsRef.current);
-      const updatedRes = await stoppagesUseCases.updateCustomCalendarEvent(remoteId, payload);
-      const mapped = mapCustomRow((updatedRes as any)?.data ?? updatedRes ?? {});
-      const nextCalendarId = patch.calendarId ?? merged.calendarId ?? mapped.calendarId;
-      const updatedWithClientOverrides: CalendarEvent = {
-        ...mapped,
-        calendarId: nextCalendarId,
-        color: CALS_DEFAULT[nextCalendarId]?.color ?? mapped.color
-      };
-
-      setEvents((prev) =>
-        prev.map((event) => (String(event.id) === String(eventId) ? updatedWithClientOverrides : event))
-      );
-      cacheRef.current.clear();
-      snackbar.success("Evento aggiornato");
-      return true;
-    } catch (updateError) {
-      setEvents(previous);
-      const message = updateError instanceof Error ? updateError.message : "Errore aggiornamento evento";
-      setError(message);
-      snackbar.error(message);
-      return false;
-    }
-  }, []);
-
-  const deleteEvent = useCallback(async (eventId: CalendarEvent["id"]) => {
-    const target = eventsRef.current.find((event) => String(event.id) === String(eventId));
-    if (!target) return false;
-
-    if (target.readonly || target.source === "stoppage") {
-      snackbar.info("Questo evento non può essere eliminato qui");
-      return false;
-    }
-
-    const previous = eventsRef.current;
-    setEvents((prev) => prev.filter((event) => String(event.id) !== String(eventId)));
-
-    try {
-      const remoteId = target.remoteId ?? String(target.id).replace(/^custom:/, "");
-      await stoppagesUseCases.deleteCustomCalendarEvent(remoteId);
-      cacheRef.current.clear();
-      snackbar.success("Evento eliminato");
-      return true;
-    } catch (deleteError) {
-      setEvents(previous);
-      const message = deleteError instanceof Error ? deleteError.message : "Errore eliminazione evento";
-      setError(message);
-      snackbar.error(message);
-      return false;
-    }
-  }, []);
+  const deleteEvent=useCallback((id:CalendarEvent["id"])=>mutate(async()=>{
+    const target=eventsRef.current.find(e=>String(e.id)===String(id));if(!target||target.readonly||target.source==="stoppage")return false;
+    const scope=identity;await stoppagesUseCases.deleteCustomCalendarEvent(target.remoteId??String(target.id).replace(/^custom:/,""));
+    if(context.current!==scope)return false;
+    cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento eliminato");return true;
+  },false),[mutate,refresh,identity]);
 
   return {
     loading,
+    mutating,
     error,
     events,
     visibleEvents,

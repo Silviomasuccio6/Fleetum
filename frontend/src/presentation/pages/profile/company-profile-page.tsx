@@ -1,5 +1,6 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { Building2, CheckCircle2, FileText, Globe2, ImagePlus, Map, ShieldCheck, UploadCloud, Wand2 } from "lucide-react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CargosConnectionPanel } from "../../components/contracts/cargos-connection-panel";
+import { Building2, CheckCircle2, FileText, Globe2, ImagePlus, Map, ShieldCheck, UploadCloud, Save } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   tenantProfileUseCases,
@@ -9,11 +10,11 @@ import {
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
-import { PageHeader } from "../../components/layout/page-header";
-import { Alert } from "../../components/ui/alert";
+import { WorkspacePageHeader } from "../../components/ui/workspace-ui";
+import { CommerceDrawer, CommerceNotice } from "../../components/ui/commerce-workspace";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Card, CardContent, CardHeader } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Textarea } from "../../components/ui/textarea";
@@ -90,9 +91,9 @@ const normalizeForm = (data: TenantCompanyProfileResponse): TenantCompanyProfile
 });
 
 const requiredScoreTone = (percentage: number) => {
-  if (percentage >= 90) return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (percentage >= 65) return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (percentage >= 90) return "admin-score admin-score-complete";
+  if (percentage >= 65) return "admin-score";
+  return "admin-score";
 };
 
 type CompanyProfilePageProps = {
@@ -138,6 +139,14 @@ const companyValidationPayload = (form: TenantCompanyProfilePayload) => ({
 export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProfilePageProps) => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
+  const canRead = Boolean(currentUser?.permissions.some(p => p === "*" || p === "users:read"));
+  const canWrite = Boolean(currentUser?.permissions.some(p => p === "*" || p === "users:write"));
+  const identity = `${currentUser?.tenantId}:${currentUser?.id}`;
+  const [dataOwner, setDataOwner] = useState(identity);
+  const [baseline, setBaseline] = useState<TenantCompanyProfilePayload | null>(null);
+  const [confirmation, setConfirmation] = useState<"logo" | "restore" | null>(null);
+  const lock = useRef(false), request = useRef(0), activeIdentity = useRef(identity);
+  activeIdentity.current = identity;
   const [form, setForm] = useState<TenantCompanyProfilePayload>(initialForm);
   const [profileState, setProfileState] = useState<TenantCompanyProfileResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -173,28 +182,33 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   );
 
   const loadProfile = async () => {
+    if (!canRead || lock.current) return;
+    const sequence = ++request.current;
     setLoading(true);
     setError(null);
     try {
       const result = await tenantProfileUseCases.getProfile();
-      setProfileState(result);
+      if (sequence !== request.current || activeIdentity.current !== identity) return;
+      setDataOwner(identity); setProfileState(result);
       const nextForm = normalizeForm(result);
       if (!result.profile && currentUser) {
         nextForm.adminFirstName = currentUser.firstName;
         nextForm.adminLastName = currentUser.lastName;
         nextForm.adminEmail = currentUser.email;
       }
-      setForm(nextForm);
+      setForm(nextForm); setBaseline(nextForm);
     } catch (err) {
-      setError((err as Error).message);
+      if (sequence === request.current && activeIdentity.current === identity) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (sequence === request.current && activeIdentity.current === identity) setLoading(false);
     }
   };
 
   useEffect(() => {
+    setProfileState(null); setForm(initialForm); setBaseline(null); setVerificationDocumentFile(null); setConfirmation(null); setSuccess(null);
     void loadProfile();
-  }, []);
+    return () => { ++request.current; };
+  }, [identity, canRead]);
 
   useEffect(() => {
     if (!isItalianCompany || italianGeo) return;
@@ -276,6 +290,8 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canWrite || lock.current || loading || !baseline || dataOwner !== identity) return;
+    lock.current = true;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -288,7 +304,6 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
               .map((field) => fieldLabels[field] ?? field)
               .join(", ")}.`
           );
-          setSaving(false);
           return;
         }
       }
@@ -296,7 +311,6 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
       const validationErrors = validateCompanyRegistrationDraft(companyValidationPayload(form));
       if (validationErrors.length > 0) {
         setError(validationErrors[0].message);
-        setSaving(false);
         return;
       }
 
@@ -309,13 +323,15 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
         province: form.province?.toUpperCase(),
         country: form.country?.toUpperCase() || "IT"
       });
+      if (activeIdentity.current !== identity) return;
+      setProfileState(result);
+      const savedForm = normalizeForm(result); setForm(savedForm); setBaseline(savedForm);
       if (verificationDocumentFile) {
         setUploadingVerificationDocument(true);
-        await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocumentFile);
+        try { await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocumentFile); }
+        catch { throw Error("Dati aziendali salvati. Il documento di verifica non è stato caricato: riprova allegando nuovamente il file."); }
         setVerificationDocumentFile(null);
       }
-      setProfileState(result);
-      setForm(normalizeForm(result));
       setSuccess(
         onboarding
           ? "Dati aziendali salvati. Ora puoi scegliere il piano e attivare il trial con carta."
@@ -333,6 +349,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      lock.current = false;
       setUploadingVerificationDocument(false);
       setSaving(false);
     }
@@ -341,61 +358,72 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   const onLogoChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
+    if (!file || !canWrite || lock.current || loading || !baseline || dataOwner !== identity) return;
+    lock.current = true;
     setUploadingLogo(true);
     setError(null);
     setSuccess(null);
     try {
       const result = await tenantProfileUseCases.uploadLogo(file);
+      if (activeIdentity.current !== identity) return;
       setProfileState(result);
-      setForm(normalizeForm(result));
       setSuccess("Logo aziendale aggiornato.");
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      lock.current = false;
       setUploadingLogo(false);
     }
   };
 
   const removeLogo = async () => {
+    if (!canWrite || lock.current || loading || !baseline || dataOwner !== identity) return;
+    lock.current = true;
     setUploadingLogo(true);
     setError(null);
     setSuccess(null);
     try {
       await tenantProfileUseCases.removeLogo();
-      await loadProfile();
+      if (activeIdentity.current !== identity) return;
+      try {
+        const refreshed = await tenantProfileUseCases.getProfile();
+        if (activeIdentity.current === identity) setProfileState(refreshed);
+      } catch {
+        setProfileState(current => current ? { ...current, branding: current.branding ? { ...current.branding, logoUrl: null, logoFileName: null } : null } : current);
+        throw Error("Logo rimosso. Non è stato possibile aggiornare la completezza del profilo: ricarica i dati dopo aver salvato la bozza.");
+      }
+      setConfirmation(null);
       setSuccess("Logo aziendale rimosso.");
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      lock.current = false;
       setUploadingLogo(false);
     }
   };
 
   return (
-    <section className="space-y-4">
-      <PageHeader
+    <section className="administration-workspace company-workspace" key={identity}>
+      <WorkspacePageHeader eyebrow="AMMINISTRAZIONE"
         title={onboarding ? "Completa dati azienda" : "Profilo Azienda"}
-        subtitle={
+        description={
           onboarding
-            ? "Google ha velocizzato l'accesso. Prima di scegliere il piano servono i dati societari per contratti, fatture e compliance."
+            ? "Prima di scegliere il piano completa i dati societari per contratti, fatture e documenti."
             : "Dati societari, branding e impostazioni usate da contratti, email, WhatsApp, export e report."
         }
       />
 
-      {error ? <Alert className="border-rose-200 bg-rose-50 text-rose-700">{error}</Alert> : null}
-      {success ? <Alert className="border-emerald-200 bg-emerald-50 text-emerald-700">{success}</Alert> : null}
-      {companyValidationErrors.length > 0 && !loading ? (
-        <Alert className="border-amber-200 bg-amber-50 text-amber-800">
-          Primo controllo dati: {companyValidationErrors[0].message}
-        </Alert>
-      ) : null}
-
+      {!canRead ? <CommerceNotice>Il tuo ruolo non consente di consultare il profilo aziendale.</CommerceNotice> : null}
+      {error ? <CommerceNotice>{error}{!baseline && canRead ? <Button variant="outline" onClick={() => void loadProfile()}>Riprova</Button> : null}</CommerceNotice> : null}
+      {success ? <CommerceNotice tone="success">{success}</CommerceNotice> : null}
+      {!canWrite && canRead ? <p className="admin-context">Accesso in sola lettura al profilo aziendale.</p> : null}
+      {canRead && baseline ? <nav className="admin-section-nav" aria-label="Sezioni aziendali">{[["identity","Dati societari"],["address","Sede e contatti"],["reference","Referente"],["contracts","Contratti"]].map(([key,label]) => <a key={key} href={`#company-${key}`}>{label}</a>)}</nav> : null}
+      <fieldset disabled={!canRead || !canWrite || loading || saving || uploadingLogo || !baseline} className="admin-company-content" hidden={!canRead || dataOwner !== identity || (!baseline && !loading)}>
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
             <div>
-              <CardTitle className="text-base">Completezza profilo</CardTitle>
+              <h2 className="text-base">Completezza profilo</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Più è completo, più contratti e comunicazioni risultano pronti per uso ufficiale.
               </p>
@@ -408,11 +436,11 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
           <CardContent className="space-y-4">
             <div className="h-2 rounded-full bg-muted">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500"
+                className="h-full rounded-full admin-completeness-progress"
                 style={{ width: `${completeness.percentage}%` }}
               />
             </div>
-            {missingLabels.length ? (
+            {loading ? <p role="status">Caricamento del profilo aziendale…</p> : missingLabels.length ? (
               <div className="flex flex-wrap gap-2">
                 {missingLabels.map((label) => (
                   <Badge key={label} variant="secondary" className="rounded-full">
@@ -421,9 +449,9 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
                 ))}
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              <div className="admin-company-complete flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
                 <CheckCircle2 className="h-4 w-4" />
-                Profilo completo: il tenant è pronto per documenti ufficiali.
+                Profilo completo per la preparazione dei documenti.
               </div>
             )}
           </CardContent>
@@ -431,10 +459,10 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <h2 className="flex items-center gap-2 text-base">
               <ImagePlus className="h-4 w-4" />
               Branding contratti
-            </CardTitle>
+            </h2>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-2xl border bg-background/70 p-4">
@@ -443,12 +471,12 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
                 {logoFileName ? `Configurato: ${logoFileName}` : "Nessun logo caricato"}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-xl border px-4 text-sm font-medium hover:bg-muted">
+                <Label className="admin-logo-upload inline-flex h-10 cursor-pointer items-center justify-center rounded-xl border px-4 text-sm font-medium hover:bg-muted">
                   {uploadingLogo ? <FleetumInlineLoader label="Caricamento" /> : "Carica logo"}
                   <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={onLogoChange} />
                 </Label>
                 {logoFileName ? (
-                  <Button type="button" variant="outline" onClick={removeLogo} disabled={uploadingLogo}>
+                  <Button type="button" variant="outline" onClick={() => setConfirmation("logo")} disabled={uploadingLogo}>
                     Rimuovi
                   </Button>
                 ) : null}
@@ -456,12 +484,12 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
-                <Label>Colore primario</Label>
-                <Input type="color" value={form.primaryColor ?? "#21375d"} onChange={(e) => updateField("primaryColor", e.target.value)} />
+                <Label htmlFor="company-field-1">Colore primario</Label>
+                <Input id="company-field-1" type="color" value={form.primaryColor ?? "#21375d"} onChange={(e) => updateField("primaryColor", e.target.value)} />
               </div>
               <div className="grid gap-1.5">
-                <Label>Colore accento</Label>
-                <Input type="color" value={form.accentColor ?? "#5d82c2"} onChange={(e) => updateField("accentColor", e.target.value)} />
+                <Label htmlFor="company-field-2">Colore accento</Label>
+                <Input id="company-field-2" type="color" value={form.accentColor ?? "#5d82c2"} onChange={(e) => updateField("accentColor", e.target.value)} />
               </div>
             </div>
           </CardContent>
@@ -471,51 +499,51 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
       <form onSubmit={onSubmit} className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <h2 className="flex items-center gap-2 text-base" id="company-identity">
               <Building2 className="h-4 w-4" />
               Dati azienda e fiscali
-            </CardTitle>
+            </h2>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div className="grid gap-1.5">
-              <Label>Ragione sociale *</Label>
-              <Input value={form.legalName ?? ""} onChange={(e) => updateField("legalName", e.target.value)} required />
+              <Label htmlFor="company-field-3">Ragione sociale *</Label>
+              <Input id="company-field-3" value={form.legalName ?? ""} onChange={(e) => updateField("legalName", e.target.value)} required />
             </div>
             <div className="grid gap-1.5">
-              <Label>Nome commerciale</Label>
-              <Input value={form.tradeName ?? ""} onChange={(e) => updateField("tradeName", e.target.value)} />
+              <Label htmlFor="company-field-4">Nome commerciale</Label>
+              <Input id="company-field-4" value={form.tradeName ?? ""} onChange={(e) => updateField("tradeName", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Forma giuridica</Label>
-              <Input placeholder="SRL, SPA, SNC..." value={form.legalForm ?? ""} onChange={(e) => updateField("legalForm", e.target.value)} />
+              <Label htmlFor="company-field-5">Forma giuridica</Label>
+              <Input id="company-field-5" placeholder="SRL, SPA, SNC..." value={form.legalForm ?? ""} onChange={(e) => updateField("legalForm", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>{isItalianCompany ? "Partita IVA" : "VAT / Tax ID"} *</Label>
-              <Input
+              <Label htmlFor="company-field-6">{isItalianCompany ? "Partita IVA" : "VAT / Tax ID"} *</Label>
+              <Input id="company-field-6"
                 value={form.vatNumber ?? ""}
                 onChange={(e) => updateField("vatNumber", normalizeVatNumberForCountry(e.target.value, form.country))}
                 placeholder={isItalianCompany ? "11 cifre" : "Identificativo fiscale aziendale"}
               />
             </div>
             <div className="grid gap-1.5">
-              <Label>Codice fiscale azienda</Label>
-              <Input value={form.taxCode ?? ""} onChange={(e) => updateField("taxCode", normalizeTaxCode(e.target.value))} />
+              <Label htmlFor="company-field-7">Codice fiscale azienda</Label>
+              <Input id="company-field-7" value={form.taxCode ?? ""} onChange={(e) => updateField("taxCode", normalizeTaxCode(e.target.value))} />
             </div>
             <div className="grid gap-1.5">
-              <Label>REA</Label>
-              <Input value={form.rea ?? ""} onChange={(e) => updateField("rea", e.target.value)} />
+              <Label htmlFor="company-field-8">REA</Label>
+              <Input id="company-field-8" value={form.rea ?? ""} onChange={(e) => updateField("rea", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>PEC</Label>
-              <Input type="email" value={form.pec ?? ""} onChange={(e) => updateField("pec", e.target.value)} />
+              <Label htmlFor="company-field-9">PEC</Label>
+              <Input id="company-field-9" type="email" value={form.pec ?? ""} onChange={(e) => updateField("pec", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Codice SDI</Label>
-              <Input value={form.sdiCode ?? ""} onChange={(e) => updateField("sdiCode", normalizeSdiCode(e.target.value))} />
+              <Label htmlFor="company-field-10">Codice SDI</Label>
+              <Input id="company-field-10" value={form.sdiCode ?? ""} onChange={(e) => updateField("sdiCode", normalizeSdiCode(e.target.value))} />
             </div>
             <div className="grid gap-1.5 xl:col-span-3">
-              <Label className="flex items-center gap-2"><UploadCloud className="h-3.5 w-3.5" /> Visura camerale per verifica aziendale</Label>
-              <Input
+              <Label className="flex items-center gap-2" htmlFor="company-verification-file"><UploadCloud className="h-3.5 w-3.5" /> Visura camerale per verifica aziendale</Label>
+              <Input id="company-verification-file"
                 type="file"
                 accept="application/pdf,image/jpeg,image/png"
                 onChange={(event) => setVerificationDocumentFile(event.target.files?.[0] ?? null)}
@@ -530,16 +558,16 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Sede legale e contatti</CardTitle>
+            <h2 className="text-base" id="company-address">Sede legale e contatti</h2>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div className="grid gap-1.5 md:col-span-2">
-              <Label>Indirizzo sede legale</Label>
-              <Input value={form.legalAddress ?? ""} onChange={(e) => updateField("legalAddress", e.target.value)} />
+              <Label htmlFor="company-field-11">Indirizzo sede legale</Label>
+              <Input id="company-field-11" value={form.legalAddress ?? ""} onChange={(e) => updateField("legalAddress", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label className="flex items-center gap-2"><Globe2 className="h-3.5 w-3.5" /> Paese</Label>
-              <select className={selectClassName} value={form.country ?? "IT"} onChange={(e) => handleCountryChange(e.target.value)}>
+              <Label className="flex items-center gap-2" htmlFor="company-country"><Globe2 className="h-3.5 w-3.5" /> Paese</Label>
+              <select id="company-country" className={selectClassName} value={form.country ?? "IT"} onChange={(e) => handleCountryChange(e.target.value)}>
                 {COUNTRIES.map((country) => (
                   <option key={country.code} value={country.code}>{country.name}</option>
                 ))}
@@ -548,8 +576,8 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
             {isItalianCompany ? (
               <>
                 <div className="grid gap-1.5">
-                  <Label className="flex items-center gap-2"><Map className="h-3.5 w-3.5" /> Regione</Label>
-                  <select className={selectClassName} value={form.region ?? ""} onChange={(e) => handleRegionChange(e.target.value)} disabled={geoLoading || !italianGeo}>
+                  <Label className="flex items-center gap-2" htmlFor="company-region"><Map className="h-3.5 w-3.5" /> Regione</Label>
+                  <select id="company-region" className={selectClassName} value={form.region ?? ""} onChange={(e) => handleRegionChange(e.target.value)} disabled={geoLoading || !italianGeo}>
                     <option value="">{geoLoading ? "Caricamento regioni..." : "Seleziona regione"}</option>
                     {(italianGeo?.regions ?? []).map((region) => (
                       <option key={region} value={region}>{region}</option>
@@ -557,8 +585,8 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
                   </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Provincia</Label>
-                  <select className={selectClassName} value={form.province ?? ""} onChange={(e) => handleProvinceChange(e.target.value)} disabled={!form.region || !italianGeo}>
+                  <Label htmlFor="company-field-12">Provincia</Label>
+                  <select id="company-field-12" className={selectClassName} value={form.province ?? ""} onChange={(e) => handleProvinceChange(e.target.value)} disabled={!form.region || !italianGeo}>
                     <option value="">Seleziona provincia</option>
                     {provinceOptions.map((province) => (
                       <option key={province.code} value={province.code}>{province.name} ({province.code})</option>
@@ -566,8 +594,8 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
                   </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Comune</Label>
-                  <select
+                  <Label htmlFor="company-field-13">Comune</Label>
+                  <select id="company-field-13"
                     className={selectClassName}
                     value={selectedMunicipality?.code ?? ""}
                     onChange={(e) => handleMunicipalityChange(e.target.value)}
@@ -583,8 +611,8 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
                   ) : null}
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>CAP</Label>
-                  <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", normalizePostalCode(e.target.value))} />
+                  <Label htmlFor="company-field-14">CAP</Label>
+                  <Input id="company-field-14" value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", normalizePostalCode(e.target.value))} />
                   {selectedMunicipality && selectedMunicipality.postalCodes.length > 1 ? (
                     <p className="text-xs text-muted-foreground">Comune multi-CAP: inserisci il CAP corretto della sede.</p>
                   ) : null}
@@ -593,80 +621,80 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
             ) : (
               <>
                 <div className="grid gap-1.5">
-                  <Label>Comune/Città</Label>
-                  <Input value={form.city ?? ""} onChange={(e) => updateField("city", e.target.value)} />
+                  <Label htmlFor="company-field-15">Comune/Città</Label>
+                  <Input id="company-field-15" value={form.city ?? ""} onChange={(e) => updateField("city", e.target.value)} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Provincia/Area *</Label>
-                  <Input value={form.province ?? ""} onChange={(e) => updateField("province", e.target.value.toUpperCase())} />
+                  <Label htmlFor="company-field-16">Provincia/Area *</Label>
+                  <Input id="company-field-16" value={form.province ?? ""} onChange={(e) => updateField("province", e.target.value.toUpperCase())} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Codice postale *</Label>
-                  <Input value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", normalizePostalCodeForCountry(e.target.value, form.country))} />
+                  <Label htmlFor="company-field-17">Codice postale *</Label>
+                  <Input id="company-field-17" value={form.postalCode ?? ""} onChange={(e) => updateField("postalCode", normalizePostalCodeForCountry(e.target.value, form.country))} />
                 </div>
               </>
             )}
             <div className="grid gap-1.5">
-              <Label>Email aziendale</Label>
-              <Input type="email" value={form.email ?? ""} onChange={(e) => updateField("email", e.target.value)} />
+              <Label htmlFor="company-field-18">Email aziendale</Label>
+              <Input id="company-field-18" type="email" value={form.email ?? ""} onChange={(e) => updateField("email", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Telefono aziendale</Label>
-              <Input value={form.phone ?? ""} onChange={(e) => updateField("phone", e.target.value)} />
+              <Label htmlFor="company-field-19">Telefono aziendale</Label>
+              <Input id="company-field-19" value={form.phone ?? ""} onChange={(e) => updateField("phone", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Sito web</Label>
-              <Input value={form.website ?? ""} onChange={(e) => updateField("website", e.target.value)} placeholder="https://..." />
+              <Label htmlFor="company-field-20">Sito web</Label>
+              <Input id="company-field-20" value={form.website ?? ""} onChange={(e) => updateField("website", e.target.value)} placeholder="https://..." />
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <h2 className="flex items-center gap-2 text-base" id="company-reference">
               <ShieldCheck className="h-4 w-4" />
               Referente admin e compliance
-            </CardTitle>
+            </h2>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div className="grid gap-1.5">
-              <Label>Nome referente</Label>
-              <Input value={form.adminFirstName ?? ""} onChange={(e) => updateField("adminFirstName", e.target.value)} />
+              <Label htmlFor="company-field-21">Nome referente</Label>
+              <Input id="company-field-21" value={form.adminFirstName ?? ""} onChange={(e) => updateField("adminFirstName", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Cognome referente</Label>
-              <Input value={form.adminLastName ?? ""} onChange={(e) => updateField("adminLastName", e.target.value)} />
+              <Label htmlFor="company-field-22">Cognome referente</Label>
+              <Input id="company-field-22" value={form.adminLastName ?? ""} onChange={(e) => updateField("adminLastName", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Email referente</Label>
-              <Input type="email" value={form.adminEmail ?? ""} onChange={(e) => updateField("adminEmail", e.target.value)} />
+              <Label htmlFor="company-field-23">Email referente</Label>
+              <Input id="company-field-23" type="email" value={form.adminEmail ?? ""} onChange={(e) => updateField("adminEmail", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Telefono referente</Label>
-              <Input value={form.adminPhone ?? ""} onChange={(e) => updateField("adminPhone", e.target.value)} />
+              <Label htmlFor="company-field-24">Telefono referente</Label>
+              <Input id="company-field-24" value={form.adminPhone ?? ""} onChange={(e) => updateField("adminPhone", e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Ruolo referente</Label>
-              <Input value={form.adminRole ?? ""} onChange={(e) => updateField("adminRole", e.target.value)} placeholder="Owner, Operations manager..." />
+              <Label htmlFor="company-field-25">Ruolo referente</Label>
+              <Input id="company-field-25" value={form.adminRole ?? ""} onChange={(e) => updateField("adminRole", e.target.value)} placeholder="Owner, Operations manager..." />
             </div>
             <div className="grid gap-1.5">
-              <Label>Versione DPA</Label>
-              <Input value={form.dpaVersion ?? ""} onChange={(e) => updateField("dpaVersion", e.target.value)} />
+              <Label htmlFor="company-field-26">Versione DPA</Label>
+              <Input id="company-field-26" value={form.dpaVersion ?? ""} onChange={(e) => updateField("dpaVersion", e.target.value)} />
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <h2 className="flex items-center gap-2 text-base" id="company-contracts">
               <FileText className="h-4 w-4" />
               Contratti e documenti
-            </CardTitle>
+            </h2>
           </CardHeader>
           <CardContent className="grid gap-3 xl:grid-cols-2">
             <div className="grid gap-1.5">
-              <Label>Testo footer contratto</Label>
-              <Textarea
+              <Label htmlFor="company-field-27">Testo footer contratto</Label>
+              <Textarea id="company-field-27"
                 rows={4}
                 value={form.contractFooterText ?? ""}
                 onChange={(e) => updateField("contractFooterText", e.target.value)}
@@ -674,8 +702,8 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
               />
             </div>
             <div className="grid gap-1.5">
-              <Label>Condizioni contrattuali default</Label>
-              <Textarea
+              <Label htmlFor="company-field-28">Condizioni contrattuali default</Label>
+              <Textarea id="company-field-28"
                 rows={4}
                 value={form.defaultContractTerms ?? ""}
                 onChange={(e) => updateField("defaultContractTerms", e.target.value)}
@@ -685,18 +713,21 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
           </CardContent>
         </Card>
 
-        <div className="sticky bottom-4 z-20 flex justify-end">
-          <div className="flex items-center gap-2 rounded-2xl border bg-card/95 p-2 shadow-xl backdrop-blur">
-            <Button type="button" variant="outline" onClick={() => void loadProfile()} disabled={loading || saving}>
+        <div className="admin-save-bar">
+          <div className="admin-save-actions"><p className="admin-context">{baseline && (JSON.stringify(form) !== JSON.stringify(baseline) || verificationDocumentFile) ? "Modifiche da salvare" : "Dati caricati dal server"}</p>
+            <Button type="button" variant="outline" onClick={() => setConfirmation("restore")} disabled={loading || saving}>
               Ripristina
             </Button>
             <Button type="submit" disabled={loading || saving} className="gap-2">
-              <Wand2 className="h-4 w-4" />
+              <Save className="h-4 w-4" aria-hidden="true" />
               {saving || uploadingVerificationDocument ? "Salvataggio..." : onboarding ? "Salva e continua ai piani" : "Salva Profilo Azienda"}
             </Button>
           </div>
         </div>
       </form>
+      </fieldset>
+      <CargosConnectionPanel />
+      {confirmation ? <CommerceDrawer compact title={confirmation === "logo" ? "Rimuovere il logo aziendale?" : "Ripristinare i dati salvati?"} busy={saving || uploadingLogo} onClose={() => setConfirmation(null)} footer={<><Button variant="outline" onClick={() => setConfirmation(null)} disabled={saving || uploadingLogo}>Annulla</Button><Button disabled={saving || uploadingLogo} onClick={() => { if (confirmation === "logo") void removeLogo(); else { setConfirmation(null); setVerificationDocumentFile(null); void loadProfile(); } }}>Conferma</Button></>}>{error ? <CommerceNotice>{error}</CommerceNotice> : null}<p>{confirmation === "logo" ? "Il logo verrà rimosso. Le modifiche non salvate ai dati aziendali resteranno disponibili." : "Le modifiche non salvate e il documento selezionato verranno scartati."}</p></CommerceDrawer> : null}
     </section>
   );
 };

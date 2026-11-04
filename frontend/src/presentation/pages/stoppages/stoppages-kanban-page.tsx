@@ -1,87 +1,23 @@
-import { useMemo, useState } from "react";
-import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
-import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
-import { PageHeader } from "../../components/layout/page-header";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { useAsync } from "../../hooks/use-async";
-
-const columns = [
-  { key: "OPEN", label: "Aperto" },
-  { key: "IN_PROGRESS", label: "In lavorazione" },
-  { key: "WAITING_PARTS", label: "In attesa ricambi" },
-  { key: "SOLICITED", label: "Sollecitato" },
-  { key: "CLOSED", label: "Chiuso" }
-] as const;
-
-export const StoppagesKanbanPage = () => {
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [refreshTick, setRefreshTick] = useState(0);
-  const { data, loading, error } = useAsync(() => stoppagesUseCases.list({ page: 1, pageSize: 200 }), [refreshTick]);
-
-  const grouped = useMemo(() => {
-    const rows = data?.data ?? [];
-    return columns.reduce<Record<string, any[]>>((acc, col) => {
-      acc[col.key] = rows.filter((row) => row.status === col.key);
-      return acc;
-    }, {});
-  }, [data]);
-
-  const onDropToColumn = async (status: "OPEN" | "IN_PROGRESS" | "WAITING_PARTS" | "SOLICITED" | "CLOSED" | "CANCELED") => {
-    if (!draggedId) return;
-    await stoppagesUseCases.updateStatus(draggedId, status);
-    setDraggedId(null);
-    setRefreshTick((x) => x + 1);
-  };
-
-  if (loading) return <FleetumBlockLoader label="Caricamento kanban" />;
-  if (error) return <p className="text-sm text-destructive">{error}</p>;
-
-  return (
-    <section className="space-y-4">
-      <PageHeader
-        title="Kanban Fermi"
-        subtitle="Sposta i fermi tra gli stati con drag and drop per un aggiornamento operativo rapido."
-      />
-      <div className="grid gap-4 xl:grid-cols-5">
-        {columns.map((column) => {
-          const items = grouped[column.key] ?? [];
-          const isEmpty = items.length === 0;
-
-          return (
-            <Card
-              key={column.key}
-              className={isEmpty ? "min-h-[220px]" : "min-h-[360px]"}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => onDropToColumn(column.key)}
-            >
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">{column.label}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {isEmpty ? (
-                  <div className="grid min-h-[120px] place-items-center rounded-md border border-dashed border-border/80 bg-muted/25 px-3 text-center">
-                    <p className="text-xs text-muted-foreground">Nessun fermo in questo stato</p>
-                  </div>
-                ) : null}
-
-                {items.map((item) => (
-                  <div
-                    key={item.id}
-                    draggable
-                    onDragStart={() => setDraggedId(item.id)}
-                    className="cursor-grab rounded-md border bg-muted/40 p-3 text-sm"
-                  >
-                    <p className="font-semibold">{item.vehicle?.plate}</p>
-                    <p>{item.vehicle?.brand} {item.vehicle?.model}</p>
-                    <p className="text-muted-foreground">{item.site?.name}</p>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">{item.reason}</p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </section>
-  );
+import {useEffect,useRef,useState} from 'react';
+import {useNavigate} from 'react-router-dom';
+import {stoppagesUseCases} from '../../../application/usecases/stoppages-usecases';
+import {stoppageStatusOptions} from '../../../domain/constants/stoppage-status';
+import {Button} from '../../components/ui/button';
+import {Select} from '../../components/ui/select';
+import {CommerceNotice} from '../../components/ui/commerce-workspace';
+import {WorkspacePageHeader} from '../../components/ui/workspace-ui';
+import {FleetumInlineLoader} from '../../components/brand/fleetum-logo-loader';
+import {useAsync} from '../../hooks/use-async';
+import {StoppageQuickPanel} from '../../components/stoppages/stoppage-quick-panel';
+import {priorityLabel,StoppageFilterBar,StoppageViewNav,useStoppageFilters,useOperationsAccess,useOperationsTask,OperationFeedback,operationsHref} from '../../components/operations/operations-workspace';
+export const StoppagesKanbanPage=()=>{
+ const{filters,set,reset,key}=useStoppageFilters();const{canRead,canWrite}=useOperationsAccess();const navigate=useNavigate();const task=useOperationsTask();
+ const[draggedId,setDraggedId]=useState<string|null>(null),[refreshTick,setRefreshTick]=useState(0),[targets,setTargets]=useState<Record<string,string>>({}),[page,setPage]=useState(1),[selected,setSelected]=useState<any>(null);const origin=useRef<HTMLElement|null>(null);
+ const{data,loading,error}=useAsync(()=>canRead?stoppagesUseCases.list({...filters,page,pageSize:200}):Promise.resolve({data:[],total:0,page:1,pageSize:200}),[key,page,refreshTick,canRead]);
+ useEffect(()=>{setPage(1);setTargets({})},[key]);
+ const move=async(id:string,status:string)=>{if(!canWrite)return;await task.run(async()=>{await stoppagesUseCases.updateStatus(id,status as any);setDraggedId(null);setRefreshTick(x=>x+1)},'Stato del fermo aggiornato.')};
+ if(!canRead)return <section className="operations-workspace"><h1>Kanban fermi</h1><p>Il tuo ruolo non consente l’accesso ai fermi.</p></section>;
+ return <section className="operations-workspace"><WorkspacePageHeader eyebrow="AVANZAMENTO INTERVENTI" title="Kanban fermi" description="Ogni fermo nel suo stato. Spostalo con il menu oppure trascina la scheda." actions={canWrite?<Button onClick={()=>navigate(operationsHref('/fermi/nuovo',filters))}>Nuovo fermo</Button>:undefined}/><StoppageViewNav active="kanban" filters={filters}/><div className="commerce-panel"><StoppageFilterBar filters={filters} onChange={(k,v)=>{setPage(1);set(k,v)}} onReset={()=>{setPage(1);reset()}}/></div><OperationFeedback error={task.error||error} success={task.success}/>{loading?<div className="commerce-empty"><FleetumInlineLoader label="Caricamento kanban"/></div>:error?<Button variant="outline" onClick={()=>setRefreshTick(x=>x+1)}>Riprova kanban</Button>:<div className="operations-board">{stoppageStatusOptions.map(column=><section key={column.value} className="operations-board-column" aria-label={column.label} onDragOver={e=>{if(canWrite)e.preventDefault()}} onDrop={()=>{if(draggedId)void move(draggedId,column.value)}}><header><h2>{column.label}</h2><span>{(data?.data??[]).filter(x=>x.status===column.value).length}</span></header>{(data?.data??[]).filter(x=>x.status===column.value).map(item=><article key={item.id} className="operations-board-card" draggable={canWrite&&!task.busy} onDragStart={()=>setDraggedId(item.id)} onDragEnd={()=>setDraggedId(null)} data-panel-origin><button className="commerce-name" aria-haspopup="dialog" onClick={e=>{origin.current=e.currentTarget;setSelected(item)}}><strong data-panel-origin-title translate="no">{item.vehicle?.plate}</strong></button><p translate="no">{item.vehicle?.brand} {item.vehicle?.model}</p><small translate="no">{item.site?.name} · {item.workshop?.name}</small><p className="operations-card-reason" translate="no">{item.reason}</p><small>Priorità: {priorityLabel[item.priority]||item.priority}</small>{canWrite?<div className="operations-move"><label htmlFor={'move-'+item.id}>Nuovo stato</label><Select id={'move-'+item.id} value={targets[item.id]||item.status} disabled={task.busy} onChange={e=>setTargets(old=>({...old,[item.id]:e.target.value}))}>{stoppageStatusOptions.map(x=><option key={x.value} value={x.value}>{x.label}</option>)}</Select><Button variant="outline" disabled={task.busy||!targets[item.id]||targets[item.id]===item.status} onClick={()=>void move(item.id,targets[item.id])}>Sposta</Button></div>:null}</article>)}{!(data?.data??[]).some(x=>x.status===column.value)?<p className="operations-hint">Nessun fermo in questo stato</p>:null}</section>)}</div>}
+ <footer className="commerce-pagination"><span>Pagina {page} di {Math.max(1,Math.ceil((data?.total??0)/200))} · Totale {data?.total??0} · fino a 200 schede per pagina</span><div><Button variant="outline" disabled={page<=1||loading} onClick={()=>setPage(p=>p-1)}>Precedente</Button><Button variant="outline" disabled={loading||page*200>=(data?.total??0)} onClick={()=>setPage(p=>p+1)}>Successiva</Button></div></footer>
+ <StoppageQuickPanel open={!!selected} stoppageId={selected?.id||null} mode="detail" origin={origin.current} onClose={()=>setSelected(null)} onSaved={()=>setRefreshTick(x=>x+1)}/></section>
 };

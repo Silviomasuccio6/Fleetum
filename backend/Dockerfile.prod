@@ -29,6 +29,7 @@ COPY --from=build /app/backend/package.json ./package.json
 COPY --from=build /app/backend/node_modules ./node_modules
 COPY --from=build /app/backend/dist ./dist
 COPY --from=build /app/backend/prisma ./prisma
+COPY --from=build /app/backend/assets ./assets
 COPY --from=build /app/packages/commercial-plan-catalog /app/packages/commercial-plan-catalog
 
 # Fail the image build if the transactional email runtime dependency is missing.

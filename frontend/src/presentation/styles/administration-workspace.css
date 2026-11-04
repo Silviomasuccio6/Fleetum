@@ -1,0 +1,70 @@
+/* B09: approved card B, administration and standalone billing only. */
+.administration-workspace{display:flex;flex-direction:column;gap:24px;min-width:0}
+.administration-workspace [hidden],.workspace-account-popover [hidden]{display:none!important}
+.workspace-shell .administration-workspace .g-card{background:hsl(var(--card));background-image:none;border:1px solid var(--ws-line);border-radius:12px;box-shadow:var(--refinement-shadow);backdrop-filter:none;animation:none;transform:none;transition:none}
+.workspace-shell .administration-workspace .g-card:hover{transform:none;box-shadow:var(--refinement-shadow)}
+.administration-workspace :is(input:not([type=checkbox]):not([type=radio]),select,textarea){border-radius:7px!important;background:hsl(var(--card))!important;box-shadow:none!important}
+.administration-workspace fieldset{min-width:0}
+.admin-company-content,.admin-profile-sections{display:grid;gap:24px;margin:0;padding:0;border:0}
+.admin-section-heading{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px}
+.admin-context{font-size:13px;line-height:1.65;color:hsl(var(--muted-foreground))}
+.admin-context button{margin-left:8px}
+.admin-section-nav{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--ws-line);padding-bottom:12px}
+.admin-section-nav :is(button,a){display:inline-flex;align-items:center;min-height:42px;border:1px solid transparent;border-radius:7px;padding:8px 13px;font-weight:500;font-size:13px;color:hsl(var(--muted-foreground))}
+.admin-section-nav :is(button,a):hover{background:hsl(var(--muted));color:hsl(var(--foreground))}
+.admin-section-nav [aria-current=page]{background:hsl(var(--secondary));color:hsl(var(--secondary-foreground));border-color:var(--refinement-selected-line)}
+.admin-filter-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(160px,220px);gap:16px;align-items:end}
+.admin-person{display:flex;gap:12px;align-items:center;min-width:0}
+.admin-avatar{display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;border-radius:8px;background:hsl(var(--muted));color:hsl(var(--muted-foreground));font-size:11px;font-weight:600}
+.admin-empty{display:grid;justify-items:center;gap:8px;text-align:center;padding:40px 16px;border:1px dashed var(--ws-line);border-radius:8px}
+.admin-empty h2{font-size:16px;font-weight:600}
+.admin-empty p{color:hsl(var(--muted-foreground));font-size:13px}
+.admin-status{display:inline-flex;padding:4px 8px;border:1px solid var(--ws-line);border-radius:6px;font-size:12px;background:hsl(var(--muted))}
+.admin-load-state{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:13px;color:hsl(var(--muted-foreground));padding-block:8px}
+.admin-save-bar{position:sticky;bottom:20px;z-index:20;background:hsl(var(--card));border:1px solid var(--ws-line);border-radius:12px;padding:12px;box-shadow:var(--refinement-shadow)}
+.admin-save-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.admin-save-actions p{margin-right:auto}
+.admin-score{color:hsl(var(--foreground));background:hsl(var(--muted));border-color:var(--ws-line)}
+.admin-score-complete{color:var(--refinement-success)}
+.admin-completeness-progress{background:hsl(var(--primary))}
+.administration-workspace [id^=company-]{scroll-margin-top:140px}
+.workspace-shell .administration-workspace .admin-primary-action{background:var(--refinement-action);color:var(--refinement-action-ink);border-radius:7px}
+.administration-workspace .admin-primary-action:hover{background:var(--refinement-action-hover)}
+.workspace-shell .administration-workspace :is(.text-emerald-500,.text-emerald-600,.text-emerald-700){color:var(--refinement-success)}
+.dark .workspace-shell .administration-workspace .text-destructive{color:#ffb4c5}
+.administration-workspace .admin-plan-card{display:flex;flex-direction:column}
+.administration-workspace .admin-plan-card>div:last-child{display:flex;flex-direction:column;flex:1}
+.administration-workspace .admin-plan-card>div:last-child>button{margin-top:auto}
+.workspace-shell .billing-workspace .admin-billing-notice{color:hsl(var(--foreground));border-left:3px solid hsl(var(--primary))}
+.billing-standalone{min-height:100vh;padding:28px max(20px,calc((100vw - 1180px)/2)) 48px}
+.billing-content{max-width:1180px;margin-inline:auto}
+.billing-back-link{display:inline-flex;gap:10px;align-items:center;min-height:44px;font-size:13px;font-weight:600;border:1px solid var(--ws-line);border-radius:8px;padding:8px 12px;background:hsl(var(--card));color:hsl(var(--foreground))}
+.billing-workspace table{min-width:640px}
+.billing-workspace table th{white-space:nowrap}
+.workspace-account-popover{max-height:calc(100dvh - 110px);overflow:auto;overscroll-behavior:contain}
+.workspace-account-popover button{min-height:40px}
+.workspace-account-popover :is(p,button){overflow-wrap:anywhere}
+@media(max-width:767px){
+ .workspace-shell :is(#workspace-notifications,#workspace-profile-menu){position:fixed;left:6px;right:6px;top:calc(74px + var(--ws-preview-offset,0px));width:auto;max-height:calc(100dvh - 180px - var(--ws-preview-offset,0px))}
+ .administration-workspace{gap:20px}
+ .admin-filter-grid{grid-template-columns:1fr}
+ .admin-section-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .admin-section-nav :is(button,a){justify-content:center;text-align:center;min-height:44px;padding:8px}
+ .workspace-shell .administration-workspace :is(button,input:not([type=checkbox]):not([type=radio]),select,a){min-height:44px}
+ .admin-save-bar{bottom:86px}
+ .admin-save-actions{gap:8px}
+ .admin-save-actions p{width:100%}
+ .billing-standalone{padding:20px 16px 36px}
+ .administration-workspace .workspace-page-header{align-items:flex-start;flex-direction:column;gap:16px}
+ .workspace-account-popover button{min-height:44px}
+ .workspace-shell .saas-topbar .workspace-account-popover button[data-variant]{width:auto;min-height:44px;white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){.administration-workspace *, .administration-workspace *::before,.administration-workspace *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+.billing-workspace >.g-card >div:first-child{padding-top:24px}
+.workspace-shell .billing-workspace .bg-gradient-to-r{background-image:none}
+
+.administration-workspace .g-card h2{font-weight:600;letter-spacing:-.02em;line-height:1.3}
+
+.admin-company-complete{background:hsl(var(--muted));border-color:var(--ws-line);color:var(--refinement-success)}
+.admin-logo-upload:focus-within{outline:3px solid hsl(var(--ring));outline-offset:3px}

@@ -77,6 +77,8 @@ export class BillingController {
     const pdf = await this.invoiceService.pdfBufferForTenant(req.auth!.tenantId, invoiceId);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename=\"fleetum-${invoiceId}.pdf\"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(pdf);
   };
 }

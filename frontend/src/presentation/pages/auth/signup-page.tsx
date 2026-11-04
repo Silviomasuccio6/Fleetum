@@ -1,6 +1,6 @@
-import { type CSSProperties, type ReactNode, FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type ReactNode, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AtSign, Briefcase, Building2, FileText, Globe, Hash, Lock, Mail, Map, MapPin, Palette, Phone, Scale, Star, User } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
@@ -18,23 +18,23 @@ import {
   normalizeVatNumberForCountry,
   validateCompanyRegistrationDraft
 } from "../../../shared/validation/company-registration";
-import { MagneticOrbs } from "../../../features/auth/components/MagneticOrbs";
-import { ParticleCanvas } from "../../../features/auth/components/ParticleCanvas";
-import { AuthBackToWebsite } from "../../../features/auth/components/AuthBackToWebsite";
-import "../../../features/auth/premium-login.css";
+import { AccessShell, AccessNotice } from "../../components/layout/access-shell";
+import { getAccessDestination, getActivationPath, getCompanyOnboardingPath } from "./access-flow";
+
+const trackSignupEvent = (...args: Parameters<typeof trackPublicEvent>) => { try { trackPublicEvent(...args); } catch { /* Analytics must not interrupt account creation. */ } };
 
 const SIGNUP_STEPS = [
   {
     title: "Azienda",
-    subtitle: "Dati tenant e fiscali"
+    subtitle: "Dati societari"
   },
   {
     title: "Referente",
-    subtitle: "Admin iniziale"
+    subtitle: "Account amministratore"
   },
   {
     title: "Conferma",
-    subtitle: "Branding e privacy"
+    subtitle: "Riepilogo e privacy"
   }
 ];
 
@@ -62,7 +62,7 @@ const GoogleLogo = () => (
 );
 
 const FieldIcon = ({ children }: { children: ReactNode }) => (
-  <span className="premium-login-field-icon-wrap">{children}</span>
+  <span className="premium-login-field-icon-wrap" aria-hidden="true">{children}</span>
 );
 
 const initialForm = {
@@ -102,7 +102,7 @@ const optionalText = (value: string) => {
 const isRequiredCompanyStepComplete = (form: typeof initialForm) => validateCompanyRegistrationDraft(form).length === 0;
 
 export const SignupPage = () => {
-  const navigate = useNavigate();
+  const navigate = useNavigate(), location = useLocation();
   const setSession = useAuthStore((state) => state.setSession);
 
   const [form, setForm] = useState(initialForm);
@@ -113,23 +113,15 @@ export const SignupPage = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [italianGeo, setItalianGeo] = useState<ItalyAdministrativeData | null>(null);
   const [geoLoading, setGeoLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string,string>>({});
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const lock = useRef(false), createdAccount = useRef<string | null>(null), alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { document.getElementById("signup-step-title")?.focus(); }, [currentStep]);
 
   const apiBaseUrl = getApiBaseUrl();
   const googleAuthUrl = (import.meta.env.VITE_GOOGLE_AUTH_URL as string | undefined) ?? `${apiBaseUrl}/auth/google`;
 
-
-  useEffect(() => {
-    const previousTheme = document.documentElement.getAttribute("data-theme");
-    document.documentElement.setAttribute("data-theme", "light");
-
-    return () => {
-      if (previousTheme) {
-        document.documentElement.setAttribute("data-theme", previousTheme);
-      } else {
-        document.documentElement.removeAttribute("data-theme");
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (form.country !== "IT" || italianGeo) return;
@@ -151,10 +143,11 @@ export const SignupPage = () => {
   }, [form.country, italianGeo]);
 
   const openGoogleSignup = () => {
-    trackPublicEvent("SIGNUP_STARTED", { entry: "google" });
+    if (lock.current || createdAccount.current) return;
+    trackSignupEvent("SIGNUP_STARTED", { entry: "google" });
     const target = new URL(googleAuthUrl, window.location.origin);
     target.searchParams.set("intent", "signup");
-    target.searchParams.set("returnTo", "/onboarding/azienda?from=social");
+    target.searchParams.set("returnTo", getCompanyOnboardingPath(getAccessDestination(location.search)));
     window.location.href = target.toString();
   };
 
@@ -162,11 +155,11 @@ export const SignupPage = () => {
   const companyStepErrors = useMemo(() => validateCompanyRegistrationDraft(form), [form]);
   const selectedRegion = form.region;
   const provinceOptions = useMemo(
-    () => (italianGeo?.provinces ?? []).filter((province) => !selectedRegion || province.region === selectedRegion),
+    () => (italianGeo?.provinces ?? []).filter((province) => Boolean(selectedRegion) && province.region === selectedRegion),
     [italianGeo, selectedRegion]
   );
   const municipalityOptions = useMemo(
-    () => (italianGeo?.municipalities ?? []).filter((municipality) => !form.province || municipality.province === form.province),
+    () => (italianGeo?.municipalities ?? []).filter((municipality) => Boolean(form.province) && municipality.province === form.province),
     [italianGeo, form.province]
   );
   const selectedMunicipality = useMemo(
@@ -242,38 +235,45 @@ export const SignupPage = () => {
   const signupProgressStyle = { "--signup-progress": `${signupProgress}%` } as CSSProperties;
 
   useEffect(() => {
-    trackPublicEvent("SIGNUP_VIEW", { page: "signup" });
+    trackSignupEvent("SIGNUP_VIEW", { page: "signup" });
   }, []);
 
-  const goToNextStep = () => {
-    setError(null);
-    setTenantId(null);
-
-    if (!stepIsValid) {
-      setError(stepErrors[currentStep]);
-      return;
+  const errorsForStep = (step: number): Record<string,string> => {
+    if (step === 0) return Object.fromEntries(companyStepErrors.map(item => [item.field,item.message]));
+    if (step === 1) {
+      const errors: Record<string,string> = {};
+      if (form.firstName.trim().length < 2) errors.firstName = "Inserisci un nome di almeno 2 caratteri.";
+      if (form.lastName.trim().length < 2) errors.lastName = "Inserisci un cognome di almeno 2 caratteri.";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = "Inserisci un indirizzo email valido.";
+      if (!isPasswordStrong) errors.password = "Usa almeno 8 caratteri con una maiuscola, un numero e un simbolo.";
+      return errors;
     }
-
-    if (currentStep === 0) trackPublicEvent("SIGNUP_STARTED", { entry: "company_details" });
-    setCurrentStep((step) => Math.min(step + 1, SIGNUP_STEPS.length - 1));
+    const errors: Record<string,string> = {};
+    if (!privacyAccepted) errors.privacy = "Conferma di aver letto l’informativa privacy.";
+    for (const key of ["primaryColor","accentColor"] as const) if (!/^#[0-9a-fA-F]{6}$/.test(form[key])) errors[key] = "Usa un colore nel formato #123456.";
+    return errors;
   };
-
+  const goToNextStep = () => {
+    if (lock.current || createdAccount.current) return;
+    const errors = errorsForStep(currentStep); setFieldErrors(errors); setError(null);
+    if (Object.keys(errors).length) { setError("Controlla i campi evidenziati prima di continuare."); return; }
+    if (currentStep === 0) trackSignupEvent("SIGNUP_STARTED", { entry: "company_details" });
+    setCurrentStep(step => Math.min(step + 1, SIGNUP_STEPS.length - 1));
+  };
   const goToPreviousStep = () => {
-    setError(null);
-    setCurrentStep((step) => Math.max(step - 1, 0));
+    if (lock.current) return;
+    setError(null); setFieldErrors({}); setCurrentStep(step => Math.max(step - 1, 0));
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError(null);
-    setTenantId(null);
-
-    if (!privacyAccepted) {
-      setError("Per creare l'account devi confermare la presa visione dell'informativa privacy.");
-      return;
+    if (lock.current || createdAccount.current) return;
+    if (currentStep < 2) { goToNextStep(); return; }
+    for (let step = 0; step < SIGNUP_STEPS.length; step++) {
+      const errors = errorsForStep(step);
+      if (Object.keys(errors).length) { setCurrentStep(step); setFieldErrors(errors); setError("Controlla i campi evidenziati prima di creare l’account."); return; }
     }
-
-    setLoading(true);
+    lock.current = true; setLoading(true); setError(null); setFieldErrors({});
 
     try {
       const tenantName = cleanText(form.tenantName);
@@ -317,25 +317,32 @@ export const SignupPage = () => {
           accentColor: form.accentColor
         }
       });
-      setSession(result.user, true);
-      if (verificationDocument) {
-        await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocument);
-      }
+      if (!alive.current) return;
+      createdAccount.current = result.tenantId;
       setTenantId(result.tenantId);
-      trackPublicEvent("SIGNUP_COMPLETED", { source: "email" });
-      trackPublicEvent("ONBOARDING_COMPANY_COMPLETED", { source: "email_signup", country });
+      setSession(result.user, true);
+      setForm(current => ({ ...current, password: "" }));
+      trackSignupEvent("SIGNUP_COMPLETED", { source: "email" });
+      trackSignupEvent("ONBOARDING_COMPANY_COMPLETED", { source: "email_signup", country });
+      if (verificationDocument) {
+        try { await tenantProfileUseCases.uploadCompanyVerificationDocument(verificationDocument); }
+        catch { if (alive.current) setError("L’account è stato creato, ma il documento non è stato caricato. Puoi riprovare l’allegato oppure continuare alla scelta del piano."); return; }
+      }
+      if (!alive.current) return;
       setForm(initialForm);
       setPrivacyAccepted(false);
       setCurrentStep(SIGNUP_STEPS.length - 1);
-      navigate("/activate?welcome=billing", { replace: true });
+      if (alive.current) navigate(getActivationPath(location.search), { replace: true });
     } catch (err) {
-      setError((err as Error).message);
+      if (alive.current) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      lock.current = false; if (alive.current) setLoading(false);
     }
   };
 
   const startAnotherSignup = () => {
+    if (lock.current) return;
+    createdAccount.current = null; setFieldErrors({});
     setTenantId(null);
     setError(null);
     setForm(initialForm);
@@ -344,77 +351,26 @@ export const SignupPage = () => {
   };
 
   const goToBillingAfterSignup = () => {
-    navigate("/activate?welcome=billing", { replace: true });
+    if (!lock.current && createdAccount.current) navigate(getActivationPath(location.search), { replace: true });
   };
 
-  return (
-    <div className="premium-login-root premium-login-root--clean">
-      <div className="premium-login-bg-gradient" aria-hidden />
-      <div className="premium-login-aurora" aria-hidden>
-        <span className="premium-login-aurora__beam premium-login-aurora__beam--one" />
-        <span className="premium-login-aurora__beam premium-login-aurora__beam--two" />
-        <span className="premium-login-aurora__beam premium-login-aurora__beam--three" />
-      </div>
-      <ParticleCanvas />
-      <MagneticOrbs />
-      <div className="premium-login-grid-overlay" aria-hidden />
-      <div className="premium-login-noise-overlay" aria-hidden />
-      <div className="premium-login-floating-layer" aria-hidden>
-        {Array.from({ length: 18 }, (_, index) => (
-          <span
-            key={index}
-            className="premium-login-floating-dot"
-            style={{
-              left: `${8 + ((index * 17) % 86)}%`,
-              top: `${10 + ((index * 23) % 78)}%`,
-              animationDuration: `${7 + (index % 5)}s`,
-              animationDelay: `${index * 0.42}s`
-            }}
-          />
-        ))}
-      </div>
-      <div className="premium-login-spotlight" aria-hidden />
-      <main className="premium-login-auth-shell">
-        <section className="premium-login-card-wrap premium-login-card-wrap--signup">
-          <div className="premium-login-card premium-login-card--signup">
-            <AuthBackToWebsite />
-            <div className="premium-login-card-head">
-              <img className="premium-login-card-logo premium-login-card-logo--image" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
-              <h2>Crea account</h2>
-              <p>Avvia il tuo ambiente con credenziali admin iniziali</p>
-            </div>
-
-            {tenantId ? (
-              <div className="premium-signup-success">
-                <div className="premium-signup-success__icon">✓</div>
-                <p className="premium-signup-success__eyebrow">Tenant creato correttamente</p>
-                <h3>Workspace pronto</h3>
-                <p>
-                  Il tenant <strong>{tenantId}</strong> è stato creato. Prima di entrare nel gestionale devi scegliere un piano
-                  e completare Stripe Checkout con carta valida. La prova dura 14 giorni e il primo addebito parte alla fine del trial.
-                </p>
-                <div className="premium-signup-success__actions">
-                  <button type="button" className="premium-login-submit" onClick={goToBillingAfterSignup}>
-                    <span className="premium-login-submit-shimmer" aria-hidden />
-                    Scegli piano e attiva con Stripe
-                  </button>
-                  <button type="button" className="premium-login-social-btn justify-center" onClick={startAnotherSignup}>
-                    Crea un altro tenant
-                  </button>
-                </div>
-                <p className="mt-3 text-xs leading-5 text-slate-500">
-                  Il gestionale resta bloccato finché Stripe non conferma una subscription attiva o in trial con metodo di pagamento raccolto.
-                  Non abilitiamo licenze dal redirect di successo: aspettiamo sempre il webhook verificato.
-                </p>
-              </div>
-            ) : (
-            <form onSubmit={onSubmit} className="premium-login-form" noValidate>
+  const retryDocument = async () => {
+    if (!createdAccount.current || !form.chamberOfCommerceFile || lock.current) return;
+    lock.current = true; setLoading(true); setError(null);
+    try { await tenantProfileUseCases.uploadCompanyVerificationDocument(form.chamberOfCommerceFile); if (alive.current) setForm(current => ({ ...current,chamberOfCommerceFile: null })); }
+    catch (e) { if (alive.current) setError("Account già creato. Il documento non è stato caricato: puoi riprovare o continuare al piano."); }
+    finally { lock.current = false; if (alive.current) setLoading(false); }
+  };
+  return <AccessShell title="Crea il tuo account Fleetum" description="Tre passaggi per configurare l’azienda e il tuo accesso. Il piano si sceglie dopo la registrazione." wide>
+    {tenantId ? <div className="premium-signup-success"><AccessNotice tone="success" focus>Account creato. I dati aziendali sono stati salvati.</AccessNotice>{error ? <AccessNotice>{error}</AccessNotice> : null}<p className="access-hint">Per iniziare scegli un piano e completa l’attivazione. La prova dura 14 giorni e richiede una carta; il primo addebito parte al termine della prova.</p><div className="premium-signup-success__actions"><button className="premium-login-submit" type="button" onClick={goToBillingAfterSignup} disabled={loading}>Continua alla scelta del piano</button>{form.chamberOfCommerceFile ? <button className="premium-login-social-btn" type="button" onClick={() => void retryDocument()} disabled={loading}>Riprova allegato</button> : null}<button className="premium-login-social-btn" type="button" onClick={startAnotherSignup} disabled={loading}>Crea un’altra azienda</button></div></div> : (
+            <form onSubmit={onSubmit} className="premium-login-form" onChangeCapture={event => { const input = event.target as HTMLInputElement; const key = input.name === 'municipalityCode' ? 'city' : input.name || input.id.replace('signup-', ''); setFieldErrors(current => { const next = { ...current }; delete next[key]; return next; }); setError(null); }} noValidate aria-busy={loading}><fieldset className="access-fields" disabled={loading}>
               <div className="premium-login-social-grid premium-login-social-grid--single">
                 <button
                   type="button"
                   data-cursor="hover"
                   className="premium-login-social-btn premium-login-social-btn--google"
                   onClick={openGoogleSignup}
+                  disabled={loading}
                 >
                   <GoogleLogo />
                   <span>Continua con Google</span>
@@ -426,7 +382,7 @@ export const SignupPage = () => {
               <div className="premium-signup-stepper" style={signupProgressStyle} aria-label="Avanzamento registrazione">
                 <div className="premium-signup-stepper__meta">
                   <span>Registrazione guidata</span>
-                  <strong>{signupProgress}% completato</strong>
+                  <strong>{`Passaggio ${currentStep + 1} di ${SIGNUP_STEPS.length}`}</strong>
                 </div>
                 <div className="premium-signup-stepper__track" aria-hidden>
                   <span />
@@ -442,8 +398,10 @@ export const SignupPage = () => {
                         type="button"
                         className={`premium-signup-stepper__step ${isActive ? "is-active" : ""} ${isDone ? "is-done" : ""}`}
                         aria-current={isActive ? "step" : undefined}
+                        disabled={loading || index >= currentStep}
                         onClick={() => {
-                          if (index < currentStep) {
+                          if (!lock.current && index < currentStep) {
+                            setFieldErrors({});
                             setError(null);
                             setCurrentStep(index);
                           }
@@ -462,9 +420,8 @@ export const SignupPage = () => {
 
               {currentStep === 0 ? (
                 <div className="rounded-2xl border border-white/60 bg-white/45 p-3 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Step 1 · Dati aziendali
-                  </p>
+                  <h2 id="signup-step-title" tabIndex={-1} className="mb-4 text-sm font-semibold">Step 1 · Dati aziendali
+                  </h2>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div className="md:col-span-2">
                       <label className="premium-login-field-label" htmlFor="signup-tenantName">Nome azienda *</label>
@@ -476,9 +433,9 @@ export const SignupPage = () => {
                           value={form.tenantName}
                           onChange={(event) => setForm((current) => ({ ...current, tenantName: event.target.value }))}
                           placeholder="Es. Fleetum Italia"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.tenantName)} aria-describedby={fieldErrors.tenantName ? "signup-tenantName-error" : undefined} autoComplete="organization"
                         />
-                      </div>
+                      </div>{fieldErrors.tenantName ? <p className="access-field-error" id="signup-tenantName-error">{fieldErrors.tenantName}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-vatNumber">{isItalianCompany ? "Partita IVA" : "VAT / Tax ID"} *</label>
@@ -490,9 +447,9 @@ export const SignupPage = () => {
                           value={form.vatNumber}
                           onChange={(event) => setForm((current) => ({ ...current, vatNumber: normalizeVatNumberForCountry(event.target.value, current.country) }))}
                           placeholder={isItalianCompany ? "11 cifre" : "Identificativo fiscale aziendale"}
-                          required
+                          required aria-invalid={Boolean(fieldErrors.vatNumber)} aria-describedby={fieldErrors.vatNumber ? "signup-vatNumber-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.vatNumber ? <p className="access-field-error" id="signup-vatNumber-error">{fieldErrors.vatNumber}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-legalForm">Forma giuridica</label>
@@ -503,9 +460,9 @@ export const SignupPage = () => {
                           name="legalForm"
                           value={form.legalForm}
                           onChange={(event) => setForm((current) => ({ ...current, legalForm: event.target.value }))}
-                          placeholder="SRL, SPA, ditta individuale..."
+                          placeholder="SRL, SPA, ditta individuale..." aria-invalid={Boolean(fieldErrors.legalForm)} aria-describedby={fieldErrors.legalForm ? "signup-legalForm-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.legalForm ? <p className="access-field-error" id="signup-legalForm-error">{fieldErrors.legalForm}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-taxCode">Codice fiscale azienda</label>
@@ -516,9 +473,9 @@ export const SignupPage = () => {
                           name="taxCode"
                           value={form.taxCode}
                           onChange={(event) => setForm((current) => ({ ...current, taxCode: normalizeTaxCode(event.target.value) }))}
-                          placeholder="Opzionale"
+                          placeholder="Opzionale" aria-invalid={Boolean(fieldErrors.taxCode)} aria-describedby={fieldErrors.taxCode ? "signup-taxCode-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.taxCode ? <p className="access-field-error" id="signup-taxCode-error">{fieldErrors.taxCode}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-companyEmail">Email aziendale *</label>
@@ -531,9 +488,9 @@ export const SignupPage = () => {
                           value={form.companyEmail}
                           onChange={(event) => setForm((current) => ({ ...current, companyEmail: event.target.value }))}
                           placeholder="info@azienda.com"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.companyEmail)} aria-describedby={fieldErrors.companyEmail ? "signup-companyEmail-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.companyEmail ? <p className="access-field-error" id="signup-companyEmail-error">{fieldErrors.companyEmail}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-companyPhone">Telefono aziendale *</label>
@@ -545,9 +502,9 @@ export const SignupPage = () => {
                           value={form.companyPhone}
                           onChange={(event) => setForm((current) => ({ ...current, companyPhone: event.target.value }))}
                           placeholder="+39..."
-                          required
+                          required aria-invalid={Boolean(fieldErrors.companyPhone)} aria-describedby={fieldErrors.companyPhone ? "signup-companyPhone-error" : undefined} autoComplete="tel"
                         />
-                      </div>
+                      </div>{fieldErrors.companyPhone ? <p className="access-field-error" id="signup-companyPhone-error">{fieldErrors.companyPhone}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-website">Sito web</label>
@@ -558,9 +515,9 @@ export const SignupPage = () => {
                           name="website"
                           value={form.website}
                           onChange={(event) => setForm((current) => ({ ...current, website: event.target.value }))}
-                          placeholder="https://azienda.it"
+                          placeholder="https://azienda.it" aria-invalid={Boolean(fieldErrors.website)} aria-describedby={fieldErrors.website ? "signup-website-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.website ? <p className="access-field-error" id="signup-website-error">{fieldErrors.website}</p> : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="premium-login-field-label" htmlFor="signup-legalAddress">Sede legale *</label>
@@ -572,9 +529,9 @@ export const SignupPage = () => {
                           value={form.legalAddress}
                           onChange={(event) => setForm((current) => ({ ...current, legalAddress: event.target.value }))}
                           placeholder="Via, numero civico"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.legalAddress)} aria-describedby={fieldErrors.legalAddress ? "signup-legalAddress-error" : undefined} autoComplete="street-address"
                         />
-                      </div>
+                      </div>{fieldErrors.legalAddress ? <p className="access-field-error" id="signup-legalAddress-error">{fieldErrors.legalAddress}</p> : null}
                     </div>
                     <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                       <div className="min-w-0">
@@ -586,13 +543,13 @@ export const SignupPage = () => {
                             name="country"
                             value={form.country}
                             onChange={(event) => handleCountryChange(event.target.value)}
-                            required
+                            required aria-invalid={Boolean(fieldErrors.country)} aria-describedby={fieldErrors.country ? "signup-country-error" : undefined}
                           >
                             {COUNTRIES.map((country) => (
                               <option key={country.code} value={country.code}>{country.name}</option>
                             ))}
                           </select>
-                        </div>
+                        </div>{fieldErrors.country ? <p className="access-field-error" id="signup-country-error">{fieldErrors.country}</p> : null}
                       </div>
                       {isItalianCompany ? (
                         <div className="min-w-0">
@@ -605,14 +562,14 @@ export const SignupPage = () => {
                               value={form.region}
                               onChange={(event) => handleRegionChange(event.target.value)}
                               required
-                              disabled={geoLoading || !italianGeo}
+                              disabled={geoLoading || !italianGeo} aria-invalid={Boolean(fieldErrors.region)} aria-describedby={fieldErrors.region ? "signup-region-error" : undefined}
                             >
                               <option value="">{geoLoading ? "Caricamento regioni..." : "Seleziona regione"}</option>
                               {(italianGeo?.regions ?? []).map((region) => (
                                 <option key={region} value={region}>{region}</option>
                               ))}
                             </select>
-                          </div>
+                          </div>{fieldErrors.region ? <p className="access-field-error" id="signup-region-error">{fieldErrors.region}</p> : null}
                         </div>
                       ) : null}
                     </div>
@@ -627,14 +584,14 @@ export const SignupPage = () => {
                               value={form.province}
                               onChange={(event) => handleProvinceChange(event.target.value)}
                               required
-                              disabled={!form.region || !italianGeo}
+                              disabled={!form.region || !italianGeo} aria-invalid={Boolean(fieldErrors.province)} aria-describedby={fieldErrors.province ? "signup-province-error" : undefined}
                             >
                               <option value="">Seleziona provincia</option>
                               {provinceOptions.map((province) => (
                                 <option key={province.code} value={province.code}>{province.name} ({province.code})</option>
                               ))}
                             </select>
-                          </div>
+                          </div>{fieldErrors.province ? <p className="access-field-error" id="signup-province-error">{fieldErrors.province}</p> : null}
                         </div>
                         <div className="min-w-0">
                           <label className="premium-login-field-label" htmlFor="signup-municipality">Comune *</label>
@@ -646,14 +603,14 @@ export const SignupPage = () => {
                               value={form.municipalityCode}
                               onChange={(event) => handleMunicipalityChange(event.target.value)}
                               required
-                              disabled={!form.province || !italianGeo}
+                              disabled={!form.province || !italianGeo} aria-invalid={Boolean(fieldErrors.city)} aria-describedby={fieldErrors.city ? "signup-municipality-error" : undefined}
                             >
                               <option value="">Seleziona comune</option>
                               {municipalityOptions.map((municipality) => (
                                 <option key={municipality.code} value={municipality.code}>{municipality.name}</option>
                               ))}
                             </select>
-                          </div>
+                          </div>{fieldErrors.city ? <p className="access-field-error" id="signup-municipality-error">{fieldErrors.city}</p> : null}
                           {selectedMunicipality ? (
                             <p className="mt-1 text-[11px] text-slate-500">
                               ISTAT {selectedMunicipality.istatCode} · Catastale {selectedMunicipality.cadastralCode ?? "n.d."}
@@ -669,9 +626,9 @@ export const SignupPage = () => {
                               value={form.postalCode}
                               onChange={(event) => setForm((current) => ({ ...current, postalCode: normalizePostalCode(event.target.value) }))}
                               placeholder="80100"
-                              required
+                              required aria-invalid={Boolean(fieldErrors.postalCode)} aria-describedby={fieldErrors.postalCode ? "signup-postalCode-error" : undefined} autoComplete="postal-code"
                             />
-                          </div>
+                          </div>{fieldErrors.postalCode ? <p className="access-field-error" id="signup-postalCode-error">{fieldErrors.postalCode}</p> : null}
                           {selectedMunicipality && selectedMunicipality.postalCodes.length > 1 ? (
                             <p className="mt-1 text-[11px] text-slate-500">Comune multi-CAP: inserisci il CAP corretto della sede.</p>
                           ) : null}
@@ -689,9 +646,9 @@ export const SignupPage = () => {
                               value={form.city}
                               onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
                               placeholder="Città"
-                              required
+                              required aria-invalid={Boolean(fieldErrors.city)} aria-describedby={fieldErrors.city ? "signup-city-error" : undefined}
                             />
-                          </div>
+                          </div>{fieldErrors.city ? <p className="access-field-error" id="signup-city-error">{fieldErrors.city}</p> : null}
                         </div>
                         <div className="min-w-0">
                           <label className="premium-login-field-label" htmlFor="signup-province">Provincia/Area *</label>
@@ -702,9 +659,9 @@ export const SignupPage = () => {
                               value={form.province}
                               onChange={(event) => setForm((current) => ({ ...current, province: event.target.value.toUpperCase() }))}
                               placeholder="Area"
-                              required
+                              required aria-invalid={Boolean(fieldErrors.province)} aria-describedby={fieldErrors.province ? "signup-province-error" : undefined}
                             />
-                          </div>
+                          </div>{fieldErrors.province ? <p className="access-field-error" id="signup-province-error">{fieldErrors.province}</p> : null}
                         </div>
                         <div className="min-w-0">
                           <label className="premium-login-field-label" htmlFor="signup-postalCode">Codice postale *</label>
@@ -715,9 +672,9 @@ export const SignupPage = () => {
                               value={form.postalCode}
                               onChange={(event) => setForm((current) => ({ ...current, postalCode: normalizePostalCodeForCountry(event.target.value, current.country) }))}
                               placeholder="Codice postale"
-                              required
+                              required aria-invalid={Boolean(fieldErrors.postalCode)} aria-describedby={fieldErrors.postalCode ? "signup-postalCode-error" : undefined} autoComplete="postal-code"
                             />
-                          </div>
+                          </div>{fieldErrors.postalCode ? <p className="access-field-error" id="signup-postalCode-error">{fieldErrors.postalCode}</p> : null}
                         </div>
                       </div>
                     )}
@@ -731,9 +688,9 @@ export const SignupPage = () => {
                           type="email"
                           value={form.pec}
                           onChange={(event) => setForm((current) => ({ ...current, pec: event.target.value }))}
-                          placeholder="pec@azienda.it"
+                          placeholder="pec@azienda.it" aria-invalid={Boolean(fieldErrors.pec)} aria-describedby={fieldErrors.pec ? "signup-pec-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.pec ? <p className="access-field-error" id="signup-pec-error">{fieldErrors.pec}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-sdiCode">Codice SDI</label>
@@ -744,9 +701,9 @@ export const SignupPage = () => {
                           name="sdiCode"
                           value={form.sdiCode}
                           onChange={(event) => setForm((current) => ({ ...current, sdiCode: normalizeSdiCode(event.target.value) }))}
-                          placeholder="7 caratteri"
+                          placeholder="7 caratteri" aria-invalid={Boolean(fieldErrors.sdiCode)} aria-describedby={fieldErrors.sdiCode ? "signup-sdiCode-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.sdiCode ? <p className="access-field-error" id="signup-sdiCode-error">{fieldErrors.sdiCode}</p> : null}
                       <p className="mt-1 text-[11px] text-slate-500">
                         Formato controllato. La verifica effettiva sarà manuale o tramite provider; la PEC resta obbligatoria.
                       </p>
@@ -778,9 +735,8 @@ export const SignupPage = () => {
 
               {currentStep === 1 ? (
                 <div className="rounded-2xl border border-white/60 bg-white/45 p-3 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Step 2 · Referente e accesso admin
-                  </p>
+                  <h2 id="signup-step-title" tabIndex={-1} className="mb-4 text-sm font-semibold">Step 2 · Referente e accesso admin
+                  </h2>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-firstName">Nome</label>
@@ -792,9 +748,9 @@ export const SignupPage = () => {
                           value={form.firstName}
                           onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
                           placeholder="Nome"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.firstName)} aria-describedby={fieldErrors.firstName ? "signup-firstName-error" : undefined} autoComplete="given-name"
                         />
-                      </div>
+                      </div>{fieldErrors.firstName ? <p className="access-field-error" id="signup-firstName-error">{fieldErrors.firstName}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-lastName">Cognome</label>
@@ -806,9 +762,9 @@ export const SignupPage = () => {
                           value={form.lastName}
                           onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
                           placeholder="Cognome"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.lastName)} aria-describedby={fieldErrors.lastName ? "signup-lastName-error" : undefined} autoComplete="family-name"
                         />
-                      </div>
+                      </div>{fieldErrors.lastName ? <p className="access-field-error" id="signup-lastName-error">{fieldErrors.lastName}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-adminPhone">Telefono referente</label>
@@ -819,9 +775,9 @@ export const SignupPage = () => {
                           name="adminPhone"
                           value={form.adminPhone}
                           onChange={(event) => setForm((current) => ({ ...current, adminPhone: event.target.value }))}
-                          placeholder="+39..."
+                          placeholder="+39..." aria-invalid={Boolean(fieldErrors.adminPhone)} aria-describedby={fieldErrors.adminPhone ? "signup-adminPhone-error" : undefined} autoComplete="tel"
                         />
-                      </div>
+                      </div>{fieldErrors.adminPhone ? <p className="access-field-error" id="signup-adminPhone-error">{fieldErrors.adminPhone}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-adminRole">Ruolo in azienda</label>
@@ -832,9 +788,9 @@ export const SignupPage = () => {
                           name="adminRole"
                           value={form.adminRole}
                           onChange={(event) => setForm((current) => ({ ...current, adminRole: event.target.value }))}
-                          placeholder="Owner, admin, operations..."
+                          placeholder="Owner, admin, operations..." aria-invalid={Boolean(fieldErrors.adminRole)} aria-describedby={fieldErrors.adminRole ? "signup-adminRole-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.adminRole ? <p className="access-field-error" id="signup-adminRole-error">{fieldErrors.adminRole}</p> : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="premium-login-field-label" htmlFor="signup-email">Email login</label>
@@ -848,9 +804,9 @@ export const SignupPage = () => {
                           onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
                           placeholder="admin@azienda.com"
                           autoComplete="email"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? "signup-email-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.email ? <p className="access-field-error" id="signup-email-error">{fieldErrors.email}</p> : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="premium-login-field-label" htmlFor="signup-password">Password</label>
@@ -859,14 +815,15 @@ export const SignupPage = () => {
                         <input
                           id="signup-password"
                           name="password"
-                          type="password"
+                          type={passwordVisible ? "text" : "password"}
                           value={form.password}
                           onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                           placeholder="Min. 8 caratteri, maiuscola, numero e simbolo"
                           autoComplete="new-password"
-                          required
+                          required aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? "signup-password-error" : undefined}
                         />
-                      </div>
+                        <button type="button" className="access-signup-password-toggle" aria-label={passwordVisible ? "Nascondi password" : "Mostra password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible(value => !value)}>{passwordVisible ? "Nascondi" : "Mostra"}</button>
+                      </div>{fieldErrors.password ? <p className="access-field-error" id="signup-password-error">{fieldErrors.password}</p> : null}
                       <p className="mt-2 text-xs text-slate-500">
                         Usa almeno 8 caratteri con una maiuscola, un numero e un simbolo.
                       </p>
@@ -877,16 +834,15 @@ export const SignupPage = () => {
 
               {currentStep === 2 ? (
                 <div className="rounded-2xl border border-white/60 bg-white/45 p-3 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Step 3 · Conferma workspace
-                  </p>
+                  <h2 id="signup-step-title" tabIndex={-1} className="mb-4 text-sm font-semibold">Step 3 · Conferma workspace
+                  </h2>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-4">
+                    <div className="access-summary rounded-2xl border border-slate-200/70 bg-white/70 p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Azienda</p>
                       <p className="mt-2 text-base font-semibold text-slate-900">{form.tenantName || "Non indicata"}</p>
                       <p className="mt-1 text-sm text-slate-500">{form.companyEmail || form.email || "Email non indicata"}</p>
                     </div>
-                    <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-4">
+                    <div className="access-summary rounded-2xl border border-slate-200/70 bg-white/70 p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Admin</p>
                       <p className="mt-2 text-base font-semibold text-slate-900">
                         {[form.firstName, form.lastName].filter(Boolean).join(" ") || "Non indicato"}
@@ -903,9 +859,9 @@ export const SignupPage = () => {
                           type="text"
                           value={form.primaryColor}
                           onChange={(event) => setForm((current) => ({ ...current, primaryColor: event.target.value }))}
-                          placeholder="#21375d"
+                          placeholder="#21375d" aria-invalid={Boolean(fieldErrors.primaryColor)} aria-describedby={fieldErrors.primaryColor ? "signup-primaryColor-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.primaryColor ? <p className="access-field-error" id="signup-primaryColor-error">{fieldErrors.primaryColor}</p> : null}
                     </div>
                     <div>
                       <label className="premium-login-field-label" htmlFor="signup-accentColor">Colore accento</label>
@@ -917,9 +873,9 @@ export const SignupPage = () => {
                           type="text"
                           value={form.accentColor}
                           onChange={(event) => setForm((current) => ({ ...current, accentColor: event.target.value }))}
-                          placeholder="#5d82c2"
+                          placeholder="#5d82c2" aria-invalid={Boolean(fieldErrors.accentColor)} aria-describedby={fieldErrors.accentColor ? "signup-accentColor-error" : undefined}
                         />
-                      </div>
+                      </div>{fieldErrors.accentColor ? <p className="access-field-error" id="signup-accentColor-error">{fieldErrors.accentColor}</p> : null}
                     </div>
                   </div>
 
@@ -929,7 +885,7 @@ export const SignupPage = () => {
                       type="checkbox"
                       checked={privacyAccepted}
                       onChange={(event) => setPrivacyAccepted(event.target.checked)}
-                      required
+                      required aria-invalid={Boolean(fieldErrors.privacy)} aria-describedby={fieldErrors.privacy ? "signup-privacy-error" : undefined}
                     />
                     <span className="leading-5">
                       Ho letto l'{" "}
@@ -938,7 +894,7 @@ export const SignupPage = () => {
                       </Link>{" "}
                       e confermo la presa visione.
                     </span>
-                  </label>
+                  </label>{fieldErrors.privacy ? <p className="access-field-error" id="signup-privacy-error">{fieldErrors.privacy}</p> : null}
                 </div>
               ) : null}
 
@@ -948,7 +904,7 @@ export const SignupPage = () => {
                 </p>
               ) : null}
 
-              {error ? <p className="premium-login-error premium-login-error--block">{error}</p> : null}
+              {error ? <AccessNotice focus>{error}</AccessNotice> : null}
 
               <div className="flex flex-col gap-3 sm:flex-row">
                 {currentStep > 0 ? (
@@ -963,7 +919,7 @@ export const SignupPage = () => {
                 ) : null}
 
                 {currentStep < SIGNUP_STEPS.length - 1 ? (
-                  <button type="button" className="premium-login-submit" onClick={goToNextStep}>
+                  <button type="button" className="premium-login-submit" onClick={event => { event.preventDefault(); goToNextStep(); }} disabled={loading}>
                     <span className="premium-login-submit-shimmer" aria-hidden />
                     {currentStep === 0 ? "Continua con referente" : "Continua alla conferma"}
                   </button>
@@ -986,11 +942,7 @@ export const SignupPage = () => {
                 Hai già un account?
                 <button type="button" className="premium-login-link" onClick={() => navigate("/login")}>Vai al login →</button>
               </p>
-            </form>
-            )}
-          </div>
-        </section>
-      </main>
-    </div>
-  );
+            </fieldset></form>
+    )}
+  </AccessShell>;
 };

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, BadgeEuro, CheckCircle2, CreditCard, Euro, FileWarning, Loader2, LockKeyhole, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import {
@@ -12,6 +12,8 @@ import {
   RentalPaymentSummaryDto,
   rentalPaymentsUseCases
 } from "../../../application/usecases/rental-payments-usecases";
+import { useDialogFocus } from "../../hooks/use-dialog-focus";
+import { BookingDetailSection } from "../bookings/booking-detail-section";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -110,10 +112,20 @@ const formatDateTime = (value?: string | null) => {
 };
 
 const eurosToCents = (value: string) => {
-  const normalized = value.replace(/\./g, "").replace(",", ".").trim();
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.round(parsed * 100);
+  const input = value.trim();
+  let normalized: string;
+  if (/^\d+(?:[.,]\d{1,2})?$/.test(input)) {
+    normalized = input.replace(",", ".");
+  } else if (/^[1-9]\d{0,2}(?:\.\d{3})+(?:,\d{1,2})?$/.test(input)) {
+    normalized = input.replace(/\./g, "").replace(",", ".");
+  } else if (/^[1-9]\d{0,2}(?:,\d{3})+\.\d{1,2}$/.test(input)) {
+    normalized = input.replace(/,/g, "");
+  } else {
+    return null;
+  }
+  const [euros, decimals = ""] = normalized.split(".");
+  const cents = Number(euros + decimals.padEnd(2, "0"));
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : null;
 };
 
 const optionalEurosToCents = (value: string) => {
@@ -356,12 +368,13 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card/70 p-3 shadow-sm">
+    <BookingDetailSection title="Pagamenti e garanzie" description="Carta cliente, deposito cauzionale e addebiti extra." icon={<ShieldCheck />} initiallyOpen={Boolean(paymentSetupStatus)}>
+    <div className="booking-payment-panel space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-primary" />
-            <Label>Pagamenti & Garanzie</Label>
+            <h4 className="font-semibold">Situazione dei pagamenti</h4>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             Carta cliente finale, deposito cauzionale e addebiti extra collegati alla prenotazione.
@@ -379,12 +392,14 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
         </div>
       ) : null}
       {error ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+        <div className="booking-detail-error" role="alert">
           {error}
         </div>
       ) : null}
 
-      <div className="grid gap-2 md:grid-cols-3 2xl:grid-cols-1">
+      {loading ? <p role="status" className="booking-detail-loading"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Caricamento situazione pagamenti...</p> : null}
+      <div hidden={loading || !summary}>
+      <div className="grid gap-2 md:grid-cols-3">
         <div className="rounded-xl border bg-muted/10 p-3">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             <CreditCard className="h-3.5 w-3.5" /> Carta garanzia
@@ -571,8 +586,9 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
           <div className="space-y-3">
             <FieldPaymentMethodSelect value={selectedPaymentMethodId} onChange={setSelectedPaymentMethodId} methods={activePaymentMethods} />
             <div className="space-y-1">
-              <Label>Importo deposito</Label>
-              <Input value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} inputMode="decimal" placeholder="500,00" />
+              <Label htmlFor="booking-deposit-amount">Importo deposito</Label>
+              <Input id="booking-deposit-amount" aria-describedby="booking-deposit-amount-hint" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} inputMode="decimal" placeholder="500,00" />
+              <p id="booking-deposit-amount-hint" className="text-xs text-muted-foreground">Usa la virgola o il punto per i centesimi: 75,00 oppure 75.00.</p>
             </div>
             <Button className="w-full" onClick={() => void runCreateDeposit()} disabled={!selectedPaymentMethodId || isActionBusy(actionBusy, "create-deposit")}>
               {isActionBusy(actionBusy, "create-deposit") ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
@@ -587,30 +603,31 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label>Tipo</Label>
-                <Select value={extraForm.type} onChange={(e) => setExtraForm((state) => ({ ...state, type: e.target.value as RentalExtraChargeType }))}>
+                <Label htmlFor="booking-extra-type">Tipo</Label>
+                <Select id="booking-extra-type" value={extraForm.type} onChange={(e) => setExtraForm((state) => ({ ...state, type: e.target.value as RentalExtraChargeType }))}>
                   {extraTypeOptions.map((type) => <option key={type} value={type}>{extraTypeLabels[type]}</option>)}
                 </Select>
               </div>
               <FieldPaymentMethodSelect value={extraForm.paymentMethodId} onChange={(value) => setExtraForm((state) => ({ ...state, paymentMethodId: value }))} methods={activePaymentMethods} optional />
             </div>
             <div className="space-y-1">
-              <Label>Descrizione</Label>
-              <Textarea rows={3} value={extraForm.description} onChange={(e) => setExtraForm((state) => ({ ...state, description: e.target.value }))} placeholder="Es. Pedaggio autostradale A1" />
+              <Label htmlFor="booking-extra-description">Descrizione</Label>
+              <Textarea id="booking-extra-description" rows={3} value={extraForm.description} onChange={(e) => setExtraForm((state) => ({ ...state, description: e.target.value }))} placeholder="Es. Pedaggio autostradale A1" />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label>Importo</Label>
-                <Input value={extraForm.amount} onChange={(e) => setExtraForm((state) => ({ ...state, amount: e.target.value }))} inputMode="decimal" placeholder="75,00" />
+                <Label htmlFor="booking-extra-amount">Importo</Label>
+                <Input id="booking-extra-amount" aria-describedby="booking-extra-amount-hint" value={extraForm.amount} onChange={(e) => setExtraForm((state) => ({ ...state, amount: e.target.value }))} inputMode="decimal" placeholder="75,00" />
               </div>
               <div className="space-y-1">
-                <Label>Spese amministrative</Label>
-                <Input value={extraForm.adminFee} onChange={(e) => setExtraForm((state) => ({ ...state, adminFee: e.target.value }))} inputMode="decimal" placeholder="10,00" />
+                <Label htmlFor="booking-extra-admin-fee">Spese amministrative</Label>
+                <Input id="booking-extra-admin-fee" aria-describedby="booking-extra-amount-hint" value={extraForm.adminFee} onChange={(e) => setExtraForm((state) => ({ ...state, adminFee: e.target.value }))} inputMode="decimal" placeholder="10,00" />
               </div>
             </div>
+            <p id="booking-extra-amount-hint" className="text-xs text-muted-foreground">Usa la virgola o il punto per i centesimi: 75,00 oppure 75.00.</p>
             <div className="space-y-1">
-              <Label>Documento/evidenza URL</Label>
-              <Input value={extraForm.evidenceFileUrl} onChange={(e) => setExtraForm((state) => ({ ...state, evidenceFileUrl: e.target.value }))} placeholder="https://..." />
+              <Label htmlFor="booking-extra-evidence">Documento/evidenza URL</Label>
+              <Input id="booking-extra-evidence" value={extraForm.evidenceFileUrl} onChange={(e) => setExtraForm((state) => ({ ...state, evidenceFileUrl: e.target.value }))} placeholder="https://..." />
               <p className="text-[11px] text-muted-foreground">Per multe e danni e consigliato collegare una prova o un documento.</p>
             </div>
             <Button className="w-full" onClick={() => void runCreateExtraCharge()} disabled={isActionBusy(actionBusy, "create-extra")}>
@@ -620,7 +637,9 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
           </div>
         </PanelModal>
       ) : null}
+      </div>
     </div>
+    </BookingDetailSection>
   );
 };
 
@@ -634,25 +653,41 @@ const FieldPaymentMethodSelect = ({
   onChange: (value: string) => void;
   methods: RentalPaymentMethodDto[];
   optional?: boolean;
-}) => (
+}) => {
+  const id = useId();
+  return (
   <div className="space-y-1">
-    <Label>Metodo di pagamento</Label>
-    <Select value={value} onChange={(event) => onChange(event.target.value)}>
+    <Label htmlFor={id}>Metodo di pagamento</Label>
+    <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
       {optional ? <option value="">Da scegliere prima dell'addebito</option> : <option value="">Seleziona carta attiva</option>}
       {methods.map((method) => (
-        <option key={method.id} value={method.id}>
+        <option translate="no" key={method.id} value={method.id}>
           {methodDisplay(method)}{methodExpiry(method) ? ` · ${methodExpiry(method)}` : ""}
         </option>
       ))}
     </Select>
   </div>
-);
+  );
+};
 
-const PanelModal = ({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) => (
-  <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+const PanelModal = ({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) => {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+  useDialogFocus(true, dialogRef, onClose);
+  useEffect(() => {
+    const { overflow, overscrollBehavior } = document.body.style;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
+    return () => {
+      document.body.style.overflow = overflow;
+      document.body.style.overscrollBehavior = overscrollBehavior;
+    };
+  }, []);
+  return (
+  <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={titleId}>
     <Card className="max-h-[90vh] w-full max-w-2xl overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between gap-3 border-b pb-3">
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle id={titleId} className="text-base">{title}</CardTitle>
         <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Chiudi modale">
           <X className="h-4 w-4" />
         </Button>
@@ -660,4 +695,5 @@ const PanelModal = ({ title, children, onClose }: { title: string; children: Rea
       <CardContent className="max-h-[calc(90vh-5rem)] overflow-y-auto p-4">{children}</CardContent>
     </Card>
   </div>
-);
+  );
+};

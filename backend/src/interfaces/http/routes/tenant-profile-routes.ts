@@ -3,6 +3,7 @@ import { uploadContractLogo } from "../../../infrastructure/storage/multer.js";
 import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { TenantProfileController } from "../controllers/tenant-profile-controller.js";
 import { requirePermissions } from "../middlewares/permissions.js";
+import { requireCompanyResourceView } from "../middlewares/company-resources.js";
 import { asyncHandler } from "./async-handler.js";
 
 export const tenantProfileRoutes = (controller: TenantProfileController) => {
@@ -14,6 +15,7 @@ export const tenantProfileRoutes = (controller: TenantProfileController) => {
   router.post(
     "/branding/logo",
     requirePermissions("users:write"),
+    requireCompanyResourceView,
     cleanupOnUploadFailure(uploadContractLogo.single("file")),
     asyncHandler(controller.uploadLogo)
   );

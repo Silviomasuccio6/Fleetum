@@ -1,5 +1,10 @@
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
 
+import { assertCompanyResourceView, assertSharedCompanyResourceView } from "../../infrastructure/auth/company-resource-access.js";
+import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { AppError } from "../../shared/errors/app-error.js";
+import { companyReportAuthorizationReason, parseCompanyReportAuthorization, type CompanyReportAuthorization } from "./company-report-authorization.js";
+
 const keyMap = {
   sla: "SETTINGS_SLA",
   playbooks: "SETTINGS_PLAYBOOKS",
@@ -34,16 +39,25 @@ export class SettingsService {
   constructor(private readonly repository: AuditLogRepository) {}
 
   async getByResource(tenantId: string, resource: SettingsResource) {
+    if (resource === "reports" || resource === "integrations") assertCompanyResourceView(tenantId);
+    else assertSharedCompanyResourceView(tenantId);
     const row = await this.repository.getLatestByAction(tenantId, resource, keyMap[resource]);
     const details = (row?.details as any) ?? defaults[resource];
-    if (details && typeof details === "object" && "__meta" in details) {
-      const { __meta, ...clean } = details as any;
-      return clean;
+    const needsConfirmation = resource === "reports" && details?.enabled === true && !parseCompanyReportAuthorization(details.__siteAuthorization);
+    if (details && typeof details === "object" && ("__meta" in details || "__siteAuthorization" in details)) {
+      const { __meta, __siteAuthorization, ...clean } = details as any;
+      return needsConfirmation ? {...clean,siteConfirmationRequired:true} : clean;
     }
-    return details;
+    return needsConfirmation ? {...details,siteConfirmationRequired:true} : details;
   }
 
   async setByResource(tenantId: string, userId: string | undefined, resource: SettingsResource, details: unknown) {
+    const scope = assertCompanyResourceView(tenantId);
+    if (resource === "reports" && scope) {
+      const authorization: CompanyReportAuthorization = { version: 1, kind: "company", userId: userId ?? "" };
+      if (await companyReportAuthorizationReason(prisma, tenantId, authorization)) throw new AppError("Configurazione report non consentita", 403, "FORBIDDEN");
+      details = { ...(details as object), __siteAuthorization: authorization };
+    }
     await this.repository.create({
       tenantId,
       userId,

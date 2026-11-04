@@ -1,3 +1,4 @@
+import {grantSyntheticAdmin,commandAuthorization,removeSyntheticActorRoles,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { RentalPaymentService } from "../../src/application/services/rental-payment-service.js";
@@ -12,7 +13,7 @@ const tenantIds: string[] = [];
 const directQueueIds: string[] = [];
 const originalSend = emailSender.send;
 const queue = new EmailQueueService();
-const service = () => new RentalPaymentService(new PrismaAuditLogRepository(), null, {}, queue);
+const service = () => {const value=new RentalPaymentService(new PrismaAuditLogRepository(),null,{},queue);const notify=value.notifyExtraCharge.bind(value);value.notifyExtraCharge=input=>withCompanyScope(input.tenantId,()=>notify(input));return value;};
 let sequence = 0;
 
 const fixture = async (suffix: string) => {
@@ -23,13 +24,14 @@ const fixture = async (suffix: string) => {
   const user = await prisma.user.create({ data: {
     tenantId: tenant.id, email: `${suffix}-${sequence}@example.test`, firstName: "Synthetic", lastName: "Notice", passwordHash: "synthetic-unused-hash"
   } });
+  await grantSyntheticAdmin(user.id);
   const site = await prisma.site.create({ data: { tenantId: tenant.id, name: `${marker}_SITE`, address: "Synthetic", city: "Synthetic" } });
   const vehicle = await prisma.vehicle.create({ data: { tenantId: tenant.id, siteId: site.id, plate: `${marker}_PLATE`, brand: "Synthetic", model: "Synthetic" } });
   const customer = await prisma.rentalCustomer.create({ data: {
     tenantId: tenant.id, firstName: "Synthetic", lastName: "Customer", email: `${suffix}-${sequence}-customer@example.test`
   } });
   const booking = await prisma.rentalBooking.create({ data: {
-    tenantId: tenant.id, vehicleId: vehicle.id, customerId: customer.id, createdByUserId: user.id,
+    tenantId: tenant.id,siteId:site.id,pickupSiteId:site.id,returnSiteId:site.id, vehicleId: vehicle.id, customerId: customer.id, createdByUserId: user.id,
     code: `${marker}_BOOKING`, customerName: "Synthetic Customer", customerEmail: `${suffix}-${sequence}-fallback@example.test`,
     status: "CLOSED", pickupAt: new Date("2030-01-01T00:00:00.000Z"), returnAt: new Date("2030-01-02T00:00:00.000Z")
   } });
@@ -148,6 +150,7 @@ describe("extra charge notice preparation, authorization and receipt atomicity",
     await prisma.rentalCustomer.deleteMany({ where: { tenantId: own } });
     await prisma.vehicle.deleteMany({ where: { tenantId: own } });
     await prisma.site.deleteMany({ where: { tenantId: own } });
+    await removeSyntheticActorRoles(tenantIds);
     await prisma.user.deleteMany({ where: { tenantId: own } });
     await prisma.auditLog.deleteMany({ where: { tenantId: own } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: own } });

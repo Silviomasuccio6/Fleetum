@@ -92,6 +92,12 @@ export class ExactMoneyReader {
     private readonly dependencies: ExactMoneyReaderDependencies = defaultDependencies
   ) {}
 
+  // Preserve read mode, mismatch reporting and metrics when a caller requires
+  // all reads to use the same database transaction snapshot.
+  withQuery(query: ExactMoneyReaderDependencies["query"]) {
+    return new ExactMoneyReader(this.mode, { ...this.dependencies, query });
+  }
+
   async hydrate<T extends ExactMoneyRecord>(
     model: ExactMoneyModel,
     records: readonly T[],

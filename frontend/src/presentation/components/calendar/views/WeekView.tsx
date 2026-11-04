@@ -1,3 +1,4 @@
+import { useFleetumLanguage } from "../../../i18n/fleetum-language";
 import { CalendarEvent, CalendarItem } from "../calendar-types";
 import { EventBlock } from "../EventBlock";
 import {
@@ -7,8 +8,7 @@ import {
   getNowLineTop,
   intersectsDay,
   positionDayEvents,
-  toDateKey,
-  weekdayLabelsShort
+  toDateKey
 } from "../calendar-utils";
 import { getWeekStart } from "../hooks/useCalendar";
 import { cn } from "../../../../lib/utils";
@@ -38,6 +38,8 @@ export const WeekView = ({
   onEventMoveEnd,
   onCreateAt
 }: WeekViewProps) => {
+  const { language } = useFleetumLanguage();
+  const locale = language === "en" ? "en-GB" : "it-IT";
   const weekStart = getWeekStart(viewDate);
   const weekDays = Array.from({ length: 7 }, (_, idx) => addDays(weekStart, idx));
   const todayKey = toDateKey(new Date());
@@ -45,10 +47,10 @@ export const WeekView = ({
   const nowTop = getNowLineTop();
 
   return (
-    <div className="calendar-week" role="grid" aria-label="Calendario settimanale">
+    <div className="calendar-week" role="group" aria-label="Calendario settimanale">
       <div className="calendar-week__header">
         <div className="calendar-week__time-head" />
-        {weekDays.map((day, index) => {
+        {weekDays.map((day) => {
           const key = toDateKey(day);
           const isToday = key === todayKey;
           const isSelected = key === selectedKey;
@@ -60,8 +62,10 @@ export const WeekView = ({
               className={cn("calendar-week__day-head", isToday && "is-today", isSelected && "is-selected")}
               onClick={() => onPickDay(day)}
               aria-current={isToday ? "date" : undefined}
+                aria-pressed={isSelected}
+                aria-label={day.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             >
-              <span className="calendar-week__weekday">{weekdayLabelsShort[index]}</span>
+              <span className="calendar-week__weekday">{day.toLocaleDateString(locale, { weekday: "short" })}</span>
               <span className="calendar-week__daynum">{day.getDate()}</span>
             </button>
           );

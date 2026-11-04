@@ -1,670 +1,143 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { FileText, Trash2, Upload, X } from "lucide-react";
+import { type ChangeEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
-import { PageHeader } from "../../components/layout/page-header";
+import { WorkspacePageHeader } from "../../components/ui/workspace-ui";
+import { VehicleCollection, VehicleDetails, VehicleDrawer, VehicleEditor, VehicleOpenLinks } from "../../components/vehicles/vehicle-workspace";
+import { vehicleFormData, vehicleFieldGroups, vehicleNumber, type VehicleErrors } from "../../components/vehicles/vehicle-form";
+import type { PanelMotionHandle } from "../../components/ui/panel-motion";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
-type ImportVehicleError = {
-  row: number;
-  field: string;
-  reason: string;
-  value?: string;
-};
-
-type ImportVehicleResult = {
-  totalRows: number;
-  validRows: number;
-  inserted: number;
-  skipped: number;
-  errors: ImportVehicleError[];
-  dryRun: boolean;
-};
-
+type ImportVehicleResult = { totalRows: number; validRows: number; inserted: number; skipped: number; errors: Array<{ row: number; field: string; reason: string; value?: string }>; dryRun: boolean };
 const PAGE_SIZE = 20;
-const toDateInputValue = (value?: string | Date | null) => {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
-};
-
-const formatDate = (value?: string | Date | null) => {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleDateString("it-IT");
-};
-
-const formatMonthYear = (value?: string | Date | null) => {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleDateString("it-IT", { month: "long", year: "numeric" });
-};
-
-const toIsoAtNoon = (value: string) => new Date(`${value.trim()}T12:00:00`).toISOString();
-
-const formatBytes = (value?: number | null) => {
-  if (!value || value <= 0) return "-";
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-};
-
 export const VehiclesPage = () => {
   const navigate = useNavigate();
-  const [sites, setSites] = useState<any[]>([]);
-  const [vehicles, setVehicles] = useState<any[]>([]);
-  const [totalVehicles, setTotalVehicles] = useState(0);
-  const [searchInput, setSearchInput] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [importPanelOpen, setImportPanelOpen] = useState(false);
-  const [mode, setMode] = useState<"create" | "edit">("create");
-  const [editingVehicle, setEditingVehicle] = useState<any | null>(null);
-  const [bookletFile, setBookletFile] = useState<File | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importDefaultSiteId, setImportDefaultSiteId] = useState("");
-  const [importDryRun, setImportDryRun] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<ImportVehicleResult | null>(null);
-
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(totalVehicles / PAGE_SIZE)), [totalVehicles]);
-
-  const loadSites = async () => {
-    const sitesRes = await masterDataUseCases.listSites({ page: 1, pageSize: 200 });
-    setSites(sitesRes.data);
+  const permissions = useAuthStore(state => state.user?.permissions) ?? [];
+  const has = (key:string) => permissions.includes("*") || permissions.includes(key);
+  const canRead = has("vehicles:read"), canWrite = has("vehicles:write"), canReadSites = canWrite && has("sites:read"), canRoi = has("stats:read");
+  const [sites,setSites]=useState<any[]>([]), [vehicles,setVehicles]=useState<any[]>([]);
+  const [totalVehicles,setTotalVehicles]=useState(0), [page,setPage]=useState(1);
+  const [searchInput,setSearchInput]=useState(""), [searchQuery,setSearchQuery]=useState("");
+  const [loading,setLoading]=useState(true), [listError,setListError]=useState<string|null>(null);
+  const [sitesLoading,setSitesLoading]=useState(false), [sitesError,setSitesError]=useState<string|null>(null);
+  const [error,setError]=useState<string|null>(null), [success,setSuccess]=useState<string|null>(null);
+  const [panelOpen,setPanelOpen]=useState(false), [importPanelOpen,setImportPanelOpen]=useState(false);
+  const [mode,setMode]=useState<"create"|"edit"|"view">("create"), [editingVehicle,setEditingVehicle]=useState<any|null>(null);
+  const [bookletFile,setBookletFile]=useState<File|null>(null), [saving,setSaving]=useState(false);
+  const [fieldErrors,setFieldErrors]=useState<VehicleErrors>({});
+  const [importFile,setImportFile]=useState<File|null>(null), [importDefaultSiteId,setImportDefaultSiteId]=useState("");
+  const [importDryRun,setImportDryRun]=useState(false), [importLoading,setImportLoading]=useState(false), [importResult,setImportResult]=useState<ImportVehicleResult|null>(null);
+  const [deletion,setDeletion]=useState<{kind:"vehicle"|"booklet";id:string;plate:string}|null>(null), [deleting,setDeleting]=useState(false);
+  const requestSequence=useRef(0), editorErrorRef=useRef<HTMLDivElement>(null);
+  const panelMotion=useRef<PanelMotionHandle|null>(null), importMotion=useRef<PanelMotionHandle|null>(null), panelOrigin=useRef<HTMLElement|null>(null), animateOpen=useRef(true);
+  const totalPages=useMemo(()=>Math.max(1,Math.ceil(totalVehicles/PAGE_SIZE)),[totalVehicles]);
+  const loadSites=useCallback(async()=>{
+    if(!canReadSites)return;
+    setSitesLoading(true);setSitesError(null);
+    try{const result=await masterDataUseCases.listSites({page:1,pageSize:200});setSites(result.data)}
+    catch(e){setSitesError((e as Error).message)}finally{setSitesLoading(false)}
+  },[canReadSites]);
+  const loadVehicles=useCallback(async(targetPage:number,targetSearch:string)=>{
+    if(!canRead)return;
+    const sequence=++requestSequence.current;
+    setLoading(true);setListError(null);
+    try{
+      const result=await masterDataUseCases.listVehicles({page:targetPage,pageSize:PAGE_SIZE,search:targetSearch||undefined});
+      if(sequence!==requestSequence.current)return;
+      const total=typeof result.total === "number" ? result.total : result.data.length;
+      const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+      if(targetPage>pages){setPage(pages);return;}
+      setVehicles(result.data);setTotalVehicles(total);
+    }catch(e){if(sequence===requestSequence.current)setListError((e as Error).message)}
+    finally{if(sequence===requestSequence.current)setLoading(false)}
+  },[canRead]);
+  const reloadVehicles=()=>loadVehicles(page,searchQuery);
+  useEffect(()=>{void loadSites()},[loadSites]);
+  useEffect(()=>{const timer=window.setTimeout(()=>{setPage(1);setSearchQuery(searchInput.trim())},300);return()=>window.clearTimeout(timer)},[searchInput]);
+  useEffect(()=>{void loadVehicles(page,searchQuery);return()=>{requestSequence.current++}},[loadVehicles,page,searchQuery]);
+  useEffect(()=>{if(!importDefaultSiteId&&sites.find(site=>site.isActive!==false)?.id)setImportDefaultSiteId(String(sites.find(site=>site.isActive!==false).id))},[importDefaultSiteId,sites]);
+  useEffect(()=>{if((panelOpen||importPanelOpen)&&(error||Object.keys(fieldErrors).length))editorErrorRef.current?.focus()},[error,fieldErrors,panelOpen,importPanelOpen]);
+  const closePanel=()=>{if(!saving&&!deletion){const done=()=>{setPanelOpen(false);setFieldErrors({});setError(null)};if(panelMotion.current)panelMotion.current.dismiss(done);else done()}};
+  const closeImport=()=>{if(!importLoading){const done=()=>{setImportPanelOpen(false);setError(null)};if(importMotion.current)importMotion.current.dismiss(done);else done()}};
+  const openPanel=(next:"create"|"edit"|"view",vehicle:any=null,origin?:HTMLElement)=>{
+    if(next!=="view"&&!canWrite)return;
+    animateOpen.current=!panelOpen; if(!panelOpen)panelOrigin.current=origin??null;
+    setMode(next);setEditingVehicle(vehicle);setBookletFile(null);setFieldErrors({});setError(null);setImportPanelOpen(false);setPanelOpen(true);
   };
-
-  const loadVehicles = async (targetPage: number, targetSearch: string) => {
-    setLoading(true);
+  const openImportPanel=()=>{if(!canWrite)return;setPanelOpen(false);setBookletFile(null);setImportResult(null);setImportFile(null);setImportDryRun(false);setError(null);setSuccess(null);setImportPanelOpen(true)};
+  const onBookletFileChange=(e:ChangeEvent<HTMLInputElement>)=>setBookletFile(e.target.files?.[0]??null);
+  const onOpenBooklet=async(bookletId:string)=>{
     setError(null);
-    try {
-      const vehiclesRes = await masterDataUseCases.listVehicles({
-        page: targetPage,
-        pageSize: PAGE_SIZE,
-        search: targetSearch || undefined
-      });
-      const nextTotal = typeof vehiclesRes.total === "number" ? vehiclesRes.total : vehiclesRes.data.length;
-      const nextTotalPages = Math.max(1, Math.ceil(nextTotal / PAGE_SIZE));
-      if (targetPage > nextTotalPages) {
-        setPage(nextTotalPages);
-        return;
+    try{const blob=await masterDataUseCases.downloadVehicleBooklet(bookletId);const url=URL.createObjectURL(blob);window.open(url,"_blank","noopener,noreferrer");window.setTimeout(()=>URL.revokeObjectURL(url),60_000)}catch(e){setError((e as Error).message)}
+  };
+  const onSubmit=async(event:FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();if(!canWrite||saving)return;
+    setError(null);setSuccess(null);
+    const {payload,errors}=vehicleFormData(new FormData(event.currentTarget));setFieldErrors(errors);
+    if(Object.keys(errors).length)return;
+    setSaving(true);let savedVehicle:any=null;
+    try{
+      if(mode==="create")savedVehicle=await masterDataUseCases.createVehicle(payload);
+      else if(editingVehicle)savedVehicle=await masterDataUseCases.updateVehicle(editingVehicle.id,payload);
+      if(!savedVehicle?.id)throw Error("Risposta del salvataggio non disponibile. Ricarica l’elenco prima di riprovare.");
+      if(bookletFile){
+        // A failed attachment must never cause the saved vehicle to be created a second time.
+        setMode("edit");setEditingVehicle(savedVehicle);
+        await masterDataUseCases.uploadVehicleBooklet(savedVehicle.id,bookletFile);
       }
-      setVehicles(vehiclesRes.data);
-      setTotalVehicles(nextTotal);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      setSuccess(mode==="create"?`Veicolo ${payload.plate} creato correttamente.`:`Veicolo ${payload.plate} aggiornato correttamente.`);
+      setPanelOpen(false);setEditingVehicle(null);setBookletFile(null);await reloadVehicles();
+    }catch(e){setError(savedVehicle?`Veicolo salvato. Caricamento libretto non riuscito: ${(e as Error).message}`:(e as Error).message)}
+    finally{setSaving(false)}
   };
-
-  const reloadVehicles = async () => {
-    await loadVehicles(page, searchQuery);
-  };
-
-  useEffect(() => {
-    loadSites().catch((e: Error) => setError(e.message));
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setPage(1);
-      setSearchQuery(searchInput.trim());
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
-
-  useEffect(() => {
-    void loadVehicles(page, searchQuery);
-  }, [page, searchQuery]);
-
-  useEffect(() => {
-    if (!importDefaultSiteId && sites[0]?.id) {
-      setImportDefaultSiteId(String(sites[0].id));
-    }
-  }, [importDefaultSiteId, sites]);
-
-  const openCreatePanel = () => {
-    setMode("create");
-    setEditingVehicle(null);
-    setBookletFile(null);
-    setImportPanelOpen(false);
-    setPanelOpen(true);
-  };
-
-  const openEditPanel = (vehicle: any) => {
-    setMode("edit");
-    setEditingVehicle(vehicle);
-    setBookletFile(null);
-    setImportPanelOpen(false);
-    setPanelOpen(true);
-  };
-
-  const openImportPanel = () => {
-    setPanelOpen(false);
-    setBookletFile(null);
-    setImportResult(null);
-    setImportFile(null);
-    setImportDryRun(false);
-    setError(null);
-    setSuccess(null);
-    setImportPanelOpen(true);
-  };
-
-  const onImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    setImportFile(file);
-  };
-
-  const onBookletFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    setBookletFile(file);
-  };
-
-  const onOpenBooklet = async (bookletId: string) => {
-    setError(null);
-    try {
-      const blob = await masterDataUseCases.downloadVehicleBooklet(bookletId);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const onDeleteBooklet = async (bookletId: string) => {
-    setError(null);
-    setSuccess(null);
-    try {
-      await masterDataUseCases.deleteVehicleBooklet(bookletId);
-      setSuccess("Libretto rimosso.");
-      await reloadVehicles();
-      if (editingVehicle && editingVehicle.booklet?.id === bookletId) {
-        setEditingVehicle({ ...editingVehicle, booklet: null });
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError(null);
-    setSuccess(null);
-    const form = new FormData(event.currentTarget);
-
-    const registrationDateValue = String(form.get("registrationDate") || "").trim();
-    const lastRevisionAtValue = String(form.get("lastRevisionAt") || "").trim();
-    const purchaseDateValue = String(form.get("purchaseDate") || "").trim();
-
-    const payload = {
-      siteId: String(form.get("siteId") || "").trim(),
-      plate: String(form.get("plate") || "").trim().toUpperCase(),
-      brand: String(form.get("brand") || "").trim(),
-      model: String(form.get("model") || "").trim(),
-      year: String(form.get("year") || "").trim() ? Number(form.get("year")) : null,
-      currentKm: String(form.get("currentKm") || "").trim() ? Number(form.get("currentKm")) : null,
-      maintenanceIntervalKm: String(form.get("maintenanceIntervalKm") || "").trim() ? Number(form.get("maintenanceIntervalKm")) : null,
-      registrationDate: registrationDateValue ? toIsoAtNoon(registrationDateValue) : null,
-      lastRevisionAt: lastRevisionAtValue ? toIsoAtNoon(lastRevisionAtValue) : null,
-      purchasePrice: String(form.get("purchasePrice") || "").trim() ? Number(form.get("purchasePrice")) : null,
-      purchaseDate: purchaseDateValue ? toIsoAtNoon(purchaseDateValue) : null,
-      residualValue: String(form.get("residualValue") || "").trim() ? Number(form.get("residualValue")) : null,
-      monthlyFixedCost: String(form.get("monthlyFixedCost") || "").trim() ? Number(form.get("monthlyFixedCost")) : null,
-      notes: String(form.get("notes") || "").trim()
-    };
-
-    if (!payload.siteId || !payload.plate || !payload.brand || !payload.model) {
-      setError("Compila sede, targa, marca e modello.");
-      return;
-    }
-
-    try {
-      let savedVehicle: any;
-      if (mode === "create") {
-        savedVehicle = await masterDataUseCases.createVehicle(payload);
-        setSuccess(`Veicolo ${payload.plate} creato correttamente.`);
-      } else if (editingVehicle) {
-        savedVehicle = await masterDataUseCases.updateVehicle(editingVehicle.id, payload);
-        setSuccess(`Veicolo ${payload.plate} aggiornato correttamente.`);
-      }
-
-      if (bookletFile && savedVehicle?.id) {
-        const uploadResult = await masterDataUseCases.uploadVehicleBooklet(savedVehicle.id, bookletFile);
-        if (uploadResult?.detectedRegistrationDate) {
-          setSuccess(
-            `Veicolo ${payload.plate} aggiornato. Libretto acquisito e immatricolazione rilevata automaticamente (${formatDate(uploadResult.detectedRegistrationDate)}).`
-          );
-        } else {
-          setSuccess(`Veicolo ${payload.plate} aggiornato. Libretto caricato.`);
-        }
-      }
-      setPanelOpen(false);
-      setEditingVehicle(null);
-      setBookletFile(null);
-      await reloadVehicles();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const onImportSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    if (!importFile) {
-      setError("Seleziona un file Excel o CSV da importare.");
-      return;
-    }
-
-    try {
+  const onImportSubmit=async(event:FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();if(!canWrite||importLoading)return;setError(null);setSuccess(null);
+    if(!importFile){setError("Seleziona un file Excel o CSV da importare.");return;}
+    try{
       setImportLoading(true);
-      const result = await masterDataUseCases.importVehicles({
-        file: importFile,
-        dryRun: importDryRun,
-        defaultSiteId: importDefaultSiteId || undefined
-      });
-
+      const result=await masterDataUseCases.importVehicles({file:importFile,dryRun:importDryRun,defaultSiteId:importDefaultSiteId||undefined});
       setImportResult(result);
-      if (!result.dryRun && result.inserted > 0) {
-        await reloadVehicles();
-      }
-
-      if (result.dryRun) {
-        setSuccess(
-          `Anteprima completata: ${result.validRows} righe valide su ${result.totalRows}. Nessun dato salvato.`
-        );
-      } else {
-        setSuccess(
-          `Import completato: ${result.inserted} veicoli creati su ${result.totalRows} righe. Errori: ${result.errors.length}.`
-        );
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setImportLoading(false);
-    }
+      if(!result.dryRun&&result.inserted>0)await reloadVehicles();
+      setSuccess(result.dryRun?`Anteprima completata: ${result.validRows} righe valide su ${result.totalRows}. Nessun dato salvato.`:`Import completato: ${result.inserted} veicoli creati su ${result.totalRows} righe. Errori: ${result.errors.length}.`);
+    }catch(e){setError((e as Error).message)}finally{setImportLoading(false)}
   };
-
-  const importErrorsPreview = useMemo(
-    () => (importResult?.errors ?? []).slice(0, 50),
-    [importResult]
-  );
-
-  const onDelete = async (id: string) => {
-    setError(null);
-    setSuccess(null);
-    try {
-      await masterDataUseCases.deleteVehicle(id);
-      setSuccess("Veicolo eliminato.");
-      await reloadVehicles();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const confirmDeletion=async()=>{
+    if(!canWrite||!deletion||deleting)return;
+    setDeleting(true);setError(null);setSuccess(null);
+    try{
+      if(deletion.kind==="vehicle")await masterDataUseCases.deleteVehicle(deletion.id);
+      else {await masterDataUseCases.deleteVehicleBooklet(deletion.id);setEditingVehicle((v:any)=>v?.booklet?.id===deletion.id?{...v,booklet:null}:v)}
+      setSuccess(deletion.kind==="vehicle"?"Veicolo eliminato.":"Libretto rimosso.");setDeletion(null);await reloadVehicles();
+    }catch(e){setError((e as Error).message)}finally{setDeleting(false)}
   };
-
-  return (
-    <section className="space-y-3">
-      <PageHeader
-        title="Anagrafiche Veicoli"
-        subtitle="Gestione veicoli con ricerca, modifica rapida e allineamento operativo con sedi/officine."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={openImportPanel}>
-              <Upload className="h-4 w-4" />
-              Importa veicoli
-            </Button>
-            <Button onClick={openCreatePanel}>Nuovo veicolo</Button>
-          </div>
-        }
-      />
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
-
-      <Card className="saas-surface shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Elenco veicoli</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Cerca per targa, marca, modello, sede..."
-          />
-
-          {loading ? <FleetumInlineLoader label="Caricamento veicoli" /> : null}
-
-          <div className="space-y-3 md:hidden">
-            {vehicles.map((vehicle) => (
-              <Card key={vehicle.id} className="border-dashed">
-                <CardContent className="space-y-2 pt-4">
-                  <p className="text-sm"><span className="text-muted-foreground">Targa: </span><span className="font-semibold">{vehicle.plate}</span></p>
-                  <p className="text-sm"><span className="text-muted-foreground">Veicolo: </span>{vehicle.brand} {vehicle.model}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Sede: </span>{vehicle.site?.name || "-"}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Anno: </span>{vehicle.year || "-"}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Km attuali: </span>{vehicle.currentKm ?? "-"}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Intervallo manutenzione km: </span>{vehicle.maintenanceIntervalKm ?? "-"}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Immatricolazione: </span>{formatDate(vehicle.registrationDate)}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Ultima revisione: </span>{formatDate(vehicle.lastRevisionAt)}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Prossima revisione: </span>{formatMonthYear(vehicle.revisionDueAt)}</p>
-                  <p className="text-sm"><span className="text-muted-foreground">Libretto: </span>{vehicle.booklet?.fileName || "-"}</p>
-                  <div className="flex items-center justify-end gap-2">
-                    {vehicle.booklet?.id ? (
-                      <Button size="sm" variant="outline" onClick={() => void onOpenBooklet(vehicle.booklet.id)}>
-                        <FileText className="h-4 w-4" />
-                        Libretto
-                      </Button>
-                    ) : null}
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/statistiche?vehicleId=${vehicle.id}`)}>ROI</Button>
-                    <Button size="sm" variant="outline" onClick={() => openEditPanel(vehicle)}>Modifica</Button>
-                    <Button size="sm" variant="destructive" onClick={() => onDelete(vehicle.id)}>Elimina</Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="hidden md:block">
-            <Table className="text-[12px] [&_th]:h-9 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-[11px] [&_td]:px-2.5 [&_td]:py-2">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Targa</TableHead>
-                  <TableHead>Veicolo</TableHead>
-                  <TableHead>Sede</TableHead>
-                  <TableHead>Km attuali</TableHead>
-                  <TableHead>Intervallo km</TableHead>
-                  <TableHead>Revisione</TableHead>
-                  <TableHead>Libretto</TableHead>
-                  <TableHead className="text-right">Azioni</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {vehicles.map((vehicle) => (
-                  <TableRow key={vehicle.id} className="text-[12px]">
-                    <TableCell className="font-medium">{vehicle.plate}</TableCell>
-                    <TableCell className="max-w-[180px] truncate">{vehicle.brand} {vehicle.model}</TableCell>
-                    <TableCell>{vehicle.site?.name || "-"}</TableCell>
-                    <TableCell>{vehicle.currentKm ?? "-"}</TableCell>
-                    <TableCell>{vehicle.maintenanceIntervalKm ?? "-"}</TableCell>
-                    <TableCell>
-                      <div className="leading-tight">
-                        <p className="text-[11px] text-muted-foreground">Ult.: {formatDate(vehicle.lastRevisionAt)}</p>
-                        <p className="font-medium">Pross.: {formatMonthYear(vehicle.revisionDueAt)}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {vehicle.booklet?.id ? (
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => void onOpenBooklet(vehicle.booklet.id)}>
-                          <FileText className="h-4 w-4" />
-                          Apri
-                        </Button>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openEditPanel(vehicle)}>Modifica</Button>
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => navigate(`/statistiche?vehicleId=${vehicle.id}`)}>ROI</Button>
-                        <Button size="sm" variant="destructive" className="h-7 px-2 text-[11px]" onClick={() => onDelete(vehicle.id)}>Elimina</Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-sm">
-            <p className="text-muted-foreground">
-              Pagina <span className="font-medium text-foreground">{page}</span> di{" "}
-              <span className="font-medium text-foreground">{totalPages}</span> · Totale record:{" "}
-              <span className="font-medium text-foreground">{totalVehicles}</span>
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page <= 1 || loading}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-              >
-                Precedente
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page >= totalPages || loading}
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              >
-                Successiva
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {panelOpen ? (
-        <>
-          <div className="fixed inset-0 z-[70] bg-black/55 backdrop-blur-sm" onClick={() => setPanelOpen(false)} />
-          <aside className="fixed z-[80] right-0 top-0 h-full w-full max-w-xl border-l bg-card shadow-2xl max-sm:bottom-0 max-sm:top-auto max-sm:max-h-[88vh] max-sm:rounded-t-2xl max-sm:border-t max-sm:border-l-0">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="text-sm font-semibold">{mode === "create" ? "Nuovo veicolo" : "Modifica veicolo"}</p>
-              <Button variant="outline" size="icon" onClick={() => setPanelOpen(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="h-[calc(100%-64px)] overflow-auto px-4 py-4">
-              <form className="grid gap-3 sm:grid-cols-2" onSubmit={onSubmit}>
-                <div className="grid gap-1.5">
-                  <Label>Sede</Label>
-                  <Select name="siteId" defaultValue={editingVehicle?.siteId ?? sites[0]?.id ?? ""} required>
-                    {sites.map((site) => (
-                      <option key={site.id} value={site.id}>{site.name} - {site.city}</option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Targa</Label>
-                  <Input name="plate" defaultValue={editingVehicle?.plate ?? ""} placeholder="AB123CD" required />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Marca</Label>
-                  <Input name="brand" defaultValue={editingVehicle?.brand ?? ""} placeholder="Iveco" required />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Modello</Label>
-                  <Input name="model" defaultValue={editingVehicle?.model ?? ""} placeholder="Daily" required />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Anno</Label>
-                  <Input name="year" type="number" min={1950} max={2100} defaultValue={editingVehicle?.year ?? ""} />
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Km attuali</Label>
-                  <Input name="currentKm" type="number" min={0} defaultValue={editingVehicle?.currentKm ?? ""} />
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Intervallo manutenzione (km)</Label>
-                  <Input name="maintenanceIntervalKm" type="number" min={100} defaultValue={editingVehicle?.maintenanceIntervalKm ?? ""} />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Prezzo acquisto</Label>
-                  <Input name="purchasePrice" type="number" min={0} step="0.01" defaultValue={editingVehicle?.purchasePrice ?? ""} placeholder="10000" />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Data acquisto</Label>
-                  <Input name="purchaseDate" type="date" defaultValue={toDateInputValue(editingVehicle?.purchaseDate)} />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Valore residuo stimato</Label>
-                  <Input name="residualValue" type="number" min={0} step="0.01" defaultValue={editingVehicle?.residualValue ?? ""} />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Costi fissi mensili</Label>
-                  <Input name="monthlyFixedCost" type="number" min={0} step="0.01" defaultValue={editingVehicle?.monthlyFixedCost ?? ""} />
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Data immatricolazione (libretto)</Label>
-                  <Input name="registrationDate" type="date" defaultValue={toDateInputValue(editingVehicle?.registrationDate)} />
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Ultima revisione effettuata</Label>
-                  <Input name="lastRevisionAt" type="date" defaultValue={toDateInputValue(editingVehicle?.lastRevisionAt)} />
-                  <p className="text-xs text-muted-foreground">
-                    Regola automatica: prima revisione a 4 anni dall'immatricolazione, poi ogni 2 anni dall'ultima revisione.
-                  </p>
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Libretto veicolo (PDF o immagine)</Label>
-                  <Input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*" onChange={onBookletFileChange} />
-                  <p className="text-xs text-muted-foreground">
-                    {bookletFile ? `Nuovo file selezionato: ${bookletFile.name}` : "Nessun nuovo file selezionato"}
-                  </p>
-                  {editingVehicle?.booklet?.id ? (
-                    <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
-                      <span className="text-muted-foreground">
-                        Attuale: <span className="font-medium text-foreground">{editingVehicle.booklet.fileName}</span> ({formatBytes(editingVehicle.booklet.sizeBytes)})
-                      </span>
-                      <Button type="button" size="sm" variant="outline" onClick={() => void onOpenBooklet(editingVehicle.booklet.id)}>
-                        <FileText className="h-4 w-4" />
-                        Apri
-                      </Button>
-                      <Button type="button" size="sm" variant="destructive" onClick={() => void onDeleteBooklet(editingVehicle.booklet.id)}>
-                        <Trash2 className="h-4 w-4" />
-                        Rimuovi
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Prossima revisione (auto)</Label>
-                  <Input value={formatMonthYear(editingVehicle?.revisionDueAt)} readOnly />
-                </div>
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Note</Label>
-                  <Input name="notes" defaultValue={editingVehicle?.notes ?? ""} placeholder="Note operative" />
-                </div>
-                <div className="sm:col-span-2 flex gap-2">
-                  <Button type="submit">{mode === "create" ? "Crea veicolo" : "Salva modifiche"}</Button>
-                  <Button type="button" variant="outline" onClick={() => setPanelOpen(false)}>Annulla</Button>
-                </div>
-              </form>
-            </div>
-          </aside>
-        </>
-      ) : null}
-
-      {importPanelOpen ? (
-        <>
-          <div className="fixed inset-0 z-[70] bg-black/55 backdrop-blur-sm" onClick={() => setImportPanelOpen(false)} />
-          <aside className="fixed z-[80] right-0 top-0 h-full w-full max-w-xl border-l bg-card shadow-2xl max-sm:bottom-0 max-sm:top-auto max-sm:max-h-[88vh] max-sm:rounded-t-2xl max-sm:border-t max-sm:border-l-0">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="text-sm font-semibold">Import massivo veicoli</p>
-              <Button variant="outline" size="icon" onClick={() => setImportPanelOpen(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="h-[calc(100%-64px)] overflow-auto px-4 py-4">
-              <form className="space-y-4" onSubmit={onImportSubmit}>
-                <p className="text-sm text-muted-foreground">
-                  Carica un file `.xlsx` o `.csv`. Colonne minime supportate: `targa`, `marca`, `modello`.
-                  Se nel file manca la sede, usa la sede di default.
-                </p>
-
-                <div className="grid gap-1.5">
-                  <Label>File import</Label>
-                  <Input type="file" accept=".xlsx,.csv" onChange={onImportFileChange} />
-                  <p className="text-xs text-muted-foreground">
-                    {importFile ? `File selezionato: ${importFile.name}` : "Nessun file selezionato"}
-                  </p>
-                </div>
-
-                <div className="grid gap-1.5">
-                  <Label>Sede di default (opzionale)</Label>
-                  <Select value={importDefaultSiteId} onChange={(e) => setImportDefaultSiteId(e.target.value)}>
-                    <option value="">Usa la colonna site_name dal file</option>
-                    {sites.map((site) => (
-                      <option key={site.id} value={site.id}>
-                        {site.name} - {site.city}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-input"
-                    checked={importDryRun}
-                    onChange={(event) => setImportDryRun(event.target.checked)}
-                  />
-                  Esegui anteprima (dry run, nessun salvataggio)
-                </label>
-
-                <div className="flex gap-2">
-                  <Button type="submit" disabled={importLoading}>
-                    {importLoading ? "Import in corso..." : importDryRun ? "Avvia anteprima" : "Avvia import"}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => setImportPanelOpen(false)}>
-                    Chiudi
-                  </Button>
-                </div>
-              </form>
-
-              {importResult ? (
-                <Card className="mt-4 border-dashed">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">
-                      Risultato {importResult.dryRun ? "anteprima" : "import"}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    <p>Righe totali: <span className="font-semibold">{importResult.totalRows}</span></p>
-                    <p>Righe valide: <span className="font-semibold">{importResult.validRows}</span></p>
-                    <p>Inserite: <span className="font-semibold">{importResult.inserted}</span></p>
-                    <p>Scartate: <span className="font-semibold">{importResult.skipped}</span></p>
-                    <p>Errori: <span className="font-semibold">{importResult.errors.length}</span></p>
-
-                    {importErrorsPreview.length > 0 ? (
-                      <div className="max-h-60 space-y-2 overflow-auto rounded-lg border border-dashed p-3">
-                        {importErrorsPreview.map((item, index) => (
-                          <p key={`${item.row}-${item.field}-${index}`} className="text-xs">
-                            <span className="font-semibold">Riga {item.row}</span> · {item.field} · {item.reason}
-                            {item.value ? ` (valore: ${item.value})` : ""}
-                          </p>
-                        ))}
-                        {importResult.errors.length > importErrorsPreview.length ? (
-                          <p className="text-xs text-muted-foreground">
-                            Mostrati primi {importErrorsPreview.length} errori su {importResult.errors.length}.
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-emerald-700">Nessun errore rilevato.</p>
-                    )}
-                  </CardContent>
-                </Card>
-              ) : null}
-            </div>
-          </aside>
-        </>
-      ) : null}
+  const panelErrors=<div ref={editorErrorRef} tabIndex={-1} className="vehicle-error" role="alert">{error?<p>{error}</p>:null}{Object.keys(fieldErrors).length?<><p>Controlla i campi indicati prima di salvare.</p><ul>{Object.entries(fieldErrors).map(([key,message])=><li key={key}><a href={`#vehicle-${key}`} onClick={e=>{e.preventDefault();document.getElementById(`vehicle-${key}`)?.focus()}}>{vehicleFieldGroups.flatMap(group=>group.fields).find(field=>field.name===key)?.label ?? "Campo"}: {message}</a></li>)}</ul></>:null}</div>;
+  if(!canRead)return <section className="vehicles-workspace"><h1>Veicoli</h1><p>Il tuo ruolo non consente l’accesso ai veicoli.</p></section>;
+  return <section className="vehicles-workspace" aria-label="Gestione veicoli">
+    <WorkspacePageHeader eyebrow="LA TUA FLOTTA" title="Veicoli" description="Anagrafica, chilometri e documenti, con le attività operative sempre a portata di mano." actions={canWrite?<><Button variant="outline" onClick={openImportPanel}><Upload aria-hidden="true" className="h-4 w-4"/>Importa veicoli</Button><Button onClick={()=>openPanel('create')}><Plus aria-hidden="true" className="h-4 w-4"/>Nuovo veicolo</Button></>:undefined}/>
+    {error&&!panelOpen&&!importPanelOpen&&!deletion?<p className="vehicle-error" role="alert">{error}</p>:null}{success?<p className="vehicle-success" role="status">{success}</p>:null}
+    <VehicleOpenLinks onNavigate={navigate} canStoppages={has('stoppages:read')} canRoi={false}/>
+    <p className="vehicle-availability-note">Verifica la disponibilità per il periodo scelto nel calendario prenotazioni.</p>
+    <section className="vehicle-list-panel" aria-labelledby="vehicle-list-title">
+      <header className="vehicle-list-header"><div><h2 id="vehicle-list-title">Elenco veicoli <span>{loading||listError?"—":vehicleNumber(totalVehicles)}</span></h2><p>Dal più recente · 20 veicoli per pagina</p></div><Button variant="ghost" size="icon" aria-label="Aggiorna elenco veicoli" disabled={loading} onClick={()=>void reloadVehicles()}><RefreshCw aria-hidden="true" className="h-4 w-4"/></Button></header>
+      <div className="vehicle-search"><Label htmlFor="vehicle-search">Cerca nella flotta</Label><div><Search aria-hidden="true" className="h-4 w-4"/><Input id="vehicle-search" value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Targa, marca, modello o sede"/>{searchInput?<Button variant="ghost" size="icon" aria-label="Cancella ricerca veicoli" onClick={()=>setSearchInput('')}><X aria-hidden="true" className="h-4 w-4"/></Button>:null}</div></div>
+      <div className="vehicle-list-content" aria-busy={loading}>
+        {loading?<div className="vehicle-list-state"><FleetumInlineLoader label="Caricamento veicoli"/></div>:listError?<div className="vehicle-list-state"><p role="alert">{listError}</p><Button variant="outline" onClick={()=>void reloadVehicles()}>Riprova elenco</Button></div>:!vehicles.length?<div className="vehicle-list-state"><h3>{searchQuery?"Nessun veicolo trovato":"La tua flotta parte da qui"}</h3><p>{searchQuery?"Prova con un’altra targa, marca, modello o sede.":"Aggiungi un veicolo oppure importa il tuo elenco."}</p>{searchQuery?<Button variant="outline" onClick={()=>setSearchInput('')}>Azzera ricerca</Button>:canWrite?<Button onClick={()=>openPanel('create')}>Nuovo veicolo</Button>:null}</div>:<VehicleCollection vehicles={vehicles} canWrite={canWrite} canRoi={canRoi} selectedId={panelOpen?editingVehicle?.id:undefined} onDetail={(v,origin)=>openPanel('view',v,origin)} onEdit={(v,origin)=>openPanel('edit',v,origin)} onDelete={v=>{setError(null);setDeletion({kind:'vehicle',id:v.id,plate:v.plate})}} onBooklet={id=>void onOpenBooklet(id)} onRoi={id=>navigate(`/statistiche?vehicleId=${encodeURIComponent(id)}`)}/>}
+      </div>
+      <footer className="vehicle-pagination"><p role="status">Pagina <strong>{page}</strong> di <strong>{loading||listError?'—':totalPages}</strong> · Totale record: <strong>{loading||listError?'—':vehicleNumber(totalVehicles)}</strong></p><div><Button variant="outline" disabled={page<=1||loading} onClick={()=>setPage(n=>Math.max(1,n-1))}>Precedente</Button><Button variant="outline" disabled={page>=totalPages||loading||Boolean(listError)} onClick={()=>setPage(n=>Math.min(totalPages,n+1))}>Successiva</Button></div></footer>
     </section>
-  );
+    {panelOpen?<VehicleDrawer key={`${mode}-${editingVehicle?.id||'new'}`} title={mode==='view'?`Scheda ${editingVehicle?.plate}`:mode==='create'?'Nuovo veicolo':'Modifica veicolo'} description={mode==='view'?'Dati registrati e collegamenti operativi.':'I campi con * sono obbligatori.'} onClose={closePanel} origin={panelOrigin.current} motionRef={panelMotion} animateOpen={animateOpen.current} footer={mode==='view'?<><Button variant="outline" onClick={closePanel}>Chiudi scheda</Button>{canWrite?<Button onClick={()=>openPanel('edit',editingVehicle)}>Modifica veicolo</Button>:null}</>:<><Button variant="outline" disabled={saving} onClick={closePanel}>Annulla</Button><Button type="submit" form="vehicle-editor-form" aria-busy={saving} disabled={saving}>{saving?'Salvataggio veicolo...':mode==='create'?'Crea veicolo':'Salva modifiche'}</Button></>}>
+      {error||Object.keys(fieldErrors).length?panelErrors:null}
+      {mode==='view'?<><VehicleDetails vehicle={editingVehicle} onBooklet={id=>void onOpenBooklet(id)}/><VehicleOpenLinks onNavigate={navigate} canStoppages={has('stoppages:read')} canRoi={canRoi} vehicleId={editingVehicle?.id}/></>:<>{sitesLoading?<p role="status">Caricamento sedi...</p>:sitesError?<div className="vehicle-error"><p role="alert">{sitesError}</p><Button variant="outline" onClick={()=>void loadSites()}>Riprova sedi</Button></div>:!canReadSites?<p className="vehicle-availability-note">Il tuo ruolo non consente di caricare altre sedi. In modifica resta disponibile la sede attuale.</p>:null}<VehicleEditor key={editingVehicle?.id||'new'} vehicle={editingVehicle} sites={sites} errors={fieldErrors} bookletFile={bookletFile} saving={saving} onSubmit={onSubmit} onBookletChange={onBookletFileChange} onOpenBooklet={id=>void onOpenBooklet(id)} onDeleteBooklet={id=>{setError(null);setDeletion({kind:'booklet',id,plate:editingVehicle.plate})}}/></>}
+    </VehicleDrawer>:null}
+    {importPanelOpen?<VehicleDrawer title="Importa veicoli" description="Carica un elenco Excel o CSV e controlla il risultato di ogni riga." onClose={closeImport} motionRef={importMotion} footer={<><Button variant="outline" disabled={importLoading} onClick={closeImport}>Chiudi</Button><Button type="submit" form="vehicle-import-form" aria-busy={importLoading} disabled={importLoading}>{importLoading?'Import in corso...':importDryRun?'Avvia anteprima':'Avvia import'}</Button></>}>
+      {error?panelErrors:null}<form id="vehicle-import-form" onSubmit={onImportSubmit} className="vehicle-import-form"><p className="vehicle-group-description">File .xlsx o .csv. Colonne minime: targa, marca, modello. Se manca la sede, usa quella di default.</p><fieldset disabled={importLoading}><div className="vehicle-field"><Label htmlFor="vehicle-import-file">File import</Label><Input id="vehicle-import-file" type="file" accept=".xlsx,.csv" onChange={e=>setImportFile(e.target.files?.[0]??null)}/><p className="vehicle-field-hint">{importFile?`File selezionato: ${importFile.name}`:'Nessun file selezionato'}</p></div><div className="vehicle-field"><Label htmlFor="vehicle-import-site">Sede di default (opzionale)</Label><Select id="vehicle-import-site" value={importDefaultSiteId} onChange={e=>setImportDefaultSiteId(e.target.value)}><option value="">Usa la colonna site_name dal file</option>{sites.filter(s=>s.isActive!==false).map(s=><option translate="no" key={s.id} value={s.id}>{s.name} · {s.city}</option>)}</Select></div><label className="vehicle-import-check"><input type="checkbox" checked={importDryRun} onChange={e=>setImportDryRun(e.target.checked)}/><span>Esegui anteprima (dry run, nessun salvataggio)</span></label></fieldset></form>
+      {success?<p className="vehicle-success" role="status">{success}</p>:null}{importResult?<section className="vehicle-import-result" aria-label="Risultato importazione"><h3>{importResult.dryRun?'Risultato anteprima':'Risultato import'}</h3><dl>{[['Righe totali',importResult.totalRows],['Righe valide',importResult.validRows],['Inserite',importResult.inserted],['Scartate',importResult.skipped],['Errori',importResult.errors.length]].map(([label,value])=><div key={String(label)}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>{importResult.errors.length?<ul>{importResult.errors.slice(0,50).map((item,i)=><li key={`${item.row}-${item.field}-${i}`}><strong>Riga {item.row}</strong> · {item.field} · {item.reason}{item.value?` (valore: ${item.value})`:''}</li>)}{importResult.errors.length>50?<li>Mostrati primi 50 errori su {importResult.errors.length}.</li>:null}</ul>:<p>Nessun errore rilevato.</p>}</section>:null}
+    </VehicleDrawer>:null}
+    {deletion?<VehicleDrawer compact title={deletion.kind==='vehicle'?'Elimina veicolo':'Rimuovi libretto'} onClose={()=>{if(!deleting){setDeletion(null);setError(null)}}} footer={<><Button variant="outline" disabled={deleting} onClick={()=>{setDeletion(null);setError(null)}}>Annulla</Button><Button variant="destructive" disabled={deleting} onClick={()=>void confirmDeletion()}>{deleting?'Rimozione in corso...':'Conferma eliminazione'}</Button></>}><p>Confermi la rimozione di {deletion.kind==='vehicle'?'questo veicolo':'questo libretto'} per <strong>{deletion.plate}</strong>?</p>{deletion.kind==='vehicle'?<p className="vehicle-field-hint">Verifica prima eventuali prenotazioni collegate.</p>:null}{error?<p className="vehicle-error" role="alert">{error}</p>:null}</VehicleDrawer>:null}
+  </section>;
 };

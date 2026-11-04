@@ -6,6 +6,8 @@ import { prisma } from "../database/prisma/client.js";
 import { logger } from "../logging/logger.js";
 import { stoppageHistoricalUsersOwned } from "../repositories/stoppage-tenant-scope.js";
 import type { emailSender } from "./email-sender.js";
+import { resolveSiteAccess } from "../../domain/policies/site-access.js";
+import { legacySiteCommandReason } from "./site-access-legacy.js";
 
 export const automaticReminderTypes = ["AUTOMATIC", "AUTOMATIC_RETRY", "ESCALATION"];
 const manualReminderTypes = ["MANUAL", "MANUAL_RETRY"];
@@ -16,6 +18,45 @@ export type ReminderStoppage = Prisma.StoppageGetPayload<{
 type Receipt = Awaited<ReturnType<typeof emailSender.send>>;
 type Outcome = { receipt: Receipt } | { error: unknown };
 type QueuedReminder = Pick<EmailQueue, "id" | "tenantId" | "createdAt" | "meta" | "recipient">;
+
+export type ManualReminderSiteAuthorization = {
+  version: 1;
+  userId: string;
+  allSites: boolean;
+  siteIds: string[];
+};
+
+// A queue worker has no HTTP request context. Rebuild the requester's current
+// authority and intersect it with the view used to prepare the command. Never
+// turn the selected manager view into a company-wide background operation.
+export const manualReminderSiteAuthorizationReason = async (
+  tx: Prisma.TransactionClient, tenantId: string, siteId: string, input: unknown
+): Promise<string | null> => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return "REQUESTER_SITE_SCOPE_INVALID";
+  const value = input as Record<string, unknown>;
+  if (value.version !== 1 || typeof value.userId !== "string" || !value.userId ||
+      typeof value.allSites !== "boolean" || !Array.isArray(value.siteIds) || value.siteIds.length > 32 ||
+      !value.siteIds.every(id => typeof id === "string" && id.length > 0)) return "REQUESTER_SITE_SCOPE_INVALID";
+  const user = await tx.user.findFirst({
+    where: { id: value.userId, tenantId, deletedAt: null, status: "ACTIVE" },
+    select: {
+      tenantId: true,
+      assignedSite: { select: { id: true, tenantId: true, isActive: true, deletedAt: true } },
+      roles: { select: { role: { select: {
+        key: true, permissions: { select: { permission: { select: { key: true } } } }
+      } } } }
+    }
+  });
+  if (!user) return "REQUESTER_NOT_ACTIVE";
+  const roles = user.roles.map(({ role }) => role.key);
+  if (!roles.includes("ADMIN") && !user.roles.some(({ role }) => role.permissions.some(({ permission }) => permission.key === "stoppages:remind"))) {
+    return "REQUESTER_PERMISSION_REVOKED";
+  }
+  const current = resolveSiteAccess({ ...user, roles });
+  if ((!current.allSites && !current.siteIds.includes(siteId)) ||
+      (!value.allSites && !value.siteIds.includes(siteId))) return "REQUESTER_SITE_REVOKED";
+  return null;
+};
 
 // Producers and dispatchers use the same order: Tenant -> Subscription ->
 // Stoppage -> Site/Vehicle/Workshop -> Queue. Historical users are read without
@@ -127,14 +168,17 @@ export const dispatchReminderEmail = async (
   const delivery: { outcome?: Promise<Outcome> } = {};
   try {
     await prisma.$transaction(async (tx) => {
-      let reason: string | null = null;
+      let reason: string | null = legacySiteCommandReason("REMINDER_EMAIL",meta);
       let stoppage: ReminderStoppage | null = null;
-      if (!tenantId || meta.tenantId !== tenantId || !stoppageId ||
-          (!isAutomatic && !manualReminderTypes.includes(reminderType))) {
+      if (!reason && (!tenantId || meta.tenantId !== tenantId || !stoppageId ||
+          (!isAutomatic && !manualReminderTypes.includes(reminderType)))) {
         reason = "METADATA_INVALID";
-      } else {
+      } else if(!reason && tenantId) {
         const context = await lockReminderContext(tx, tenantId, stoppageId);
         reason = context.reason; stoppage = context.stoppage;
+        if (!reason && stoppage && !isAutomatic && Object.hasOwn(meta, "siteAuthorization")) {
+          reason = await manualReminderSiteAuthorizationReason(tx, tenantId, stoppage.siteId, meta.siteAuthorization);
+        }
         if (!reason && stoppage) {
           const statusChanged = await tx.auditLog.findFirst({
             where: { tenantId, resource: "tenant", action: "PLATFORM_TENANT_STATUS_CHANGED",

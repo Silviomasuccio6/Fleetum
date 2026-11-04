@@ -24,6 +24,7 @@ export type RentalBookingNoteDto = {
 };
 
 export type RentalBookingDto = {
+  contractCreated?: boolean;
   id: string;
   code: string;
   status: RentalBookingStatus;

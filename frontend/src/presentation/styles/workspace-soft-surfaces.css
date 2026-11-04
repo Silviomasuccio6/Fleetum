@@ -1,0 +1,84 @@
+/* Approved soft surfaces. Screen-only and explicit tenant opt-in preserve login, Platform and print. */
+@media screen {
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] {
+    --ws-soft-radius:16px;
+    --ws-soft-surface:#fff;
+    --ws-soft-shadow:0 3px 14px rgb(26 40 69 / .065);
+    --ws-soft-selected:#eaf0ff;
+  }
+  .dark .workspace-shell[data-appearance=refined][data-surfaces=soft] {
+    --ws-soft-surface:#1c222d;
+    --ws-soft-shadow:0 3px 14px rgb(0 0 0 / .22);
+    --ws-soft-selected:#273554;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] :is(
+    .g-card,.workspace-metric,.dashboard-panel,.booking-calendar-card,.booking-list,.booking-detail-card,.customer-list-panel,.customer-mobile-card,
+    .vehicle-list-panel,.vehicle-mobile-card,.commerce-panel,.commerce-mobile-card,
+    .operations-group,.operations-board-card,.report-section
+  ) {
+    background:var(--ws-soft-surface);
+    border-radius:var(--ws-soft-radius);
+    border-color:transparent;
+    box-shadow:var(--ws-soft-shadow);
+    backdrop-filter:none;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] :is(.g-card,.workspace-metric,.dashboard-panel):hover {
+    transform:none;box-shadow:var(--ws-soft-shadow);
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] :is(.customer-mobile-card,.vehicle-mobile-card,.commerce-mobile-card)[data-selected=true] {
+    background:var(--refinement-selected);border-color:var(--refinement-selected-line);
+    box-shadow:var(--ws-soft-shadow),inset 2px 0 0 hsl(var(--ring));
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] :is(.commerce-kpis,.report-metrics)>div {
+    background:var(--ws-soft-surface);border-radius:var(--ws-soft-radius);border-color:transparent;box-shadow:var(--ws-soft-shadow);
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .workspace-metric dt {
+    display:block;min-height:0;padding-right:0;font-size:13px;line-height:1.5;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .workspace-metric dt svg { display:none; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .workspace-metric-value {
+    font-size:30px;font-weight:500;line-height:1.2;letter-spacing:-.03em;margin-top:12px;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .workspace-metric-hint { font-size:12px;line-height:1.5;margin-top:8px; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .dashboard-overview .workspace-metric:first-child {
+    background:var(--ws-soft-selected);box-shadow:none;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .dashboard-panel-header h2>svg { display:none; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .dashboard-workspace {
+    --dashboard-blue:#3d55bd;--dashboard-fill:rgb(61 85 189 / .1);--dashboard-neutral:#8795ad;
+  }
+  .dark .workspace-shell[data-appearance=refined][data-surfaces=soft] .dashboard-workspace {
+    --dashboard-blue:#96adff;--dashboard-fill:rgb(150 173 255 / .1);--dashboard-neutral:#71829e;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .recharts-default-legend .recharts-legend-item-text { color:hsl(var(--foreground))!important; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .recharts-cartesian-axis-tick text { fill:hsl(var(--muted-foreground)); }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .dashboard-chart-tooltip {
+    background:var(--ws-soft-surface);color:hsl(var(--foreground));border:1px solid var(--ws-line);border-radius:10px;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-chart { display:block;width:100%;height:220px;max-width:320px;margin-inline:auto;overflow:visible; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-chart text { text-anchor:middle;fill:hsl(var(--foreground));font-variant-numeric:tabular-nums; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-total { font-size:30px;font-weight:500;letter-spacing:-.03em; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-chart .fleet-composition-caption { font-size:12px;fill:hsl(var(--muted-foreground)); }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-sector { transform-box:view-box; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-summary { text-align:center;color:hsl(var(--muted-foreground));font-size:12px;margin-top:8px; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-legend { display:grid;gap:4px;margin-top:16px; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-legend button {
+    display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;width:100%;padding:8px;
+    color:hsl(var(--foreground));font-size:13px;text-align:left;border-radius:8px;background:transparent;
+  }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-legend button[aria-pressed=true] { background:var(--ws-soft-selected); }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-legend button>span:first-child { display:flex;gap:8px;align-items:center; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-swatch { display:inline-block;width:8px;height:8px;border-radius:2px;flex-shrink:0; }
+  .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-note { margin-top:16px;font-size:12px;line-height:1.6;color:hsl(var(--muted-foreground)); }
+  @media(max-width:640px) {
+    .workspace-shell[data-appearance=refined][data-surfaces=soft] .workspace-metric { padding:16px; }
+    .workspace-shell[data-appearance=refined][data-surfaces=soft] .workspace-metric-value { font-size:28px; }
+    .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-legend button { min-height:44px; }
+  }
+  @media(hover:hover) and (pointer:fine) {
+    .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-sector { transition:transform 160ms cubic-bezier(.23,1,.32,1); }
+  }
+  @media(prefers-reduced-motion:reduce) {
+    .workspace-shell[data-appearance=refined][data-surfaces=soft] .fleet-composition-sector { transform:none!important;transition:none!important; }
+  }
+}
