@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page, type Response } from "
 import { createAuthenticatedApi, csrfHeaders, saveStorageStateFromApi } from "./helpers/auth";
 import { ensureDemoSite } from "./helpers/demo-data";
 import { e2eEnv, hasOtherTenantCredentials, hasTenantCredentials } from "./helpers/env";
+import { vehicleSearch, vehiclePaginationStatus, vehiclePaginationTextPattern } from "./helpers/workspace-locators.mjs";
 
 type SyntheticVehicle = { id: string; plate: string; brand: string; model: string };
 type VehicleList = { data: SyntheticVehicle[]; total: number; page: number; pageSize: number };
@@ -93,25 +94,25 @@ test.describe("Fleetum critical flow: vehicle pagination", () => {
         await consentDialog.getByRole("button", { name: "Solo necessari", exact: true }).click();
       }
 
-      const search = page.getByRole("textbox").and(page.getByPlaceholder(/Cerca per targa, marca, modello, sede|Search by plate, brand, model, site/));
-      const pagination = page.locator("main p").filter({ hasText: /Totale record|Total records/ }).filter({ visible: true });
+      const search = vehicleSearch(page);
+      const pagination = vehiclePaginationStatus(page);
       const tableRows = page.getByRole("table").filter({ visible: true }).locator("tbody tr");
       const previous = page.getByRole("button", { name: /^(Precedente|Previous)$/ });
       const next = page.getByRole("button", { name: /^(Successiva|Next)$/ });
 
       const expectVisiblePage = async (payload: VehicleList) => {
         await expect(tableRows).toHaveCount(payload.data.length);
-        await expect(tableRows.locator("td:first-child")).toHaveText(payload.data.map((vehicle) => vehicle.plate));
+        for (const [index, vehicle] of payload.data.entries()) {
+          await expect(tableRows.nth(index).getByText(vehicle.plate, { exact: true }),
+            "each visible plate must retain the API row order even when cells include vehicle details").toBeVisible();
+        }
         // Allow the language observer to finish, so a transient React update cannot hide stale counters.
         await page.evaluate(() => new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
         await expect(pagination).toBeVisible();
-        await expect(pagination.locator("span"), "visible page, page count and total must match the real API contract").toHaveText([
-          String(payload.page),
-          String(Math.max(1, Math.ceil(payload.total / payload.pageSize))),
-          String(payload.total)
-        ]);
+        await expect(pagination, "visible page, page count and total must match the real API contract")
+          .toHaveText(vehiclePaginationTextPattern(payload));
         await expect(page.getByText(tenantBVehicle.plate, { exact: true })).toHaveCount(0);
         if (payload.page === 1) await expect(previous).toBeDisabled();
         else await expect(previous).toBeEnabled();
