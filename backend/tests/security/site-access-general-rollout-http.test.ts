@@ -3,6 +3,8 @@ import {assertSyntheticDatabase} from "../helpers/synthetic-database.js";
 import assert from "node:assert/strict";
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import { after, before, describe, it } from "node:test";
 import fs from "node:fs/promises";
 import { storageProvider } from "../../src/infrastructure/storage/storage-provider.js";
@@ -333,7 +335,8 @@ describe("E02 complete tenant application without an injected test scope", () =>
   });
   it("runs the maintenance CLI in read-only mode and applies an explicit private manifest",async()=>{
     const member=await prisma.user.create({data:{tenantId:ids.a,email:run+"-cli@example.invalid",firstName:"Synthetic CLI",lastName:"Synthetic",passwordHash:"unused-synthetic",roles:{create:{roleId:ids.OPERATOR}}}});
-    const planPath=`/private/tmp/${run}-plan.json`,manifestPath=`/private/tmp/${run}-manifest.json`,receiptPath=`/private/tmp/${run}-receipt.json`;
+    const directory=await fs.mkdtemp(join(tmpdir(),`${run}-cli-`));
+    const planPath=join(directory,"plan.json"),manifestPath=join(directory,"manifest.json"),receiptPath=join(directory,"receipt.json");
     const cli=["--import","tsx",fileURLToPath(new URL("../../src/scripts/reconcile-site-access.ts",import.meta.url)),"--tenant",ids.a,"--actor",ids.adminUser],execute=promisify(execFile);
     try{
       await execute(process.execPath,[...cli,"--output",planPath],{env:process.env,timeout:15000});
@@ -343,7 +346,7 @@ describe("E02 complete tenant application without an injected test scope", () =>
       await execute(process.execPath,[...cli,"--apply",manifestPath,"--output",receiptPath],{env:process.env,timeout:15000});
       assert.equal(JSON.parse(await fs.readFile(receiptPath,"utf8")).counts.users,1);assert.equal((await prisma.user.findUniqueOrThrow({where:{id:member.id}})).assignedSiteId,ids.roma);
       const receipt=await fs.readFile(receiptPath,"utf8");await assert.rejects(execute(process.execPath,[...cli,"--apply",manifestPath,"--output",receiptPath],{env:process.env,timeout:15000}));assert.equal(await fs.readFile(receiptPath,"utf8"),receipt);
-    }finally{for(const path of[planPath,manifestPath,receiptPath])await fs.rm(path,{force:true});}
+    }finally{await fs.rm(directory,{recursive:true,force:true});}
   });
   it("refuses truncated inventories and supports an explicitly selected reconciliation batch",async()=>{
     const entries=Array.from({length:501},(_,i)=>({id:run+"-batch-"+String(i).padStart(3,"0"),tenantId:ids.a,userId:ids.romeUser,title:"Synthetic batch event",startAt:new Date("2035-04-01"),endAt:new Date("2035-04-02"),type:"TASK"as const}));await prisma.calendarEvent.createMany({data:entries});
