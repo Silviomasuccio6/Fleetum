@@ -147,7 +147,7 @@ jobs:
         run: npm run test -w backend
 
       - name: Frontend tests
-        run: npx tsx --test frontend/tests/*.test.ts
+        run: npm run test:frontend
 
       - name: Marketing website static export tests
         run: npm run test:website

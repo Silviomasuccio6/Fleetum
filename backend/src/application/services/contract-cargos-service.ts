@@ -17,15 +17,15 @@ const key=(purpose="credentials")=>{
  return Buffer.from(crypto.hkdfSync("sha256",Buffer.from(env.CARGOS_DATA_ENCRYPTION_KEY,"hex"),"fleetum:cargos:v1",purpose,32));
 };
 const sealRecord=(tenantId:string,record:string)=>{
- const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key("record"),iv);cipher.setAAD(Buffer.from(tenantId));
+ const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key("record"),iv,{authTagLength:16});cipher.setAAD(Buffer.from(tenantId));
  const data=Buffer.concat([cipher.update(record,"utf8"),cipher.final()]);return[iv.toString("base64url"),cipher.getAuthTag().toString("base64url"),data.toString("base64url")].join(".");
 };
 export const sealCargosCredentials=(tenantId:string,value:CargosCredentials)=>{
- const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key(),iv);cipher.setAAD(Buffer.from(tenantId));
+ const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key(),iv,{authTagLength:16});cipher.setAAD(Buffer.from(tenantId));
  const data=Buffer.concat([cipher.update(JSON.stringify(value),"utf8"),cipher.final()]);return[iv.toString("base64url"),cipher.getAuthTag().toString("base64url"),data.toString("base64url")].join(".");
 };
 const unseal=(tenantId:string,value:string):CargosCredentials=>{
- const[iv,tag,data]=value.split(".");const cipher=crypto.createDecipheriv("aes-256-gcm",key(),Buffer.from(iv,"base64url"));cipher.setAAD(Buffer.from(tenantId));cipher.setAuthTag(Buffer.from(tag,"base64url"));return JSON.parse(Buffer.concat([cipher.update(Buffer.from(data,"base64url")),cipher.final()]).toString("utf8"));
+ const[iv,tag,data]=value.split(".");const cipher=crypto.createDecipheriv("aes-256-gcm",key(),Buffer.from(iv,"base64url"),{authTagLength:16});cipher.setAAD(Buffer.from(tenantId));cipher.setAuthTag(Buffer.from(tag,"base64url"));return JSON.parse(Buffer.concat([cipher.update(Buffer.from(data,"base64url")),cipher.final()]).toString("utf8"));
 };
 const date=(value:Date|null|undefined,time=true)=>{
  if(!value)return"";const formatter=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Rome",day:"2-digit",month:"2-digit",year:"numeric",...(time?{hour:"2-digit",minute:"2-digit",hourCycle:"h23" as const}:{})});return formatter.format(value).replace(",","");

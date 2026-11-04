@@ -67,6 +67,18 @@ describe("E02 personal calendars, bound feeds and synchronization",()=>{
     const where={tenantId:{in:tenants}};
     for(const model of[prisma.auditLog,prisma.calendarEvent,prisma.vehicle,prisma.refreshSession]as any[])await model.deleteMany({where});await prisma.userRole.deleteMany({where:{user:{tenantId:{in:tenants}}}});await prisma.user.deleteMany({where});await prisma.site.deleteMany({where});await prisma.tenantSubscription.deleteMany({where});await prisma.tenant.deleteMany({where:{id:{in:tenants}}});await prisma.$disconnect();
   });
+  it("rejects a shortened Google PKCE authentication tag before contacting the provider",async()=>{
+    const flow=await oauth(),state=flow.url.searchParams.get("state")!;
+    const row=await prisma.auditLog.findFirstOrThrow({where:{tenantId:ids.a,resource:"CalendarGrant",resourceId:crypto.createHash("sha256").update(state).digest("hex"),action:"CALENDAR_GRANT_CREATED"}});
+    const details=row.details as any,[iv,tag,data]=details.codeVerifierSealed.split(".");
+    assert.equal(Buffer.from(tag,"base64url").length,16);
+    try{
+      await prisma.auditLog.update({where:{id:row.id},data:{details:{...details,codeVerifierSealed:[iv,Buffer.from(tag,"base64url").subarray(0,4).toString("base64url"),data].join(".")}}});
+      const count=googleCalls.length;
+      await call("rome",`/calendar/google/callback?code=synthetic-code&state=${encodeURIComponent(state)}`,{public:true,cookie:flow.cookie});
+      assert.equal(googleCalls.length,count,"Unauthenticated PKCE data must not reach Google");
+    }finally{await clearConnection();}
+  });
   it("keeps personal events while excluding unclassified operational copies",async()=>{const data=await json("rome",personalPath);assert.ok(JSON.stringify(data).includes(ids.personal));absent(data,"PRIVATE_LEGACY_milan","PRIVATE_UNKNOWN");});
   it("does not erase another site's generated tasks during deadline synchronization",async()=>{const r=await call("rome","/master-data/vehicle-deadlines/calendar-sync",{method:"POST",body:{includeSoon:false}});assert.equal(r.status,200,await r.text());assert.ok(await prisma.calendarEvent.findUnique({where:{id:ids.milanLegacyEvent}}));const data=await json("rome",personalPath);assert.ok(JSON.stringify(data).includes("SYN-rome"));absent(data,"SYN-milan","PRIVATE_UNKNOWN");});
   it("blocks direct editing/deletion of hidden generated events",async()=>{for(const method of["PATCH","DELETE"]){const r=await call("rome",`${personalPath}/${ids.milanLegacyEvent}`,{method,body:method==="PATCH"?{title:"Synthetic denied"}:undefined});assert.equal(r.status,404);}assert.ok(await prisma.calendarEvent.findUnique({where:{id:ids.milanLegacyEvent}}));});

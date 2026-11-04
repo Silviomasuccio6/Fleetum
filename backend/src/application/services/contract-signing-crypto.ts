@@ -17,13 +17,13 @@ export const createSigningCrypto = (master: string) => {
     validToken: (value: string) => /^[A-Za-z0-9_-]{43}$/.test(value)&&Buffer.from(value,"base64url").toString("base64url")===value,
     code: () => String(crypto.randomInt(0,1000000)).padStart(6,"0"),
     seal(value: unknown,context: string) {
-      const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key("queue"),iv);
+      const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key("queue"),iv,{authTagLength:16});
       cipher.setAAD(Buffer.from(context));const bytes=Buffer.concat([cipher.update(JSON.stringify(value),"utf8"),cipher.final()]);
       return [iv.toString("base64url"),cipher.getAuthTag().toString("base64url"),bytes.toString("base64url")].join(".");
     },
     open(value: string,context: string): Record<string,unknown> {
       if(value.length>8192)throw new Error("Invalid signing envelope");
-      const [iv,tag,bytes]=value.split(".");const decipher=crypto.createDecipheriv("aes-256-gcm",key("queue"),Buffer.from(iv,"base64url"));
+      const [iv,tag,bytes]=value.split(".");const decipher=crypto.createDecipheriv("aes-256-gcm",key("queue"),Buffer.from(iv,"base64url"),{authTagLength:16});
       decipher.setAAD(Buffer.from(context));decipher.setAuthTag(Buffer.from(tag,"base64url"));
       return JSON.parse(Buffer.concat([decipher.update(Buffer.from(bytes,"base64url")),decipher.final()]).toString("utf8"));
     },

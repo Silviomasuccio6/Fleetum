@@ -66,6 +66,21 @@ test("CARGOS configuration is tenant-bound and read never returns credentials",a
  const before=await (await api("/cargos")).json() as any;const record=Object.fromEntries(before.fields.filter((f:any)=>f.editable).map((f:any)=>[f.key,!f.required?"":f.key.endsWith("_TIPO_COD")?"1":f.kind==="code"?"100000001":f.kind==="digit"?"1":""]));
  const draft=await api("/cargos/draft","PATCH",{record});assert.equal(draft.status,200,await draft.clone().text());assert.equal((await draft.json() as any).canSend,true);
 });
+test("CARGOS rejects shortened credential tags before any provider request",async()=>{
+ const stored=await prisma.tenantCargosConnection.findUniqueOrThrow({where:{tenantId:ids.a}});
+ const[iv,tag,data]=stored.credentialsEncrypted.split(".");assert.equal(Buffer.from(tag,"base64url").length,16);
+ const before=checkCalls,previousTokenHook=tokenEntered;let tokenCalls=0;tokenEntered=()=>{tokenCalls++;};
+ try{
+  await prisma.tenantCargosConnection.update({where:{tenantId:ids.a},data:{credentialsEncrypted:[iv,Buffer.from(tag,"base64url").subarray(0,4).toString("base64url"),data].join(".")}});
+  const status=await (await api("/cargos")).json() as any;
+  const response=await api("/cargos/check","POST",{sourceHash:status.sourceHash});
+  assert.ok(response.status>=400,"Shortened authentication tags must fail closed");
+  assert.equal(checkCalls,before);assert.equal(tokenCalls,0);
+ }finally{
+  tokenEntered=previousTokenHook;
+  await prisma.tenantCargosConnection.update({where:{tenantId:ids.a},data:{credentialsEncrypted:stored.credentialsEncrypted}});
+ }
+});
 test("CARGOS double click creates exactly one accepted transmission and protects the claimed draft",async()=>{
  const data=await (await api("/cargos")).json() as any;mode="blocked";const seen=new Promise<void>(resolve=>{entered=resolve;});const first=api("/cargos/transmit","POST",{sourceHash:data.sourceHash});await seen;
  assert.equal((await api("/cargos/transmit","POST",{sourceHash:data.sourceHash})).status,409);

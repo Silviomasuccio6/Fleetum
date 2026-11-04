@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { readUiPreviewHealth } from "./ui-preview-health.mjs";
 
 // Browser regression checks against the synthetic, loopback-only UI laboratory.
 // This does not exercise a real backend, database, provider or tenant session.
 const base = "http://127.0.0.1:5180";
 const output = fileURLToPath(new URL("../output/playwright/ui-booking/", import.meta.url));
 await mkdir(output, { recursive: true });
-const health = await fetch(`${base}/api/health`).then((response) => response.json());
-assert.equal(health.mode, "ui-preview", "Refuse to test any real application server");
+await readUiPreviewHealth(base);
 const results = [];
 const accessibility = [];
 const errors = [];

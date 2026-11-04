@@ -85,12 +85,12 @@ const cookieOptions=(expires?:Date)=>({httpOnly:true,secure:env.NODE_ENV==="prod
 const grantResource="CalendarGrant",createdAction="CALENDAR_GRANT_CREATED";
 const encryptionKey=crypto.createHash("sha256").update(`fleetum:calendar-pkce:v2:${env.JWT_SECRET}`).digest();
 const seal=(value:string)=>{
-  const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",encryptionKey,iv);
+  const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",encryptionKey,iv,{authTagLength:16});
   const encrypted=Buffer.concat([cipher.update(value,"utf8"),cipher.final()]);
   return[iv.toString("base64url"),cipher.getAuthTag().toString("base64url"),encrypted.toString("base64url")].join(".");
 };
 const unseal=(value:string)=>{
-  const[iv,tag,data]=value.split(".");const decipher=crypto.createDecipheriv("aes-256-gcm",encryptionKey,Buffer.from(iv,"base64url"));
+  const[iv,tag,data]=value.split(".");const decipher=crypto.createDecipheriv("aes-256-gcm",encryptionKey,Buffer.from(iv,"base64url"),{authTagLength:16});
   decipher.setAuthTag(Buffer.from(tag,"base64url"));return Buffer.concat([decipher.update(Buffer.from(data,"base64url")),decipher.final()]).toString("utf8");
 };
 const latestOwnerEpoch=async(db:Pick<typeof prisma,"auditLog">,tenantId:string,userId:string)=>
