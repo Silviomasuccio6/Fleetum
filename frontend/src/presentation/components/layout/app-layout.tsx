@@ -173,13 +173,6 @@ const navSections = [
   { title: "Anagrafiche", items: orderNavItems(["clienti", "sedi", "officine"]) },
   { title: "Gestione", items: orderNavItems(["statistiche", "billing"]) }
 ];
-const mobileNavItems: Array<{ to: string; label: string; icon: any; feature?: FeatureKey }> = [
-  { to: "/dashboard", label: "Dashboard", icon: Gauge },
-  { to: "/booking", label: "Prenotazioni", icon: CalendarDays },
-  { to: "/anagrafiche/veicoli", label: "Flotta", icon: CarFront },
-  { to: "/anagrafiche/clienti", label: "Clienti", icon: Users }
-];
-
 export const AppLayout = () => {
   const sidebarStorageKey = "fermi_sidebar_hidden";
   const privacyNoticeVersion = "2026-05-05";
@@ -513,11 +506,6 @@ export const AppLayout = () => {
           items: filterFeatureVisibleItems(section.items, entitlementsLoaded, can)
         }))
         .filter((section) => section.items.length > 0),
-    [can, entitlementsLoaded]
-  );
-
-  const visibleMobileNavItems = useMemo(
-    () => filterFeatureVisibleItems(mobileNavItems, entitlementsLoaded, can),
     [can, entitlementsLoaded]
   );
 
@@ -1029,7 +1017,7 @@ export const AppLayout = () => {
         id="workspace-main"
         tabIndex={-1}
         className={cn(
-          "workspace-main pb-24 pt-[5.5rem] lg:pb-10",
+          "workspace-main pb-6 pt-[5.5rem] lg:pb-10",
           sidebarHidden ? "lg:ml-0" : "lg:ml-60",
           isWideWorkspaceRoute && "workspace-main-wide"
         )}
@@ -1078,36 +1066,6 @@ export const AppLayout = () => {
         </div>
       ) : null}
 
-      <nav aria-label="Navigazione rapida" className="workspace-mobile-nav fixed inset-x-0 bottom-0 z-40 lg:hidden">
-        <div className="grid grid-cols-5 gap-1">
-            {visibleMobileNavItems.map((item) => {
-              const active =
-                item.to === "/fermi"
-                ? location.pathname.startsWith("/fermi") &&
-                  !location.pathname.startsWith("/fermi/kanban") &&
-                  !location.pathname.startsWith("/fermi/calendario")
-                : item.to === "/booking" ? location.pathname === "/booking" || location.pathname.startsWith("/rental-bookings/") : location.pathname.startsWith(item.to);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium",
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-          <button type="button" onClickCapture={event => { mobilePointer.current = event.detail > 0; }} onClick={event => { event.currentTarget.focus(); setMobileOpen(true); }} className="workspace-mobile-more"><Menu className="h-4 w-4" aria-hidden="true" /><span>Altro</span></button>
-        </div>
-      </nav>
     </div>
   </div>
   );

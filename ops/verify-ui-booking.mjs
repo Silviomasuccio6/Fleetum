@@ -129,10 +129,13 @@ try {
     await page.locator(".workspace-filter-group > summary").click();
     assert.ok(await page.getByLabel("Filtra sede booking", { exact: true }).isVisible());
     await page.locator(".workspace-filter-group > summary").click();
-    assert.equal(await page.getByRole("navigation", { name: "Navigazione rapida" }).locator("a,button").count(), 5);
+    assert.equal(await page.getByRole("navigation", { name: "Navigazione rapida" }).count(), 0);
     await screenshot("booking-phone");
-    await page.getByRole("button", { name: "Altro", exact: true }).click();
+    await page.getByRole("button", { name: "Apri menu principale", exact: true }).click();
     const menu = page.getByRole("dialog", { name: "Menu principale", exact: true }); await menu.waitFor();
+    for (const name of ["Dashboard", "Prenotazioni", "Veicoli", "Clienti"]) {
+      assert.ok(await menu.getByRole("link", { name, exact: true }).isVisible());
+    }
     assert.ok(await menu.getByRole("link", { name: "Scadenziario", exact: true }).isVisible());
     assert.ok(await menu.getByRole("link", { name: "Manutenzioni", exact: true }).isVisible());
     await page.keyboard.press("Escape"); await menu.waitFor({ state: "hidden" });
