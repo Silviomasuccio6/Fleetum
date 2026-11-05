@@ -4,6 +4,12 @@ export const vehiclePaginationStatus = page => page.getByRole("status")
   .filter({ hasText: /Totale record|Total records/ }).filter({ visible: true });
 export const bookingDetailsPanel = page => page.getByRole("complementary", { name: /^(Dettaglio prenotazione|Booking details)$/ });
 
+export function bookingCodeTextPattern({ code }) {
+  if (typeof code !== "string" || !code.trim()) throw new Error("Booking code is required");
+  const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*${escaped}\\s*·\\s*\\S(?:[\\s\\S]*\\S)?\\s*$`);
+}
+
 export function bookingCalendarButtonNamePattern({ code, customerName }) {
   if (typeof code !== "string" || !code || typeof customerName !== "string" || !customerName) {
     throw new Error("Booking identity is required");

@@ -3,7 +3,7 @@ import { e2eEnv, hasTenantCredentials } from "./helpers/env";
 import { createAuthenticatedApi, csrfHeaders, saveStorageStateFromApi } from "./helpers/auth";
 import { createDemoDataset } from "./helpers/demo-data";
 import { openBookingMonth } from "./helpers/calendar.mjs";
-import { vehiclePaginationStatus, vehiclePaginationTextPattern, bookingDetailsPanel, bookingCalendarButtonNamePattern } from "./helpers/workspace-locators.mjs";
+import { vehiclePaginationStatus, vehiclePaginationTextPattern, bookingDetailsPanel, bookingCalendarButtonNamePattern, bookingCodeTextPattern } from "./helpers/workspace-locators.mjs";
 
 const tinySignaturePng =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lZr0xQAAAABJRU5ErkJggg==";
@@ -111,16 +111,17 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
       return response.request().method() === "GET"
         && new URL(response.url()).pathname === "/api/rental-bookings/availability/month";
     });
+    const selectedPanel = bookingDetailsPanel(page);
     await page.goto(`/booking?bookingId=${dataset.booking.id}`);
-    await expect(page.getByText(dataset.booking.code, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL((url) => url.searchParams.get("bookingId") === dataset.booking.id);
+    await expect(selectedPanel.getByText(bookingCodeTextPattern(dataset.booking))).toBeVisible({ timeout: 20_000 });
     const initialAvailability = await initialAvailabilityPromise;
     expect(initialAvailability.ok()).toBeTruthy();
     await openBookingMonth(page, dataset.booking.pickupAt, (await initialAvailability.json()).month);
 
-    const selectedPanel = bookingDetailsPanel(page);
     const expectSelectedBooking = async (booking: { id: string; code: string }) => {
       await expect(page).toHaveURL((url) => url.searchParams.get("bookingId") === booking.id);
-      await expect(selectedPanel.getByText(booking.code, { exact: true })).toBeVisible();
+      await expect(selectedPanel.getByText(bookingCodeTextPattern(booking))).toBeVisible();
     };
     const selectBooking = async (booking: { code: string; customerName: string }) => {
       await page.getByRole("button", { name: bookingCalendarButtonNamePattern(booking) }).last().click();

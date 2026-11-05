@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { vehiclePaginationTextPattern, bookingCalendarButtonNamePattern } from "../../tests/e2e/helpers/workspace-locators.mjs";
+import { vehiclePaginationTextPattern, bookingCalendarButtonNamePattern, bookingCodeTextPattern } from "../../tests/e2e/helpers/workspace-locators.mjs";
+
+test("the observed booking detail code and status retain the exact booking identity in IT and EN", () => {
+  const pattern = bookingCodeTextPattern({ code: "BK26-02268" });
+  for (const text of ["BK26-02268 · Bozza", "BK26-02268 · Draft", " BK26-02268 · In noleggio ", "BK26-02268 · In rental"]) {
+    assert.match(text, pattern);
+  }
+  assert.match("QA.123+(A) · Confirmed", bookingCodeTextPattern({ code: "QA.123+(A)" }));
+});
+
+test("booking detail matching rejects different or extended codes and missing status", () => {
+  const pattern = bookingCodeTextPattern({ code: "BK26-02268" });
+  for (const text of ["BK26-02269 · Bozza", "BK26-022680 · Bozza", "X-BK26-02268 · Bozza", "BK26-02268", "BK26-02268 · ", "BK26-02268 Draft"]) {
+    assert.doesNotMatch(text, pattern);
+  }
+  assert.doesNotMatch("QAX123A · Confirmed", bookingCodeTextPattern({ code: "QA.123+(A)" }));
+  for (const code of ["", " ", undefined, null]) assert.throws(() => bookingCodeTextPattern({ code }));
+});
 
 test("vehicle totals from the observed new UI retain every API pagination value in IT and EN", () => {
   const pattern = vehiclePaginationTextPattern({ page: 1, pageSize: 20, total: 143 });
