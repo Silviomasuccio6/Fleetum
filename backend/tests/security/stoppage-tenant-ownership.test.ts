@@ -1,3 +1,4 @@
+import {createReportActor,reportAuthorization,removeReportActors,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { ManageStoppagesUseCases } from "../../src/application/usecases/stoppages/manage-stoppages-usecases.js";
@@ -141,6 +142,7 @@ describe("stoppage ownership across mutations and projections", { concurrency: f
     await prisma.vehicle.deleteMany({ where: { tenantId: ids } });
     await prisma.workshop.deleteMany({ where: { tenantId: ids } });
     await prisma.site.deleteMany({ where: { tenantId: ids } });
+    await removeReportActors(ownedTenantIds);
     await prisma.user.deleteMany({ where: { tenantId: ids } });
     await prisma.scheduledReportCursor.deleteMany({ where: { tenantId: ids } });
     await prisma.auditLog.deleteMany({ where: { tenantId: ids } });
@@ -602,9 +604,10 @@ describe("stoppage ownership across mutations and projections", { concurrency: f
     await prisma.tenantSubscription.create({ data: { tenantId: a.tenant.id, provider: "local", plan: "PRO", status: "ACTIVE" } });
     const now = new Date();
     now.setSeconds(0, 0);
+    await createReportActor(a.tenant.id);
     const settings = await prisma.auditLog.create({ data: {
       tenantId: a.tenant.id, resource: "reports", action: "SETTINGS_REPORTS", createdAt: new Date(now.getTime() - dayMs),
-      details: { enabled: true, frequency: "daily", hour: now.getHours(), minute: now.getMinutes(), reportStyle: "EXECUTIVE", recipients: ["synthetic-report@example.test"] }
+      details: {...{ enabled: true, frequency: "daily", hour: now.getHours(), minute: now.getMinutes(), reportStyle: "EXECUTIVE", recipients: ["synthetic-report@example.test"] },__siteAuthorization:reportAuthorization(a.tenant.id)}
     } });
     await prisma.scheduledReportCursor.create({ data: {
       tenantId: a.tenant.id, settingsAuditLogId: settings.id, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, nextRunAt: now

@@ -2,7 +2,9 @@ import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
-import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockOwnedVehicle } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { visiblePriceListWhere, visiblePricingCounts, assertPricingWriteScope, lockWritablePriceList } from "../../../infrastructure/repositories/pricing-site-scope.js";
+import { assertVisibleSite, visibleVehicleWhere } from "../../../infrastructure/repositories/resource-site-scope.js";
 import { computeRentalQuote } from "../../../application/services/rental-pricing-service.js";
 import {
   rentalPricingCreateExtraPolicySchema,
@@ -19,11 +21,17 @@ import { AppError } from "../../../shared/errors/app-error.js";
 const withDefined = <T extends Record<string, unknown>>(input: T): Partial<T> =>
   Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
 
-const ownedPricingVehicleWhere = (tenantId: string): Prisma.RentalPriceListWhereInput => ({
-  OR: [{ vehicleId: null }, { vehicle: { is: ownedVehicleWhere(tenantId, true) } }]
-});
+const ownedPricingVehicleWhere = visiblePriceListWhere;
 
 export class RentalPricingController {
+  private async getExtraPolicyOrThrow(tenantId:string,id:string) {
+    const policy=await prisma.rentalExtraKmPolicy.findFirst({where:{tenantId,id,deletedAt:null,
+      priceList:{is:{...visiblePriceListWhere(tenantId),deletedAt:null}},
+      OR:[{packageId:null},{package:{is:{tenantId,deletedAt:null,priceList:{is:visiblePriceListWhere(tenantId)}}}}]
+    },include:{package:{select:{priceListId:true}},tiers:{where:{tenantId}}}});
+    if(!policy||(policy.packageId&&policy.package?.priceListId!==policy.priceListId))throw new AppError("Tariffario extra km non trovato",404,"RENTAL_EXTRA_POLICY_NOT_FOUND");
+    return policy;
+  }
   private async hydrateExtraPolicies<
     T extends { id: string; tiers: Array<{ id: string }> }
   >(tenantId: string, policies: readonly T[]): Promise<T[]> {
@@ -60,7 +68,9 @@ export class RentalPricingController {
       throw new AppError("Per scope VEHICLE_CATEGORY devi indicare una categoria veicolo.", 400, "RENTAL_PRICING_CATEGORY_REQUIRED");
     }
 
+    assertPricingWriteScope(input.tenantId,input);
     if (input.siteId) {
+      assertVisibleSite(input.tenantId,input.siteId);
       const site = await prisma.site.findFirst({
         where: { tenantId: input.tenantId, id: input.siteId, deletedAt: null },
         select: { id: true }
@@ -70,7 +80,7 @@ export class RentalPricingController {
 
     if (input.vehicleId) {
       const vehicle = await prisma.vehicle.findFirst({
-        where: { ...ownedVehicleWhere(input.tenantId), id: input.vehicleId, isActive: true },
+        where: { ...visibleVehicleWhere(input.tenantId), id: input.vehicleId, isActive: true },
         select: { id: true }
       });
       if (!vehicle) throw new AppError("Veicolo non valido per il tenant corrente.", 404, "RENTAL_PRICING_VEHICLE_NOT_FOUND");
@@ -95,11 +105,12 @@ export class RentalPricingController {
       where: { tenantId: input.tenantId, id: input.priceListId, deletedAt: null, AND: [ownedPricingVehicleWhere(input.tenantId)] },
       include: {
         packages: {
-          where: { deletedAt: null, isActive: true },
+          where: { tenantId: input.tenantId, deletedAt: null, isActive: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
         },
         extraKmPolicies: {
-          where: { deletedAt: null, isActive: true },
+          where: { tenantId: input.tenantId, deletedAt: null, isActive: true,
+            OR: [{ packageId: null }, { package: { is: { tenantId: input.tenantId, priceListId: input.priceListId, deletedAt: null } } }] },
           include: {
             tiers: {
               where: { tenantId: input.tenantId },
@@ -176,7 +187,7 @@ export class RentalPricingController {
         include: {
           site: { select: { id: true, name: true, city: true } },
           vehicle: { select: { id: true, plate: true, brand: true, model: true } },
-          _count: { select: { packages: true, extraKmPolicies: true, bookingSnapshots: true } }
+
         }
       })
     ]);
@@ -186,7 +197,8 @@ export class RentalPricingController {
       data,
       { tenantId }
     );
-    res.json({ data: exactData, total, page: query.page, pageSize: query.pageSize });
+    const counts = await visiblePricingCounts(tenantId,exactData.map(row=>row.id));
+    res.json({ data: exactData.map(row=>({...row,_count:counts.get(row.id)})), total, page: query.page, pageSize: query.pageSize });
   };
 
   createList = async (req: Request, res: Response) => {
@@ -204,6 +216,7 @@ export class RentalPricingController {
     const created = await prisma.$transaction(async (tx) => {
       if (payload.scope === "VEHICLE" && payload.vehicleId) {
         const vehicle = await lockOwnedVehicle(tx, tenantId, payload.vehicleId);
+        assertVisibleSite(tenantId,vehicle.siteId);
         if (!vehicle.isActive) throw new AppError("Veicolo non valido per il tenant corrente.", 404, "RENTAL_PRICING_VEHICLE_NOT_FOUND");
       }
       return tx.rentalPriceList.create({
@@ -241,6 +254,7 @@ export class RentalPricingController {
     const payload = rentalPricingUpdateListSchema.parse(req.body);
     const current = await this.getPriceListOrThrow(tenantId, req.params.id);
 
+    assertPricingWriteScope(tenantId,current);
     const nextScope = payload.scope ?? current.scope;
     const nextSiteId = payload.siteId ?? current.siteId ?? undefined;
     const nextVehicleId = payload.vehicleId ?? current.vehicleId ?? undefined;
@@ -273,6 +287,7 @@ export class RentalPricingController {
       if (!locked || locked.vehicleId !== current.vehicleId || locked.updatedAt.getTime() !== current.updatedAt.getTime()) {
         throw new AppError("Il listino e' cambiato. Riprova.", 409, "RENTAL_PRICE_LIST_CHANGED");
       }
+      assertPricingWriteScope(tenantId,locked);
       return tx.rentalPriceList.update({
         where: { id: current.id },
         data: {
@@ -313,9 +328,9 @@ export class RentalPricingController {
     const tenantId = req.auth!.tenantId;
     const current = await this.getPriceListOrThrow(tenantId, req.params.id);
 
-    await prisma.rentalPriceList.update({
-      where: { id: current.id },
-      data: { deletedAt: new Date(), isActive: false }
+    await prisma.$transaction(async tx=>{
+      await lockWritablePriceList(tx,tenantId,current.id);
+      await tx.rentalPriceList.update({where:{id:current.id},data:{deletedAt:new Date(),isActive:false}});
     });
 
     res.status(204).send();
@@ -341,6 +356,7 @@ export class RentalPricingController {
     await this.getPriceListOrThrow(tenantId, listId);
 
     const created = await prisma.$transaction(async (tx) => {
+      await lockWritablePriceList(tx,tenantId,listId);
       if (payload.isDefault) {
         await tx.rentalPricePackage.updateMany({
           where: { tenantId, priceListId: listId, deletedAt: null },
@@ -372,11 +388,12 @@ export class RentalPricingController {
     const payload = rentalPricingUpdatePackageSchema.parse(req.body);
 
     const current = await prisma.rentalPricePackage.findFirst({
-      where: { tenantId, id: req.params.id, deletedAt: null }
+      where: { tenantId, id: req.params.id, deletedAt: null, priceList: { is: { ...visiblePriceListWhere(tenantId), deletedAt: null } } }
     });
     if (!current) throw new AppError("Pacchetto km non trovato.", 404, "RENTAL_PRICE_PACKAGE_NOT_FOUND");
 
     const updated = await prisma.$transaction(async (tx) => {
+      await lockWritablePriceList(tx,tenantId,current.priceListId);
       if (payload.isDefault) {
         await tx.rentalPricePackage.updateMany({
           where: { tenantId, priceListId: current.priceListId, deletedAt: null },
@@ -408,13 +425,13 @@ export class RentalPricingController {
   removePackage = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const current = await prisma.rentalPricePackage.findFirst({
-      where: { tenantId, id: req.params.id, deletedAt: null }
+      where: { tenantId, id: req.params.id, deletedAt: null, priceList: { is: { ...visiblePriceListWhere(tenantId), deletedAt: null } } }
     });
     if (!current) throw new AppError("Pacchetto km non trovato.", 404, "RENTAL_PRICE_PACKAGE_NOT_FOUND");
 
-    await prisma.rentalPricePackage.update({
-      where: { id: current.id },
-      data: { deletedAt: new Date(), isActive: false, isDefault: false }
+    await prisma.$transaction(async tx=>{
+      await lockWritablePriceList(tx,tenantId,current.priceListId);
+      await tx.rentalPricePackage.update({where:{id:current.id},data:{deletedAt:new Date(),isActive:false,isDefault:false}});
     });
 
     res.status(204).send();
@@ -428,17 +445,22 @@ export class RentalPricingController {
     const where: Prisma.RentalExtraKmPolicyWhereInput = {
       tenantId,
       deletedAt: null,
+      priceList: { is: { ...visiblePriceListWhere(tenantId), deletedAt: null } },
+      OR: [{ packageId: null }, { package: { is: { tenantId, deletedAt: null, priceList: { is: visiblePriceListWhere(tenantId) } } } }],
       ...(listId ? { priceListId: listId } : {}),
       ...(packageId ? { packageId } : {})
     };
 
-    const data = await prisma.rentalExtraKmPolicy.findMany({
+    const rows = await prisma.rentalExtraKmPolicy.findMany({
       where,
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       include: {
+        package: { select: { tenantId: true, priceListId: true } },
         tiers: { where: { tenantId }, orderBy: [{ sortOrder: "asc" }, { fromKm: "asc" }] }
       }
     });
+    const data=rows.filter(row=>!row.packageId||(row.package?.tenantId===tenantId&&row.package.priceListId===row.priceListId))
+      .map(({package:_package,...row})=>row);
 
     const exactData = await this.hydrateExtraPolicies(tenantId, data);
     res.json({ data: exactData });
@@ -462,6 +484,7 @@ export class RentalPricingController {
     }
 
     const created = await prisma.$transaction(async (tx) => {
+      await lockWritablePriceList(tx,tenantId,priceListId);
       if (payload.isDefault) {
         await tx.rentalExtraKmPolicy.updateMany({
           where: {
@@ -518,11 +541,7 @@ export class RentalPricingController {
 
   updateExtraPolicy = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
-    const current = await prisma.rentalExtraKmPolicy.findFirst({
-      where: { tenantId, id: req.params.id, deletedAt: null },
-      include: { tiers: true }
-    });
-    if (!current) throw new AppError("Tariffario extra km non trovato.", 404, "RENTAL_EXTRA_POLICY_NOT_FOUND");
+    const current = await this.getExtraPolicyOrThrow(tenantId,req.params.id);
 
     const payload = rentalPricingUpdateExtraPolicySchema.parse(req.body);
     const rawPackageId = typeof (req.body as Record<string, unknown>).packageId === "string"
@@ -539,6 +558,7 @@ export class RentalPricingController {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      await lockWritablePriceList(tx,tenantId,current.priceListId);
       if (payload.isDefault) {
         await tx.rentalExtraKmPolicy.updateMany({
           where: {
@@ -599,12 +619,10 @@ export class RentalPricingController {
 
   removeExtraPolicy = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
-    const current = await prisma.rentalExtraKmPolicy.findFirst({
-      where: { tenantId, id: req.params.id, deletedAt: null }
-    });
-    if (!current) throw new AppError("Tariffario extra km non trovato.", 404, "RENTAL_EXTRA_POLICY_NOT_FOUND");
+    const current = await this.getExtraPolicyOrThrow(tenantId,req.params.id);
 
     await prisma.$transaction(async (tx) => {
+      await lockWritablePriceList(tx,tenantId,current.priceListId);
       await tx.rentalExtraKmTier.deleteMany({ where: { tenantId, policyId: current.id } });
       await tx.rentalExtraKmPolicy.update({
         where: { id: current.id },

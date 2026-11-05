@@ -1,3 +1,4 @@
+import { captureSiteStamp, captureSiteAccount, assertSiteAccount, assertSiteStamp, assertSiteResponse, invalidateSiteStamp, siteRequestHeaders, beginSiteWrite, type SiteStamp, type SiteAccountStamp, SiteContextChangedError } from "../../application/stores/site-access-store";
 import axios from "axios";
 import { snackbar } from "../../application/stores/snackbar-store";
 import { useAuthStore } from "../../application/stores/auth-store";
@@ -13,6 +14,12 @@ const api = axios.create({
   timeout: 15000,
   withCredentials: true
 });
+
+type ViewRequest = { _fleetumView?: SiteStamp; _fleetumOwner?: SiteAccountStamp; _releaseView?: () => void };
+const assertRequestOwner = (request: ViewRequest) => {
+  if (request._fleetumOwner) assertSiteAccount(request._fleetumOwner);
+  if (request._fleetumView) assertSiteStamp(request._fleetumView);
+};
 
 export class HttpClientError extends Error {
   status?: number;
@@ -41,10 +48,9 @@ export class HttpClientError extends Error {
   }
 }
 
-let lastToastAt = 0;
-const TOAST_COOLDOWN_MS = 5000;
 const AUTH_ROUTES = ["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password", "/auth/accept-invite", "/auth/refresh"];
 let refreshPromise: Promise<{ user?: unknown; csrfToken?: string } | null> | null = null;
+let refreshAccount: SiteAccountStamp | null = null;
 
 const getCookieValue = (name: string) => {
   const raw = document.cookie
@@ -70,8 +76,10 @@ const logoutAndRedirectToLogin = () => {
 };
 
 const tryRefreshSession = async () => {
-  if (refreshPromise) return refreshPromise;
+  const account = captureSiteAccount();
+  if (refreshPromise && refreshAccount?.owner===account.owner && refreshAccount.epoch===account.epoch) return refreshPromise;
 
+  refreshAccount=account;
   refreshPromise = (async () => {
     try {
       const remember = tokenStorage.shouldRemember();
@@ -80,6 +88,7 @@ const tryRefreshSession = async () => {
       const nextUser = refreshRes.data?.user;
       const csrfToken = typeof refreshRes.data?.csrfToken === "string" ? refreshRes.data.csrfToken : undefined;
 
+      try{assertSiteAccount(account);}catch{return null;}
       if (nextUser) useAuthStore.getState().setSession(nextUser as any, remember);
 
       if (csrfToken) tokenStorage.setCsrf(csrfToken, remember);
@@ -87,7 +96,7 @@ const tryRefreshSession = async () => {
     } catch {
       return null;
     } finally {
-      refreshPromise = null;
+      if(refreshAccount===account){refreshPromise=null;refreshAccount=null;}
     }
   })();
 
@@ -95,6 +104,14 @@ const tryRefreshSession = async () => {
 };
 
 api.interceptors.request.use(async (config) => {
+  const request = config as typeof config & ViewRequest;
+  const business = !/^\/(auth|public|health|ready)(\/|$)/.test(String(config.url ?? ""));
+  // Own metadata may outlive a view revision, but never its account identity.
+  if (String(config.url ?? "") === "/auth/site-access") {
+    request._fleetumOwner ??= captureSiteAccount();
+    assertRequestOwner(request);
+  }
+  if (business) { if(request._fleetumView) assertSiteStamp(request._fleetumView); else request._fleetumView=captureSiteStamp(); }
   if (isStateChangingMethod(config.method)) {
     let csrfToken = readCsrfToken();
     if (!csrfToken) {
@@ -104,19 +121,31 @@ api.interceptors.request.use(async (config) => {
     if (csrfToken) config.headers["X-CSRF-Token"] = csrfToken;
   }
 
+  if(request._fleetumView){ assertSiteStamp(request._fleetumView); config.headers.delete("X-Fleetum-Site"); config.headers.delete("X-Fleetum-Site-Revision"); Object.assign(config.headers,siteRequestHeaders()); request._releaseView=beginSiteWrite(request._fleetumView,config.method); }
   return config;
 });
 
 api.interceptors.response.use(
   (res) => {
+    const request=res.config as typeof res.config & ViewRequest;
+    request._releaseView?.(); assertRequestOwner(request);
+    if(request._fleetumView)assertSiteResponse(request._fleetumView,res.headers["x-fleetum-site-revision"],res.headers["x-fleetum-site-view"],res.status>=200&&res.status<300);
     const csrfToken = typeof res.data?.csrfToken === "string" ? res.data.csrfToken : undefined;
     if (csrfToken) tokenStorage.setCsrf(csrfToken, tokenStorage.shouldRemember());
     return res;
   },
   async (error) => {
     const originalRequest = error.config ?? {};
+    originalRequest._releaseView?.();
+    try{assertRequestOwner(originalRequest);}catch(stale){return Promise.reject(stale);}
     const status = error.response?.status as number | undefined;
     const apiErrorCode = error.response?.data?.error as string | undefined;
+    if(originalRequest._fleetumView){
+      try{
+        if(apiErrorCode==="SITE_CONTEXT_STALE"){invalidateSiteStamp(originalRequest._fleetumView);throw new SiteContextChangedError();}
+        assertSiteResponse(originalRequest._fleetumView,error.response?.headers?.["x-fleetum-site-revision"],error.response?.headers?.["x-fleetum-site-view"]);
+      }catch(stale){return Promise.reject(stale);}
+    }
     const apiMessage = error.response?.data?.message as string | undefined;
     const apiDetails = error.response?.data?.details as Record<string, unknown> | undefined;
     const requestUrl = String(originalRequest.url ?? "");
@@ -161,6 +190,7 @@ api.interceptors.response.use(
       try {
         originalRequest._retry = true;
         const refreshed = await tryRefreshSession();
+        assertRequestOwner(originalRequest);
         if (refreshed) {
           originalRequest.headers = { ...(originalRequest.headers ?? {}) };
           if (isStateChangingMethod(originalRequest.method)) {
@@ -170,7 +200,8 @@ api.interceptors.response.use(
           return api.request(originalRequest);
         }
         logoutAndRedirectToLogin();
-      } catch {
+      } catch (failure) {
+        if(failure instanceof SiteContextChangedError)return Promise.reject(failure);
         logoutAndRedirectToLogin();
       }
     }
@@ -184,6 +215,7 @@ api.interceptors.response.use(
     ) {
       originalRequest._csrfRetry = true;
       const refreshed = await tryRefreshSession();
+      try{assertRequestOwner(originalRequest);}catch(stale){return Promise.reject(stale);}
       const csrfToken = refreshed?.csrfToken ?? readCsrfToken();
       if (csrfToken) {
         originalRequest.headers = {
@@ -201,13 +233,16 @@ api.interceptors.response.use(
       apiMessage ||
       (status === 402 ? "Licenza scaduta. Rinnova per continuare." : null) ||
       (status === 403 ? "Accesso non consentito." : null) ||
-      (isTimeout ? "Operazione in timeout. Riprova tra pochi secondi." : null) ||
-      (isNetwork ? "Backend non raggiungibile. Verifica API e connessione." : "Errore di rete");
+      (isTimeout || isNetwork
+        ? isStateChangingMethod(originalRequest.method)
+          ? "Esito da verificare. Controlla la risorsa prima di riprovare l’operazione."
+          : "Connessione non disponibile. Controlla la rete e riprova il caricamento."
+        : "Operazione non completata. Verifica l’esito prima di riprovare.");
 
-    const now = Date.now();
-    if (!isSilentSessionCheck && now - lastToastAt > TOAST_COOLDOWN_MS) {
-      snackbar.error(message);
-      lastToastAt = now;
+    // The form owns field validation. Other errors are a deferred fallback:
+    // the viewport removes it if the same message is already shown inline.
+    if (!isSilentSessionCheck && !isAuthRoute && apiErrorCode !== "VALIDATION_ERROR") {
+      snackbar.error(message, {origin:"transport", key:JSON.stringify([originalRequest.method,requestUrl,apiErrorCode,message])});
     }
     return Promise.reject(
       new HttpClientError(message, {
@@ -220,11 +255,6 @@ api.interceptors.response.use(
     );
   }
 );
-
-const shouldShowSuccess = (url: string) => {
-  const ignore = ["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password", "/auth/accept-invite", "/auth/change-password"];
-  return !ignore.some((x) => url.startsWith(x));
-};
 
 export const httpClient: ApiRepository = {
   async get<T>(url: string, params?: Record<string, string | number | undefined>) {
@@ -240,21 +270,26 @@ export const httpClient: ApiRepository = {
       headers: options?.headers,
       ...(typeof options?.timeoutMs === "number" ? { timeout: options.timeoutMs } : {})
     });
-    if (shouldShowSuccess(url) && !options?.suppressSuccessToast) snackbar.success("Operazione completata");
     return res.data;
   },
   async put<T>(url: string, body?: unknown) {
     const res = await api.put<T>(url, body);
-    if (shouldShowSuccess(url)) snackbar.success("Impostazioni salvate");
     return res.data;
   },
   async patch<T>(url: string, body?: unknown) {
     const res = await api.patch<T>(url, body);
-    if (shouldShowSuccess(url)) snackbar.success("Modifica salvata");
     return res.data;
   },
   async delete(url: string) {
     await api.delete(url);
-    if (shouldShowSuccess(url)) snackbar.success("Eliminazione completata");
   }
 };
+
+// Opt in only for resources whose absence is a normal UI state. Other failures
+// keep the existing auth, license, CSRF and error interceptors unchanged.
+export async function getOptionalResource<T>(url: string): Promise<T | null> {
+  const response = await api.get<T>(url, {
+    validateStatus: (status) => (status >= 200 && status < 300) || status === 404
+  });
+  return response.status === 404 ? null : response.data;
+}

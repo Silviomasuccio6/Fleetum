@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {runInNewContext} from 'node:vm';import ts from 'typescript';
+test('the topbar mobile menu opener focuses itself before mounting the dialog on Safari',()=>{
+ const source=readFileSync(new URL('../src/presentation/components/layout/app-layout.tsx',import.meta.url),'utf8'),ast=ts.createSourceFile('layout.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);const handlers:string[]=[];
+ const walk=(node:ts.Node)=>{if(ts.isJsxAttribute(node)&&node.name.getText(ast)==='onClick'&&node.initializer&&ts.isJsxExpression(node.initializer)&&node.initializer.expression?.getText(ast).includes('setMobileOpen(true)'))handlers.push(node.initializer.expression.getText(ast));ts.forEachChild(node,walk);};walk(ast);assert.equal(handlers.length,1);
+ for(const source of handlers){const order:string[]=[];const handler=runInNewContext(ts.transpileModule('('+source+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{setMobileOpen:(open:boolean)=>{assert.equal(open,true);order.push('open')}});handler({currentTarget:{focus:()=>order.push('focus')}});assert.deepEqual(order,['focus','open']);}
+});

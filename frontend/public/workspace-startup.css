@@ -1,0 +1,14 @@
+/* Scoped to operational routes; public pages and the approved login keep their own canvas. */
+html[data-fleetum-workspace], html[data-fleetum-workspace] body {
+  background: #f5f6f8;
+}
+html.dark[data-fleetum-workspace], html.dark[data-fleetum-workspace] body {
+  background: #101216;
+}
+html[data-fleetum-workspace] .fleetum-fullscreen-loader {
+  background: transparent;
+  color: #263142;
+}
+html.dark[data-fleetum-workspace] .fleetum-fullscreen-loader {
+  color: #e8edf5;
+}

@@ -1,0 +1,19 @@
+.workspace-shell .site-context-trigger{min-height:44px;min-width:0;max-width:min(42vw,310px);display:flex;gap:8px;padding:5px 8px;text-align:left;border-radius:11px;white-space:normal}
+.site-context-caption{display:flex;flex-direction:column;min-width:0;gap:1px}
+.site-context-caption>span{color:hsl(var(--muted-foreground));font-size:11px;font-weight:500;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.site-context-caption>strong{color:hsl(var(--foreground));font-size:13px;font-weight:650;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.site-context-help{font-size:14px;line-height:1.6;color:hsl(var(--muted-foreground));margin-top:16px}
+.site-context-name{font-size:18px;line-height:1.45;font-weight:650;overflow-wrap:anywhere}
+.site-context-empty{padding:32px;max-width:600px;margin:20px auto;border:1px solid var(--ws-line);border-radius:18px;background:hsl(var(--card))}
+.site-context-empty h1{font-size:22px;font-weight:650;margin:16px 0 8px}
+.site-context-empty p{color:hsl(var(--muted-foreground));line-height:1.6}
+.site-member-assignment{display:flex;align-items:flex-start;flex-direction:column;gap:6px;min-width:0;max-width:260px;overflow-wrap:anywhere}
+@media(max-width:600px){.workspace-shell .site-context-trigger{max-width:35vw;gap:5px;padding-inline:3px}.site-context-trigger>svg:first-child{display:none}.site-context-caption>strong{font-size:12px}.site-context-caption>span{font-size:10px}}
+
+/* The site selector remains in the existing topbar footprint (block 1). */
+.workspace-shell .site-context-control{position:relative;display:flex;align-items:center;gap:8px;min-width:0;max-width:min(42vw,310px)}
+.site-context-control .site-context-caption{min-width:0;max-width:100%}
+.workspace-shell .site-context-select{min-height:34px;height:34px;max-width:100%;min-width:0;width:180px;font-size:13px;line-height:1.25;font-weight:600;border-radius:7px;text-overflow:ellipsis;padding:3px 8px}
+.site-context-control .site-context-caption>span.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.site-context-error{position:absolute;top:100%;left:0;z-index:20;width:280px;max-width:85vw;padding:8px 12px;border:1px solid hsl(var(--destructive));border-radius:7px;background:hsl(var(--card));color:hsl(var(--foreground));font-size:13px}
+@media(max-width:600px){.workspace-shell .site-context-control{max-width:35vw;gap:4px}.site-context-control>svg{display:none}.workspace-shell .site-context-select{width:100%;min-height:44px;height:44px;font-size:13px;padding-inline:6px}.site-context-control .site-context-caption>span{font-size:10px}}

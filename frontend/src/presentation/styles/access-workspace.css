@@ -1,0 +1,126 @@
+/* B10 only. Login and its existing premium assets are intentionally outside this scope. */
+.access-shell{min-height:100dvh;padding:24px 20px 48px}
+.access-workspace{width:100%;max-width:560px;margin-inline:auto;min-width:0}
+.access-shell-wide .access-workspace{max-width:980px}
+.access-brand-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px}
+.access-brand-bar>div{display:flex;align-items:center;gap:12px}
+.access-brand{display:inline-flex;align-items:center;gap:10px;font-weight:650;font-size:16px;min-height:44px}
+.access-brand img{width:32px;height:32px}
+.access-back,.access-theme{display:inline-flex;align-items:center;justify-content:center;min-height:44px;gap:8px;border-radius:7px;font-size:13px}
+.access-back{padding:8px;color:hsl(var(--muted-foreground))}
+.access-theme{width:44px;border:1px solid var(--ws-line);background:hsl(var(--card));color:hsl(var(--foreground))}
+.access-card{padding:32px;background:hsl(var(--card));border:1px solid var(--ws-line);border-radius:12px;box-shadow:var(--refinement-shadow)}
+.access-header{margin-bottom:28px}
+.access-header h1{font-size:28px;line-height:1.25;letter-spacing:-.04em;font-weight:650}
+.access-header>p:last-child{font-size:14px;line-height:1.65;color:hsl(var(--muted-foreground));margin-top:10px}
+.access-form,.access-fields{display:grid;gap:20px;min-width:0}
+.access-fields{margin:0;padding:0;border:0}
+.access-field{display:grid;gap:7px;min-width:0}
+.access-field label{font-size:13px;font-weight:500}
+.access-workspace input:not([type=checkbox]):not([type=color]):not(.sr-only),.access-workspace select{width:100%;min-width:0;min-height:44px;border:1px solid hsl(var(--input));border-radius:7px;background:var(--refinement-field);color:hsl(var(--foreground));padding:10px 12px;font:inherit;font-size:14px;box-shadow:none}
+.access-workspace input::placeholder{color:hsl(var(--muted-foreground));opacity:1}
+.access-password{display:flex;align-items:center;position:relative;min-width:0}
+.access-password input{padding-right:92px!important}
+.access-password button{position:absolute;right:4px;min-height:36px;padding:6px 10px;border-radius:5px;color:hsl(var(--primary));font-size:12px;font-weight:600}
+.access-hint,.access-footnote{font-size:12px;line-height:1.6;color:hsl(var(--muted-foreground))}
+.access-field-error{font-size:12px;line-height:1.5;color:#9b2342;margin-top:6px}
+.dark .access-field-error{color:#ffb4c5}
+.access-notice{border:1px solid var(--ws-line);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.65;overflow-wrap:anywhere;margin-bottom:20px}
+.access-notice-error{background:#fff3f5;color:#8f1b38;border-color:#c796a4}
+.access-notice-success{color:#226345;background:#f1f8f4;border-color:#88b39c}
+.access-notice-info{background:hsl(var(--muted));color:hsl(var(--foreground))}
+.dark .access-notice-error{background:#38202a;color:#ffc1ce;border-color:#9e6274}
+.dark .access-notice-success{background:#1d3029;color:#b5e4c9;border-color:#608b75}
+.access-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.access-actions>button,.access-actions>a{min-height:44px}
+.access-link{display:inline-flex;align-items:center;min-height:44px;padding:6px 0;color:hsl(var(--primary));font-size:13px;font-weight:500;text-decoration:underline;text-underline-offset:4px}
+.access-step-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:24px;padding:0;list-style:none}
+.access-step-list li{border-bottom:2px solid var(--ws-line);padding:12px 0;color:hsl(var(--muted-foreground));font-size:13px}
+.access-step-list [aria-current=step]{border-color:hsl(var(--primary));color:hsl(var(--foreground));font-weight:600}
+.access-onboarding>.access-workspace{max-width:1180px}
+.access-onboarding .access-onboarding-intro{padding:16px 0 24px;font-size:14px;line-height:1.65;color:hsl(var(--muted-foreground))}
+.access-workspace [hidden]{display:none!important}
+/* Keep existing signup field names and country cascade, with approved B materials. */
+.access-workspace .premium-login-form{display:grid;gap:24px}
+.access-workspace .premium-login-field-label{display:block;font-size:13px;font-weight:500;color:hsl(var(--foreground));margin-bottom:7px}
+.access-workspace .premium-login-field{display:flex;align-items:center;position:relative;border:0;border-radius:7px;background:none;box-shadow:none;transform:none}
+.access-workspace .premium-login-field:focus-within{box-shadow:none}
+.access-workspace .premium-login-field-icon-wrap{position:absolute;left:12px;display:flex;align-items:center;pointer-events:none;color:hsl(var(--muted-foreground))}
+.access-workspace .premium-login-field-icon-wrap svg{width:16px;height:16px}
+.access-workspace .premium-login-field input,.access-workspace .premium-login-field select{padding-left:38px!important;font-family:inherit;letter-spacing:normal;background:var(--refinement-field);border:1px solid hsl(var(--input));color:hsl(var(--foreground))}
+.access-workspace .premium-login-field input[type=file]{font-size:13px;padding-left:12px!important}
+.access-workspace :is(.premium-login-submit,.premium-login-social-btn){min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;border-radius:7px;border:1px solid hsl(var(--input));font-size:13px;font-weight:600;transform:none;animation:none;box-shadow:none;background:hsl(var(--card));color:hsl(var(--foreground));letter-spacing:normal}
+.access-workspace .premium-login-submit{background:var(--refinement-action);color:var(--refinement-action-ink);border-color:var(--refinement-action)}
+.access-workspace .premium-login-submit:hover{background:var(--refinement-action-hover)}
+.access-workspace :is(.premium-login-submit-shimmer,.premium-signup-stepper__track){display:none}
+.access-workspace .premium-login-social-icon{width:18px;height:18px}
+.access-workspace .premium-login-social-grid{display:flex}
+.access-workspace .premium-login-divider{font-size:12px;color:hsl(var(--muted-foreground));display:flex;align-items:center;gap:14px}
+.access-workspace .premium-login-divider::before,.access-workspace .premium-login-divider::after{content:'';height:1px;background:var(--ws-line);flex:1}
+.access-workspace .premium-signup-stepper__meta{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px;font-size:12px;color:hsl(var(--muted-foreground))}
+.access-workspace .premium-signup-stepper__steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.access-workspace .premium-signup-stepper__step{display:flex;align-items:center;gap:10px;min-height:52px;text-align:left;border:1px solid var(--ws-line);border-radius:8px;padding:10px;background:hsl(var(--muted));color:hsl(var(--muted-foreground));box-shadow:none;transform:none}
+.access-workspace .premium-signup-stepper__step.is-active{color:hsl(var(--foreground));border-color:var(--refinement-selected-line);background:var(--refinement-selected)}
+.access-workspace .premium-signup-stepper__dot{width:24px;height:24px;flex-shrink:0;display:grid;place-items:center;border-radius:5px;background:hsl(var(--card));font-size:12px}
+.access-workspace .premium-signup-stepper__copy{display:grid;gap:3px;font-size:13px}
+.access-workspace .premium-signup-stepper__copy small{font-size:11px;line-height:1.3;font-weight:400}
+.access-workspace .premium-login-form>fieldset>div.rounded-2xl{background:hsl(var(--card));border:1px solid var(--ws-line);border-radius:8px;box-shadow:none;padding:20px}
+.access-workspace .premium-login-form .text-slate-500,.access-workspace .premium-login-form .text-slate-700{color:hsl(var(--muted-foreground))}
+.access-workspace .premium-login-form .text-slate-900{color:hsl(var(--foreground))}
+.access-workspace .premium-login-form .bg-white\/70{background:hsl(var(--muted));border-color:var(--ws-line)}
+.access-workspace .premium-login-check{display:flex;gap:10px;font-size:13px;line-height:1.65;color:hsl(var(--foreground))}
+.access-workspace .premium-login-check input{width:18px;height:18px;flex-shrink:0;accent-color:var(--refinement-action);margin-top:3px}
+.access-workspace .premium-login-link{color:hsl(var(--primary));font-size:13px;min-height:44px;padding:8px;text-decoration:underline;text-underline-offset:4px}
+.access-workspace .premium-login-signup-text{font-size:13px;color:hsl(var(--muted-foreground))}
+.access-workspace .premium-signup-success{display:grid;gap:16px}
+.access-workspace .premium-signup-success__actions{display:flex;flex-wrap:wrap;gap:12px}
+@media(max-width:640px){.access-shell{padding:16px 16px 32px}.access-card{padding:24px 20px}.access-header h1{font-size:25px}.access-brand-bar{gap:8px;margin-bottom:20px}.access-back{font-size:12px;gap:5px}.access-brand-bar>div{gap:4px}.access-workspace .premium-signup-stepper__step{padding:8px;gap:7px;align-items:flex-start}.access-workspace .premium-signup-stepper__copy small{display:none}.access-workspace .premium-signup-stepper__copy{font-size:12px}.access-workspace .premium-signup-stepper__dot{width:20px;height:20px}.access-workspace .premium-login-form>fieldset>div.rounded-2xl{padding:16px}.access-actions{align-items:stretch;flex-direction:column}.access-actions :is(a,button){justify-content:center}.access-step-list{gap:8px}.access-step-list li{font-size:12px}.access-password button{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.access-workspace *, .access-workspace *::before,.access-workspace *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.access-workspace .access-signup-password-toggle{position:absolute;right:4px;min-height:40px;padding:6px 10px;font-size:12px;font-weight:600;color:hsl(var(--primary));background:var(--refinement-field);border-radius:5px}
+.access-workspace #signup-password{padding-right:90px!important}
+.access-workspace .premium-login-field::before,.access-workspace .premium-login-field::after{content:none}
+
+.access-workspace .premium-signup-stepper{background:none;border:0;border-radius:0;padding:0;box-shadow:none;backdrop-filter:none}
+.access-workspace .premium-signup-stepper__meta{flex-direction:row;align-items:center;letter-spacing:.04em;font-weight:500}
+.access-workspace .premium-signup-stepper__meta strong{color:hsl(var(--muted-foreground));font-weight:500}
+.access-workspace .premium-signup-stepper__step::before,.access-workspace .premium-signup-stepper__step::after{content:none}
+.access-workspace .premium-signup-stepper__step.is-active .premium-signup-stepper__dot{background:hsl(var(--primary));color:hsl(var(--primary-foreground));box-shadow:none}
+.access-workspace .premium-login-divider{width:100%;margin:0}
+
+.access-workspace .premium-signup-stepper::before{content:none}
+.access-workspace .premium-login-divider::before,.access-workspace .premium-login-divider::after{position:static;width:auto}
+.access-workspace .premium-signup-stepper__copy span{white-space:normal;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.access-workspace .premium-signup-stepper__step.is-active{transform:none;box-shadow:none}
+.access-workspace .premium-signup-stepper__step.is-done{color:hsl(var(--foreground));background:hsl(var(--muted));border-color:var(--ws-line)}
+.workspace-shell .access-workspace .premium-login-field-icon-wrap{width:16px!important;height:16px;padding:0;border:0;background:none}
+.workspace-shell .access-workspace :is(input:not([type=checkbox]):not([type=color]):not(.sr-only),select){min-height:44px}
+.workspace-shell .access-workspace :is(input,select,button,a):focus-visible{outline:2px solid hsl(var(--primary));outline-offset:3px}
+.workspace-shell .access-workspace .access-password button,.workspace-shell .access-workspace .access-signup-password-toggle{min-height:44px;min-width:44px}
+
+@media(max-width:640px){.workspace-shell .access-workspace :is(input:not([type=checkbox]):not([type=color]):not(.sr-only),select){font-size:16px}}
+.access-workspace .premium-signup-stepper__step:disabled{opacity:1;cursor:default;filter:none}
+@media(max-width:640px){
+ .access-workspace .premium-signup-stepper__step{display:grid;justify-items:start;align-content:start;gap:8px}
+ .access-workspace .premium-signup-stepper__copy span{font-size:12px;white-space:nowrap}
+ .access-workspace .premium-signup-stepper__meta{flex-wrap:wrap;gap:6px;letter-spacing:normal;font-size:11px}
+}
+
+.access-workspace .premium-language-switcher{padding:3px;border:1px solid var(--ws-line);background:hsl(var(--card));border-radius:7px;box-shadow:none;flex-shrink:0}
+.access-workspace .premium-language-switcher button{min-width:44px;min-height:44px;padding:6px;font-size:12px;color:hsl(var(--muted-foreground));border-radius:4px;background:none;box-shadow:none}
+.access-workspace .premium-language-switcher button.is-active{color:hsl(var(--primary));background:hsl(var(--secondary));box-shadow:none}
+@media(max-width:640px){.access-back{min-width:44px;padding:6px}.access-back>span{display:none}.access-brand-bar{gap:8px}}
+@media(max-width:420px){.access-brand>span{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}}
+.workspace-shell .access-workspace .premium-language-switcher{position:static;top:auto;right:auto;z-index:auto;backdrop-filter:none;background:hsl(var(--card));border-radius:7px;box-shadow:none;transform:none}
+.workspace-shell .access-workspace .premium-language-switcher button{min-width:44px;min-height:44px;height:44px;padding:6px;font-size:12px;letter-spacing:normal;color:hsl(var(--muted-foreground));border-radius:4px;background:none;box-shadow:none;transform:none}
+.workspace-shell .access-workspace .premium-language-switcher button.is-active{color:hsl(var(--primary));background:hsl(var(--secondary));box-shadow:none}
+.access-workspace .access-brand{min-width:44px}
+.access-workspace .premium-login-check a{display:inline-flex;align-items:center;min-height:44px}
+
+.workspace-shell .access-workspace .access-summary{min-width:0;border-radius:8px;box-shadow:none;backdrop-filter:none;background:hsl(var(--muted));border:1px solid var(--ws-line);overflow-wrap:anywhere}
+
+.access-social-loading{min-height:160px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px}
+.access-workspace .access-loader-dark{display:none}
+.dark .access-workspace .access-loader-light{display:none}
+.dark .access-workspace .access-loader-dark{display:flex}
+
+.workspace-shell .access-workspace .administration-workspace input.sr-only{width:1px;max-width:1px;min-height:1px;height:1px;padding:0}

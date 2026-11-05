@@ -1,3 +1,4 @@
+import { scopedFetch } from "../../../infrastructure/api/scoped-fetch";
 import { useEffect, useMemo, useState } from "react";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 
@@ -30,7 +31,7 @@ export const AuthenticatedPhoto = ({ photoId, kind, alt, className }: Authentica
     setSrc(null);
     setFailed(false);
 
-    void fetch(endpoint, {
+    void scopedFetch(endpoint, {
       method: "GET",
       credentials: "include",
       signal: controller.signal

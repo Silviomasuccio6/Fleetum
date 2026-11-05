@@ -1,0 +1,159 @@
+/* Approved card B materials belong to the persistent shell, including route/data loaders. */
+.workspace-shell[data-appearance=refined]{
+ --background:220 18% 97%;--foreground:215 27% 17%;--card:0 0% 100%;--card-foreground:215 27% 17%;
+ --primary:225 61% 49%;--primary-foreground:0 0% 100%;--muted:220 23% 97%;--muted-foreground:214 14% 40%;
+ --secondary:224 100% 96%;--secondary-foreground:225 61% 49%;--accent:224 100% 96%;--accent-foreground:225 61% 49%;
+ --input:214 14% 59%;--ring:225 61% 49%;--border:214 23% 87%;
+ --ws-canvas:#f5f6f8;--ws-line:#d8dee6;--ws-subtle:#f7f8fa;
+ --ws-material:rgb(255 255 255 / .88);--ws-material-border:rgb(255 255 255 / .95);--ws-material-solid:#f0f3f8;
+ --refinement-fine-line:#e6eaf0;--refinement-selected:#f5f8ff;--refinement-selected-line:#b4c3e7;
+ --refinement-panel-surface:#fff;--refinement-field:#fff;--refinement-action:#3158c8;--refinement-action-hover:#2d51b8;--refinement-action-pressed:#2748a6;--refinement-action-ink:#fff;--refinement-busy:#435782;
+ --refinement-success:#226345;--refinement-danger:#9f1239;--refinement-shadow:0 2px 5px #14233c0a,0 12px 24px -15px #14233c33;--refinement-soft-edge:inset 0 1px 0 #ffffffb3;
+ --refinement-backdrop:rgb(13 20 33 / .35);--refinement-panel-shadow:-16px 0 48px #101a2a26;--refinement-panel-border:#d8dee6;
+ background:var(--ws-canvas);background-attachment:initial;
+}
+.dark .workspace-shell[data-appearance=refined]{
+ --background:220 16% 7%;--foreground:216 29% 93%;--card:216 16% 13%;--card-foreground:216 29% 93%;
+ --primary:225 100% 83%;--primary-foreground:224 45% 18%;--muted:217 17% 15%;--muted-foreground:217 14% 70%;
+ --secondary:220 37% 22%;--secondary-foreground:225 100% 83%;--accent:220 37% 22%;--accent-foreground:225 100% 83%;
+ --input:219 11% 51%;--ring:225 100% 83%;--border:217 15% 24%;
+ --ws-canvas:#101216;--ws-line:#343b46;--ws-subtle:#20252d;
+ --ws-material:rgb(27 31 37 / .94);--ws-material-border:#343b46;--ws-material-solid:#1b1f25;
+ --refinement-fine-line:#2d333d;--refinement-selected:#202a3a;--refinement-selected-line:#465876;
+ --refinement-panel-surface:#252a32;--refinement-field:#171b21;--refinement-action:#4564ca;--refinement-action-hover:#4c68ce;--refinement-action-pressed:#405cbe;--refinement-action-ink:#f5f7ff;--refinement-busy:#354764;
+ --refinement-success:#a4d8b8;--refinement-danger:#ffbacb;--refinement-shadow:0 2px 5px #0003,0 14px 28px -16px #000b;--refinement-soft-edge:inset 0 1px 0 #ffffff0e;
+ --refinement-backdrop:rgb(4 6 10 / .52);--refinement-panel-shadow:inset 1px 0 0 #ffffff08,-18px 0 56px #0006;--refinement-panel-border:#465062;
+ background:var(--ws-canvas);
+}
+.workspace-shell[data-appearance=refined] button[data-variant=default]{background:var(--refinement-action);color:var(--refinement-action-ink);filter:none;box-shadow:inset 0 1px 0 #ffffff12}
+.workspace-shell[data-appearance=refined] button[data-variant=default]:hover{background:var(--refinement-action-hover);filter:none}
+.workspace-shell[data-appearance=refined] button[data-variant=default]:active{background:var(--refinement-action-pressed)}
+.workspace-shell[data-appearance=refined] button[data-variant][aria-busy=true]{background:var(--refinement-busy);color:var(--refinement-action-ink);opacity:1;filter:none}
+.workspace-shell[data-appearance=refined] :is(input:not([type=checkbox]):not([type=radio]),select,textarea){background:var(--refinement-field);border-radius:7px}
+
+.fleetum-panel-surface,.fleetum-panel-edge,.fleetum-panel-identity{position:fixed;pointer-events:none;user-select:none;will-change:transform;transform-origin:0 0}
+.fleetum-panel-surface{z-index:0;background:var(--refinement-panel-surface);border:1px solid var(--refinement-panel-border);box-shadow:var(--refinement-soft-edge),var(--refinement-panel-shadow)}
+.fleetum-panel-edge{z-index:2;background:hsl(var(--ring));opacity:.65}
+.fleetum-panel-identity{z-index:3;color:hsl(var(--foreground));margin:0;overflow-wrap:anywhere}
+
+/* Identical materials; each page keeps the structure appropriate to its data. */
+.workspace-shell[data-appearance=refined]{
+ --ws-panel-shadow:var(--refinement-soft-edge),var(--refinement-shadow);
+}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) .workspace-eyebrow{font-size:11px;letter-spacing:.08em}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) .workspace-page-header h1{letter-spacing:-.035em;font-weight:600}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) :is(.g-card,.dashboard-panel,.vehicle-list-panel,.vehicle-mobile-card,.booking-toolbar,.booking-calendar-card,.booking-list){border-radius:12px;box-shadow:var(--ws-panel-shadow);background:hsl(var(--card));border-color:var(--ws-line)}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) .g-card:hover{transform:none;box-shadow:var(--ws-panel-shadow)}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) .workspace-metric{border-radius:12px}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) .workspace-metric dt svg{width:26px;height:26px;padding:5px;border-radius:7px;background:var(--ws-subtle)}
+.workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) :is(input,select,textarea){border-radius:7px}
+
+/* Dashboard: quiet cards, stable data, no entrance animation on every tile. */
+.workspace-shell .dashboard-workspace .dashboard-panel-header h2{font-weight:600}
+.workspace-shell .dashboard-workspace .dashboard-view-switch{gap:20px;padding:0;border:0;border-bottom:1px solid var(--ws-line);border-radius:0;background:transparent;box-shadow:none}
+.workspace-shell .dashboard-workspace .dashboard-view-switch button[data-variant]{background:transparent;color:hsl(var(--muted-foreground));border-radius:0;box-shadow:none;padding:0 0 10px;filter:none;font-weight:500}
+.workspace-shell .dashboard-workspace .dashboard-view-switch button[aria-pressed=true]{color:hsl(var(--primary));box-shadow:inset 0 -2px 0 hsl(var(--ring))}
+.workspace-shell .dashboard-workspace .dashboard-view-switch button:hover{color:hsl(var(--foreground))}
+
+/* Vehicles: same selected-surface treatment as Customers. */
+.workspace-shell .vehicles-workspace .vehicle-list-header h2{font-size:17px;font-weight:600}
+.workspace-shell .vehicles-workspace .vehicle-list-header h2 span{padding:0;background:transparent}
+.workspace-shell .vehicles-workspace :is(.vehicle-table th,.vehicle-table td>small){font-size:12px}
+.workspace-shell .vehicles-workspace .vehicle-table td{border-color:var(--refinement-fine-line)}
+.workspace-shell .vehicles-workspace :is(.vehicle-table tr,.vehicle-mobile-card)[data-selected=true]{background:var(--refinement-selected)}
+.workspace-shell .vehicles-workspace .vehicle-table tr[data-selected=true] td:first-child{box-shadow:inset 2px 0 0 hsl(var(--ring))}
+.workspace-shell .vehicles-workspace .vehicle-mobile-card{border-color:var(--ws-line);padding:20px}
+.workspace-shell .vehicles-workspace .vehicle-mobile-card[data-selected=true]{border-color:var(--refinement-selected-line);box-shadow:var(--ws-panel-shadow),inset 2px 0 0 hsl(var(--ring))}
+.workspace-shell .vehicles-workspace .vehicle-mobile-card .vehicle-name strong{font-size:20px!important;letter-spacing:-.02em}
+.workspace-shell .vehicles-workspace .vehicle-mobile-card dl{gap:18px 14px}
+.workspace-shell .vehicles-workspace .vehicle-mobile-card dl>div{padding-top:14px;border-top:1px solid var(--refinement-fine-line)}
+.workspace-shell .vehicles-workspace .vehicle-mobile-card dt{font-size:12px}
+.workspace-shell .vehicles-workspace .vehicle-search>div{background:var(--refinement-field);border-radius:7px}
+.workspace-shell .vehicles-workspace .vehicle-scrim{background:var(--refinement-backdrop);backdrop-filter:none}
+.workspace-shell .vehicles-workspace .vehicle-drawer{background:var(--refinement-panel-surface);border-color:var(--refinement-panel-border);box-shadow:var(--refinement-panel-shadow)}
+.workspace-shell .vehicles-workspace .vehicle-drawer-frame{position:relative;z-index:1;display:flex;flex-direction:column;width:100%;height:100%;min-height:0;overflow:hidden}
+.workspace-shell .vehicles-workspace .vehicle-drawer-compact .vehicle-drawer-frame{height:auto}
+.workspace-shell .vehicles-workspace .vehicle-drawer-header{padding:26px 28px 22px;border-color:var(--refinement-fine-line)}
+.workspace-shell .vehicles-workspace .vehicle-drawer-header h2{font-size:25px;font-weight:600;letter-spacing:-.035em}
+.workspace-shell .vehicles-workspace .vehicle-eyebrow{font-size:12px!important;font-weight:400;letter-spacing:0}
+.workspace-shell .vehicles-workspace .vehicle-drawer-content{flex:1;min-height:0}
+.workspace-shell .vehicles-workspace .vehicle-drawer-footer{min-height:82px;background:var(--refinement-panel-surface);border-color:var(--refinement-fine-line)}
+.workspace-shell .vehicles-workspace .vehicle-drawer-footer button[data-variant=default]{min-width:180px}
+.workspace-shell .vehicles-workspace .vehicle-drawer[data-panel-motion]{overflow:visible}
+.workspace-shell .vehicles-workspace .vehicle-drawer[data-panel-motion=shared]:is([data-panel-phase=opening],[data-panel-phase=closing]){background:transparent;border-color:transparent;box-shadow:none}
+.workspace-shell .vehicles-workspace .vehicle-drawer[data-panel-phase=closing] .vehicle-drawer-frame{pointer-events:none}
+.workspace-shell .vehicles-workspace .vehicle-drawer[data-panel-phase=closed]{opacity:0}
+
+/* Bookings: retain the calendar and dossier; reveal only the selected identity. */
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-detail-summary{animation:fleetum-dossier-open 280ms cubic-bezier(.2,.72,.2,1)}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-detail-section[open]>.booking-detail-section-body{animation:fleetum-dossier-open 220ms cubic-bezier(.2,.72,.2,1)}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-detail-section{border-radius:8px}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-detail-section>summary{border-radius:8px}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-detail-section[open]>summary{border-radius:8px 8px 0 0}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-detail-card>div.booking-detail-header{border-radius:12px 12px 0 0;background:hsl(var(--card))}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-editor-card.saas-surface{background:var(--refinement-panel-surface);border-radius:12px}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-editor-card[data-panel-phase=closing]{pointer-events:none}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-editor-card.saas-surface>div.booking-editor-header{background:var(--refinement-panel-surface);border-radius:12px 12px 0 0;border-color:var(--refinement-fine-line)}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-editor-card .booking-editor-footer{background:var(--refinement-panel-surface);border-color:var(--refinement-fine-line)}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-list-row[aria-pressed=true]{background:var(--refinement-selected);box-shadow:inset 2px 0 0 hsl(var(--ring))}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-list-row:hover{background:var(--ws-subtle)}
+.workspace-shell:has(.booking-workspace) .booking-workspace .booking-calendar-card{overflow:hidden}
+@keyframes fleetum-dossier-open{from{opacity:.4;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:640px){
+ .workspace-shell .vehicles-workspace .vehicle-drawer-header{padding:22px 16px 18px}
+ .workspace-shell .vehicles-workspace .vehicle-drawer-header h2{font-size:23px}
+ .workspace-shell .vehicles-workspace .vehicle-drawer-footer{min-height:76px;gap:10px}
+ .workspace-shell .vehicles-workspace .vehicle-drawer-footer button[data-variant=default]{min-width:0;flex:1}
+ .workspace-shell .vehicles-workspace .vehicle-mobile-card{padding:18px}
+ .workspace-shell .dashboard-workspace .dashboard-view-switch{gap:12px}
+ .workspace-shell .dashboard-workspace .dashboard-view-switch button{font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){
+ .workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) *,
+ .workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) *::before,
+ .workspace-shell :is(.booking-workspace,.vehicles-workspace,.dashboard-workspace,.contracts-workspace,.pricing-workspace,.operations-workspace,.directory-workspace,.reports-workspace,.administration-workspace,.access-workspace) *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+
+/* Native date/time affordances follow the workspace theme, including browser pickers. */
+.workspace-shell input:is([type=date],[type=datetime-local],[type=time],[type=month],[type=week]){color-scheme:light}
+.dark .workspace-shell input:is([type=date],[type=datetime-local],[type=time],[type=month],[type=week]){color-scheme:dark}
+
+/* Keep notification actions readable before the viewport needs to scroll. */
+.workspace-shell #workspace-notifications{display:flex;flex-direction:column}
+.workspace-shell #workspace-notifications .workspace-notifications-body{min-height:0;overflow:auto;overscroll-behavior:contain;scroll-padding-block:8px}
+.workspace-shell #workspace-notifications .workspace-notifications-body:focus-visible{outline:2px solid hsl(var(--ring));outline-offset:-2px;border-radius:8px}
+.workspace-shell #workspace-notifications .workspace-notifications-footer{flex-direction:column;align-items:stretch;gap:8px;flex-shrink:0}
+.workspace-shell #workspace-notifications .workspace-notifications-actions{display:flex;flex-wrap:wrap;gap:8px}
+.workspace-shell #workspace-notifications .workspace-notifications-actions button{flex:1 1 110px;min-width:0;height:auto;min-height:44px;white-space:normal;overflow-wrap:normal;word-break:normal;line-height:1.4}
+.workspace-shell #workspace-notifications .workspace-notifications-actions button svg{flex-shrink:0}
+.workspace-shell #workspace-notifications .workspace-notifications-actions .text-destructive{color:var(--refinement-danger)}
+@media(max-width:1023px){
+ /* A backdrop-filter creates a containing block for fixed descendants. */
+ .workspace-shell .saas-topbar:has(.workspace-account-popover){-webkit-backdrop-filter:none;backdrop-filter:none;background:hsl(var(--card));z-index:49}
+ .workspace-shell .saas-topbar :is(#workspace-notifications,#workspace-profile-menu){position:fixed;left:auto;right:10px;top:calc(var(--ws-topbar-height) + 8px + var(--ws-preview-offset,0px));max-width:calc(100vw - 20px);max-height:calc(100dvh - 176px - var(--ws-preview-offset,0px) - env(safe-area-inset-bottom));overflow:auto}
+ .workspace-shell .saas-topbar #workspace-notifications{width:min(360px,calc(100vw - 20px))}
+ .workspace-shell .saas-topbar #workspace-profile-menu{width:min(288px,calc(100vw - 20px))}
+}
+@media(max-width:767px){
+ .workspace-shell .saas-topbar :is(#workspace-notifications,#workspace-profile-menu){top:calc(var(--ws-topbar-height) + 8px + var(--ws-preview-offset,0px))}
+}
+
+/* The QA toolbar must not cover the vehicle drawer identity or close action. */
+.workspace-shell .vehicle-overlay{top:var(--ws-preview-offset,0px)}
+
+.workspace-shell .booking-editor-dialog{top:var(--ws-preview-offset,0px)}
+.workspace-shell .booking-workspace .booking-editor-card.saas-surface{max-height:calc(100dvh - 48px - var(--ws-preview-offset,0px))}
+@media(max-width:599px){
+ .workspace-shell .booking-workspace .booking-editor-card.saas-surface{max-height:calc(100dvh - 16px - var(--ws-preview-offset,0px))}
+}
+
+/* Mobile dialog actions must keep their labels inside their own hit area. */
+.workspace-shell .commerce-drawer-footer button[data-variant]{height:auto;min-height:44px;white-space:normal;overflow-wrap:normal;line-height:1.4}
+@media(max-width:640px){
+ .workspace-shell .commerce-drawer-footer button[data-variant]{flex:1 1 140px;min-width:0}
+}
+
+/* Editable role/status values need the full card width on a narrow phone. */
+@media(max-width:480px){
+ .workspace-shell .administration-workspace .commerce-mobile-card dl:has(select){grid-template-columns:minmax(0,1fr)}
+}

@@ -1,3 +1,5 @@
+import { requestCalendarAuthority, refreshCalendarAuthority, inCalendarScope, type CalendarAuthority } from "../../../application/services/calendar-authority-service.js";
+import { bindCalendarSource } from "../../../infrastructure/repositories/calendar-event-scope.js";
 import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import ExcelJS from "exceljs";
@@ -6,7 +8,8 @@ import { ImportMasterDataUseCase } from "../../../application/usecases/master-da
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
 import { assertImportFileIntegrity } from "../../../infrastructure/storage/import-upload.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
-import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockVisibleVehicle as lockOwnedVehicle, visibleVehicleWhere as ownedVehicleWhere } from "../../../infrastructure/repositories/resource-site-scope.js";
+import { siteAccessForTenant } from "../../../infrastructure/auth/site-access-context.js";
 import { ManageSitesUseCases } from "../../../application/usecases/sites/manage-sites-usecases.js";
 import { ManageVehiclesUseCases } from "../../../application/usecases/vehicles/manage-vehicles-usecases.js";
 import { ManageWorkshopsUseCases } from "../../../application/usecases/workshops/manage-workshops-usecases.js";
@@ -104,7 +107,7 @@ export class MasterDataController {
     limit: z.coerce.number().int().min(1).max(2000).optional().default(600)
   });
   private readonly vehicleDeadlinesCalendarSyncSchema = z.object({
-    vehicleIds: z.array(z.string().trim().min(1)).optional(),
+    vehicleIds: z.array(z.string().trim().min(1)).max(1000).optional(),
     includeSoon: z.boolean().optional().default(true),
     kmWarning: z.coerce.number().int().min(0).max(100000).optional().default(1000),
     revisionWarningDays: z.coerce.number().int().min(0).max(365).optional().default(30)
@@ -814,6 +817,11 @@ export class MasterDataController {
   };
 
   syncVehicleDeadlinesCalendar = async (req: Request, res: Response) => {
+    const authority=await requestCalendarAuthority(req,["vehicles:write"]);
+    return inCalendarScope(authority,()=>this.syncVehicleDeadlinesCalendarScoped(req,res,authority));
+  };
+
+  private syncVehicleDeadlinesCalendarScoped = async (req: Request, res: Response, authority: CalendarAuthority) => {
     const input = this.vehicleDeadlinesCalendarSyncSchema.parse(req.body ?? {});
     const tenantId = req.auth!.tenantId;
     const userId = req.auth!.userId;
@@ -910,9 +918,11 @@ export class MasterDataController {
       });
     }
 
+    await refreshCalendarAuthority(authority,["vehicles:write"]);
     const { created, updated, removed } = await prisma.$transaction(async (tx) => {
       const vehicleIds = [...new Set(filtered.map((row) => row.vehicleId))].sort();
-      for (const vehicleId of vehicleIds) await lockOwnedVehicle(tx, tenantId, vehicleId);
+      const vehicleSites=new Map<string,string>();
+      for (const vehicleId of vehicleIds) {const vehicle=await lockOwnedVehicle(tx,tenantId,vehicleId);vehicleSites.set(vehicleId,vehicle.siteId);}
       const existing = await tx.calendarEvent.findMany({
         where: {
           tenantId,
@@ -924,9 +934,14 @@ export class MasterDataController {
       });
 
       const existingByMarker = new Map<string, { id: string; marker: string; vehicleId: string }>();
+      // A branch change must not erase another branch's generated tasks.
+      const scope = siteAccessForTenant(tenantId);
+      const permittedVehicleIds = scope && !scope.allSites
+        ? new Set((await tx.vehicle.findMany({ where: ownedVehicleWhere(tenantId, true), select: { id: true } })).map(row => row.id))
+        : undefined;
       existing.forEach((event) => {
         const parsed = this.extractAutoDeadlineMarker(event.description);
-        if (!parsed) return;
+        if (!parsed || (permittedVehicleIds && !permittedVehicleIds.has(parsed.vehicleId))) return;
         existingByMarker.set(parsed.marker, { id: event.id, marker: parsed.marker, vehicleId: parsed.vehicleId });
       });
 
@@ -936,7 +951,7 @@ export class MasterDataController {
       for (const item of needed.values()) {
         const existingItem = existingByMarker.get(item.marker);
         if (existingItem) {
-          await tx.calendarEvent.update({
+          const saved=await tx.calendarEvent.update({
             where: { id: existingItem.id },
             data: {
               title: item.title,
@@ -950,9 +965,11 @@ export class MasterDataController {
               calendarId: "work"
             }
           });
+          const vehicleId=this.extractAutoDeadlineMarker(item.marker)!.vehicleId;
+          await bindCalendarSource(tx,saved,{version:1,kind:"vehicle_deadline",source:"deadline",vehicleId,siteId:vehicleSites.get(vehicleId)!});
           updated += 1;
         } else {
-          await tx.calendarEvent.create({
+          const saved=await tx.calendarEvent.create({
             data: {
               tenantId,
               userId,
@@ -971,6 +988,8 @@ export class MasterDataController {
               calendarId: "work"
             }
           });
+          const vehicleId=this.extractAutoDeadlineMarker(item.marker)!.vehicleId;
+          await bindCalendarSource(tx,saved,{version:1,kind:"vehicle_deadline",source:"deadline",vehicleId,siteId:vehicleSites.get(vehicleId)!});
           created += 1;
         }
       }
@@ -980,6 +999,7 @@ export class MasterDataController {
         .map((event) => {
           const parsed = this.extractAutoDeadlineMarker(event.description);
           if (!parsed) return null;
+          if (permittedVehicleIds && !permittedVehicleIds.has(parsed.vehicleId)) return null;
           if (targetVehicleSet && !targetVehicleSet.has(parsed.vehicleId)) return null;
           if (neededMarkers.has(parsed.marker)) return null;
           return event.id;

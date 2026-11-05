@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+import ts from 'typescript';
+import * as React from 'react';
+import * as billingAccess from '../src/domain/policies/billing-access';
+function harness(kind:'users'|'company'|'billing'|'profile', permissions:string[]=['*']) {
+ const names={users:'UsersPage',company:'CompanyProfilePage',billing:'PlanUpgradePage',profile:'ProfileSettingsPage'};
+ const files={users:'users/users-page.tsx',company:'profile/company-profile-page.tsx',billing:'profile/plan-upgrade-page.tsx',profile:'profile/profile-settings-page.tsx'};
+ let source=readFileSync(process.env.B09_BASELINE ? new URL('file://'+process.env.B09_BASELINE+'/frontend/src/presentation/pages/'+files[kind]) : new URL('../src/presentation/pages/'+files[kind],import.meta.url),'utf8');
+ const ast=ts.createSourceFile('page.tsx',source,ts.ScriptTarget.Latest,true);
+ const declaration=ast.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).find(d=>d.name.getText(ast)===names[kind])!;
+ const body=(declaration.initializer as import('typescript').ArrowFunction).body as import('typescript').Block;
+ const ret=body.statements.find(st=>ts.isIfStatement(st) && st.getText(ast).startsWith('if (loading)')) ?? body.statements.filter(ts.isReturnStatement).at(-1)!;
+ const expose=kind==='users'?'loadData,onCreate,onInvite,onDelete':kind==='company'?'loadProfile,onSubmit,onLogoChange,form,updateField':kind==='profile'?'saveReports,saveAutomation,saveIntegrations,sectionState':'openPaymentMethodSession,openCustomerPortalSession,invoiceState';
+ source=source.slice(0,ret.getFullStart())+'\nexpose({'+expose+'});'+source.slice(ret.getFullStart());
+ let index=0,refIndex=0,functions:any;const states:any[]=[],refs:any[]=[],effects:any[]=[],pending:any[]=[];
+ const api=new Proxy({},{get:(_,method)=>(...args:any[])=>new Promise((resolve,reject)=>pending.push({method,args,resolve,reject}))});
+ const user={id:'synthetic-user',tenantId:'synthetic-tenant',firstName:'QA',lastName:'User',email:'qa@example.invalid',roles:permissions.includes('*')?['ADMIN']:['VIEWER'],permissions};
+ const exports:any={};
+ runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,Date,Intl,console,URL,URLSearchParams,Promise,localStorage:{getItem:()=>null,setItem(){}},FormData:class { get(k:string){return {firstName:'Test',lastName:'User',email:'qa@example.invalid',password:'Synthetic-password-22',roleKey:'OPERATOR'}[k as 'firstName']} },expose:(f:any)=>functions=f,window:{location:{search:'',href:''},matchMedia:()=>({matches:true})},require(id:string){
+ if(id==='react')return{...React,useId:()=> 'synthetic-id',useState:(value:any)=>{const i=index++;if(!(i in states))states[i]=typeof value==='function'?value():value;return[states[i],(v:any)=>states[i]=typeof v==='function'?v(states[i]):v]},useEffect:(f:any)=>effects.push(f),useRef:(v:any)=>{const i=refIndex++;return refs[i]??(refs[i]={current:v})},useCallback:(f:any)=>f,useMemo:(f:any)=>f()};
+ if(id==='react/jsx-runtime')return{jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props}),Fragment:'Fragment'};
+ if(id==='react-router-dom')return{useNavigate:()=>()=>{}};
+ if(id.endsWith('site-access-store'))return{useSiteAccessStore:()=>({revision:0,context:{canAssignSites:permissions.includes('*'),sites:[]}})};
+ if(id.endsWith('site-context'))return{useCompanySiteView:()=>true};
+ if(id.endsWith('auth-store'))return{useAuthStore:(fn:any)=>fn?fn({user}):{user}};
+ if(id.endsWith('use-entitlements'))return{useEntitlements:()=>({can:()=>true,plan:'PRO',licenseStatus:'ACTIVE',provider:'stripe',loading:false})};
+ if(id.endsWith('theme-manager'))return{getStoredTheme:()=> 'light',setTheme(){}};
+ if(id.endsWith('auth-usecases'))return{authUseCases:api};if(id.endsWith('settings-usecases'))return{settingsUseCases:api};
+ if(id.endsWith('users-usecases'))return{usersUseCases:api};if(id.endsWith('tenant-profile-usecases'))return{tenantProfileUseCases:api};if(id.endsWith('billing-usecases'))return{billingUseCases:api};
+ if(id.endsWith('billing-access'))return billingAccess;
+ if(id.endsWith('entitlements'))return{SAAS_PLANS:[],getFeatureListForPlan:()=>[],PLAN_MONTHLY_PRICING_EUR:{},PLAN_YEARLY_PRICING_EUR:{}};
+ if(id.endsWith('countries'))return{COUNTRIES:[]};
+ if(id.endsWith('company-registration'))return{validateCompanyRegistrationDraft:()=>[],normalizeVatNumberForCountry:(v:any)=>v,normalizeTaxCode:(v:any)=>v,normalizeSdiCode:(v:any)=>v,normalizePostalCodeForCountry:(v:any)=>v};
+ if(id.endsWith('lib/utils'))return{cn:(...a:any[])=>a.filter(Boolean).join(' ')};
+ if(id.endsWith('billing-status-copy'))return{getBillingStatusNotice:()=>null};
+ return new Proxy({},{get:(_,key)=>String(key)});
+ }});
+ const render=()=>{index=0;refIndex=0;exports[names[kind]]({})};render();
+ return {get functions(){return functions},pending,effects,render,states};
+}
+const submit=()=>({preventDefault(){},currentTarget:{reset(){}}});
+test('users do not fetch protected directory without users read',async()=>{const h=harness('users',[]);const p=h.functions.loadData();assert.equal(h.pending.length,0);await p});
+test('read-only users cannot create or invite from a stale handler',async()=>{const h=harness('users',['users:read']);const a=h.functions.onCreate(submit()),b=h.functions.onInvite(submit());assert.equal(h.pending.length,0);await a;await b});
+test('user creation serializes duplicate submissions and handles a rejected request',async()=>{const h=harness('users');const a=h.functions.onCreate(submit());const b=h.functions.onCreate(submit());assert.equal(h.pending.length,1);h.pending[0].reject(Error('Synthetic failure'));await a;await b});
+test('company does not fetch a profile without permission',async()=>{const h=harness('company',[]);const p=h.functions.loadProfile();assert.equal(h.pending.length,0);await p});
+test('company logo upload keeps unsaved company and branding edits',async()=>{const h=harness('company');const load=h.functions.loadProfile();h.pending[0].resolve({profile:{legalName:'Synthetic Mobility'},branding:{primaryColor:'#21375d'},legalSettings:{},completeness:{percentage:50,missing:[]}});await load;h.render();h.functions.updateField('tradeName','Unsaved QA');h.functions.updateField('primaryColor','#123456');h.render();const p=h.functions.onLogoChange({target:{files:[{name:'logo.png'}],value:'logo.png'}});assert.equal(h.pending.length,2);h.pending[1].resolve({profile:{tradeName:'Persisted'},branding:{primaryColor:'#21375d',logoUrl:'/synthetic/logo'},legalSettings:{},completeness:{percentage:50,missing:[]}});await p;h.render();assert.equal(h.functions.form.tradeName,'Unsaved QA');assert.equal(h.functions.form.primaryColor,'#123456')});
+test('non-manager cannot open Stripe payment or portal handlers',async()=>{const h=harness('billing',['billing:read']);const a=h.functions.openPaymentMethodSession(),b=h.functions.openCustomerPortalSession();assert.equal(h.pending.length,0);await a;await b});
+test('Stripe portal and card actions share a synchronous submission lock',async()=>{const h=harness('billing');const a=h.functions.openPaymentMethodSession();const b=h.functions.openCustomerPortalSession();assert.equal(h.pending.length,1);h.pending[0].reject(Error('Synthetic unavailable'));await a;await b});
+
+test('settings write permission alone cannot fetch or overwrite unloaded company settings',async()=>{const h=harness('profile',['users:write']);h.effects.forEach(f=>f());assert.equal(h.pending.length,1);assert.equal(h.pending[0].method,'sessions');await h.functions.saveAutomation();await h.functions.saveReports();await h.functions.saveIntegrations();assert.equal(h.pending.length,1);h.pending[0].resolve({data:[]})});
+test('failed report settings remain unavailable and cannot submit defaults',async()=>{const h=harness('profile');h.effects.forEach(f=>f());for(const p of h.pending){if(p.method==='getReports')p.reject(Error('Synthetic unavailable'));else p.resolve(p.method==='sessions'?{data:[]}:{});}await new Promise(resolve=>setImmediate(resolve));h.render();assert.equal(h.functions.sectionState.reports,'error');const before=h.pending.length;await h.functions.saveReports();assert.equal(h.pending.length,before)});
+test('failed invoice request remains an error rather than an empty collection',async()=>{const h=harness('billing');h.effects.forEach(f=>f());assert.equal(h.pending[0].method,'listInvoices');h.pending[0].reject(Error('Synthetic unavailable'));await new Promise(resolve=>setImmediate(resolve));h.render();assert.equal(h.functions.invoiceState,'error')});
+test('read-only billing role cannot request invoices without billing read permission',()=>{const h=harness('billing',[]);h.effects.forEach(f=>f());assert.equal(h.pending.length,0)});

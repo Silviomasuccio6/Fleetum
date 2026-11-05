@@ -3,12 +3,16 @@ import { Link, Navigate, useLocation } from "react-router-dom";
 import { isCompanyProfileReadyForBilling, tenantProfileUseCases } from "../../../application/usecases/tenant-profile-usecases";
 import { FleetumFullScreenLoader } from "../../components/brand/fleetum-logo-loader";
 import { useEntitlements } from "../../hooks/use-entitlements";
+import { getAccessDestination } from "../auth/access-flow";
+import { Button } from "../../components/ui/button";
+import { CommerceNotice } from "../../components/ui/commerce-workspace";
 import { PlanUpgradePage } from "../profile/plan-upgrade-page";
 
 export const BillingActivationPage = () => {
   const location = useLocation();
-  const [profileGate, setProfileGate] = useState<"checking" | "ready" | "required">("checking");
+  const [profileGate, setProfileGate] = useState<"checking" | "ready" | "required" | "error">("checking");
   const { licenseStatus, loaded } = useEntitlements();
+  const [retry, setRetry] = useState(0);
   const hasActiveSubscription = licenseStatus === "ACTIVE" || licenseStatus === "TRIAL";
   const checkoutCompleted = new URLSearchParams(location.search).get("checkout") === "success";
 
@@ -21,13 +25,13 @@ export const BillingActivationPage = () => {
         if (!cancelled) setProfileGate(isCompanyProfileReadyForBilling(profile) ? "ready" : "required");
       })
       .catch(() => {
-        if (!cancelled) setProfileGate("required");
+        if (!cancelled) setProfileGate("error");
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retry]);
 
   if (!loaded) {
     return <FleetumFullScreenLoader label="Verifica abbonamento" />;
@@ -36,7 +40,7 @@ export const BillingActivationPage = () => {
   // The activation URL can be kept in an old tab or bookmark. Never show
   // activation checkout again to a tenant that already has a valid license.
   if (hasActiveSubscription) {
-    return <Navigate to={checkoutCompleted ? "/dashboard" : "/upgrade"} replace />;
+    return <Navigate to={checkoutCompleted ? getAccessDestination(location.search) : "/upgrade"} replace />;
   }
 
   if (licenseStatus === "PAST_DUE" || licenseStatus === "SUSPENDED") {
@@ -47,15 +51,20 @@ export const BillingActivationPage = () => {
     return <FleetumFullScreenLoader label="Verifica dati aziendali" />;
   }
 
+  if (profileGate === "error") {
+    return <main className="workspace-shell billing-standalone"><section className="administration-workspace"><h1 className="text-2xl font-semibold">Verifica dati aziendali</h1><CommerceNotice>I dati aziendali non sono disponibili. Nessuna attivazione è stata avviata. <Button variant="outline" onClick={() => setRetry(key => key + 1)}>Riprova</Button></CommerceNotice></section></main>;
+  }
+
   if (profileGate === "required") {
     return <Navigate to="/onboarding/azienda?billing=profile-required" replace />;
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(79,70,229,0.16),transparent_34%),linear-gradient(135deg,#f8fbff_0%,#eef4ff_45%,#f8fafc_100%)] px-4 py-6 text-slate-950 dark:bg-slate-950 dark:text-white md:px-8">
+    <main className="workspace-shell billing-standalone">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between pb-6">
-        <Link to="/" className="inline-flex items-center gap-3 rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-bold shadow-[0_20px_45px_-32px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-950/70">
-          <img className="h-8 w-8" src="/brand/fleetum-symbol-color.svg" alt="Fleetum" />
+        <Link to="/" className="billing-back-link">
+          <img className="h-8 w-8 dark:hidden" src="/brand/fleetum-symbol-color.svg" alt="" />
+          <img className="hidden h-8 w-8 dark:block" src="/brand/fleetum-symbol-for-dark-bg.svg" alt="" />
           Fleetum
         </Link>
         <span className="hidden rounded-full border border-indigo-200 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700 shadow-sm md:inline-flex dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
@@ -63,7 +72,7 @@ export const BillingActivationPage = () => {
         </span>
       </div>
 
-      <div className="mx-auto max-w-6xl rounded-[2rem] border border-white/70 bg-white/80 p-4 shadow-[0_30px_80px_-45px_rgba(15,23,42,0.55)] backdrop-blur dark:border-white/10 dark:bg-slate-950/65 md:p-6">
+      <div className="billing-content">
         <PlanUpgradePage mode="activation" />
       </div>
     </main>

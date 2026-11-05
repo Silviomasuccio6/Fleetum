@@ -2,8 +2,11 @@ import { RoleKey } from "@prisma/client";
 import { UserEntity } from "../../domain/entities/user.js";
 import { UserRepository } from "../../domain/repositories/user-repository.js";
 import { prisma } from "../database/prisma/client.js";
+import { visibleTeamUserWhere } from "./resource-site-scope.js";
+import { assertCompanyResourceView } from "../auth/company-resource-access.js";
 
 const userWithRolesInclude = {
+  assignedSite: {select:{id:true,tenantId:true,name:true,isActive:true,deletedAt:true}},
   roles: {
     include: {
       role: {
@@ -23,6 +26,7 @@ const toEntity = (user: {
   lastName: string;
   status: "ACTIVE" | "INVITED" | "SUSPENDED";
   roles: { role: { key: RoleKey; permissions: { permission: { key: string } }[] } }[];
+  assignedSite?: {id:string;tenantId:string;name:string;isActive:boolean;deletedAt:Date|null}|null;
 }): UserEntity => ({
   id: user.id,
   tenantId: user.tenantId,
@@ -30,6 +34,7 @@ const toEntity = (user: {
   firstName: user.firstName,
   lastName: user.lastName,
   status: user.status,
+  assignedSite: user.assignedSite?.tenantId===user.tenantId?{id:user.assignedSite.id,name:user.assignedSite.name,isActive:user.assignedSite.isActive&&!user.assignedSite.deletedAt}:null,
   roles: user.roles.map((entry) => entry.role.key),
   permissions: Array.from(new Set(user.roles.flatMap((entry) => entry.role.permissions.map((item) => item.permission.key))))
 });
@@ -70,6 +75,7 @@ export class PrismaUserRepository implements UserRepository {
     lastName: string;
     roleKey?: "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER";
   }): Promise<UserEntity> {
+    assertCompanyResourceView(input.tenantId);
     const role = await prisma.role.findUniqueOrThrow({ where: { key: input.roleKey ?? "OPERATOR" } });
     const user = await prisma.user.create({
       data: {
@@ -92,7 +98,7 @@ export class PrismaUserRepository implements UserRepository {
 
   async list(tenantId: string): Promise<UserEntity[]> {
     const users = await prisma.user.findMany({
-      where: { tenantId, deletedAt: null },
+      where: { ...visibleTeamUserWhere(tenantId), deletedAt: null },
       include: userWithRolesInclude
     });
 
@@ -109,6 +115,7 @@ export class PrismaUserRepository implements UserRepository {
     userId: string,
     input: Partial<{ firstName: string; lastName: string; status: "ACTIVE" | "INVITED" | "SUSPENDED" }>
   ): Promise<UserEntity | null> {
+    assertCompanyResourceView(tenantId);
     await prisma.user.updateMany({
       where: { id: userId, tenantId, deletedAt: null },
       data: input
@@ -117,6 +124,7 @@ export class PrismaUserRepository implements UserRepository {
   }
 
   async setRole(tenantId: string, userId: string, roleKey: "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER"): Promise<UserEntity | null> {
+    assertCompanyResourceView(tenantId);
     return prisma.$transaction(async (tx) => {
       // Use the same user-row lock as credential/session mutations, scoped to
       // the requester tenant before any role relation is read or modified.
@@ -139,6 +147,7 @@ export class PrismaUserRepository implements UserRepository {
   }
 
   async softDelete(tenantId: string, userId: string): Promise<void> {
+    assertCompanyResourceView(tenantId);
     await prisma.user.updateMany({
       where: { id: userId, tenantId, deletedAt: null },
       data: { deletedAt: new Date(), status: "SUSPENDED" }

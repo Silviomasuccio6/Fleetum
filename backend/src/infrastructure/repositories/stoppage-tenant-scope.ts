@@ -3,6 +3,9 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { prisma } from "../database/prisma/client.js";
 import { lockVehicleSite, ownedVehicleWhere } from "./vehicle-tenant-scope.js";
 
+import { currentSiteWhere, siteAccessForTenant } from "../auth/site-access-context.js";
+import { assertVisibleSite } from "./resource-site-scope.js";
+
 type Reader = Prisma.TransactionClient | typeof prisma;
 export type StoppageLinks = Pick<Stoppage,
   "siteId" | "vehicleId" | "workshopId" | "createdByUserId" | "assignedToUserId">;
@@ -20,7 +23,7 @@ const scopeWithUsers = (tenantId: string, userIds: string[], includeDeleted: boo
     tenantId,
     ...(!includeDeleted ? { deletedAt: null } : {}),
     site: { tenantId }, vehicle: ownedVehicleWhere(tenantId, true), workshop: { tenantId }, createdBy: { tenantId },
-    AND: [{ OR: [{ assignedToUserId: null }, { assignedToUserId: { in: userIds } }] }]
+    AND: [{ OR: [{ assignedToUserId: null }, { assignedToUserId: { in: userIds } }] }, ...(siteAccessForTenant(tenantId) ? [currentSiteWhere(tenantId)] : [])]
 });
 const tenantUserIds = async (tenantId: string, db: Reader) =>
   (await db.user.findMany({ where: { tenantId }, select: { id: true } })).map((user) => user.id);
@@ -86,6 +89,7 @@ export const lockStoppageLinks = async (
   tx: Prisma.TransactionClient, tenantId: string, next: StoppageLinks,
   current?: StoppageLinks, exclusiveVehicle = false
 ) => {
+  assertVisibleSite(tenantId, next.siteId);
   const sites = await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
     SELECT "deletedAt" FROM "Site" WHERE "id" = ${next.siteId} AND "tenantId" = ${tenantId} FOR SHARE
   `;
@@ -98,6 +102,9 @@ export const lockStoppageLinks = async (
         SELECT "siteId", "deletedAt" FROM "Vehicle" WHERE "id" = ${next.vehicleId} AND "tenantId" = ${tenantId} FOR SHARE
       `;
   if (!vehicles.length || (next.vehicleId !== current?.vehicleId && vehicles[0].deletedAt)) throw stoppageNotFound();
+  // Existing historical references survive a move; a new/replacement vehicle
+  // must be selectable from the actor's current fleet scope.
+  if (!current || next.vehicleId !== current.vehicleId) assertVisibleSite(tenantId, vehicles[0].siteId);
   // The operational site of a stoppage may differ from the vehicle's home site.
   await lockVehicleSite(tx, tenantId, vehicles[0].siteId);
   const workshops = await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
@@ -105,6 +112,15 @@ export const lockStoppageLinks = async (
   `;
   if (!workshops.length || (next.workshopId !== current?.workshopId && workshops[0].deletedAt)) throw stoppageNotFound();
   await lockStoppageUsers(tx, tenantId, next, current);
+  if (siteAccessForTenant(tenantId) && next.assignedToUserId && (next.assignedToUserId !== current?.assignedToUserId || next.siteId !== current?.siteId)) {
+    const eligible = await tx.user.findFirst({ where: {
+      id: next.assignedToUserId, tenantId, deletedAt: null, status: "ACTIVE", OR: [
+        { assignedSite: { is: { id: next.siteId, tenantId, isActive: true, deletedAt: null } } },
+        { roles: { some: { role: { key: { in: ["ADMIN", "MANAGER"] } } } } }
+      ]
+    }, select: { id: true } });
+    if (!eligible) throw stoppageNotFound();
+  }
 };
 
 // Every mutation validates the current parent first: no accidental repair of a

@@ -5,7 +5,7 @@ import { extractRegistrationDateFromBooklet } from "../../../application/service
 import { computeVehicleRevisionDueAt } from "../../../application/services/vehicle-revision-schedule-service.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { lockOwnedStoppage, ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
-import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockVisibleVehicle as lockOwnedVehicle, visibleVehicleWhere as ownedVehicleWhere, visibleBookingWhere, visibleCustomerAttachmentWhere } from "../../../infrastructure/repositories/resource-site-scope.js";
 import { lockOwnedRentalCustomer } from "../../../infrastructure/repositories/rental-customer-tenant-scope.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 import { validateUploadedFile } from "../../../infrastructure/storage/file-security.js";
@@ -50,7 +50,7 @@ const sendStoredFile = async (
   }
 
   const payload = await storageProvider.read(input.filePath);
-  res.setHeader("Cache-Control", "private, max-age=60");
+  res.setHeader("Cache-Control", "private, no-store");
   res.type(input.mimeType || "application/octet-stream");
   res.send(payload);
 };
@@ -689,7 +689,7 @@ export const uploadsRoutes = () => {
 
       if (bookingId) {
         const booking = await prisma.rentalBooking.findFirst({
-          where: { id: bookingId, tenantId, deletedAt: null },
+          where: { ...visibleBookingWhere(tenantId), id: bookingId, deletedAt: null },
           select: { id: true, customerId: true }
         });
         if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
@@ -712,7 +712,7 @@ export const uploadsRoutes = () => {
           // the optional relation in the same transaction as the attachment.
           if (bookingId) {
             const currentBooking = await tx.rentalBooking.findFirst({
-              where: { id: bookingId, tenantId, deletedAt: null },
+              where: { ...visibleBookingWhere(tenantId), id: bookingId, deletedAt: null },
               select: { customerId: true }
             });
             if (!currentBooking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
@@ -754,7 +754,7 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const attachment = await prisma.rentalCustomerAttachment.findFirst({
-        where: { id: req.params.attachmentId, tenantId },
+        where: { ...visibleCustomerAttachmentWhere(tenantId), id: req.params.attachmentId },
         select: { filePath: true, mimeType: true, fileName: true }
       });
       if (!attachment) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
@@ -778,12 +778,14 @@ export const uploadsRoutes = () => {
     asyncHandler(async (req, res) => {
       const tenantId = req.auth!.tenantId;
       const attachment = await prisma.rentalCustomerAttachment.findFirst({
-        where: { id: req.params.attachmentId, tenantId },
+        where: { ...visibleCustomerAttachmentWhere(tenantId), id: req.params.attachmentId },
         select: { id: true, filePath: true }
       });
       if (!attachment) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
 
       await prisma.$transaction(async (tx) => {
+        const current = await tx.rentalCustomerAttachment.findFirst({ where: { ...visibleCustomerAttachmentWhere(tenantId), id: attachment.id }, select: { id: true } });
+        if (!current) throw new AppError("Allegato cliente non trovato", 404, "NOT_FOUND");
         await tx.rentalCustomerAttachment.delete({ where: { id: attachment.id } });
         await markStoredFileDeleted(tx, tenantId, attachment.filePath);
       }, { isolationLevel: "Serializable" });

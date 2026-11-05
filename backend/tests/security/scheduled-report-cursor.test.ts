@@ -1,3 +1,4 @@
+import {createReportActor,reportAuthorization,removeReportActors,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { SettingsService } from "../../src/application/services/settings-service.js";
@@ -57,12 +58,13 @@ const createScheduledTenant = async (input: {
   enabled?: boolean;
 }) => {
   await prisma.tenant.create({ data: { id: input.tenantId, name: `${runId} synthetic tenant` } });
+  await createReportActor(input.tenantId);
   const settings = await prisma.auditLog.create({
     data: {
       tenantId: input.tenantId,
       action: "SETTINGS_REPORTS",
       resource: "reports",
-      details: dailySettings(input.slot, input.recipients, input.enabled),
+      details: {...dailySettings(input.slot, input.recipients, input.enabled),__siteAuthorization:reportAuthorization(input.tenantId)},
       createdAt: input.settingsCreatedAt
     }
   });
@@ -95,6 +97,7 @@ describe("persistent scheduled report cursor", () => {
     await prisma.emailQueue.deleteMany({ where: { tenantId: { in: allTenantIds } } });
     await cursorModel.deleteMany({ where: { tenantId: { in: allTenantIds } } });
     await prisma.auditLog.deleteMany({ where: { tenantId: { in: allTenantIds } } });
+    await removeReportActors(allTenantIds);
     await prisma.tenant.deleteMany({ where: { id: { in: allTenantIds } } });
     await prisma.$disconnect();
   });
@@ -375,14 +378,14 @@ describe("persistent scheduled report cursor", () => {
     const now = new Date();
     const newHour = (now.getHours() + 2) % 24;
     const settingsService = new SettingsService(new PrismaAuditLogRepository());
-    await settingsService.setByResource(tenantIds.changed, undefined, "reports", {
+    await withCompanyScope(tenantIds.changed,()=>settingsService.setByResource(tenantIds.changed,reportAuthorization(tenantIds.changed).userId,"reports",{
       enabled: true,
       frequency: "weekly",
       hour: newHour,
       minute: 0,
       reportStyle: "BASIC",
       recipients: ["new-recipient@example.test"]
-    });
+    }));
 
     const latestSettings = await prisma.auditLog.findFirstOrThrow({
       where: { tenantId: tenantIds.changed, action: "SETTINGS_REPORTS", resource: "reports" },
@@ -405,11 +408,12 @@ describe("persistent scheduled report cursor", () => {
     await prisma.tenant.create({
       data: { id: tenantIds.concurrentSettings, name: `${runId} synthetic concurrent settings` }
     });
+    await createReportActor(tenantIds.concurrentSettings);
     const settingsService = new SettingsService(new PrismaAuditLogRepository());
     const slot = localSlot(2032, 5, 12, 8);
     await Promise.all([
-      settingsService.setByResource(tenantIds.concurrentSettings, undefined, "reports", dailySettings(slot, ["one@example.test"])),
-      settingsService.setByResource(tenantIds.concurrentSettings, undefined, "reports", dailySettings(nextDaySlot(slot, 0), ["two@example.test"]))
+      withCompanyScope(tenantIds.concurrentSettings,()=>settingsService.setByResource(tenantIds.concurrentSettings,reportAuthorization(tenantIds.concurrentSettings).userId,"reports",dailySettings(slot, ["one@example.test"]))),
+      withCompanyScope(tenantIds.concurrentSettings,()=>settingsService.setByResource(tenantIds.concurrentSettings,reportAuthorization(tenantIds.concurrentSettings).userId,"reports",dailySettings(nextDaySlot(slot, 0), ["two@example.test"])))
     ]);
 
     const latestSettings = await prisma.auditLog.findFirstOrThrow({

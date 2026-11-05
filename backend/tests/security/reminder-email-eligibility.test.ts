@@ -1,3 +1,4 @@
+import {grantSyntheticAdmin,commandAuthorization,removeSyntheticActorRoles,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { AuthSessionService } from "../../src/application/services/auth-session-service.js";
@@ -59,6 +60,7 @@ const fixture = async (suffix: string, options: {
     tenantId: tenant.id, email: `${suffix}-${sequence}@example.test`, passwordHash: "synthetic-unused-password-hash",
     firstName: "Synthetic", lastName: "Reminder"
   } });
+  await grantSyntheticAdmin(user.id);
   const site = await prisma.site.create({ data: { tenantId: tenant.id, name: "Synthetic Site", address: "Synthetic Address", city: "TestCity" } });
   const workshop = await prisma.workshop.create({ data: { tenantId: tenant.id, name: "Synthetic Workshop", email: `${suffix}-workshop@example.test` } });
   const vehicle = await prisma.vehicle.create({ data: { tenantId: tenant.id, siteId: site.id, plate: `SYN-${sequence}`, brand: "Synthetic", model: "Vehicle" } });
@@ -77,7 +79,7 @@ const enqueueRetry = async (data: Fixture, reminderType = "AUTOMATIC_RETRY", met
   const row = await queue.enqueue({
     tenantId: data.tenant.id, type: "REMINDER_EMAIL", recipient: data.workshop.email!,
     subject: "Synthetic queued reminder", body: "Synthetic reminder body",
-    meta: { tenantId: data.tenant.id, stoppageId: data.stoppage.id, reminderType, ...meta }
+    meta: { tenantId: data.tenant.id,...(["MANUAL","MANUAL_RETRY"].includes(reminderType)?{siteAuthorization:commandAuthorization(data.user.id)}:{}), stoppageId: data.stoppage.id, reminderType, ...meta }
   });
   directQueueIds.push(row.id);
   return row;
@@ -135,6 +137,7 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     await prisma.workshop.deleteMany({ where: { tenantId: owned } });
     await prisma.site.deleteMany({ where: { tenantId: owned } });
     await prisma.refreshSession.deleteMany({ where: { tenantId: owned } });
+    await removeSyntheticActorRoles(tenantIds);
     await prisma.user.deleteMany({ where: { tenantId: owned } });
     await prisma.auditLog.deleteMany({ where: { tenantId: owned } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: owned } });
@@ -342,7 +345,7 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
         let sends = 0;
         emailSender.send = async () => { sends += 1; return { provider: "resend", id: "unexpected-invalid-user-link" }; };
         if (path === "manual") {
-          await assert.rejects(() => useCase().manualEmail(data.tenant.id, data.stoppage.id), (error: unknown) => {
+          await assert.rejects(() => withCompanyScope(data.tenant.id,()=>useCase().manualEmail(data.tenant.id, data.stoppage.id,data.user.id)), (error: unknown) => {
             const statusCode = (error as any)?.statusCode;
             assert.ok(Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500);
             return true;
@@ -370,15 +373,16 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     for (const path of ["manual", "automatic", "queued"] as const) {
       it(`${path} keeps owned historical ${userState} creator and assignee eligible`, async () => {
         const data = await fixture(`historical-user-${userState}-${path}`);
-        await prisma.stoppage.update({ where: { id: data.stoppage.id }, data: { assignedToUserId: data.user.id } });
+        const historical=await prisma.user.create({data:{tenantId:data.tenant.id,email:`historical-${sequence++}@example.invalid`,firstName:"Synthetic historical",lastName:"Creator",passwordHash:"synthetic-unused-hash"}});
+        await prisma.stoppage.update({ where: { id: data.stoppage.id }, data: { createdByUserId:historical.id,assignedToUserId: historical.id } });
         const queued = path === "queued" ? await enqueueRetry(data, "MANUAL_RETRY") : null;
-        await prisma.user.update({ where: { id: data.user.id }, data: {
+        await prisma.user.update({ where: { id: historical.id }, data: {
           status: "SUSPENDED", ...(userState === "deleted" ? { deletedAt: new Date() } : {})
         } });
         let sends = 0;
         emailSender.send = async () => { sends += 1; return { provider: "resend", id: "eligible-historical-owned-user" }; };
         if (path === "manual") {
-          assert.deepEqual(await useCase().manualEmail(data.tenant.id, data.stoppage.id), { success: true, queued: false });
+          assert.deepEqual(await withCompanyScope(data.tenant.id,()=>useCase().manualEmail(data.tenant.id, data.stoppage.id,data.user.id)), { success: true, queued: false });
         } else if (path === "automatic") {
           await useCase().automaticRun(data.now);
         } else {
@@ -392,8 +396,10 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
         assert.equal(stoppage.status, "SOLICITED");
         assert.equal(stoppage.totalRemindersSent, 1);
         assert.ok(stoppage.lastReminderSentAt);
-        assert.equal(stoppage.createdByUserId, data.user.id);
-        assert.equal(stoppage.assignedToUserId, data.user.id);
+        assert.equal(stoppage.createdByUserId, historical.id);
+        assert.equal(stoppage.assignedToUserId, historical.id);
+        assert.equal((await prisma.user.findUniqueOrThrow({where:{id:data.user.id}})).status,"ACTIVE");
+        assert.equal((await prisma.user.findUniqueOrThrow({where:{id:historical.id}})).status,"SUSPENDED");
         assert.equal(await prisma.reminder.count({ where: { stoppageId: data.stoppage.id, success: true } }), 1);
         assert.equal(await prisma.reminder.count({ where: { stoppageId: data.stoppage.id, success: false } }), 0);
       });
@@ -413,12 +419,18 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     });
   }
 
+  it("a suspended requester cannot send a queued manual reminder even when its historical authors are valid",async()=>{
+    const data=await fixture("manual-requester-suspended"),item=await enqueueRetry(data,"MANUAL_RETRY");
+    await prisma.user.update({where:{id:data.user.id},data:{status:"SUSPENDED"}});let sends=0;emailSender.send=async()=>{sends++;return{provider:"resend",id:"unexpected"};};
+    await queue.processPending(new Date(),{ids:[item.id]});assert.equal(sends,0);assert.equal((await prisma.emailQueue.findUniqueOrThrow({where:{id:item.id}})).status,"FAILED");await assertNoSuccess(data);
+  });
+
   it("protects manual reminders with the same tenant and license checks", async () => {
     const data = await fixture("manual-suspended", { licenseStatus: "SUSPENDED" });
     let sends = 0;
     emailSender.send = async () => { sends += 1; return { provider: "resend", id: "unexpected-manual-reminder" }; };
     let result: any;
-    try { result = await useCase().manualEmail(data.tenant.id, data.stoppage.id); } catch { result = { rejected: true }; }
+    try { result = await withCompanyScope(data.tenant.id,()=>useCase().manualEmail(data.tenant.id, data.stoppage.id,data.user.id)); } catch { result = { rejected: true }; }
     assert.equal(sends, 0);
     assert.notEqual(result?.success, true);
     await assertNoSuccess(data);
@@ -429,7 +441,7 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     const foreign = await fixture("manual-owner-b", { due: false });
     let sends = 0;
     emailSender.send = async () => { sends += 1; return { provider: "resend", id: "unexpected-foreign-manual" }; };
-    await assert.rejects(() => useCase().manualEmail(data.tenant.id, foreign.stoppage.id));
+    await assert.rejects(() => withCompanyScope(data.tenant.id,()=>useCase().manualEmail(data.tenant.id, foreign.stoppage.id,data.user.id)));
     assert.equal(sends, 0);
     await assertNoSuccess(foreign);
   });
@@ -439,7 +451,7 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
     await prisma.stoppage.update({ where: { id: data.stoppage.id }, data: { status: "CLOSED", closedAt: data.now } });
     const keys: string[] = [];
     emailSender.send = async (input) => { keys.push(String(input.idempotencyKey)); return { provider: "resend", id: "manual-closed-reminder" }; };
-    const result = await useCase().manualEmail(data.tenant.id, data.stoppage.id);
+    const result = await withCompanyScope(data.tenant.id,()=>useCase().manualEmail(data.tenant.id, data.stoppage.id,data.user.id));
     assert.equal(result.success, true);
     assert.equal(result.queued, false);
     assert.equal(keys.length, 1);
@@ -639,7 +651,7 @@ describe("reminder email tenant, license and lifecycle eligibility", () => {
       if (sends === 1) throw new Error("synthetic manual provider failure");
       return { provider: "resend", id: "manual-retry-accepted" };
     };
-    const result = await useCase().manualEmail(data.tenant.id, data.stoppage.id);
+    const result = await withCompanyScope(data.tenant.id,()=>useCase().manualEmail(data.tenant.id, data.stoppage.id,data.user.id));
     assert.equal(result.success, false);
     assert.equal(result.queued, true);
     await assertNoSuccess(data, { allowFailureHistory: true });

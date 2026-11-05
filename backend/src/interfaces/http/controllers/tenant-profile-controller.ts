@@ -4,21 +4,25 @@ import { validateUploadedFile } from "../../../infrastructure/storage/file-secur
 import { withRequestUploadCleanup } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { tenantCompanyProfileSchema } from "../validators/tenant-profile-validators.js";
+import { assertCompanyResourceView, assertSharedCompanyResourceView } from "../../../infrastructure/auth/company-resource-access.js";
 
 export class TenantProfileController {
   constructor(private readonly service: TenantProfileService) {}
 
   getProfile = async (req: Request, res: Response) => {
+    assertCompanyResourceView(req.auth!.tenantId);
     const result = await this.service.getProfile(req.auth!.tenantId);
     res.json(result);
   };
 
   completeness = async (req: Request, res: Response) => {
+    assertSharedCompanyResourceView(req.auth!.tenantId);
     const result = await this.service.getProfile(req.auth!.tenantId);
     res.json(result.completeness);
   };
 
   updateProfile = async (req: Request, res: Response) => {
+    assertCompanyResourceView(req.auth!.tenantId);
     const input = tenantCompanyProfileSchema.parse(req.body);
     const result = await this.service.updateProfile(req.auth!.tenantId, req.auth!.userId, input);
     res.json(result);

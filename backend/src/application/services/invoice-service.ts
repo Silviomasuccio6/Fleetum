@@ -1,7 +1,9 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
+import { persistNewBuffer } from "../../infrastructure/storage/upload-persistence.js";
+import { readInvoiceCompanyLogo } from "./invoice-logo-service.js";
+import { renderSubscriptionInvoicePdf } from "./subscription-invoice-pdf.js";
+import { assertCompanyResourceView } from "../../infrastructure/auth/company-resource-access.js";
 import crypto from "node:crypto";
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../infrastructure/database/exact-money-reader.js";
@@ -10,15 +12,6 @@ import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { ensureKnownPlan, getPlanMonthlyPrice } from "./feature-entitlements-service.js";
 
-const PAGE_W = 595.28;
-const PAGE_H = 841.89;
-const MARGIN = 44;
-const BLUE = rgb(0.145, 0.388, 1);
-const NAVY = rgb(0.027, 0.067, 0.122);
-const TEXT = rgb(0.075, 0.096, 0.15);
-const MUTED = rgb(0.38, 0.44, 0.54);
-const LINE = rgb(0.86, 0.89, 0.94);
-const SOFT = rgb(0.965, 0.98, 1);
 const TAX_RATE = 22;
 
 type InvoiceWithRelations = Prisma.InvoiceGetPayload<{
@@ -76,11 +69,6 @@ const formatMoney = (value: number, currency = "EUR") =>
 const formatDate = (value: Date | string) => new Date(value).toLocaleDateString("it-IT");
 const formatPeriod = (start: Date | string, end: Date | string) => `${formatDate(start)} - ${formatDate(end)}`;
 
-const sanitize = (value?: string | null, fallback = "-") => {
-  const clean = String(value ?? "").replace(/\s+/g, " ").trim();
-  return clean || fallback;
-};
-
 const parseLicense = (details: unknown): LicenseSnapshot | null => {
   if (!details || typeof details !== "object") return null;
   const payload = details as Record<string, unknown>;
@@ -102,56 +90,6 @@ const monthBounds = (now = new Date()) => {
 };
 
 const dueDateFrom = (issueDate: Date) => new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
-
-const wrapText = (text: string, font: PDFFont, size: number, maxWidth: number) => {
-  const words = sanitize(text, "").split(" ").filter(Boolean);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (font.widthOfTextAtSize(next, size) <= maxWidth) {
-      current = next;
-    } else {
-      if (current) lines.push(current);
-      current = word;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length ? lines : ["-"];
-};
-
-const drawText = (page: PDFPage, text: string, x: number, y: number, options: { font: PDFFont; size: number; color?: ReturnType<typeof rgb>; maxWidth?: number; lineHeight?: number }) => {
-  const lines = options.maxWidth ? wrapText(text, options.font, options.size, options.maxWidth) : [text];
-  let nextY = y;
-  for (const line of lines) {
-    page.drawText(line, { x, y: nextY, size: options.size, font: options.font, color: options.color ?? TEXT });
-    nextY -= options.lineHeight ?? options.size + 4;
-  }
-  return nextY;
-};
-
-const drawLabelValue = (page: PDFPage, label: string, value: string, x: number, y: number, w: number, fonts: { regular: PDFFont; bold: PDFFont }) => {
-  page.drawText(label.toUpperCase(), { x, y, size: 7.2, font: fonts.bold, color: MUTED });
-  drawText(page, value, x, y - 14, { font: fonts.regular, size: 9.2, maxWidth: w, lineHeight: 12, color: TEXT });
-};
-
-const resolveLogo = async (pdfDoc: PDFDocument): Promise<PDFImage | null> => {
-  const candidates = [
-    path.resolve(process.cwd(), "assets/fleetum-logo-horizontal.png"),
-    path.resolve(process.cwd(), "backend/assets/fleetum-logo-horizontal.png"),
-    path.resolve(process.cwd(), "../backend/assets/fleetum-logo-horizontal.png"),
-    path.resolve(process.cwd(), "frontend/public/brand/fleetum-logo-horizontal.png")
-  ];
-  for (const candidate of candidates) {
-    try {
-      const image = await fs.readFile(candidate);
-      return pdfDoc.embedPng(image);
-    } catch {
-      // Try next path: prod images can be copied in a different cwd than local dev.
-    }
-  }
-  return null;
-};
 
 const latestLicenseForTenant = async (tenantId: string): Promise<LicenseSnapshot> => {
   const row = await prisma.auditLog.findFirst({
@@ -233,6 +171,7 @@ export class InvoiceService {
   }
 
   async listTenantInvoices(tenantId: string) {
+    assertCompanyResourceView(tenantId);
     const rows = await prisma.invoice.findMany({
       where: { tenantId, deletedAt: null },
       orderBy: { createdAt: "desc" },
@@ -252,6 +191,7 @@ export class InvoiceService {
   }
 
   async getTenantInvoice(tenantId: string, invoiceId: string) {
+    assertCompanyResourceView(tenantId);
     const invoice = await this.findInvoice(invoiceId, tenantId);
     return { data: toPublicInvoice(invoice) };
   }
@@ -294,66 +234,77 @@ export class InvoiceService {
     const { start, end } = monthBounds(issueDate);
     const invoiceNumber = await nextInvoiceNumber();
 
-    const invoice = await prisma.$transaction(async (tx) => {
-      const created = await tx.invoice.create({
-        data: {
-          tenantId: tenant.id,
-          invoiceNumber,
-          issueDate,
-          dueDate: dueDateFrom(issueDate),
-          periodStart: start,
-          periodEnd: billingCycle === "yearly" ? new Date(Date.UTC(issueDate.getUTCFullYear(), 11, 31, 23, 59, 59, 999)) : end,
-          status: "GENERATED",
-          currency: "EUR",
+    const invoiceId = crypto.randomUUID();
+    const data = {
+      tenantId: tenant.id,
+      invoiceNumber,
+      issueDate,
+      dueDate: dueDateFrom(issueDate),
+      periodStart: start,
+      periodEnd: billingCycle === "yearly" ? new Date(Date.UTC(issueDate.getUTCFullYear(), 11, 31, 23, 59, 59, 999)) : end,
+      status: "GENERATED" as const,
+      currency: "EUR",
+      subtotal,
+      taxRate: TAX_RATE,
+      taxAmount,
+      total,
+      billingName,
+      billingVatNumber: profile?.vatNumber ?? null,
+      billingTaxCode: profile?.taxCode ?? null,
+      billingAddress: billingAddress || null,
+      billingEmail,
+      billingPec: profile?.pec ?? null,
+      billingSdi: profile?.sdiCode ?? null,
+      notes: "Documento riepilogativo / copia di cortesia. Non sostituisce fattura elettronica SDI se non emessa tramite sistema fiscale certificato.",
+      items: {
+        create: {
+          description: `Abbonamento Fleetum ${plan} (${billingCycle === "yearly" ? "annuale" : "mensile"})`,
+          quantity,
+          unitPrice,
           subtotal,
           taxRate: TAX_RATE,
           taxAmount,
-          total,
-          billingName,
-          billingVatNumber: profile?.vatNumber ?? null,
-          billingTaxCode: profile?.taxCode ?? null,
-          billingAddress: billingAddress || null,
-          billingEmail,
-          billingPec: profile?.pec ?? null,
-          billingSdi: profile?.sdiCode ?? null,
-          notes: "Documento riepilogativo / copia di cortesia. Non sostituisce fattura elettronica SDI se non emessa tramite sistema fiscale certificato.",
-          items: {
-            create: {
-              description: `Abbonamento Fleetum ${plan} (${billingCycle === "yearly" ? "annuale" : "mensile"})`,
-              quantity,
-              unitPrice,
-              subtotal,
-              taxRate: TAX_RATE,
-              taxAmount,
-              total
-            }
-          }
-        },
-        include: {
-          tenant: { select: { id: true, name: true } },
-          items: true,
-          deliveries: { orderBy: { createdAt: "desc" } }
+          total
         }
-      });
-
-      await tx.auditLog.create({
-        data: {
-          tenantId: tenant.id,
-          userId: input.actorUserId,
-          action: "PLATFORM_INVOICE_GENERATED",
-          resource: "invoice",
-          resourceId: created.id,
-          details: {
-            actor: input.actorUserId,
-            sourceIp: input.sourceIp,
-            invoiceNumber: created.invoiceNumber,
-            total: created.total,
-            status: created.status
-          } as Prisma.InputJsonValue
-        }
-      });
-      return created;
+      }
+    };
+    const buffer = await renderSubscriptionInvoicePdf({ ...data, items: [data.items.create] }, issuer, {
+      companyLogo: await readInvoiceCompanyLogo(tenant.id)
     });
+    const persisted = await persistNewBuffer({
+      tenantId: tenant.id, category: "invoices", resourceType: "Invoice", resourceId: invoiceId,
+      originalName: `${invoiceNumber}.pdf`, mimeType: "application/pdf", buffer,
+      commit: async (tx, key) => {
+        const created = await tx.invoice.create({
+          data: { ...data, id: invoiceId, pdfFilePath: key },
+          include: {
+            tenant: { select: { id: true, name: true } },
+            items: true,
+            deliveries: { orderBy: { createdAt: "desc" } }
+          }
+        });
+
+        await tx.auditLog.create({
+          data: {
+            tenantId: tenant.id,
+            userId: input.actorUserId,
+            action: "PLATFORM_INVOICE_GENERATED",
+            resource: "invoice",
+            resourceId: created.id,
+            details: {
+              actor: input.actorUserId,
+              sourceIp: input.sourceIp,
+              invoiceNumber: created.invoiceNumber,
+              total: created.total,
+              status: created.status
+            } as Prisma.InputJsonValue
+          }
+        });
+        return created;
+      }
+    });
+    const invoice = persisted.result;
+    if (!invoice) throw new AppError("Documento generato da verificare", 503, "INVOICE_COMMIT_UNCERTAIN");
 
     const exactInvoice = (await hydrateInvoiceRows([invoice], invoice.tenantId))[0];
     return { data: toPublicInvoice(exactInvoice) };
@@ -391,6 +342,7 @@ export class InvoiceService {
   }
 
   async pdfBufferForTenant(tenantId: string, invoiceId: string) {
+    assertCompanyResourceView(tenantId);
     return this.renderPdf(await this.findInvoice(invoiceId, tenantId));
   }
 
@@ -592,110 +544,22 @@ export class InvoiceService {
   }
 
   private async renderPdf(invoice: InvoiceWithRelations) {
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
-    const regular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const fonts = { regular, bold };
-    const logo = await resolveLogo(pdfDoc);
-
-    page.drawRectangle({ x: 0, y: PAGE_H - 154, width: PAGE_W, height: 154, color: SOFT });
-    page.drawRectangle({ x: 0, y: PAGE_H - 4, width: PAGE_W, height: 4, color: BLUE });
-
-    page.drawText("DOCUMENTO RIEPILOGATIVO / COPIA DI CORTESIA", {
-      x: MARGIN,
-      y: PAGE_H - 54,
-      size: 7.4,
-      font: bold,
-      color: BLUE
-    });
-    page.drawText(invoice.invoiceNumber, { x: MARGIN, y: PAGE_H - 86, size: 24, font: bold, color: NAVY });
-    page.drawText("Fatturazione SaaS Fleetum", { x: MARGIN, y: PAGE_H - 108, size: 10.5, font: regular, color: MUTED });
-
-    if (logo) {
-      const scale = Math.min(126 / logo.width, 40 / logo.height);
-      page.drawImage(logo, { x: PAGE_W - MARGIN - logo.width * scale, y: PAGE_H - 84, width: logo.width * scale, height: logo.height * scale });
-    } else {
-      page.drawText("Fleetum", { x: PAGE_W - MARGIN - 80, y: PAGE_H - 70, size: 18, font: bold, color: NAVY });
-    }
-
-    const statusLabel = invoice.status === "SENT" ? "Inviata" : invoice.status === "PAID" ? "Pagata" : invoice.status === "ERROR" ? "Errore" : "Generata";
-    page.drawRectangle({ x: PAGE_W - MARGIN - 106, y: PAGE_H - 124, width: 106, height: 28, borderColor: LINE, borderWidth: 1, color: rgb(1, 1, 1), opacity: 0.9 });
-    page.drawText(statusLabel.toUpperCase(), { x: PAGE_W - MARGIN - 90, y: PAGE_H - 115, size: 8.4, font: bold, color: BLUE });
-
-    const metaY = PAGE_H - 182;
-    drawLabelValue(page, "Data emissione", formatDate(invoice.issueDate), MARGIN, metaY, 110, fonts);
-    drawLabelValue(page, "Data scadenza", formatDate(invoice.dueDate), MARGIN + 126, metaY, 110, fonts);
-    drawLabelValue(page, "Periodo", formatPeriod(invoice.periodStart, invoice.periodEnd), MARGIN + 252, metaY, 180, fonts);
-
-    const leftY = PAGE_H - 256;
-    page.drawText("Emittente", { x: MARGIN, y: leftY, size: 11, font: bold, color: NAVY });
-    drawText(page, issuer.name, MARGIN, leftY - 20, { font: bold, size: 10.2, maxWidth: 220 });
-    drawText(page, `${issuer.address}\n${issuer.vat}\n${issuer.email} · ${issuer.website}\nPEC: ${issuer.pec} · SDI: ${issuer.sdi}`.replace(/\n/g, " "), MARGIN, leftY - 36, { font: regular, size: 8.7, maxWidth: 220, lineHeight: 12, color: MUTED });
-
-    page.drawText("Cliente", { x: 326, y: leftY, size: 11, font: bold, color: NAVY });
-    drawText(page, invoice.billingName, 326, leftY - 20, { font: bold, size: 10.2, maxWidth: 218 });
-    drawText(
-      page,
-      [invoice.billingAddress, invoice.billingVatNumber ? `P.IVA ${invoice.billingVatNumber}` : null, invoice.billingTaxCode ? `CF ${invoice.billingTaxCode}` : null, invoice.billingEmail, invoice.billingPec ? `PEC ${invoice.billingPec}` : null, invoice.billingSdi ? `SDI ${invoice.billingSdi}` : null]
-        .filter(Boolean)
-        .join(" · "),
-      326,
-      leftY - 36,
-      { font: regular, size: 8.7, maxWidth: 218, lineHeight: 12, color: MUTED }
-    );
-
-    const tableTop = PAGE_H - 378;
-    page.drawRectangle({ x: MARGIN, y: tableTop, width: PAGE_W - MARGIN * 2, height: 34, color: NAVY });
-    page.drawText("Descrizione", { x: MARGIN + 14, y: tableTop + 12, size: 8, font: bold, color: rgb(1, 1, 1) });
-    page.drawText("Q.ta", { x: 330, y: tableTop + 12, size: 8, font: bold, color: rgb(1, 1, 1) });
-    page.drawText("Prezzo", { x: 378, y: tableTop + 12, size: 8, font: bold, color: rgb(1, 1, 1) });
-    page.drawText("Totale", { x: 474, y: tableTop + 12, size: 8, font: bold, color: rgb(1, 1, 1) });
-
-    let rowY = tableTop - 28;
-    for (const item of invoice.items) {
-      drawText(page, item.description, MARGIN + 14, rowY, { font: regular, size: 9.3, maxWidth: 260, lineHeight: 12 });
-      page.drawText(String(item.quantity), { x: 334, y: rowY, size: 9.3, font: regular, color: TEXT });
-      page.drawText(formatMoney(item.unitPrice, invoice.currency), { x: 378, y: rowY, size: 9.3, font: regular, color: TEXT });
-      page.drawText(formatMoney(item.total, invoice.currency), { x: 466, y: rowY, size: 9.3, font: bold, color: TEXT });
-      page.drawLine({ start: { x: MARGIN, y: rowY - 14 }, end: { x: PAGE_W - MARGIN, y: rowY - 14 }, thickness: 0.7, color: LINE });
-      rowY -= 38;
-    }
-
-    const summaryX = 348;
-    const summaryY = rowY - 24;
-    page.drawRectangle({ x: summaryX, y: summaryY - 104, width: PAGE_W - MARGIN - summaryX, height: 126, borderColor: LINE, borderWidth: 1, color: rgb(1, 1, 1), opacity: 0.96 });
-    const summaryRows: Array<[string, string, boolean]> = [
-      ["Imponibile", formatMoney(invoice.subtotal, invoice.currency), false],
-      [`IVA ${invoice.taxRate}%`, formatMoney(invoice.taxAmount, invoice.currency), false],
-      ["Totale", formatMoney(invoice.total, invoice.currency), true]
-    ];
-    let sy = summaryY;
-    for (const [label, value, strong] of summaryRows) {
-      page.drawText(label, { x: summaryX + 16, y: sy, size: strong ? 10.5 : 8.8, font: strong ? bold : regular, color: strong ? NAVY : MUTED });
-      page.drawText(value, { x: summaryX + 106, y: sy, size: strong ? 13 : 9.2, font: bold, color: strong ? BLUE : TEXT });
-      sy -= strong ? 28 : 22;
-    }
-
-    const notesY = 184;
-    page.drawText("Note pagamento", { x: MARGIN, y: notesY, size: 11, font: bold, color: NAVY });
-    drawText(
-      page,
-      `Pagamento secondo accordi contrattuali. IBAN: ${issuer.iban}. ${invoice.notes ?? ""}`,
-      MARGIN,
-      notesY - 20,
-      { font: regular, size: 8.8, maxWidth: 490, lineHeight: 12, color: MUTED }
-    );
-
-    page.drawLine({ start: { x: MARGIN, y: 76 }, end: { x: PAGE_W - MARGIN, y: 76 }, thickness: 0.8, color: LINE });
-    drawText(
-      page,
-      `${issuer.name} · ${issuer.website} · ${issuer.email} · Documento generato da Fleetum Billing. Copia di cortesia se non integrata a flusso SDI certificato.`,
-      MARGIN,
-      56,
-      { font: regular, size: 7.4, maxWidth: PAGE_W - MARGIN * 2, lineHeight: 10, color: MUTED }
-    );
-
-    return Buffer.from(await pdfDoc.save());
+    if (!invoice.pdfFilePath) return renderSubscriptionInvoicePdf(invoice, issuer, { legacy: true });
+    const key = invoice.pdfFilePath;
+    const prefix = `tenants/${invoice.tenantId}/invoices/`;
+    const unavailable = () => new AppError("Copia PDF conservata non disponibile. Riprova o contatta l'assistenza.", 503, "INVOICE_PDF_UNAVAILABLE");
+    if (!/^[A-Za-z0-9_-]+$/.test(invoice.tenantId) || !key.startsWith(prefix) ||
+        !/^[A-Za-z0-9_-]+\.pdf$/.test(key.slice(prefix.length))) throw unavailable();
+    const objects = await prisma.storedFileObject.findMany({ where: { provider: storageProvider.name, storageKey: key } });
+    if (objects.length !== 1) throw unavailable();
+    const object = objects[0];
+    if (object.tenantId !== invoice.tenantId || object.resourceType !== "Invoice" || object.resourceId !== invoice.id ||
+        object.deletedAt || object.visibility !== "private" || object.mimeType !== "application/pdf" || !object.checksumSha256 ||
+        object.sizeBytes <= 0 || object.sizeBytes > 10 * 1024 * 1024) throw unavailable();
+    let bytes: Buffer;
+    try { bytes = await storageProvider.read(key); } catch { throw unavailable(); }
+    if (bytes.length !== object.sizeBytes || bytes.subarray(0, 5).toString() !== "%PDF-" ||
+        crypto.createHash("sha256").update(bytes).digest("hex") !== object.checksumSha256) throw unavailable();
+    return bytes;
   }
 }

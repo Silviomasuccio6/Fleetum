@@ -97,7 +97,7 @@ for (const layout of [
   test(`enterprise contract embeds signature through local storage: ${layout.label}`, async () => {
     const result = await render(layout);
     assert.ok(result.images > 0, "The PDF must contain the synthetic signature image");
-    assert.equal(result.pages, 2);
+    assert.ok(result.pages >= 2, "Complete fields and signature may paginate onto additional pages");
     assert.deepEqual(result.calls, [], "Local reads must not contact any provider");
     assert.deepEqual(result.after, result.before, "Reading a signature must not create metadata files");
   });
@@ -115,7 +115,7 @@ for (const mode of ["missing", "corrupt"] as const) {
   test(`enterprise contract retains optional signature fallback for ${mode} objects`, async () => {
     const result = await render({ key: "tenants/tenant-synthetic/contracts/signature.png", absolute: true, mode });
     assert.equal(result.images, 0);
-    assert.equal(result.pages, 2);
+    assert.ok(result.pages >= 2, "Complete fields and signature may paginate onto additional pages");
   });
 }
 

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { BookingContractStatus, RentalCustomerContractTimelineItem } from "../../../application/usecases/rental-bookings-usecases";
 import { FleetumInlineLoader } from "../brand/fleetum-logo-loader";
 import { Badge } from "../ui/badge";
@@ -30,6 +31,8 @@ const bookingStatusLabel: Record<string, string> = {
 const currency = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
 type Props = {
+  canWrite?: boolean;
+  busy?: boolean;
   items: RentalCustomerContractTimelineItem[];
   loading: boolean;
   error: string | null;
@@ -64,19 +67,22 @@ export const CustomerContractsTimeline = ({
   onOpenBooking,
   onDownloadPdf,
   onSendEmail,
-  onMarkSigned
+  onMarkSigned,
+  canWrite = true,
+  busy = false
 }: Props) => {
+  const filterId = useId();
   return (
-    <Card className="saas-surface">
+    <Card className="customer-contracts">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Storico Noleggi & Contratti</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-2 md:grid-cols-[180px_180px_1fr_auto]">
           <div className="space-y-1">
-            <Label>Periodo</Label>
-            <Select value={period} onChange={(event) => onPeriodChange(event.target.value as Props["period"])}>
-              <option value="all">Tutto</option>
+            <Label htmlFor={`${filterId}-period`}>Periodo</Label>
+            <Select id={`${filterId}-period`} disabled={busy} value={period} onChange={(event) => onPeriodChange(event.target.value as Props["period"])}>
+              <option value="all">Tutto il periodo</option>
               <option value="7d">7 giorni</option>
               <option value="30d">30 giorni</option>
               <option value="90d">90 giorni</option>
@@ -84,8 +90,8 @@ export const CustomerContractsTimeline = ({
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>Stato contratto</Label>
-            <Select value={status} onChange={(event) => onStatusChange(event.target.value as Props["status"])}>
+            <Label htmlFor={`${filterId}-status`}>Stato contratto</Label>
+            <Select id={`${filterId}-status`} disabled={busy} value={status} onChange={(event) => onStatusChange(event.target.value as Props["status"])}>
               <option value="">Tutti</option>
               <option value="DRAFT">Bozza</option>
               <option value="READY">Pronto</option>
@@ -97,20 +103,20 @@ export const CustomerContractsTimeline = ({
           {period === "custom" ? (
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label>Da</Label>
+                <Label htmlFor={`${filterId}-from`}>Da</Label>
                 <input
                   className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
                   type="date"
-                  value={dateFrom}
+                  id={`${filterId}-from`} disabled={busy} value={dateFrom}
                   onChange={(event) => onDateFromChange(event.target.value)}
                 />
               </div>
               <div className="space-y-1">
-                <Label>A</Label>
+                <Label htmlFor={`${filterId}-to`}>A</Label>
                 <input
                   className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
                   type="date"
-                  value={dateTo}
+                  id={`${filterId}-to`} disabled={busy} value={dateTo}
                   onChange={(event) => onDateToChange(event.target.value)}
                 />
               </div>
@@ -119,16 +125,16 @@ export const CustomerContractsTimeline = ({
             <div />
           )}
           <div className="flex items-end">
-            <Button variant="outline" onClick={onApplyFilters}>
+            <Button variant="outline" disabled={busy || loading} onClick={onApplyFilters}>
               Applica filtri
             </Button>
           </div>
         </div>
 
         {loading ? <FleetumInlineLoader label="Caricamento timeline contratti" /> : null}
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <div className="customer-error"><p role="alert">{error}</p><Button variant="outline" onClick={onApplyFilters}>Riprova storico contratti</Button></div> : null}
 
-        {items.length === 0 ? (
+        {loading || error ? null : items.length === 0 ? (
           <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             Nessun contratto trovato con i filtri correnti.
           </p>
@@ -163,18 +169,18 @@ export const CustomerContractsTimeline = ({
                   <span>Firma: {item.signedAt ? new Date(item.signedAt).toLocaleString("it-IT") : "-"}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => onOpenBooking(item.bookingId)} aria-label="Apri dettaglio prenotazione">
+                  <Button disabled={busy} size="sm" variant="outline" onClick={() => onOpenBooking(item.bookingId)} aria-label="Apri dettaglio prenotazione">
                     Apri prenotazione
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => onDownloadPdf(item.bookingId)} aria-label="Scarica contratto PDF">
+                  <Button disabled={busy} size="sm" variant="outline" onClick={() => onDownloadPdf(item.bookingId)} aria-label="Scarica contratto PDF">
                     Scarica PDF
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => onSendEmail(item.bookingId)} aria-label="Invia contratto via email">
+                  {canWrite ? <><Button disabled={busy} size="sm" variant="outline" onClick={() => onSendEmail(item.bookingId)} aria-label="Invia contratto via email">
                     Invia email
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => onMarkSigned(item.bookingId)} aria-label="Marca contratto firmato">
+                  <Button disabled={busy} size="sm" variant="outline" onClick={() => onMarkSigned(item.bookingId)} aria-label="Marca contratto firmato">
                     Marca firmato
-                  </Button>
+                  </Button></> : null}
                 </div>
               </article>
             ))}

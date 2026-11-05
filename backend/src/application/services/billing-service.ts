@@ -1,3 +1,4 @@
+import { assertCompanyResourceView } from "../../infrastructure/auth/company-resource-access.js";
 import Stripe from "stripe";
 import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
@@ -310,6 +311,7 @@ export class BillingService {
     customerEmail?: string | null;
     analytics?: CheckoutAnalyticsInput;
   }) {
+    assertCompanyResourceView(input.tenantId);
     const plan = ensureKnownPlan(input.plan);
     const billingCycle = normalizeBillingCycle(input.billingCycle);
     const priceMonthly = getPlanMonthlyPrice(plan);
@@ -409,6 +411,7 @@ export class BillingService {
   }
 
   async createPaymentMethodUpdateSession(input: { tenantId: string; userId: string }) {
+    assertCompanyResourceView(input.tenantId);
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
       throw new AppError("Stripe non configurato", 500, "STRIPE_NOT_CONFIGURED");
     }
@@ -460,6 +463,7 @@ export class BillingService {
   }
 
   async createCustomerPortalSession(input: { tenantId: string; userId: string; plan?: string; billingCycle?: string }) {
+    assertCompanyResourceView(input.tenantId);
     if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
       throw new AppError("Stripe non configurato", 500, "STRIPE_NOT_CONFIGURED");
     }
@@ -560,6 +564,7 @@ export class BillingService {
   }
 
   async completeLocalCheckout(input: { tenantId: string; userId: string; plan: string; billingCycle?: string }) {
+    assertCompanyResourceView(input.tenantId);
     if (env.NODE_ENV === "production") throw new AppError("Checkout locale non disponibile in produzione", 403, "LOCAL_CHECKOUT_DISABLED");
 
     const plan = ensureKnownPlan(input.plan);

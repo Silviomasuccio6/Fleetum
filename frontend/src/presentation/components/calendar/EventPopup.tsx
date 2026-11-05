@@ -1,335 +1,38 @@
-import { RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CalendarEvent, CalendarItem } from "./calendar-types";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
-
-type EventPopupProps = {
-  event: CalendarEvent | null;
-  draftEvent?: CalendarEvent | null;
-  anchorRect: DOMRect | null;
-  containerRef: RefObject<HTMLDivElement>;
-  calendars: CalendarItem[];
-  onClose: () => void;
-  onCreate?: (draft: Partial<CalendarEvent>) => Promise<CalendarEvent | null>;
-  onUpdate: (eventId: CalendarEvent["id"], patch: Partial<CalendarEvent>) => Promise<boolean>;
-  onDelete: (eventId: CalendarEvent["id"]) => Promise<boolean>;
-};
-
-type DraftState = {
-  title: string;
-  date: string;
-  start: string;
-  end: string;
-  location: string;
-  description: string;
-  calendarId: number;
-  allDay: boolean;
-};
-
-type PopupTab = "details" | "notes";
-
-const buildDraft = (event: CalendarEvent): DraftState => ({
-  title: event.title,
-  date: event.date,
-  start: event.start,
-  end: event.end,
-  location: event.location ?? "",
-  description: event.description ?? "",
-  calendarId: event.calendarId,
-  allDay: Boolean(event.allDay)
-});
-
-export const EventPopup = ({
-  event,
-  draftEvent = null,
-  anchorRect,
-  containerRef,
-  calendars,
-  onClose,
-  onCreate,
-  onUpdate,
-  onDelete
-}: EventPopupProps) => {
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const [coords, setCoords] = useState({ top: 12, left: 12 });
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<DraftState | null>(null);
-  const [activeTab, setActiveTab] = useState<PopupTab>("details");
-
-  const isCreateMode = Boolean(draftEvent && !event);
-  const sourceEvent = event ?? draftEvent;
-
-  useEffect(() => {
-    if (!sourceEvent) {
-      setDraft(null);
-      setEditing(false);
-      return;
-    }
-    setDraft(buildDraft(sourceEvent));
-    setEditing(isCreateMode);
-    setActiveTab("details");
-  }, [sourceEvent, isCreateMode]);
-
-  useLayoutEffect(() => {
-    if (!sourceEvent || !containerRef.current || !panelRef.current) return;
-
-    const container = containerRef.current;
-    const panel = panelRef.current;
-    const containerRect = container.getBoundingClientRect();
-
-    const scrollLeft = container.scrollLeft;
-    const scrollTop = container.scrollTop;
-
-    const panelWidth = Math.min(420, Math.max(320, container.clientWidth * 0.34));
-    panel.style.width = `${panelWidth}px`;
-    const panelHeight = panel.offsetHeight || 340;
-
-    const defaultLeft = scrollLeft + container.clientWidth - panelWidth - 8;
-    const defaultTop = scrollTop + 8;
-
-    const anchorLeft = anchorRect
-      ? anchorRect.left - containerRect.left + scrollLeft
-      : defaultLeft;
-    const anchorTop = anchorRect
-      ? anchorRect.top - containerRect.top + scrollTop
-      : defaultTop;
-
-    const minLeft = scrollLeft + 8;
-    const maxLeft = scrollLeft + container.clientWidth - panelWidth - 8;
-    const minTop = scrollTop + 8;
-    const maxTop = scrollTop + container.clientHeight - panelHeight - 8;
-
-    let nextLeft = anchorLeft + 10;
-    let nextTop = anchorTop + 10;
-
-    if (nextLeft > maxLeft) nextLeft = anchorLeft - panelWidth - 12;
-    if (nextTop > maxTop) nextTop = anchorTop - panelHeight - 12;
-
-    nextLeft = Math.max(minLeft, Math.min(maxLeft, nextLeft));
-    nextTop = Math.max(minTop, Math.min(maxTop, nextTop));
-
-    setCoords({ top: nextTop, left: nextLeft });
-  }, [sourceEvent, containerRef, anchorRect, editing, draft]);
-
-  useEffect(() => {
-    if (!sourceEvent) return;
-
-    const onMouseDown = (mouseEvent: MouseEvent) => {
-      const panel = panelRef.current;
-      if (!panel) return;
-      if (!panel.contains(mouseEvent.target as Node)) onClose();
-    };
-
-    const onKeyDown = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === "Escape") onClose();
-    };
-
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [sourceEvent, onClose]);
-
-  const calendar = useMemo(() => {
-    if (!draft) return null;
-    return calendars.find((item) => item.id === draft.calendarId) ?? calendars[0] ?? null;
-  }, [draft, calendars]);
-
-  if (!sourceEvent || !calendar || !draft) return null;
-
-  const readonly = !isCreateMode && Boolean(sourceEvent.readonly || sourceEvent.source === "stoppage");
-
-  const saveChanges = async () => {
-    setSaving(true);
-
-    if (isCreateMode) {
-      const created = await onCreate?.({
-        title: draft.title.trim() || "Senza titolo",
-        date: draft.date,
-        start: draft.start,
-        end: draft.end,
-        location: draft.location.trim(),
-        description: draft.description.trim(),
-        calendarId: draft.calendarId,
-        allDay: draft.allDay,
-        color: calendar.color
-      });
-      setSaving(false);
-      if (created) onClose();
-      return;
-    }
-
-    if (!event) {
-      setSaving(false);
-      return;
-    }
-
-    const ok = await onUpdate(event.id, {
-      title: draft.title.trim() || "Senza titolo",
-      date: draft.date,
-      start: draft.start,
-      end: draft.end,
-      location: draft.location.trim(),
-      description: draft.description.trim(),
-      calendarId: draft.calendarId,
-      color: calendar.color
-    });
-    setSaving(false);
-    if (ok) {
-      setEditing(false);
-      onClose();
-    }
-  };
-
-  const remove = async () => {
-    if (!event) return;
-    setSaving(true);
-    const ok = await onDelete(event.id);
-    setSaving(false);
-    if (ok) onClose();
-  };
-
-  const showForm = editing || isCreateMode;
-
-  return (
-    <div
-      ref={panelRef}
-      className="calendar-event-popup calendar-event-popup--drawer"
-      style={{ top: coords.top, left: coords.left }}
-      role="dialog"
-      aria-label={isCreateMode ? "Nuovo evento" : `Dettaglio evento ${sourceEvent.title}`}
-    >
-      <div className="calendar-event-popup__head">
-        <div className="calendar-event-popup__title-wrap">
-          <span className="calendar-event-popup__dot" style={{ background: calendar.color }} />
-          <div>
-            <p className="calendar-event-popup__title">{showForm ? draft.title || "Nuovo evento" : sourceEvent.title}</p>
-            <p className="calendar-event-popup__time">{`${draft.start} - ${draft.end}`}</p>
-          </div>
-        </div>
-        <button type="button" className="calendar-event-popup__close" onClick={onClose} aria-label="Chiudi pannello evento">
-          ×
-        </button>
-      </div>
-
-      <div className="calendar-event-popup__tabs" role="tablist" aria-label="Sezioni evento">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "details"}
-          className={`calendar-event-popup__tab ${activeTab === "details" ? "is-active" : ""}`}
-          onClick={() => setActiveTab("details")}
-        >
-          Dettagli
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "notes"}
-          className={`calendar-event-popup__tab ${activeTab === "notes" ? "is-active" : ""}`}
-          onClick={() => setActiveTab("notes")}
-        >
-          Note
-        </button>
-      </div>
-
-      <div className="calendar-event-popup__body">
-        <Badge variant="outline" style={{ borderColor: calendar.color, color: calendar.tc, background: calendar.bg }}>
-          {calendar.name}
-        </Badge>
-
-        {activeTab === "details" ? (
-          showForm ? (
-            <div className="space-y-2">
-              <Input
-                value={draft.title}
-                placeholder="Titolo evento"
-                onChange={(ev) => setDraft((prev) => (prev ? { ...prev, title: ev.target.value } : prev))}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <Input type="date" value={draft.date} onChange={(ev) => setDraft((prev) => (prev ? { ...prev, date: ev.target.value } : prev))} />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input type="time" value={draft.start} onChange={(ev) => setDraft((prev) => (prev ? { ...prev, start: ev.target.value } : prev))} />
-                  <Input type="time" value={draft.end} onChange={(ev) => setDraft((prev) => (prev ? { ...prev, end: ev.target.value } : prev))} />
-                </div>
-              </div>
-              <Input
-                placeholder="Luogo"
-                value={draft.location}
-                onChange={(ev) => setDraft((prev) => (prev ? { ...prev, location: ev.target.value } : prev))}
-              />
-              <select
-                className="calendar-native-select"
-                value={draft.calendarId}
-                onChange={(ev) => setDraft((prev) => (prev ? { ...prev, calendarId: Number(ev.target.value) } : prev))}
-              >
-                {calendars.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="calendar-event-popup__info-grid">
-              <p className="calendar-event-popup__meta"><strong>Data:</strong> {draft.date}</p>
-              <p className="calendar-event-popup__meta"><strong>Orario:</strong> {draft.start} - {draft.end}</p>
-              <p className="calendar-event-popup__meta"><strong>Luogo:</strong> {sourceEvent.location || "Non specificato"}</p>
-            </div>
-          )
-        ) : showForm ? (
-          <Textarea
-            rows={6}
-            placeholder="Descrizione / note operative"
-            value={draft.description}
-            onChange={(ev) => setDraft((prev) => (prev ? { ...prev, description: ev.target.value } : prev))}
-          />
-        ) : (
-          <p className="calendar-event-popup__meta">{sourceEvent.description || "Nessuna nota disponibile."}</p>
-        )}
-      </div>
-
-      <div className="calendar-event-popup__actions">
-        {readonly ? (
-          <p className="text-xs text-[var(--cal-ink4)]">Evento di sola lettura</p>
-        ) : isCreateMode ? (
-          <>
-            <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
-              Annulla
-            </Button>
-            <Button size="sm" onClick={() => void saveChanges()} disabled={saving}>
-              Crea evento
-            </Button>
-          </>
-        ) : (
-          <>
-            {editing ? (
-              <>
-                <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={saving}>
-                  Annulla
-                </Button>
-                <Button size="sm" onClick={() => void saveChanges()} disabled={saving}>
-                  Salva
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={saving}>
-                  Modifica
-                </Button>
-                <Button size="sm" variant="destructive" onClick={() => void remove()} disabled={saving}>
-                  Elimina
-                </Button>
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
+import {useEffect,useRef,useState,type RefObject} from 'react';
+import {Link} from 'react-router-dom';
+import {CalendarEvent,CalendarItem} from './calendar-types';
+import {CommerceDrawer,CommerceField,CommerceNotice} from '../ui/commerce-workspace';
+import {Button} from '../ui/button';
+import {Input} from '../ui/input';
+import {Textarea} from '../ui/textarea';
+import {Select} from '../ui/select';
+import {DiscardDialog} from '../operations/operations-workspace';
+import type {PanelMotionHandle} from '../ui/panel-motion';
+type Props={event:CalendarEvent|null;draftEvent?:CalendarEvent|null;anchorRect:DOMRect|null;containerRef:RefObject<HTMLDivElement>;calendars:CalendarItem[];onClose:()=>void;onCreate?:(draft:Partial<CalendarEvent>)=>Promise<CalendarEvent|null>;onUpdate:(id:CalendarEvent['id'],patch:Partial<CalendarEvent>)=>Promise<boolean>;onDelete:(id:CalendarEvent['id'])=>Promise<boolean>;canWrite?:boolean};
+const editable=(e:CalendarEvent)=>({title:e.title,date:e.date,start:e.start,end:e.end,location:e.location??'',description:e.description??'',calendarId:e.calendarId,allDay:!!e.allDay});
+export const EventPopup=({event,draftEvent=null,calendars,onClose,onCreate,onUpdate,onDelete,canWrite=true}:Props)=>{
+ const source=event??draftEvent,creating=!!draftEvent&&!event;
+ const[draft,setDraft]=useState<ReturnType<typeof editable>|null>(null),[editing,setEditing]=useState(false),[dirty,setDirty]=useState(false),[discard,setDiscard]=useState(false),[saving,setSaving]=useState(false),[error,setError]=useState(''),[confirmDelete,setConfirmDelete]=useState(false);
+ const lock=useRef(false),motion=useRef<PanelMotionHandle|null>(null),origin=useRef<HTMLElement|null>(null);
+ useEffect(()=>{if(!source){setDraft(null);return}origin.current=document.activeElement instanceof HTMLElement?document.activeElement:null;setDraft(editable(source));setEditing(creating);setDirty(false);setError('');setConfirmDelete(false)},[source?.id,creating]);
+ useEffect(()=>{if(!dirty)return;const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[dirty]);
+ const finish=()=>{if(motion.current)motion.current.dismiss(onClose);else onClose()};
+ const close=()=>{if(lock.current)return;if(dirty){setDiscard(true);return}finish()};
+ if(!source||!draft)return null;
+ const readonly=!canWrite||!!source.readonly||source.source==='stoppage';
+ const change=(key:keyof typeof draft,value:any)=>{setDraft(old=>old?{...old,[key]:value}:old);setDirty(true)};
+ const save=async()=>{if(readonly||lock.current)return;lock.current=true;setSaving(true);setError('');try{const result=creating?await onCreate?.(draft):await onUpdate(source.id,draft);if(result){setDirty(false);finish()}else setError('Salvataggio non riuscito. I dati inseriti sono conservati.')}catch(e){setError((e as Error).message)}finally{lock.current=false;setSaving(false)}};
+ const remove=async()=>{if(readonly||lock.current)return;lock.current=true;setSaving(true);setError('');try{if(await onDelete(source.id)){setConfirmDelete(false);setDirty(false);finish()}else setError('Eliminazione non riuscita. Riprova.')}catch(e){setError((e as Error).message)}finally{lock.current=false;setSaving(false)}};
+ return <><CommerceDrawer title={creating?'Nuovo evento':source.title} description={source.source==='stoppage'?'Fermo tecnico · dettagli e operazioni nella scheda del fermo':'Evento operativo · calendario Fleetum'} onClose={close} origin={origin.current} motionRef={motion} busy={saving} footer={<>{source.source==='stoppage'?<Link className="operations-file-link" to={'/fermi/'+encodeURIComponent(source.remoteId??String(source.id).replace(/^stoppage:/,''))}>Apri scheda fermo</Link>:readonly?<p className="operations-hint">Evento di sola lettura</p>:editing?<><Button variant="outline" disabled={saving} onClick={()=>{if(creating)close();else if(dirty)setDiscard(true);else setEditing(false)}}>Annulla</Button><Button type="submit" form="calendar-event-form" disabled={saving}>{saving?'Salvataggio...':creating?'Crea evento':'Salva evento'}</Button></>:<><Button variant="outline" onClick={()=>setEditing(true)}>Modifica evento</Button><Button variant="destructive" onClick={()=>setConfirmDelete(true)}>Elimina evento</Button></>}</>}>
+ {error?<CommerceNotice>{error}</CommerceNotice>:null}
+ {editing&&!readonly?<form id="calendar-event-form" className="operations-form" onSubmit={e=>{e.preventDefault();void save()}}><fieldset disabled={saving}>
+ <CommerceField id="calendar-event-title" label="Titolo evento"><Input required value={draft.title} onChange={e=>change('title',e.target.value)}/></CommerceField>
+ <CommerceField id="calendar-event-date" label="Data evento"><Input required type="date" value={draft.date} onChange={e=>change('date',e.target.value)}/></CommerceField>
+ <label className="operations-check"><input type="checkbox" checked={draft.allDay} onChange={e=>change('allDay',e.target.checked)}/>Intera giornata</label>
+ {!draft.allDay?<div className="operations-form-pair"><CommerceField id="calendar-event-start" label="Ora inizio"><Input required type="time" value={draft.start} onChange={e=>change('start',e.target.value)}/></CommerceField><CommerceField id="calendar-event-end" label="Ora fine"><Input required type="time" value={draft.end} onChange={e=>change('end',e.target.value)}/></CommerceField></div>:null}
+ <CommerceField id="calendar-event-location" label="Luogo"><Input value={draft.location} onChange={e=>change('location',e.target.value)}/></CommerceField>
+ <CommerceField id="calendar-event-calendar" label="Calendario"><Select value={draft.calendarId} onChange={e=>change('calendarId',Number(e.target.value))}>{calendars.map(c=><option translate="no" key={c.id} value={c.id}>{c.name}</option>)}</Select></CommerceField>
+ <CommerceField id="calendar-event-notes" label="Note operative"><Textarea rows={5} value={draft.description} onChange={e=>change('description',e.target.value)}/></CommerceField>
+ </fieldset></form>:<dl className="operations-facts"><div><dt>Data</dt><dd>{draft.date}</dd></div><div><dt>Orario</dt><dd>{draft.allDay?'Intera giornata':draft.start+' – '+draft.end}</dd></div><div><dt>Luogo</dt><dd>{draft.location||'Non specificato'}</dd></div><div><dt>Calendario</dt><dd>{calendars.find(c=>c.id===draft.calendarId)?.name||'—'}</dd></div><div><dt>Note operative</dt><dd>{draft.description||'Nessuna nota disponibile.'}</dd></div></dl>}
+ </CommerceDrawer>{discard?<DiscardDialog onContinue={()=>setDiscard(false)} onDiscard={()=>{setDiscard(false);setDirty(false);finish()}}/>:null}{confirmDelete?<CommerceDrawer compact level={150} title="Elimina evento" busy={saving} onClose={()=>setConfirmDelete(false)} footer={<><Button variant="outline" disabled={saving} onClick={()=>setConfirmDelete(false)}>Annulla</Button><Button variant="destructive" disabled={saving} onClick={()=>void remove()}>Conferma eliminazione</Button></>}><p>Vuoi eliminare questo evento dal calendario Fleetum?</p>{error?<CommerceNotice>{error}</CommerceNotice>:null}</CommerceDrawer>:null}</>;
 };

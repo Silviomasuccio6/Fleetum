@@ -1,3 +1,4 @@
+import { scopedFetch } from "../../infrastructure/api/scoped-fetch";
 import { httpClient } from "../../infrastructure/api/http-client";
 import { getApiBaseUrl } from "../../infrastructure/api/api-base-url";
 
@@ -64,7 +65,7 @@ const uploadVehicleBooklet = (vehicleId: string, file: File) => {
 const deleteVehicleBooklet = (bookletId: string) => httpClient.delete(`/uploads/vehicle-booklets/${bookletId}`);
 const downloadVehicleBooklet = async (bookletId: string) => {
   const base = getApiBaseUrl();
-  const response = await fetch(`${base}/uploads/vehicle-booklets/${bookletId}/file`, {
+  const response = await scopedFetch(`${base}/uploads/vehicle-booklets/${bookletId}/file`, {
     credentials: "include"
   });
   if (!response.ok) throw new Error("Download libretto fallito");
@@ -99,7 +100,7 @@ const downloadVehicleMaintenanceExport = async (
     if (value !== undefined && value !== null && `${value}` !== "") query.set(key, String(value));
   });
   const base = getApiBaseUrl();
-  const response = await fetch(`${base}/master-data/vehicle-maintenances/export.${format}?${query.toString()}`, {
+  const response = await scopedFetch(`${base}/master-data/vehicle-maintenances/export.${format}?${query.toString()}`, {
     credentials: "include"
   });
   if (!response.ok) {

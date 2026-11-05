@@ -9,10 +9,12 @@ export const stoppagesRoutes = (controller: StoppagesController, requireFeature:
   router.get("/", requirePermissions("stoppages:read"), asyncHandler(controller.list));
   router.get("/sla/overview", requirePermissions("stoppages:read"), asyncHandler(controller.slaOverview));
   router.get("/assignment/suggestions", requirePermissions("stoppages:read"), asyncHandler(controller.assignmentSuggestions));
+  router.use("/calendar",(_req,res,next)=>{res.setHeader("Cache-Control","private, no-store");next();});
   router.get("/calendar", requirePermissions("stoppages:read"), asyncHandler(controller.calendar));
   router.get("/calendar/apple/feed", requirePermissions("stoppages:read"), asyncHandler(controller.appleCalendarFeedInfo));
+  router.post("/calendar/apple/revoke", requirePermissions("stoppages:read"), asyncHandler(controller.revokeAppleCalendarFeeds));
   router.post("/calendar/apple/import", requirePermissions("stoppages:write"), asyncHandler(controller.appleCalendarImport));
-  router.post("/calendar/google/sync", requirePermissions("stoppages:read"), asyncHandler(controller.googleCalendarSync));
+  router.post("/calendar/google/sync", requirePermissions("stoppages:read","stoppages:write"), asyncHandler(controller.googleCalendarSync));
   router.get("/calendar/custom", requirePermissions("stoppages:read"), asyncHandler(controller.listCustomCalendarEvents));
   router.post("/calendar/custom", requirePermissions("stoppages:write"), asyncHandler(controller.createCustomCalendarEvent));
   router.patch("/calendar/custom/:eventId", requirePermissions("stoppages:write"), asyncHandler(controller.updateCustomCalendarEvent));

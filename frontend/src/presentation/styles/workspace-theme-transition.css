@@ -1,0 +1,13 @@
+/* Opted in only by an explicit workspace theme action. No page/navigation transitions. */
+html[data-fleetum-theme-transition]::view-transition,
+html[data-fleetum-theme-transition]::view-transition-group(root),
+html[data-fleetum-theme-transition]::view-transition-image-pair(root),
+html[data-fleetum-theme-transition]::view-transition-old(root),
+html[data-fleetum-theme-transition]::view-transition-new(root) { pointer-events:none; }
+html[data-fleetum-theme-transition]::view-transition-group(root),
+html[data-fleetum-theme-transition]::view-transition-old(root),
+html[data-fleetum-theme-transition]::view-transition-new(root) { animation:none; mix-blend-mode:normal; }
+html[data-fleetum-theme-transition=to-dark]::view-transition-old(root),
+html[data-fleetum-theme-transition=to-light]::view-transition-new(root) { z-index:1; }
+html[data-fleetum-theme-transition=to-dark]::view-transition-new(root),
+html[data-fleetum-theme-transition=to-light]::view-transition-old(root) { z-index:2; }

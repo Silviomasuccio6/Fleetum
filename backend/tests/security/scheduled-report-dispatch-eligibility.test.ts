@@ -1,3 +1,4 @@
+import {createReportActor,reportAuthorization,removeReportActors,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
@@ -61,6 +62,7 @@ const createTenant = async (suffix: string, options: {
       }
     });
   }
+  await createReportActor(id);
   return id;
 };
 
@@ -69,13 +71,15 @@ const enqueue = async (suffix: string, tenantId: string | undefined, options: {
   attempts?: number;
   meta?: Record<string, unknown>;
 } = {}) => {
+  const reportRecipient=`${suffix}@example.test`;
+  const settings=tenantId&&(options.type??"SCHEDULED_REPORT")==="SCHEDULED_REPORT"&&await prisma.tenant.findUnique({where:{id:tenantId}})?await prisma.auditLog.create({data:{tenantId,action:"SETTINGS_REPORTS",resource:"reports",details:{enabled:true,frequency:"daily",hour:8,minute:0,recipients:[reportRecipient],__siteAuthorization:reportAuthorization(tenantId)}}}):null;
   const row = await queue.enqueue({
     tenantId,
     type: options.type ?? "SCHEDULED_REPORT",
     recipient: `${suffix}@example.test`,
     subject: `Synthetic report ${suffix}`,
     body: "Synthetic scheduled report; no production data",
-    meta: { syntheticCase: suffix, ...options.meta }
+    meta: { syntheticCase: suffix, ...(tenantId?{companyReportAuthorization:reportAuthorization(tenantId),...(settings?{settingsAuditLogId:settings.id}:{})}:{}), ...options.meta }
   });
   queueIds.push(row.id);
   if (options.attempts !== undefined) {
@@ -130,6 +134,7 @@ describe("scheduled report dispatch eligibility", () => {
     await prisma.invoiceDelivery.deleteMany({ where: { invoice: { tenantId: { in: tenantIds } } } });
     await prisma.invoice.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await removeReportActors(tenantIds);
     await prisma.tenant.deleteMany({ where: { id: { in: tenantIds.splice(0) } } });
   });
 

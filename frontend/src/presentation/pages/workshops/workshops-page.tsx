@@ -3,7 +3,8 @@ import { masterDataUseCases } from "../../../application/usecases/master-data-us
 
 export const WorkshopsPage = () => (
   <GenericCrudPage
-    title="Anagrafiche Officine"
+    scope="workshops"
+    title="Officine"
     createLabel="Nuova officina"
     list={(params) => masterDataUseCases.listWorkshops(params)}
     create={(input) => masterDataUseCases.createWorkshop(input)}

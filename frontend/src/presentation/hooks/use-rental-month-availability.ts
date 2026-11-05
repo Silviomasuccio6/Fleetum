@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { rentalBookingsUseCases } from "../../application/usecases/rental-bookings-usecases";
 
 type Input = {
@@ -11,6 +11,7 @@ type Input = {
 type MonthAvailabilityResponse = Awaited<ReturnType<typeof rentalBookingsUseCases.monthAvailability>>;
 
 export const useRentalMonthAvailability = (input: Input) => {
+  const requestVersion = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<MonthAvailabilityResponse["data"]>([]);
@@ -22,6 +23,7 @@ export const useRentalMonthAvailability = (input: Input) => {
   });
 
   const load = useCallback(async () => {
+    const version = ++requestVersion.current;
     setLoading(true);
     setError(null);
     try {
@@ -30,17 +32,19 @@ export const useRentalMonthAvailability = (input: Input) => {
         siteId: input.siteId || undefined,
         search: input.search || undefined
       });
+      if (version !== requestVersion.current) return;
       setData(result.data ?? []);
       setSummary(result.summary);
     } catch (e) {
-      setError((e as Error).message);
+      if (version === requestVersion.current) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [input.month, input.search, input.siteId]);
 
   useEffect(() => {
     void load();
+    return () => { requestVersion.current += 1; };
   }, [load, input.refreshKey]);
 
   return {

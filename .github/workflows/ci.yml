@@ -147,7 +147,7 @@ jobs:
         run: npm run test -w backend
 
       - name: Frontend tests
-        run: npx tsx --test frontend/tests/*.test.ts
+        run: npm run test:frontend
 
       - name: Marketing website static export tests
         run: npm run test:website
@@ -253,6 +253,10 @@ jobs:
 
       - name: Verify exact monetary dual-write triggers
         run: npm run money:verify-dual-write -w backend
+
+      - name: Prepare ephemeral signing and CARGOS test keys
+        run: |
+          node -e 'const fs=require("node:fs"),crypto=require("node:crypto");for(const name of ["CONTRACT_SIGNING_KEY","CARGOS_DATA_ENCRYPTION_KEY"]){const key=crypto.randomBytes(32).toString("hex");process.stdout.write("::add-mask::"+key+"\n");fs.appendFileSync(process.env.GITHUB_ENV,name+"="+key+"\n");}fs.appendFileSync(process.env.GITHUB_ENV,"RUN_CONTRACT_SIGNING_TESTS=1\n");'
 
       - name: Run black-box tenant isolation tests
         run: npm run test:tenant-isolation -w backend

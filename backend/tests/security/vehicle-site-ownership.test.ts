@@ -226,6 +226,7 @@ describe("vehicle site ownership at write boundaries and legacy projections", { 
     await prisma.vehicle.deleteMany({ where: { tenantId: own } });
     await prisma.workshop.deleteMany({ where: { tenantId: own } });
     await prisma.site.deleteMany({ where: { tenantId: own } });
+    await prisma.userRole.deleteMany({ where: { user: { tenantId: own } } });
     await prisma.user.deleteMany({ where: { tenantId: own } });
     await prisma.tenantSubscription.deleteMany({ where: { tenantId: own } });
     await prisma.scheduledReportCursor.deleteMany({ where: { tenantId: own } });
@@ -748,11 +749,14 @@ describe("vehicle site ownership at write boundaries and legacy projections", { 
     const invalidVehicle = await corruptVehicle(a, b);
     await prisma.vehicle.updateMany({ where: { id: { in: [a.vehicle.id, invalidVehicle.id] } }, data: { currentKm: 100, maintenanceIntervalKm: 5000 } });
     await prisma.tenantSubscription.create({ data: { tenantId: a.tenant.id, provider: "local", plan: "PRO", status: "ACTIVE" } });
+    // Company schedules require the same durable configurator authority as HTTP.
+    const admin = await prisma.role.upsert({where:{key:"ADMIN"},update:{},create:{key:"ADMIN",name:"Synthetic admin"}});
+    await prisma.userRole.create({data:{userId:a.user.id,roleId:admin.id}});
     const now = new Date();
     now.setSeconds(0, 0);
     const setting = await prisma.auditLog.create({ data: {
       tenantId: a.tenant.id, resource: "reports", action: "SETTINGS_REPORTS", createdAt: new Date(now.getTime() - dayMs),
-      details: { enabled: true, frequency: "daily", hour: now.getHours(), minute: now.getMinutes(), reportStyle: "EXECUTIVE", recipients: ["synthetic-report@example.test"] }
+      details: { __siteAuthorization: { version: 1, kind: "company", userId: a.user.id }, enabled: true, frequency: "daily", hour: now.getHours(), minute: now.getMinutes(), reportStyle: "EXECUTIVE", recipients: ["synthetic-report@example.test"] }
     } });
     await prisma.scheduledReportCursor.create({ data: { tenantId: a.tenant.id, settingsAuditLogId: setting.id, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, nextRunAt: now } });
     await runReportsCronCycle(new EmailQueueService(), new LicensePolicyService(new PrismaAuditLogRepository()), now);

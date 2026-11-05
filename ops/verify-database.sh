@@ -5,8 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_NAME="fleetum_verify_db_${$}"
 DB_USER="fleetum"
 DB_NAME="fleetum_ci"
-DB_PASSWORD="fleetum_verify_local"
-UPLOAD_DIR="${TMPDIR:-/tmp}/fleetum-verify-uploads-${$}"
+DB_PASSWORD="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
+VERIFY_UPLOAD_PARENT="${TMPDIR:-/tmp}"
+UPLOAD_DIR="${VERIFY_UPLOAD_PARENT%/}/fleetum-verify-uploads-${$}"
 STARTED_AT="$(date +%s)"
 
 cleanup() {
@@ -64,6 +65,9 @@ fi
 export NODE_ENV=test
 export DOTENV_CONFIG_PATH=/dev/null
 export RUN_TENANT_ISOLATION_TESTS=1
+export RUN_CONTRACT_SIGNING_TESTS=1
+export CONTRACT_SIGNING_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+export CARGOS_DATA_ENCRYPTION_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
 export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${HOST_PORT}/${DB_NAME}?schema=public"
 export UPLOAD_DIR
 

@@ -7,4 +7,5 @@ export type UserEntity = {
   status: "ACTIVE" | "INVITED" | "SUSPENDED";
   roles: string[];
   permissions: string[];
+  assignedSite?: {id:string;name:string;isActive:boolean} | null;
 };

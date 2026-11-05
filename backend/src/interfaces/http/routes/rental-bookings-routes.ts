@@ -4,9 +4,15 @@ import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-l
 import { RentalBookingsController } from "../controllers/rental-bookings-controller.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
+import { contractSigningPrivateRoutes } from "./contract-signing-routes.js";
+import { contractCargosRoutes } from "./contract-cargos-routes.js";
+import { contractRentalDetailsRoutes } from "./contract-rental-details-routes.js";
 
 export const rentalBookingsRoutes = (controller: RentalBookingsController) => {
   const router = Router();
+  router.use(contractCargosRoutes());
+  router.use(contractSigningPrivateRoutes());
+  router.use(contractRentalDetailsRoutes());
 
   router.get("/", requirePermissions("vehicles:read"), asyncHandler(controller.list));
   router.get("/contracts", requirePermissions("vehicles:read"), asyncHandler(controller.listContractsMonitoring));
@@ -28,6 +34,7 @@ export const rentalBookingsRoutes = (controller: RentalBookingsController) => {
   router.get("/customers/:customerId", requirePermissions("vehicles:read"), asyncHandler(controller.getCustomerById));
   router.patch("/customers/:customerId", requirePermissions("vehicles:write"), asyncHandler(controller.updateCustomer));
   router.post("/:id/contract/generate", requirePermissions("vehicles:write"), asyncHandler(controller.generateContract));
+  router.get("/:id/invoice/draft.pdf", requirePermissions("vehicles:read"), asyncHandler(controller.downloadInvoiceDraft));
   router.get("/:id/contract", requirePermissions("vehicles:read"), asyncHandler(controller.getContract));
   router.patch("/:id/contract", requirePermissions("vehicles:write"), asyncHandler(controller.updateContractDocument));
   router.get("/:id/contract/pdf", requirePermissions("vehicles:read"), asyncHandler(controller.downloadContractPdf));

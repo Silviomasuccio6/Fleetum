@@ -15,6 +15,9 @@ import { MonthView } from "./views/MonthView";
 import { WeekView } from "./views/WeekView";
 import { addDays, formatMonthTitle, minutesToTime, toDateKey } from "./calendar-utils";
 
+import {emptyStoppageFilters,type StoppageFilters,useOperationsAccess} from "../operations/operations-workspace";
+import {CommerceDrawer} from "../ui/commerce-workspace";
+
 type ApplePrivacyMode = "masked" | "full";
 type GooglePopupMessage = {
   source?: string;
@@ -39,7 +42,8 @@ const getGooglePopupFeatures = () => {
   return `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`;
 };
 
-export const CalendarShell = () => {
+export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageFilters}) => {
+  const {canRead,canWrite}=useOperationsAccess();
   const {
     viewDate,
     selDay,
@@ -53,20 +57,25 @@ export const CalendarShell = () => {
 
   const {
     loading,
+    mutating,
     error,
-    visibleEvents,
+    visibleEvents:loadedEvents,
     calendars,
     loadRange,
     refresh,
     addEvent,
     updateEvent,
     deleteEvent
-  } = useEvents();
+  } = useEvents(filters);
+  const visibleEvents=useMemo(()=>loadedEvents.map(e=>canWrite&&!mutating?e:{...e,readonly:true}),[loadedEvents,canWrite,mutating]);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [popupState, setPopupState] = useState<{ eventId: string; anchorRect: DOMRect } | null>(null);
   const [createDraft, setCreateDraft] = useState<{ event: CalendarEvent; anchorRect: DOMRect | null } | null>(null);
   const [appleDialogOpen, setAppleDialogOpen] = useState(false);
+  const [feedsRevoking,setFeedsRevoking]=useState(false);
+  const [feedRevocationArmed,setFeedRevocationArmed]=useState(false);
+  const feedRevocationOrigin=useRef<HTMLButtonElement>(null);
   const [applePrivacyMode, setApplePrivacyMode] = useState<ApplePrivacyMode>("masked");
   const [appleSubmitting, setAppleSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
@@ -132,7 +141,8 @@ export const CalendarShell = () => {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
+      if(event.altKey||event.ctrlKey||event.metaKey||document.querySelector('[role="dialog"]'))return;
+      if (target && (target.closest("button,a,[role=tab]") || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
         return;
       }
 
@@ -177,6 +187,7 @@ export const CalendarShell = () => {
   }, [goToday, setView, stepDay]);
 
   const openCreateEventPopup = (day: Date, minute: number, anchorRect: DOMRect | null = null) => {
+    if(!canWrite||mutating)return;
     const clamped = Math.max(0, Math.min(1439, minute));
     const start = minutesToTime(clamped);
     const end = minutesToTime(Math.min(1439, clamped + 60));
@@ -219,6 +230,7 @@ export const CalendarShell = () => {
   const weeklyAllDayCount = useMemo(() => weeklyCustomEvents.filter((event) => Boolean(event.allDay)).length, [weeklyCustomEvents]);
 
   const handleEventResizeEnd = (event: CalendarEvent, nextStart: string, nextEnd: string) => {
+    if(!canWrite||mutating)return;
     if (event.start === nextStart && event.end === nextEnd) return;
     setPopupState(null);
     setCreateDraft(null);
@@ -226,6 +238,7 @@ export const CalendarShell = () => {
   };
 
   const handleEventMoveEnd = (event: CalendarEvent, nextDate: string, nextStart: string, nextEnd: string) => {
+    if(!canWrite||mutating)return;
     if (event.date === nextDate && event.start === nextStart && event.end === nextEnd) return;
     setPopupState(null);
     setCreateDraft(null);
@@ -275,6 +288,14 @@ export const CalendarShell = () => {
         reject(new Error("Autorizzazione Google annullata."));
       }, 400);
     });
+
+  const confirmRevokeFeeds=async()=>{
+    if(!feedRevocationArmed||feedsRevoking)return;
+    setFeedsRevoking(true);
+    try{await stoppagesUseCases.revokeCalendarFeeds();setFeedRevocationArmed(false);snackbar.success("Link di lettura revocati. Gli eventi già copiati in altri calendari restano disponibili lì.");}
+    catch(error){snackbar.error(error instanceof Error?error.message:"Revoca dei link non riuscita. Riprova.");}
+    finally{setFeedsRevoking(false);window.requestAnimationFrame(()=>feedRevocationOrigin.current?.focus());}
+  };
 
   const confirmSendApple = async () => {
     setAppleSubmitting(true);
@@ -357,6 +378,7 @@ export const CalendarShell = () => {
   };
 
   const confirmImportAppleFeed = async () => {
+    if(!canWrite)return;
     const feedUrl = appleImportUrl.trim();
     if (!feedUrl) {
       snackbar.error("Inserisci il link feed .ics di Apple Calendar");
@@ -386,16 +408,18 @@ export const CalendarShell = () => {
     <section className="calendar-shell">
       <div className="calendar-main">
         <CalendarToolbar
+          canWrite={canWrite&&!mutating}
           monthLabel={monthLabel}
           curView={curView}
           onNavigate={navigate}
           onSetView={setView}
-          onSendApple={() => setAppleDialogOpen(true)}
+          onSendApple={() => {setFeedRevocationArmed(false);setAppleDialogOpen(true);}}
           onSendGoogle={confirmSendGoogle}
           onCreate={() => openCreateEventPopup(selDay, 9 * 60)}
         />
 
-        {error ? <p className="calendar-error">{error}</p> : null}
+        {error ? <div className="calendar-error" role="alert">{error}<Button variant="outline" disabled={loading} onClick={()=>void refresh()}>Riprova calendario</Button></div> : null}
+        {!loading&&!error&&!visibleEvents.length?<p className="operations-hint" role="status">Nessun evento nel periodo selezionato.</p>:null}
 
         <div className="calendar-surface" ref={scrollerRef}>
           {curView === "week" ? (
@@ -449,7 +473,7 @@ export const CalendarShell = () => {
             </div>
           ) : null}
 
-          <EventPopup
+          <EventPopup canWrite={canWrite}
             event={popupEvent}
             draftEvent={createDraft?.event ?? null}
             anchorRect={popupState?.anchorRect ?? createDraft?.anchorRect ?? null}
@@ -467,14 +491,9 @@ export const CalendarShell = () => {
       </div>
 
       {appleDialogOpen ? (
-        <div className="calendar-apple-dialog" role="dialog" aria-modal="true" aria-label="Invio calendario esterno">
-          <div
-            className="calendar-apple-dialog__backdrop"
-            onClick={() => {
-              if (!appleSubmitting && !googleSubmitting && !appleImporting) setAppleDialogOpen(false);
-            }}
-          />
-          <div className="calendar-apple-dialog__panel">
+        <CommerceDrawer compact title="Invio calendario" busy={appleSubmitting||googleSubmitting||appleImporting||feedsRevoking} onClose={()=>setAppleDialogOpen(false)}>
+
+          <div className="operations-calendar-integrations">
             <h3 className="calendar-apple-dialog__title">Invio Calendario</h3>
             <p className="calendar-apple-dialog__meta">
               Settimana: {visibleWeekRange.from.toLocaleDateString("it-IT")} - {visibleWeekRange.to.toLocaleDateString("it-IT")}
@@ -488,7 +507,7 @@ export const CalendarShell = () => {
                 type="button"
                 className={`calendar-apple-dialog__privacy-btn ${applePrivacyMode === "masked" ? "is-active" : ""}`}
                 onClick={() => setApplePrivacyMode("masked")}
-                disabled={appleSubmitting || googleSubmitting || appleImporting}
+                disabled={appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}
               >
                 Dati minimizzati (consigliato)
               </button>
@@ -496,7 +515,7 @@ export const CalendarShell = () => {
                 type="button"
                 className={`calendar-apple-dialog__privacy-btn ${applePrivacyMode === "full" ? "is-active" : ""}`}
                 onClick={() => setApplePrivacyMode("full")}
-                disabled={appleSubmitting || googleSubmitting || appleImporting}
+                disabled={appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}
               >
                 Dettagli completi
               </button>
@@ -508,33 +527,43 @@ export const CalendarShell = () => {
                 : "Compliance standard: invio con dettagli completi dell'evento."}
             </p>
 
+            <p className="calendar-apple-dialog__hint">I collegamenti creati prima dell’aggiornamento vanno rigenerati. Puoi disattivare i tuoi link di lettura; gli eventi già copiati negli altri calendari rimangono lì.</p>
+            <div role="group" aria-label="Gestione link calendario" className="space-y-3">
+              {feedRevocationArmed?<p>Disattivare tutti i tuoi link di lettura attuali?</p>:null}
+              <div className="flex flex-wrap gap-3">
+                <Button ref={feedRevocationOrigin} variant="outline" onClick={()=>setFeedRevocationArmed(value=>!value)} disabled={appleSubmitting||googleSubmitting||appleImporting||feedsRevoking}>{feedRevocationArmed?"Mantieni i link":"Revoca i miei link di lettura"}</Button>
+                {feedRevocationArmed?<Button variant="destructive" onClick={()=>void confirmRevokeFeeds()} disabled={feedsRevoking}>{feedsRevoking?"Revoca in corso…":"Conferma revoca link"}</Button>:null}
+              </div>
+            </div>
+
             <Input
+              aria-label="Link feed Apple Calendar"
               value={appleImportUrl}
               onChange={(event) => setAppleImportUrl(event.target.value)}
               placeholder="https://.../calendar.ics (import Apple -> Gestionale)"
-              disabled={appleSubmitting || googleSubmitting || appleImporting}
+              disabled={!canWrite||appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}
             />
 
             <div className="calendar-apple-dialog__actions">
               <Button
                 variant="outline"
                 onClick={() => setAppleDialogOpen(false)}
-                disabled={appleSubmitting || googleSubmitting || appleImporting}
+                disabled={appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}
               >
                 Annulla
               </Button>
-              <Button variant="outline" onClick={confirmImportAppleFeed} disabled={appleSubmitting || googleSubmitting || appleImporting}>
+              <Button variant="outline" onClick={confirmImportAppleFeed} disabled={!canWrite||appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}>
                 {appleImporting ? "Import Apple..." : "Importa da Apple"}
               </Button>
-              <Button variant="outline" onClick={confirmSendGoogle} disabled={appleSubmitting || googleSubmitting || appleImporting}>
+              <Button variant="outline" onClick={confirmSendGoogle} disabled={appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}>
                 {googleSubmitting ? "Connessione Google..." : "Invia a Google"}
               </Button>
-              <Button onClick={confirmSendApple} disabled={appleSubmitting || googleSubmitting || appleImporting}>
+              <Button onClick={confirmSendApple} disabled={appleSubmitting || googleSubmitting || appleImporting || feedsRevoking}>
                 {appleSubmitting ? "Invio Apple..." : "Invia ad Apple"}
               </Button>
             </div>
           </div>
-        </div>
+        </CommerceDrawer>
       ) : null}
     </section>
   );

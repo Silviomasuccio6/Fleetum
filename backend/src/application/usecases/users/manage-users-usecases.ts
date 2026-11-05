@@ -4,6 +4,7 @@ import { EmailQueueService, createRawToken, hashToken } from "../../../infrastru
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { PrismaUserRepository } from "../../../infrastructure/repositories/prisma-user-repository.js";
+import { assertCompanyResourceView } from "../../../infrastructure/auth/company-resource-access.js";
 
 export class ManageUsersUseCases {
   constructor(private readonly userRepository: PrismaUserRepository, private readonly emailQueueService: EmailQueueService) {}
@@ -26,6 +27,7 @@ export class ManageUsersUseCases {
       roleKey: "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER";
     }
   ) {
+    assertCompanyResourceView(tenantId);
     const existing = await this.userRepository.findByEmail(tenantId, input.email);
     if (existing) throw new AppError("Email già presente nel tenant", 409, "CONFLICT");
 
@@ -70,6 +72,7 @@ export class ManageUsersUseCases {
       roleKey: "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER";
     }
   ) {
+    assertCompanyResourceView(tenantId);
     const existing = await this.userRepository.findByEmail(tenantId, input.email);
     if (existing) throw new AppError("Email già presente nel tenant", 409, "CONFLICT");
 

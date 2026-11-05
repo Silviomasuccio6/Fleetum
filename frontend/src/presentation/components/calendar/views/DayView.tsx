@@ -1,9 +1,9 @@
+import { useFleetumLanguage } from "../../../i18n/fleetum-language";
 import { CalendarEvent, CalendarItem } from "../calendar-types";
 import { EventBlock } from "../EventBlock";
 import {
   DAY_GRID_HEIGHT,
   HOUR_HEIGHT,
-  formatDayTitle,
   getNowLineTop,
   intersectsDay,
   positionDayEvents,
@@ -23,17 +23,19 @@ type DayViewProps = {
 };
 
 export const DayView = ({ viewDate, events, calendars, onEventClick, onEventResizeEnd, onEventMoveEnd, onCreateAt }: DayViewProps) => {
+  const { language } = useFleetumLanguage();
+  const locale = language === "en" ? "en-GB" : "it-IT";
   const dayEvents = positionDayEvents(events.filter((event) => intersectsDay(event, viewDate)), viewDate);
   const timedEvents = events.filter((event) => !event.allDay && intersectsDay(event, viewDate));
   const nowTop = getNowLineTop();
   const today = toDateKey(new Date()) === toDateKey(viewDate);
 
   return (
-    <div className="calendar-day" role="grid" aria-label="Calendario giornaliero">
+    <div className="calendar-day" role="group" aria-label="Calendario giornaliero">
       <header className="calendar-day__head">
         <div>
-          <p className="calendar-day__date">{formatDayTitle(viewDate)}</p>
-          <p className="calendar-day__count">{timedEvents.length} eventi pianificati</p>
+          <p className="calendar-day__date">{viewDate.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+          <p className="calendar-day__count">{timedEvents.length} {language === "en" ? "scheduled events" : "eventi pianificati"}</p>
         </div>
       </header>
 

@@ -1,4 +1,5 @@
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import { assertCompanyResourceView } from "../../infrastructure/auth/company-resource-access.js";
 import {
   deleteRetiredPhysicalObject,
   persistNewUploadedFiles
@@ -213,6 +214,7 @@ export class TenantProfileService {
   }
 
   async updateProfile(tenantId: string, actorUserId: string, input: TenantCompanyProfileInput) {
+    assertCompanyResourceView(tenantId);
     this.validateBusinessRules(input);
 
     const profilePayload = this.profileData(input);
@@ -305,6 +307,7 @@ export class TenantProfileService {
   }
 
   async setLogo(tenantId: string, actorUserId: string, file: Express.Multer.File) {
+    assertCompanyResourceView(tenantId);
     const persisted = await persistNewUploadedFiles({
       tenantId,
       category: "branding",
@@ -385,6 +388,7 @@ export class TenantProfileService {
   }
 
   async setCompanyVerificationDocument(tenantId: string, actorUserId: string, file: Express.Multer.File) {
+    assertCompanyResourceView(tenantId);
     const persisted = await persistNewUploadedFiles({
       tenantId,
       category: "company-verification-documents",
@@ -425,6 +429,7 @@ export class TenantProfileService {
   }
 
   async removeLogo(tenantId: string, actorUserId: string) {
+    assertCompanyResourceView(tenantId);
     const retiredKey = await prisma.$transaction(async (tx) => {
       const current = await tx.tenantBranding.findUnique({ where: { tenantId } });
       if (!current) return null;
