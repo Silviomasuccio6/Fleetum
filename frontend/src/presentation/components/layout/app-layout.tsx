@@ -1,4 +1,5 @@
 import { WorkspaceMobileMenu } from "./workspace-mobile-menu";
+import { WorkspaceLogo } from "../brand/workspace-logo";
 import { SectionSearch } from "./section-search";
 import { allowedSearchSections } from "./section-search-model";
 import "../../styles/topbar-refinement.css";
@@ -909,8 +910,7 @@ export const AppLayout = () => {
         <div className="workspace-brand">
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">Fleetum</p>
-            <img src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" className="mt-1 h-8 w-auto max-w-[176px] object-contain dark:hidden" />
-            <img src="/brand/fleetum-logo-full-dark.svg" alt="Fleetum" className="mt-1 hidden h-8 w-auto max-w-[176px] object-contain dark:block" />
+            <WorkspaceLogo className="mt-1" />
           </div>
           <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{user?.firstName} {user?.lastName}</p>
         </div>

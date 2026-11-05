@@ -92,7 +92,6 @@
 .workspace-shell[data-sidebar-hidden="true"] .workspace-sidebar-desktop { visibility: hidden; }
 .workspace-brand { padding: 10px 12px 20px; border-bottom: 1px solid hsl(var(--border) / .7); }
 .workspace-brand > div > p { display: none; }
-.workspace-brand img { height: 36px; max-width: 160px; }
 .workspace-brand > p { color: hsl(var(--muted-foreground)); font-size: 12px; margin-top: 16px; }
 .workspace-shell .saas-sidebar .g-section-label { color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 600; letter-spacing: .1em; }
 .workspace-shell .saas-sidebar nav :is(a, button) { position: relative; min-height: 42px; border-radius: 11px; border: 1px solid transparent; color: hsl(var(--muted-foreground)); font-size: 13px; }

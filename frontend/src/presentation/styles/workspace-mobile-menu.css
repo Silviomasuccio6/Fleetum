@@ -9,7 +9,6 @@
 .workspace-shell .workspace-mobile-menu[role="dialog"][aria-modal="true"] { background:hsl(var(--card)); }
 .workspace-shell .workspace-mobile-menu-header { display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 20px 8px;flex-shrink:0; }
 .workspace-shell .workspace-mobile-menu-brand { display:flex;align-items:center;gap:16px;min-width:0; }
-.workspace-shell .workspace-mobile-menu-brand img { max-width:128px;height:28px;object-fit:contain; }
 .workspace-shell .workspace-mobile-menu-brand>span { color:hsl(var(--muted-foreground));font-size:14px; }
 .workspace-shell .workspace-mobile-menu-close { display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border-radius:8px; }
 .workspace-shell .workspace-mobile-menu-close:hover { background:hsl(var(--secondary)); }

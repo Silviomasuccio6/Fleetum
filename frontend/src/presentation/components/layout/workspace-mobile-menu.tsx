@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Search, UserRound, X } from "lucide-react";
 import { translateText, useFleetumLanguage } from "../../i18n/fleetum-language";
 import { FleetumLanguageSwitcher } from "../i18n/fleetum-language-switcher";
+import { WorkspaceLogo } from "../brand/workspace-logo";
 import { createMobileMenuMotion, isolateMobileMenu } from "./mobile-menu-motion";
 import { mobileMenuSections } from "./mobile-menu-model";
 import type { SectionEntry } from "./section-search-model";
@@ -41,8 +42,7 @@ export function WorkspaceMobileMenu({ sections, authorized, ready, dialogRef, po
   return <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Menu principale" tabIndex={-1} className="workspace-mobile-menu">
     <header className="workspace-mobile-menu-header">
       <div className="workspace-mobile-menu-brand">
-        <img src="/brand/fleetum-logo-full-light.svg" alt="Fleetum" className="dark:hidden" />
-        <img src="/brand/fleetum-logo-full-dark.svg" alt="Fleetum" className="hidden dark:block" />
+        <WorkspaceLogo />
         <span>Menu</span>
       </div>
       <button type="button" className="workspace-mobile-menu-close" aria-label="Chiudi menu principale"
