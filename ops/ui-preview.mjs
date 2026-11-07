@@ -211,7 +211,7 @@ const apiHandler = async (req, res, next) => {
     if (scenario === "slow") await new Promise((resolve) => setTimeout(resolve, 5000));
     if (scenario === "error") return send(res, 503, { error: "DEMO_PAYMENTS_ERROR", message: "Riepilogo pagamenti temporaneamente non disponibile nella prova locale." });
     const booking = bookings.find((entry) => entry.id === payments[1]);
-    return send(res, 200, { booking: { id: booking.id, code: booking.code, customerId: booking.customer.id }, paymentMethods: [], deposits: [], extraCharges: [] });
+    return send(res, 200, { booking: { id: booking.id, code: booking.code, customerId: booking.customer.id }, paymentMethods: [], deposits: [], extraCharges: [], capabilities: { stripe: { status: "disabled_for_environment", operationsEnabled: false, verification: "not_performed" } } });
   }
   return send(res, 501, { error: "UI_PREVIEW_UNAVAILABLE", message: "Questa sezione non è ancora inclusa nell'anteprima Prenotazioni." });
 };

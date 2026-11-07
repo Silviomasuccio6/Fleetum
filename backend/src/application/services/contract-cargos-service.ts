@@ -99,6 +99,7 @@ export class ContractCargosService {
    transmission={...transmission,status:"UNKNOWN"};
   }
   const issues=cargosRecordIssues(record),blockingReasons=cargosDomainIssues(booking);
+  if(env.FLEETUM_ENVIRONMENT!=="production")blockingReasons.unshift("Invio CARGOS disabilitato in questo ambiente di prova.");
   const history=await prisma.bookingContractEvent.findMany({where:{tenantId,contractId:booking.contract!.id,type:{startsWith:"CARGOS_"}},orderBy:[{createdAt:"desc"},{id:"desc"}],take:41,select:{id:true,type:true,message:true,createdAt:true,details:true}});
   const receipts=transmission?await prisma.contractCargosReceipt.findMany({where:{tenantId,transmissionId:transmission.id},orderBy:{createdAt:"desc"},select:{id:true,protocol:true,receiptDate:true,transactionId:true,kind:true,createdAt:true,sha256:true}}):[];
   const fields=CARGOS_FIELDS.map(field=>({...field,value:record[field.key]??"",editable:editable(field.key)&&!field.key.startsWith("AGENZIA_")&&(booking.contract!.rentalTerms===null||!field.key.startsWith("CONDUCENTE2_")||field.key.endsWith("_COD")),issue:issues[field.key]??null}));

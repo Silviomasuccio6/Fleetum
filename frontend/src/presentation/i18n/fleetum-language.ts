@@ -6,6 +6,10 @@ export const FLEETUM_LANGUAGE_STORAGE_KEY = "fleetum-language";
 export const FLEETUM_LANGUAGE_EVENT = "fleetum-language-change";
 
 const TRANSLATIONS_IT_EN: Record<string, string> = {
+  "Invio CARGOS disabilitato in questo ambiente di prova.": "CARGOS transmission is disabled in this test environment.",
+  "Carte e garanzie Stripe sono disabilitate in questo ambiente di prova. Puoi consultare i dati e preparare gli extra senza eseguire addebiti.": "Stripe cards and guarantees are disabled in this test environment. You can review existing records and prepare extras without charging a card.",
+  "Il collegamento Stripe per carte e garanzie non è configurato. Chiedi all’amministratore di completarlo; puoi continuare a consultare i dati e preparare gli extra.": "Stripe is not configured for cards and guarantees. Ask your administrator to complete the connection; you can still review records and prepare extras.",
+  "Disponibilità delle operazioni Stripe non verificata. Aggiorna il riepilogo prima di continuare.": "Stripe operation availability has not been checked. Refresh the summary before continuing.",
   "Lingua": "Language",
   "Cerca una sezione": "Find a section",
   "Sezioni del gestionale": "Workspace sections",

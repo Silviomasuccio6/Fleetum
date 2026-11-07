@@ -1,4 +1,6 @@
 import { createCipheriv } from "node:crypto";
+import { env } from "../../shared/config/env.js";
+import type { FleetumEnvironment } from "../../shared/config/staging-safety.js";
 export type CargosCredentials={username:string;password:string;apiKey:string};
 export type CargosOutcome={status:"ACCEPTED";transactionId:string}|{status:"REJECTED";errorCode:string}|{status:"UNKNOWN"}|{status:"UNAVAILABLE"};
 export type CargosCheckOutcome={status:"VALID"}|{status:"INVALID";errorCode:string}|{status:"UNAVAILABLE"};
@@ -12,8 +14,9 @@ const endpoint="https://cargos.poliziadistato.it/CARGOS_API/api/";
 type Fetch=typeof fetch;
 export type CargosSendGuard=(start:()=>Promise<unknown>)=>Promise<unknown>;
 export class CargosClient {
- constructor(private readonly credentials:CargosCredentials,private readonly request:Fetch=fetch){}
+ constructor(private readonly credentials:CargosCredentials,private readonly request:Fetch=fetch,private readonly environment:FleetumEnvironment=env.FLEETUM_ENVIRONMENT){}
  private async json(path:string,headers:Record<string,string>,body?:unknown){
+  if(this.environment!=="production")throw new Error("CARGOS transport disabled in this environment");
   const response=await this.request(endpoint+path,{method:body===undefined?"GET":"POST",headers:{Accept:"application/json","Content-Type":"application/json",...headers},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:"error",signal:AbortSignal.timeout(15000)});
   if(!response.ok)throw new Error("CARGOS request failed");
   const reader=response.body?.getReader();if(!reader)throw new Error("Missing response");let bytes=0;const chunks:Uint8Array[]=[];

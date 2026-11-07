@@ -92,6 +92,13 @@ export type RentalExtraChargeDto = {
 };
 
 export type RentalPaymentSummaryDto = {
+  capabilities?: {
+    stripe: {
+      status: "disabled_for_environment" | "not_configured" | "configuration_present";
+      operationsEnabled: boolean;
+      verification: "not_performed";
+    };
+  };
   booking: {
     id: string;
     code: string;

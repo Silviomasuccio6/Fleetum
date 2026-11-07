@@ -6,6 +6,18 @@ import { CargosClient, encryptCargosToken } from "../src/infrastructure/cargos/c
 const synthetic = () => Object.fromEntries(CARGOS_FIELDS.map(field => [field.key,
   !field.required ? "" : field.kind === "dateTime" ? "29/10/2026 10:00" : field.kind === "date" ? "01/01/1990" : field.kind === "code" ? "100000001" : field.kind === "digit" ? "1" : field.kind === "phone" ? "05555555" : "A".repeat(Math.min(field.width,8))
 ]));
+test("CARGOS refuses Token, Check and Send in staging and provider QA before any network request", async () => {
+ for (const environment of ["staging", "provider-qa"] as const) {
+  let calls = 0;
+  const client = new CargosClient({username:"synthetic",password:"synthetic",apiKey:"012345678901234567890123456789010123456789012345"}, async () => {
+   calls++;
+   return new Response(JSON.stringify({token_type:"Bearer",access_token:"synthetic",expires_date:"2099-01-01T00:00:00Z"}));
+  }, environment);
+  assert.deepEqual(await client.check("x".repeat(1505)), {status:"UNAVAILABLE"});
+  assert.deepEqual(await client.send("x".repeat(1505)), {status:"UNAVAILABLE"});
+  assert.equal(calls, 0);
+ }
+});
 test("official Check validates without calling Send and does not turn its transaction reference into acceptance",async()=>{
  const calls:string[]=[];const client=new CargosClient({username:"synthetic",password:"synthetic",apiKey:"012345678901234567890123456789010123456789012345"},async(url,init)=>{
   calls.push(String(url));if(String(url).endsWith("Token"))return new Response(JSON.stringify({token_type:"Bearer",access_token:"synthetic",expires_date:"2099-01-01T00:00:00Z"}));

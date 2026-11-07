@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { rentalStripeAvailability } from "./rental-payment-availability.js";
 import Stripe from "stripe";
 import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
@@ -630,7 +631,8 @@ export class RentalPaymentService {
       this.deps.listExtraChargesByBooking(tenantId, bookingId)
     ]);
 
-    return { booking: { id: booking.id, code: booking.code, customerId }, paymentMethods, deposits, extraCharges };
+    return { booking: { id: booking.id, code: booking.code, customerId }, paymentMethods, deposits, extraCharges,
+      capabilities: { stripe: this.stripeAvailability() } };
   }
 
   async listPaymentMethods(tenantId: string, rentalCustomerId: string) {
@@ -1358,9 +1360,17 @@ export class RentalPaymentService {
     return profile;
   }
 
+  private stripeAvailability() {
+    return rentalStripeAvailability(env.FLEETUM_ENVIRONMENT, Boolean(env.STRIPE_SECRET_KEY?.trim()), Boolean(this.stripeClient));
+  }
+
   private requireStripeClient() {
-    if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
-      throw new AppError("Stripe non configurato per garanzie noleggio", 500, "RENTAL_STRIPE_NOT_CONFIGURED");
+    const availability = this.stripeAvailability();
+    if (availability.status === "disabled_for_environment") {
+      throw new AppError("Operazioni Stripe disabilitate in questo ambiente di prova", 503, "RENTAL_STRIPE_DISABLED");
+    }
+    if (!availability.operationsEnabled || !this.stripeClient) {
+      throw new AppError("Stripe non configurato per garanzie noleggio", 503, "RENTAL_STRIPE_NOT_CONFIGURED");
     }
     return this.stripeClient;
   }
