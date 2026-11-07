@@ -122,7 +122,7 @@ const actualLayoutLogout = (events: string[]) => {
   }).outputText;
   return vm.runInNewContext(callback, {
     platformAdminUseCases, platformAuthStorage,
-    setLoggingOut: () => {}, snackbar: { error: () => events.push("error") }, navigate: (url: string) => events.push(url)
+    setLoggingOut: () => {}, snackbar: { capture: () => "synthetic-platform-scope", error: () => events.push("error") }, navigate: (url: string) => events.push(url)
   }) as () => Promise<void>;
 };
 test("actual layout does not navigate when a newer login runs after clear but before awaited logout resumes", async () => {
@@ -177,7 +177,7 @@ const run = ${initializers.get("handlePlatformAuthError")}; run`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
   }).outputText;
   return vm.runInNewContext(callback, { platformAdminUseCases,
-    snackbar: { error: () => events.push("error") }, navigate: (url: string) => events.push(url)
+    snackbar: { capture: () => "synthetic-platform-scope", error: () => events.push("error") }, navigate: (url: string) => events.push(url)
   }) as (error: unknown) => boolean;
 };
 for (const stale of [false, true]) test(`actual page auth-error handler ${stale ? "ignores an old" : "clears a current"} request after unauthorized response`, async () => {

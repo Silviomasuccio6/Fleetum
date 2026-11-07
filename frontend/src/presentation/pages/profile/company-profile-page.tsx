@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { CargosConnectionPanel } from "../../components/contracts/cargos-connection-panel";
 import { Building2, CheckCircle2, FileText, Globe2, ImagePlus, Map, ShieldCheck, UploadCloud, Save } from "lucide-react";
@@ -289,6 +290,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if (!canWrite || lock.current || loading || !baseline || dataOwner !== identity) return;
     lock.current = true;
@@ -332,11 +334,9 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
         catch { throw Error("Dati aziendali salvati. Il documento di verifica non è stato caricato: riprova allegando nuovamente il file."); }
         setVerificationDocumentFile(null);
       }
-      setSuccess(
-        onboarding
+      publishOperationFeedback(setSuccess, onboarding
           ? "Dati aziendali salvati. Ora puoi scegliere il piano e attivare il trial con carta."
-          : "Profilo azienda salvato. I prossimi contratti useranno questi dati."
-      );
+          : "Profilo azienda salvato. I prossimi contratti useranno questi dati.", notificationScope);
       if (onboarding) {
         trackPublicEvent("ONBOARDING_COMPANY_COMPLETED", {
           source: "company_onboarding",
@@ -356,6 +356,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   };
 
   const onLogoChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const notificationScope=captureOperationContext();
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || !canWrite || lock.current || loading || !baseline || dataOwner !== identity) return;
@@ -367,7 +368,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
       const result = await tenantProfileUseCases.uploadLogo(file);
       if (activeIdentity.current !== identity) return;
       setProfileState(result);
-      setSuccess("Logo aziendale aggiornato.");
+      publishOperationFeedback(setSuccess, "Logo aziendale aggiornato.", notificationScope);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -377,6 +378,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
   };
 
   const removeLogo = async () => {
+    const notificationScope=captureOperationContext();
     if (!canWrite || lock.current || loading || !baseline || dataOwner !== identity) return;
     lock.current = true;
     setUploadingLogo(true);
@@ -393,7 +395,7 @@ export const CompanyProfilePage = ({ onboarding = false, nextPath }: CompanyProf
         throw Error("Logo rimosso. Non è stato possibile aggiornare la completezza del profilo: ricarica i dati dopo aver salvato la bozza.");
       }
       setConfirmation(null);
-      setSuccess("Logo aziendale rimosso.");
+      publishOperationFeedback(setSuccess, "Logo aziendale rimosso.", notificationScope);
     } catch (err) {
       setError((err as Error).message);
     } finally {

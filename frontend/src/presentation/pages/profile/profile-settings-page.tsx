@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { useCompanySiteView } from "../../components/layout/site-context";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -49,10 +50,11 @@ export const ProfileSettingsPage = () => {
   const lock = useRef(false), activeIdentity = useRef(identity);
   activeIdentity.current = identity;
   const runTask = async (key: string, action: () => Promise<unknown>, message?: string) => {
+    const notificationScope=captureOperationContext();
     if (lock.current) return;
     lock.current = true; setBusy(key); setError(null); setSuccess(null);
     const owner = identity;
-    try { await action(); if (activeIdentity.current === owner && message) setSuccess(message); }
+    try { await action(); if (activeIdentity.current === owner && message) publishOperationFeedback(setSuccess, message, notificationScope); }
     catch (e) { if (activeIdentity.current === owner) setError((e as Error).message); }
     finally { lock.current = false; setBusy(null); }
   };

@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   RentalExtraKmPolicy,
@@ -236,6 +237,7 @@ export const RentalPricingPage = () => {
   };
 
   const saveList = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if(!canWrite||saving||!validate("list",listForm))return;
     setSaving(true);
@@ -267,10 +269,10 @@ export const RentalPricingPage = () => {
 
       if (listForm.id) {
         await rentalBookingsUseCases.updatePriceList(listForm.id, payload);
-        setSuccess("Listino aggiornato.");
+        publishOperationFeedback(setSuccess, "Listino aggiornato.", notificationScope);
       } else {
         const created = await rentalBookingsUseCases.createPriceList(payload);
-        setSuccess("Listino creato.");
+        publishOperationFeedback(setSuccess, "Listino creato.", notificationScope);
         setSelectedListId(created.id);selectedRef.current=created.id;setListForm(previous=>({...previous,id:created.id}));
       }
 
@@ -285,6 +287,7 @@ export const RentalPricingPage = () => {
   };
 
   const duplicateList = async (list: RentalPriceList) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||saving)return false;
     setSaving(true);
     setError(null);
@@ -350,7 +353,7 @@ export const RentalPricingPage = () => {
       await loadLists();
       setStatusFilter("all");selectList(created);
       await loadListDetails(created.id);
-      setSuccess("Listino duplicato.");
+      publishOperationFeedback(setSuccess, "Listino duplicato.", notificationScope);
       return true;
     } catch (e) {
       setError((e as Error).message);return false;
@@ -360,6 +363,7 @@ export const RentalPricingPage = () => {
   };
 
   const toggleListStatus = async (list: RentalPriceList) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||saving)return false;
     setSaving(true);
     setError(null);
@@ -367,7 +371,7 @@ export const RentalPricingPage = () => {
     try {
       await rentalBookingsUseCases.updatePriceList(list.id, { isActive: !list.isActive });
       await loadLists();
-      setSuccess(`Listino ${list.isActive ? "disattivato" : "attivato"}.`);
+      publishOperationFeedback(setSuccess, `Listino ${list.isActive ? "disattivato" : "attivato"}.`, notificationScope);
       return true;
     } catch (e) {
       setError((e as Error).message);return false;
@@ -377,6 +381,7 @@ export const RentalPricingPage = () => {
   };
 
   const removeList = async (list: RentalPriceList) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||saving)return false;
     setSaving(true);
     setError(null);
@@ -391,7 +396,7 @@ export const RentalPricingPage = () => {
         setPolicies([]);
       }
       await loadLists();
-      setSuccess("Listino eliminato.");
+      publishOperationFeedback(setSuccess, "Listino eliminato.", notificationScope);
       return true;
     } catch (e) {
       setError((e as Error).message);return false;
@@ -401,6 +406,7 @@ export const RentalPricingPage = () => {
   };
 
   const savePackage = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if(!canWrite||saving||detailsLoading||detailsError||!validate("package",packageForm))return;
     if (!selectedListId) return;
@@ -426,10 +432,10 @@ export const RentalPricingPage = () => {
 
       if (packageForm.id) {
         await rentalBookingsUseCases.updatePricePackage(packageForm.id, payload);
-        setSuccess("Pacchetto aggiornato.");
+        publishOperationFeedback(setSuccess, "Pacchetto aggiornato.", notificationScope);
       } else {
         await rentalBookingsUseCases.createPricePackage(selectedListId, payload);
-        setSuccess("Pacchetto creato.");
+        publishOperationFeedback(setSuccess, "Pacchetto creato.", notificationScope);
       }
 
       clearDirty("package");
@@ -443,6 +449,7 @@ export const RentalPricingPage = () => {
   };
 
   const savePolicy = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if(!canWrite||saving||detailsLoading||detailsError||!validate("policy",policyForm))return;
     if (!selectedListId) return;
@@ -472,10 +479,10 @@ export const RentalPricingPage = () => {
 
       if (policyForm.id) {
         await rentalBookingsUseCases.updateExtraKmPolicy(policyForm.id, payload);
-        setSuccess("Tariffario km extra aggiornato.");
+        publishOperationFeedback(setSuccess, "Tariffario km extra aggiornato.", notificationScope);
       } else {
         await rentalBookingsUseCases.createExtraKmPolicy({ priceListId: selectedListId, ...payload });
-        setSuccess("Tariffario km extra creato.");
+        publishOperationFeedback(setSuccess, "Tariffario km extra creato.", notificationScope);
       }
 
       clearDirty("policy");
@@ -519,6 +526,7 @@ export const RentalPricingPage = () => {
   };
 
   const deletePackage = async (pkg: RentalPricePackage) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||saving)return false;
     if (!selectedListId) return;
     setSaving(true);
@@ -528,7 +536,7 @@ export const RentalPricingPage = () => {
       await rentalBookingsUseCases.deletePricePackage(pkg.id);
       if(packageForm.id===pkg.id){setPackageForm(defaultPackageForm());clearDirty("package");}
       await loadListDetails(selectedListId);
-      setSuccess("Pacchetto eliminato.");
+      publishOperationFeedback(setSuccess, "Pacchetto eliminato.", notificationScope);
       return true;
     } catch (e) {
       setError((e as Error).message);return false;
@@ -538,6 +546,7 @@ export const RentalPricingPage = () => {
   };
 
   const deletePolicy = async (policy: RentalExtraKmPolicy) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||saving)return false;
     if (!selectedListId) return;
     setSaving(true);
@@ -547,7 +556,7 @@ export const RentalPricingPage = () => {
       await rentalBookingsUseCases.deleteExtraKmPolicy(policy.id);
       if(policyForm.id===policy.id){setPolicyForm(defaultPolicyForm());clearDirty("policy");}
       await loadListDetails(selectedListId);
-      setSuccess("Tariffario km extra eliminato.");
+      publishOperationFeedback(setSuccess, "Tariffario km extra eliminato.", notificationScope);
       return true;
     } catch (e) {
       setError((e as Error).message);return false;

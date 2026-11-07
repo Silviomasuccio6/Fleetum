@@ -19,7 +19,8 @@ export function createSnackbarClock(store:ReturnType<typeof createSnackbarStore>
    for(const item of state.items){
     let clock=clocks.get(item.id)!;
     if(clock.revision!==item.revision){clock={revision:item.revision,remaining:item.durationMs,last:now,active:false};clocks.set(item.id,clock);}
-    clock.active=visible.has(item.id)&&(item.closing||(!paused.size&&!itemPauses.get(item.id)?.size));
+    if(!visible.has(item.id))itemPauses.delete(item.id);
+    clock.active=item.closing||(visible.has(item.id)&&!paused.size&&!itemPauses.get(item.id)?.size);
     if(clock.active&&clock.remaining!==null)next=Math.min(next,clock.remaining);
     if(item.readyAt>now)next=Math.min(next,item.readyAt-now);
    }
@@ -29,7 +30,11 @@ export function createSnackbarClock(store:ReturnType<typeof createSnackbarStore>
  const unsubscribe=store.subscribe(sync);sync();
  return {
   pause:(reason:string,value:boolean)=>{value?paused.add(reason):paused.delete(reason);sync();},
-  pauseItem:(id:string,reason:string,value:boolean)=>{const reasons=itemPauses.get(id)??new Set<string>();value?reasons.add(reason):reasons.delete(reason);itemPauses.set(id,reasons);sync();},
+  pauseItem:(id:string,reason:string,value:boolean)=>{
+   if(!store.getState().items.some(item=>item.id===id)){itemPauses.delete(id);return;}
+   const reasons=itemPauses.get(id)??new Set<string>();value?reasons.add(reason):reasons.delete(reason);
+   if(reasons.size)itemPauses.set(id,reasons);else itemPauses.delete(id);sync();
+  },
   dispose:()=>{disposed=true;unsubscribe();if(timer!==null)host.cancel(timer);clocks.clear();itemPauses.clear();}
  };
 }

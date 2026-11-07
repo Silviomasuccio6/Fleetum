@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import {SigningPdfReader} from "../../components/contracts/signing-pdf-reader";
 import {useEffect,useRef,useState} from "react";
 import {publicSigningRequest,type SigningView} from "../../../application/usecases/contract-signing-usecases";
@@ -26,10 +27,11 @@ export function ContractSigningPage(){
   return()=>{mounted.current=false;controller.abort();meta.remove();robots.remove();if(documentRef.current){URL.revokeObjectURL(documentRef.current);documentRef.current="";}};
  },[]);
  useEffect(()=>{if(!view||!((view.status==="PENDING"&&view.otpDelivery==="PENDING")||(view.status==="SIGNED"&&view.copyDelivery==="PENDING")))return;let disposed=false;const started=Date.now();let running=false;const timer=window.setInterval(()=>{if(running||pending.current||Date.now()-started>120000)return;running=true;const version=epoch.current;void publicSigningRequest("resolve",token.current).then(r=>r.json()).then(next=>{if(!disposed&&version===epoch.current)setView(next);}).catch(()=>{}).finally(()=>{running=false;});},5000);return()=>{disposed=true;window.clearInterval(timer);};},[view?.id,view?.status,view?.otpDelivery,view?.copyDelivery]);
- const run=async(action:"otp"|"confirm"|"evidence")=>{if(!view||pending.current)return;pending.current=true;epoch.current++;setBusy(true);setError("");try{
+ const run=async(action:"otp"|"confirm"|"evidence")=>{
+    const notificationScope=captureOperationContext();if(!view||pending.current)return;pending.current=true;epoch.current++;setBusy(true);setError("");try{
   const response=await publicSigningRequest(action,token.current,action==="otp"?{documentHash:view.documentSha256}:action==="confirm"?{documentHash:view.documentSha256,code,confirmationId:confirmation.current,consent,consentVersion:view.consentVersion}:{});
   if(!mounted.current)return;
-  if(action==="evidence"){const url=URL.createObjectURL(await response.blob());download(url,"Registrazione_firma_email.pdf");window.setTimeout(()=>URL.revokeObjectURL(url),60000);}else{const next=await response.json() as SigningView;setView(next);setNotice(action==="otp"?"Codice richiesto. Attendi la conferma di invio.":"Firma registrata. Puoi scaricare i tuoi documenti.");if(action==="otp"){setCode("");confirmation.current=crypto.randomUUID();}}
+  if(action==="evidence"){const url=URL.createObjectURL(await response.blob());download(url,"Registrazione_firma_email.pdf");window.setTimeout(()=>URL.revokeObjectURL(url),60000);}else{const next=await response.json() as SigningView;setView(next);publishOperationFeedback(setNotice, action==="otp"?"Codice richiesto. Attendi la conferma di invio.":"Firma registrata. Puoi scaricare i tuoi documenti.", notificationScope, "info");if(action==="otp"){setCode("");confirmation.current=crypto.randomUUID();}}
  }catch(e){if(mounted.current)setError((e as Error).message);}finally{pending.current=false;if(mounted.current)setBusy(false);}};
  return <main className="contract-signing" translate="no" lang="it"><header className="signing-header"><span className="signing-wordmark">Fleetum<span> / Contratti</span></span><span>Documento riservato</span></header>
   <div className="signing-intro"><p className="signing-eyebrow">{view?.issuerName??"Il tuo contratto di noleggio"}</p><h1>{view?.status==="SIGNED"?"Firma completata":"Leggi. Verifica. Firma."}</h1><p>{view?`${view.bookingCode} · ${view.signerName}`:"Il documento e la conferma della firma, in un unico spazio."}</p></div>

@@ -1,3 +1,4 @@
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -20,6 +21,7 @@ function harness(kind:'users'|'company'|'billing'|'profile', permissions:string[
  const user={id:'synthetic-user',tenantId:'synthetic-tenant',firstName:'QA',lastName:'User',email:'qa@example.invalid',roles:permissions.includes('*')?['ADMIN']:['VIEWER'],permissions};
  const exports:any={};
  runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,Date,Intl,console,URL,URLSearchParams,Promise,localStorage:{getItem:()=>null,setItem(){}},FormData:class { get(k:string){return {firstName:'Test',lastName:'User',email:'qa@example.invalid',password:'Synthetic-password-22',roleKey:'OPERATOR'}[k as 'firstName']} },expose:(f:any)=>functions=f,window:{location:{search:'',href:''},matchMedia:()=>({matches:true})},require(id:string){
+ if(id.endsWith('operation-feedback'))return operationFeedback;
  if(id==='react')return{...React,useId:()=> 'synthetic-id',useState:(value:any)=>{const i=index++;if(!(i in states))states[i]=typeof value==='function'?value():value;return[states[i],(v:any)=>states[i]=typeof v==='function'?v(states[i]):v]},useEffect:(f:any)=>effects.push(f),useRef:(v:any)=>{const i=refIndex++;return refs[i]??(refs[i]={current:v})},useCallback:(f:any)=>f,useMemo:(f:any)=>f()};
  if(id==='react/jsx-runtime')return{jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props}),Fragment:'Fragment'};
  if(id==='react-router-dom')return{useNavigate:()=>()=>{}};

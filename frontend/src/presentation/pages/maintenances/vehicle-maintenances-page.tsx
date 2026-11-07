@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { scopedFetch } from "../../../infrastructure/api/scoped-fetch";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Download, ExternalLink, FileImage, FileText, Trash2, X } from "lucide-react";
@@ -298,6 +299,7 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if (!canWrite||submitLock.current) return;
     setError(null);
@@ -413,11 +415,9 @@ export const VehicleMaintenancesPage = () => {
           void reload();
         }, 9000);
       }
-      setSuccess(
-        mode === "create"
+      publishOperationFeedback(setSuccess, mode === "create"
           ? `Manutenzione registrata${uploaded ? ` con ${uploaded} allegato/i` : ""}${invoiceAnalysisQueued > 0 ? " · analisi fatture in background" : ""}.`
-          : `Manutenzione aggiornata${uploaded ? ` con ${uploaded} nuovo/i allegato/i` : ""}${invoiceAnalysisQueued > 0 ? " · analisi fatture in background" : ""}.`
-      );
+          : `Manutenzione aggiornata${uploaded ? ` con ${uploaded} nuovo/i allegato/i` : ""}${invoiceAnalysisQueued > 0 ? " · analisi fatture in background" : ""}.`, notificationScope);
     } catch (e) {
       setError((savedId.current?"L’intervento è già registrato. Riprova per completare gli allegati senza creare un duplicato. ":"")+(e as Error).message);
     } finally {
@@ -426,13 +426,14 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const deleteRecord = async (id: string) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite)return;
     setError(null);
     setSuccess(null);
     setWarning(null);
     try {
       await masterDataUseCases.deleteVehicleMaintenance(id);
-      setSuccess("Manutenzione eliminata.");
+      publishOperationFeedback(setSuccess, "Manutenzione eliminata.", notificationScope);
       await reload();
     } catch (e) {
       setError((e as Error).message);
@@ -497,6 +498,7 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const deleteAttachment = async (maintenanceId: string, attachment: VehicleMaintenanceAttachment) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite)return;
     if (deletingAttachmentId) return;
     setError(null);
@@ -517,7 +519,7 @@ export const VehicleMaintenancesPage = () => {
       if (previewAttachment?.id === attachment.id) {
         closePreview();
       }
-      setSuccess(`Allegato "${attachment.fileName}" eliminato.`);
+      publishOperationFeedback(setSuccess, `Allegato "${attachment.fileName}" eliminato.`, notificationScope);
     } catch (e) {
       setError((e as Error).message);
       throw e;
@@ -549,6 +551,7 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const runMaintenanceExport = async (format: "csv" | "xlsx") => {
+    const notificationScope=captureOperationContext();
     if(!canRead||!canExportCsv||exportLoading)return;
     setError(null);
     setSuccess(null);
@@ -568,7 +571,7 @@ export const VehicleMaintenancesPage = () => {
       link.download = `manutenzioni-${vehiclePlateLabel}-${fromTag}-${toTag}.${ext}`;
       link.click();
       URL.revokeObjectURL(url);
-      setSuccess(`Export ${format.toUpperCase()} manutenzioni generato con successo.`);
+      publishOperationFeedback(setSuccess, `Export ${format.toUpperCase()} manutenzioni generato con successo.`, notificationScope);
       setExportDialogOpen(false);
     } catch (e) {
       setError((e as Error).message);

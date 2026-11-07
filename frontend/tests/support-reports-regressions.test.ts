@@ -1,3 +1,4 @@
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -19,7 +20,8 @@ function harness(kind:'stats'|'directory',permissions:string[]=[],features=true)
  const api=new Proxy({},{get:(_,method)=>(...args:any[])=>new Promise((resolve,reject)=>pending.push({method,args,resolve,reject}))});
  const exports:any={};
  runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,Date,Intl,console,URL,URLSearchParams,Promise,expose:(f:any)=>functions=f,window:{setTimeout:()=>0,clearTimeout:()=>{}},document:{getElementById:()=>({focus(){}})},require(id:string){
- if(id==='react')return{...React,useId:()=> 'synthetic-id',useState:(value:any)=>{const i=index++;if(!(i in states))states[i]=typeof value==='function'?value():value;return[states[i],(v:any)=>states[i]=typeof v==='function'?v(states[i]):v]},useEffect:()=>{},useRef:(v:any)=>{const i=refIndex++;return refs[i]??(refs[i]={current:v})},useCallback:(f:any)=>f,useMemo:(f:any)=>f()};
+ if(id.endsWith('operation-feedback'))return operationFeedback;
+  if(id==='react')return{...React,useId:()=> 'synthetic-id',useState:(value:any)=>{const i=index++;if(!(i in states))states[i]=typeof value==='function'?value():value;return[states[i],(v:any)=>states[i]=typeof v==='function'?v(states[i]):v]},useEffect:()=>{},useRef:(v:any)=>{const i=refIndex++;return refs[i]??(refs[i]={current:v})},useCallback:(f:any)=>f,useMemo:(f:any)=>f()};
  if(id==='react/jsx-runtime')return{jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props}),Fragment:'Fragment'};
  if(id.endsWith('lib/utils'))return{cn:(...args:any[])=>args.join(' ')};
  if(id==='react-router-dom')return{useLocation:()=>({search:''})};

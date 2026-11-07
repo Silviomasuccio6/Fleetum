@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, BadgeEuro, CheckCircle2, CreditCard, Euro, FileWarning, Loader2, LockKeyhole, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useAuthStore } from "../../../application/stores/auth-store";
@@ -270,6 +271,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   const runCreateDeposit = async () => {
+    const notificationScope=captureOperationContext();
     const amountCents = eurosToCents(depositAmount);
     if (!selectedPaymentMethodId || !amountCents) {
       setError("Seleziona una carta attiva e inserisci un importo deposito valido.");
@@ -279,7 +281,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
     setError(null);
     try {
       await rentalPaymentsUseCases.createDeposit(booking.id, { paymentMethodId: selectedPaymentMethodId, amountCents });
-      setNotice("Deposito creato. Lo stato viene aggiornato in base all'esito Stripe.");
+      publishOperationFeedback(setNotice, "Deposito creato. Lo stato viene aggiornato in base all'esito Stripe.", notificationScope, "info");
       closeModal();
       await loadSummary();
     } catch (e) {
@@ -290,6 +292,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   const runCaptureDeposit = async (deposit: RentalDepositDto, partial = false) => {
+    const notificationScope=captureOperationContext();
     let amountToCaptureCents: number | undefined;
     if (partial) {
       const value = window.prompt("Importo da catturare in euro", String((deposit.amountCents - deposit.capturedAmountCents) / 100));
@@ -305,7 +308,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
     setError(null);
     try {
       await rentalPaymentsUseCases.captureDeposit(deposit.id, partial ? { amountToCaptureCents } : undefined);
-      setNotice(partial ? "Deposito catturato parzialmente." : "Deposito catturato.");
+      publishOperationFeedback(setNotice, partial ? "Deposito catturato parzialmente." : "Deposito catturato.", notificationScope, "info");
       await loadSummary();
     } catch (e) {
       setError((e as Error).message);
@@ -315,11 +318,12 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   const runReleaseDeposit = async (deposit: RentalDepositDto) => {
+    const notificationScope=captureOperationContext();
     setActionBusy({ type: "release", id: deposit.id });
     setError(null);
     try {
       await rentalPaymentsUseCases.releaseDeposit(deposit.id);
-      setNotice("Deposito rilasciato.");
+      publishOperationFeedback(setNotice, "Deposito rilasciato.", notificationScope, "info");
       await loadSummary();
     } catch (e) {
       setError((e as Error).message);
@@ -329,6 +333,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   const runCreateExtraCharge = async () => {
+    const notificationScope=captureOperationContext();
     const amountCents = eurosToCents(extraForm.amount);
     const adminFeeCents = optionalEurosToCents(extraForm.adminFee);
     if (!amountCents || adminFeeCents === null || extraForm.description.trim().length < 3) {
@@ -346,7 +351,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
         paymentMethodId: extraForm.paymentMethodId || undefined,
         evidenceFileUrl: extraForm.evidenceFileUrl.trim() || undefined
       });
-      setNotice("Addebito extra creato e in attesa di approvazione.");
+      publishOperationFeedback(setNotice, "Addebito extra creato e in attesa di approvazione.", notificationScope, "info");
       setExtraForm({ type: "FINE", description: "", amount: "", adminFee: "", evidenceFileUrl: "", paymentMethodId: activePaymentMethods[0]?.id ?? "" });
       closeModal();
       await loadSummary();
@@ -358,6 +363,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   const runExtraAction = async (charge: RentalExtraChargeDto, action: "approve" | "notify" | "charge" | "cancel") => {
+    const notificationScope=captureOperationContext();
     setActionBusy({ type: action, id: charge.id });
     setError(null);
     try {
@@ -365,7 +371,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       if (action === "notify") await rentalPaymentsUseCases.notifyExtraCharge(charge.id);
       if (action === "charge") await rentalPaymentsUseCases.chargeExtraCharge(charge.id, { paymentMethodId: charge.paymentMethodId ?? activePaymentMethods[0]?.id });
       if (action === "cancel") await rentalPaymentsUseCases.cancelExtraCharge(charge.id);
-      setNotice("Workflow addebito aggiornato.");
+      publishOperationFeedback(setNotice, "Workflow addebito aggiornato.", notificationScope, "info");
       await loadSummary();
     } catch (e) {
       setError((e as Error).message);

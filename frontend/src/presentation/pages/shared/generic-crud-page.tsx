@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import {type FormEvent, useCallback, useEffect, useId, useRef, useState} from 'react';
 import {Building2, MapPin, Plus, RefreshCw, Search} from 'lucide-react';
 import {useAuthStore} from '../../../application/stores/auth-store';
@@ -49,6 +50,7 @@ export const GenericCrudPage=({scope,title,createLabel='Nuovo record',createTitl
  const requestClose=()=>{if(saving)return;if(dirty&&canWrite)setDiscard(true);else close()};
  const open=(trigger:HTMLElement,row:Row|null)=>{origin.current=trigger;const initial=valuesFor(fields,row);setValues(initial);setEditor({row,initial});setFieldErrors({});setFormError('')};
  const onSubmit=async(event:FormEvent)=>{
+    const notificationScope=captureOperationContext();
   event.preventDefault();if(!canRead||!canWrite||!editor||!submissionGuard.tryAcquire())return;
   const errors:Record<string,string>={};for(const f of fields){const v=values[f.key]?.trim()??'';
    if((f.key==='name'||(scope==='sites'&&['address','city'].includes(f.key)))&&v.length<2)errors[f.key]='Inserisci almeno 2 caratteri.';
@@ -57,10 +59,11 @@ export const GenericCrudPage=({scope,title,createLabel='Nuovo record',createTitl
   setFieldErrors(errors);setFormError('');if(Object.keys(errors).length){submissionGuard.release();window.setTimeout(()=>summary.current?.focus(),0);return}
   const payload:Record<string,unknown>={};for(const f of fields){const v=values[f.key]??'';if(editor.row||v!=='')payload[f.key]=v}
   const context=identity;setSaving(true);setSuccess('');
-  try{if(editor.row)await update(editor.row.id,payload);else await create(payload);if(context!==identityRef.current)return;setEditor(null);setSuccess('Anagrafica salvata.');await reload()}
+  try{if(editor.row)await update(editor.row.id,payload);else await create(payload);if(context!==identityRef.current)return;setEditor(null);publishOperationFeedback(setSuccess, 'Anagrafica salvata.', notificationScope);await reload()}
   catch(e){if(context===identityRef.current){setFormError((e as Error).message);window.setTimeout(()=>summary.current?.focus(),0)}}finally{submissionGuard.release();setSaving(false)}
  };
- const onDelete=async()=>{if(!canRead||!canWrite||!deleting||!submissionGuard.tryAcquire())return;const context=identity;setSaving(true);setDeleteError('');setSuccess('');try{await remove(deleting.id);if(context!==identityRef.current)return;setDeleting(null);setSuccess('Anagrafica rimossa dall’elenco.');await reload()}catch(e){if(context===identityRef.current)setDeleteError((e as Error).message)}finally{submissionGuard.release();setSaving(false)}};
+ const onDelete=async()=>{
+    const notificationScope=captureOperationContext();if(!canRead||!canWrite||!deleting||!submissionGuard.tryAcquire())return;const context=identity;setSaving(true);setDeleteError('');setSuccess('');try{await remove(deleting.id);if(context!==identityRef.current)return;setDeleting(null);publishOperationFeedback(setSuccess, 'Anagrafica rimossa dall’elenco.', notificationScope);await reload()}catch(e){if(context===identityRef.current)setDeleteError((e as Error).message)}finally{submissionGuard.release();setSaving(false)}};
  const visible=loadedIdentity.current===identity?rows:[];
  const isSite=scope==='sites',Icon=isSite?MapPin:Building2;
  const group=(keys:string[],label:string)=>{const items=fields.filter(f=>keys.includes(f.key));return items.length?<fieldset className="commerce-form-group"><legend>{label}</legend><div className="commerce-field-grid">{items.map(f=><CommerceField key={f.key} id={formId+'-'+f.key} label={f.label} error={fieldErrors[f.key]}><Input name={f.key} type={f.type??'text'} value={values[f.key]??''} placeholder={f.placeholder} required={f.key==='name'||(isSite&&['address','city'].includes(f.key))} disabled={!canWrite||saving} onChange={e=>setValues(old=>({...old,[f.key]:e.target.value}))}/></CommerceField>)}</div></fieldset>:null};

@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { type FormEvent,useCallback,useEffect,useMemo,useRef,useState } from 'react';
 import { Plus,RefreshCw,Search,X } from 'lucide-react';
 import { useNavigate,useSearchParams } from 'react-router-dom';
@@ -64,26 +65,30 @@ export const CustomersPage=()=>{
  const create=()=>{if(!canWrite)return;setSearchParams(current=>{const next=new URLSearchParams(current);next.delete('customerId');return next});setCreating(true);setEditing(true);setForm(defaultCustomerForm());setErrors({});setDirty(false);setActionError(null);setSuccess(null);setSection('profile')};
  const change=(patch:Partial<typeof form>)=>{if(!canWrite||locked)return;setForm(current=>({...current,...patch}));setDirty(true)};
  const save=async(event:FormEvent<HTMLFormElement>)=>{
+    const notificationScope=captureOperationContext();
   event.preventDefault();if(!canWrite||locked)return;const validation=validateCustomerForm(form);setErrors(validation);setActionError(null);if(Object.keys(validation).length)return;
   const id=selectedId;setBusy(true);setSuccess(null);
   try{const payload=customerPayload(form);
-   if(creating){const saved=await rentalBookingsUseCases.createCustomer(payload);setDirty(false);setCreating(false);setEditing(false);setPage(1);setSearchParams(current=>{const next=new URLSearchParams(current);next.set('customerId',saved.id);return next});setSuccess('Cliente creato correttamente.');await loadCustomers(1,search,typeFilter)}
-   else if(id){await rentalBookingsUseCases.updateCustomerProfile(id,payload);if(identity.current!==id)return;setDirty(false);setEditing(false);setSuccess('Anagrafica cliente aggiornata.');await Promise.all([loadProfile(id),reloadList()])}
+   if(creating){const saved=await rentalBookingsUseCases.createCustomer(payload);setDirty(false);setCreating(false);setEditing(false);setPage(1);setSearchParams(current=>{const next=new URLSearchParams(current);next.set('customerId',saved.id);return next});publishOperationFeedback(setSuccess, 'Cliente creato correttamente.', notificationScope);await loadCustomers(1,search,typeFilter)}
+   else if(id){await rentalBookingsUseCases.updateCustomerProfile(id,payload);if(identity.current!==id)return;setDirty(false);setEditing(false);publishOperationFeedback(setSuccess, 'Anagrafica cliente aggiornata.', notificationScope);await Promise.all([loadProfile(id),reloadList()])}
   }catch(e){setActionError((e as Error).message)}finally{setBusy(false)}
  };
- const upload=async()=>{const id=selectedId;if(!canWrite||!id||!uploadFiles.length||locked)return;setBusy(true);setActionError(null);try{await rentalBookingsUseCases.uploadCustomerAttachments(id,uploadFiles);if(identity.current!==id)return;setUploadFiles([]);setSuccess('Documenti cliente caricati.');await Promise.all([loadProfile(id,false),reloadList()])}catch(e){setActionError((e as Error).message)}finally{setBusy(false)}};
- const remove=async()=>{const id=selectedId;if(!canWrite||!id||!confirm?.id||locked)return;setBusy(true);setActionError(null);try{await rentalBookingsUseCases.deleteCustomerAttachment(confirm.id);if(identity.current!==id)return;setConfirm(null);setSuccess('Documento eliminato.');await Promise.all([loadProfile(id,false),reloadList()])}catch(e){setActionError((e as Error).message)}finally{setBusy(false)}};
+ const upload=async()=>{
+    const notificationScope=captureOperationContext();const id=selectedId;if(!canWrite||!id||!uploadFiles.length||locked)return;setBusy(true);setActionError(null);try{await rentalBookingsUseCases.uploadCustomerAttachments(id,uploadFiles);if(identity.current!==id)return;setUploadFiles([]);publishOperationFeedback(setSuccess, 'Documenti cliente caricati.', notificationScope);await Promise.all([loadProfile(id,false),reloadList()])}catch(e){setActionError((e as Error).message)}finally{setBusy(false)}};
+ const remove=async()=>{
+    const notificationScope=captureOperationContext();const id=selectedId;if(!canWrite||!id||!confirm?.id||locked)return;setBusy(true);setActionError(null);try{await rentalBookingsUseCases.deleteCustomerAttachment(confirm.id);if(identity.current!==id)return;setConfirm(null);publishOperationFeedback(setSuccess, 'Documento eliminato.', notificationScope);await Promise.all([loadProfile(id,false),reloadList()])}catch(e){setActionError((e as Error).message)}finally{setBusy(false)}};
  const attachment=async(id:string)=>{setActionError(null);try{const blob=await rentalBookingsUseCases.downloadCustomerAttachment(id);const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener,noreferrer');window.setTimeout(()=>URL.revokeObjectURL(url),120000)}catch(e){setActionError((e as Error).message)}};
  const scan=async()=>{const id=selectedId;if(!canWrite||locked||!scanFiles.length)return;setScanning(true);setActionError(null);setScanInfo(null);
   try{const r=await rentalBookingsUseCases.parseCustomerDocumentDraft(scanFiles);if(identity.current!==id)return;setForm(current=>mergeCustomerScan(current,r.fields??{}));setEditing(true);setDirty(true);setSection('profile');setScanInfo(`Analisi completata (${r.score}%). Rivedi i dati prima di salvare.`);if(r.warnings?.length)setScanInfo(current=>`${current} ${r.warnings.join(' · ')}`);if((r.fields?.customerType??form.customerType)!=='PERSONA_GIURIDICA'&&!r.fields?.drivingLicenseNumber)setActionError('Numero patente non rilevato automaticamente. Inseriscilo manualmente.')
   }catch(e){setActionError((e as Error).message)}finally{setScanning(false)}
  };
  const applyFilters=()=>{if(filters.period==='custom'&&filters.dateFrom&&filters.dateTo&&filters.dateFrom>filters.dateTo){setTimelineError('La data finale deve seguire quella iniziale.');return}setTimelinePage(1);setAppliedFilters({...filters})};
- const contractAction=async(kind:'pdf'|'email'|'signed',bookingId:string)=>{const id=selectedId;if(locked||!id||(kind!=='pdf'&&!canWrite))return;setBusy(true);setActionError(null);
+ const contractAction=async(kind:'pdf'|'email'|'signed',bookingId:string)=>{
+    const notificationScope=captureOperationContext();const id=selectedId;if(locked||!id||(kind!=='pdf'&&!canWrite))return;setBusy(true);setActionError(null);
   try{if(kind==='pdf'){const blob=await rentalBookingsUseCases.downloadContractPdf(bookingId);const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`Contratto_${bookingId}.pdf`;document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),120000)}
    else if(kind==='email'){const key=emailKeys.current.get(bookingId)??globalThis.crypto.randomUUID();emailKeys.current.set(bookingId,key);await rentalBookingsUseCases.sendContractEmail(bookingId,undefined,key);emailKeys.current.delete(bookingId)}
    else await rentalBookingsUseCases.markContractSigned(bookingId);
-   if(identity.current!==id)return;setSuccess(kind==='pdf'?'PDF contratto scaricato.':kind==='email'?'Contratto inviato via email.':'Contratto marcato come firmato.');if(kind!=='pdf')await loadTimeline(id,timelinePage,appliedFilters)
+   if(identity.current!==id)return;publishOperationFeedback(setSuccess, kind==='pdf'?'PDF contratto scaricato.':kind==='email'?'Invio email contratto accodato.':'Contratto marcato come firmato.', notificationScope, kind==='email'?'info':'success');if(kind!=='pdf')await loadTimeline(id,timelinePage,appliedFilters)
   }catch(e){setActionError((e as Error).message)}finally{setBusy(false)}
  };
  const summary=useMemo(()=>profile?.stats??{bookingsTotal:profile?._count?.bookings,contractsTotal:undefined,attachmentsTotal:profile?._count?.attachments},[profile]);

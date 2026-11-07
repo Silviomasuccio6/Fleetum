@@ -253,32 +253,36 @@ export const useEvents = (filters:StoppageFilters=emptyStoppageFilters) => {
   const refreshRef=useRef(refresh);refreshRef.current=refresh;
 
   const mutate=useCallback(async<T,>(work:()=>Promise<T>,fallback:T)=>{
+    const notificationScope = snackbar.capture();
     if(!canWrite||mutationLock.current)return fallback;
     mutationLock.current=true;setMutating(true);setError(null);const scope=context.current;
-    try{return await work()}catch(e){if(context.current===scope){const message=e instanceof Error?e.message:"Operazione non riuscita";setError(message);snackbar.error(message)}return fallback}
+    try{return await work()}catch(e){if(context.current===scope){const message=e instanceof Error?e.message:"Operazione non riuscita";setError(message);snackbar.error(message, {scope: notificationScope})}return fallback}
     finally{if(context.current===scope){mutationLock.current=false;setMutating(false)}}
   },[canWrite]);
 
   const addEvent=useCallback((input:Partial<CalendarEvent>)=>mutate(async()=>{
+    const notificationScope = snackbar.capture();
     const draft=ensureEventRange({id:`tmp:${Date.now()}`,source:"custom",title:input.title?.trim()||"Nuovo evento",date:input.date??toDateKey(new Date()),start:input.start??"09:00",end:input.end??"10:00",calendarId:input.calendarId??0,location:input.location??"",description:input.description??"",allDay:input.allDay??false,color:input.color});
     const scope=identity;const result=await stoppagesUseCases.createCustomCalendarEvent(eventToBackendPayload(draft,calendarsRef.current));
     if(context.current!==scope)return null;
-    const created=mapCustomRow((result as any)?.data??result??{});cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento creato");return created;
+    const created=mapCustomRow((result as any)?.data??result??{});cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento creato", {scope: notificationScope});return created;
   },null as CalendarEvent|null),[mutate,refresh,identity]);
 
   const updateEvent=useCallback((id:CalendarEvent["id"],patch:Partial<CalendarEvent>)=>mutate(async()=>{
+    const notificationScope = snackbar.capture();
     const target=eventsRef.current.find(e=>String(e.id)===String(id));if(!target||target.readonly||target.source==="stoppage")return false;
     const scope=identity;const merged=ensureEventRange({...target,...patch});
     await stoppagesUseCases.updateCustomCalendarEvent(target.remoteId??String(target.id).replace(/^custom:/,""),eventToBackendPayload(merged,calendarsRef.current));
     if(context.current!==scope)return false;
-    cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento aggiornato");return true;
+    cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento aggiornato", {scope: notificationScope});return true;
   },false),[mutate,refresh,identity]);
 
   const deleteEvent=useCallback((id:CalendarEvent["id"])=>mutate(async()=>{
+    const notificationScope = snackbar.capture();
     const target=eventsRef.current.find(e=>String(e.id)===String(id));if(!target||target.readonly||target.source==="stoppage")return false;
     const scope=identity;await stoppagesUseCases.deleteCustomCalendarEvent(target.remoteId??String(target.id).replace(/^custom:/,""));
     if(context.current!==scope)return false;
-    cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento eliminato");return true;
+    cacheRef.current.clear();await refreshRef.current();snackbar.success("Evento eliminato", {scope: notificationScope});return true;
   },false),[mutate,refresh,identity]);
 
   return {

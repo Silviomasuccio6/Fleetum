@@ -142,13 +142,14 @@ export const StoppageDetailPage = () => {
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{if(!canWrite)return;
+                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                  const notificationScope = snackbar.capture();if(!canWrite)return;
                   await stoppagesUseCases.requestCostApproval(safeId, {
                     estimatedTotalCost: Number(approvalForm.estimatedTotalCost || 0),
                     reason: approvalForm.reason,
                     note: approvalForm.note || undefined
                   });
-                  snackbar.success("Richiesta approvazione inviata.");
+                  snackbar.success("Richiesta approvazione inviata.", {scope: notificationScope});
                   setRefreshTick(x=>x+1);
                 })}
               >
@@ -157,13 +158,14 @@ export const StoppageDetailPage = () => {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{if(!canWrite)return;
+                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                  const notificationScope = snackbar.capture();if(!canWrite)return;
                   await stoppagesUseCases.decideCostApproval(safeId, {
                     approved: true,
                     approvedCost: Number(approvalForm.estimatedTotalCost || 0),
                     reason: approvalForm.note || "Approvato"
                   });
-                  snackbar.success("Costo approvato.");
+                  snackbar.success("Costo approvato.", {scope: notificationScope});
                   setRefreshTick(x=>x+1);
                 })}
               >
@@ -172,12 +174,13 @@ export const StoppageDetailPage = () => {
               <Button
                 size="sm"
                 variant="destructive"
-                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{if(!canWrite)return;
+                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                  const notificationScope = snackbar.capture();if(!canWrite)return;
                   await stoppagesUseCases.decideCostApproval(safeId, {
                     approved: false,
                     reason: approvalForm.note || "Rifiutato"
                   });
-                  snackbar.success("Approvazione rifiutata.");
+                  snackbar.success("Approvazione rifiutata.", {scope: notificationScope});
                   setRefreshTick(x=>x+1);
                 })}
               >
@@ -213,9 +216,10 @@ export const StoppageDetailPage = () => {
             </div>
             <Button
               size="sm"
-              disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{if(!canWrite)return;
+              disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                const notificationScope = snackbar.capture();if(!canWrite)return;
                 await stoppagesUseCases.setFinalCost(safeId, Number(finalCost || 0));
-                snackbar.success("Costo consuntivo salvato.");
+                snackbar.success("Costo consuntivo salvato.", {scope: notificationScope});
                 setRefreshTick(x=>x+1);
               })}
             >
@@ -263,14 +267,15 @@ export const StoppageDetailPage = () => {
           </div>
           <Button
             size="sm"
-            disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{if(!canWrite)return;
+            disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+              const notificationScope = snackbar.capture();if(!canWrite)return;
               await stoppagesUseCases.addPartsOrder(safeId, {
                 description: partsForm.description,
                 supplier: partsForm.supplier || undefined,
                 etaDate: partsForm.etaDate || undefined,
                 estimatedCost: Number(partsForm.estimatedCost || 0) || undefined
               });
-              snackbar.success("Ordine ricambio registrato.");
+              snackbar.success("Ordine ricambio registrato.", {scope: notificationScope});
               setRefreshTick(x=>x+1);
             })}
           >

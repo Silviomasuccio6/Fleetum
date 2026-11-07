@@ -15,7 +15,7 @@ const api = axios.create({
   withCredentials: true
 });
 
-type ViewRequest = { _fleetumView?: SiteStamp; _fleetumOwner?: SiteAccountStamp; _releaseView?: () => void };
+type ViewRequest = { _fleetumView?: SiteStamp; _fleetumOwner?: SiteAccountStamp; _releaseView?: () => void; _fleetumNoticeScope?: string };
 const assertRequestOwner = (request: ViewRequest) => {
   if (request._fleetumOwner) assertSiteAccount(request._fleetumOwner);
   if (request._fleetumView) assertSiteStamp(request._fleetumView);
@@ -105,6 +105,7 @@ const tryRefreshSession = async () => {
 
 api.interceptors.request.use(async (config) => {
   const request = config as typeof config & ViewRequest;
+  request._fleetumNoticeScope ??= snackbar.capture();
   const business = !/^\/(auth|public|health|ready)(\/|$)/.test(String(config.url ?? ""));
   // Own metadata may outlive a view revision, but never its account identity.
   if (String(config.url ?? "") === "/auth/site-access") {
@@ -239,10 +240,10 @@ api.interceptors.response.use(
           : "Connessione non disponibile. Controlla la rete e riprova il caricamento."
         : "Operazione non completata. Verifica l’esito prima di riprovare.");
 
-    // The form owns field validation. Other errors are a deferred fallback:
-    // the viewport removes it if the same message is already shown inline.
+    // Field validation belongs to the form. Other errors get one finite popup;
+    // the inline explanation remains and owns any duplicate announcement.
     if (!isSilentSessionCheck && !isAuthRoute && apiErrorCode !== "VALIDATION_ERROR") {
-      snackbar.error(message, {origin:"transport", key:JSON.stringify([originalRequest.method,requestUrl,apiErrorCode,message])});
+      snackbar.error(message, {origin:"transport", scope:originalRequest._fleetumNoticeScope, key:JSON.stringify([originalRequest.method,requestUrl,apiErrorCode,message])});
     }
     return Promise.reject(
       new HttpClientError(message, {

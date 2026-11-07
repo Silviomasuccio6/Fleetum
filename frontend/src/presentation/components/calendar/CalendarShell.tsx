@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {useOperationIssue} from "../../hooks/use-operation-issue";
 import { snackbar } from "../../../application/stores/snackbar-store";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
 import { FleetumInlineLoader } from "../brand/fleetum-logo-loader";
@@ -44,6 +45,8 @@ const getGooglePopupFeatures = () => {
 
 export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageFilters}) => {
   const {canRead,canWrite}=useOperationsAccess();
+  const {issue:integrationIssue,remember:rememberIntegrationIssue,clear:clearIntegrationIssue}=useOperationIssue();
+  const reportIntegrationError=(message:string,scope:string)=>{rememberIntegrationIssue(message,scope);snackbar.error(message,{scope});};
   const {
     viewDate,
     selDay,
@@ -290,15 +293,17 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
     });
 
   const confirmRevokeFeeds=async()=>{
+    const notificationScope = snackbar.capture();
     if(!feedRevocationArmed||feedsRevoking)return;
-    setFeedsRevoking(true);
-    try{await stoppagesUseCases.revokeCalendarFeeds();setFeedRevocationArmed(false);snackbar.success("Link di lettura revocati. Gli eventi già copiati in altri calendari restano disponibili lì.");}
-    catch(error){snackbar.error(error instanceof Error?error.message:"Revoca dei link non riuscita. Riprova.");}
+    setFeedsRevoking(true);clearIntegrationIssue();
+    try{await stoppagesUseCases.revokeCalendarFeeds();setFeedRevocationArmed(false);snackbar.success("Link di lettura revocati. Gli eventi già copiati in altri calendari restano disponibili lì.", {scope: notificationScope});}
+    catch(error){reportIntegrationError(error instanceof Error?error.message:"Revoca dei link non riuscita. Riprova.", notificationScope);}
     finally{setFeedsRevoking(false);window.requestAnimationFrame(()=>feedRevocationOrigin.current?.focus());}
   };
 
   const confirmSendApple = async () => {
-    setAppleSubmitting(true);
+    const notificationScope = snackbar.capture();
+    setAppleSubmitting(true);clearIntegrationIssue();
     try {
       const response = await stoppagesUseCases.getAppleCalendarFeed({
         dateFrom: visibleWeekRange.from.toISOString(),
@@ -325,18 +330,19 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
       snackbar.success(
         copied
           ? "Invio completato. Solo eventi calendario della settimana visualizzata. Link copiato."
-          : "Solo la settimana visualizzata è stata inviata ad Apple Calendar."
+          : "Solo la settimana visualizzata è stata inviata ad Apple Calendar.", {scope: notificationScope}
       );
       setAppleDialogOpen(false);
     } catch (error) {
-      snackbar.error(error instanceof Error ? error.message : "Invio Apple Calendar non riuscito");
+      reportIntegrationError(error instanceof Error ? error.message : "Invio Apple Calendar non riuscito", notificationScope);
     } finally {
       setAppleSubmitting(false);
     }
   };
 
   const confirmSendGoogle = async () => {
-    setGoogleSubmitting(true);
+    const notificationScope = snackbar.capture();
+    setGoogleSubmitting(true);clearIntegrationIssue();
     const preparedPopup = window.open("about:blank", GOOGLE_POPUP_NAME, getGooglePopupFeatures());
     try {
       const response = await stoppagesUseCases.syncGoogleCalendar({
@@ -356,7 +362,7 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
         const updated = Number(popupResult.updated ?? 0);
         const removed = Number(popupResult.removed ?? 0);
         snackbar.success(
-          `Google Calendar collegato${popupResult.accountEmail ? ` (${popupResult.accountEmail})` : ""}. Push ${pushed}, import ${imported}, aggiornati ${updated}, rimossi ${removed}.`
+          `Google Calendar collegato${popupResult.accountEmail ? ` (${popupResult.accountEmail})` : ""}. Push ${pushed}, import ${imported}, aggiornati ${updated}, rimossi ${removed}.`, {scope: notificationScope}
         );
       } else {
         if (preparedPopup && !preparedPopup.closed) preparedPopup.close();
@@ -364,28 +370,29 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
         const imported = Number(payload?.imported ?? 0);
         const updated = Number(payload?.updated ?? 0);
         const removed = Number(payload?.removed ?? 0);
-        snackbar.success(`Google Calendar bidirezionale OK: push ${pushed}, import ${imported}, aggiornati ${updated}, rimossi ${removed}.`);
+        snackbar.success(`Google Calendar bidirezionale OK: push ${pushed}, import ${imported}, aggiornati ${updated}, rimossi ${removed}.`, {scope: notificationScope});
       }
 
       await refresh();
       setAppleDialogOpen(false);
     } catch (error) {
       if (preparedPopup && !preparedPopup.closed) preparedPopup.close();
-      snackbar.error(error instanceof Error ? error.message : "Sync Google Calendar non riuscita");
+      reportIntegrationError(error instanceof Error ? error.message : "Sync Google Calendar non riuscita", notificationScope);
     } finally {
       setGoogleSubmitting(false);
     }
   };
 
   const confirmImportAppleFeed = async () => {
+    const notificationScope = snackbar.capture();
     if(!canWrite)return;
     const feedUrl = appleImportUrl.trim();
     if (!feedUrl) {
-      snackbar.error("Inserisci il link feed .ics di Apple Calendar");
+      reportIntegrationError("Inserisci il link feed .ics di Apple Calendar", notificationScope);
       return;
     }
 
-    setAppleImporting(true);
+    setAppleImporting(true);clearIntegrationIssue();
     try {
       const response = await stoppagesUseCases.importAppleCalendarFeed({
         feedUrl,
@@ -395,10 +402,10 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
       const imported = Number(response?.data?.imported ?? 0);
       const updated = Number(response?.data?.updated ?? 0);
       const scanned = Number(response?.data?.scanned ?? 0);
-      snackbar.success(`Import Apple completato: ${imported} nuovi, ${updated} aggiornati, ${scanned} letti.`);
+      snackbar.success(`Import Apple completato: ${imported} nuovi, ${updated} aggiornati, ${scanned} letti.`, {scope: notificationScope});
       await refresh();
     } catch (error) {
-      snackbar.error(error instanceof Error ? error.message : "Import Apple non riuscito");
+      reportIntegrationError(error instanceof Error ? error.message : "Import Apple non riuscito", notificationScope);
     } finally {
       setAppleImporting(false);
     }
@@ -407,6 +414,7 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
   return (
     <section className="calendar-shell">
       <div className="calendar-main">
+        {integrationIssue&&!appleDialogOpen?<div className="calendar-error" role="alert">{integrationIssue}</div>:null}
         <CalendarToolbar
           canWrite={canWrite&&!mutating}
           monthLabel={monthLabel}
@@ -494,6 +502,7 @@ export const CalendarShell = ({filters=emptyStoppageFilters}:{filters?:StoppageF
         <CommerceDrawer compact title="Invio calendario" busy={appleSubmitting||googleSubmitting||appleImporting||feedsRevoking} onClose={()=>setAppleDialogOpen(false)}>
 
           <div className="operations-calendar-integrations">
+            {integrationIssue?<div className="calendar-error" role="alert">{integrationIssue}</div>:null}
             <h3 className="calendar-apple-dialog__title">Invio Calendario</h3>
             <p className="calendar-apple-dialog__meta">
               Settimana: {visibleWeekRange.from.toLocaleDateString("it-IT")} - {visibleWeekRange.to.toLocaleDateString("it-IT")}

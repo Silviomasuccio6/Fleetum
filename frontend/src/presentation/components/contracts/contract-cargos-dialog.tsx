@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import {CargosReceiptsPanel} from "./cargos-receipts-panel";
 import { useEffect,useRef,useState } from "react";
 import { Send,CheckCircle2,AlertTriangle } from "lucide-react";
@@ -15,6 +16,7 @@ export function ContractCargosDialog({bookingId,onClose,onUpdated}:{bookingId:st
  const sequence=useRef(0),inFlight=useRef(false);const data=loaded?.context===context?loaded.value:null;
  useEffect(()=>{const current=++sequence.current,stamp=captureSiteStamp();inFlight.current=false;setBusy(false);setLoaded(null);setDraft({});setError(null);setNotice(null);void contractCargosUseCases.preflight(bookingId).then(value=>{assertSiteStamp(stamp);if(current!==sequence.current)return;setLoaded({context,value});setDraft(Object.fromEntries(value.fields.filter(f=>f.editable).map(f=>[f.key,f.value])));}).catch(e=>{if(current===sequence.current)setError((e as Error).message);});return()=>{sequence.current++};},[bookingId,context,refresh]);
  const run=async(send:boolean|"check")=>{
+    const notificationScope=captureOperationContext();
   if(!data||inFlight.current)return;inFlight.current=true;setBusy(true);setError(null);setNotice(null);const current=sequence.current,stamp=captureSiteStamp();
   let outcomeSnapshot:CargosPreflight|null=null;
   try{
@@ -22,15 +24,15 @@ export function ContractCargosDialog({bookingId,onClose,onUpdated}:{bookingId:st
    if(changed)value=await contractCargosUseCases.saveDraft(bookingId,draft);
    assertSiteStamp(stamp);if(current!==sequence.current)return;setLoaded({context,value});
    if(send==="check"){
-    const checked=await contractCargosUseCases.check(bookingId,value.sourceHash);assertSiteStamp(stamp);if(current!==sequence.current)return;setLoaded({context,value:checked});setNotice(checked.validation?.status==="VALID"?"Dati validati da CARGOS. Nessun invio effettuato.":"Controllo non riuscito: verifica i dati o riprova più tardi. Nessun invio effettuato.");
+    const checked=await contractCargosUseCases.check(bookingId,value.sourceHash);assertSiteStamp(stamp);if(current!==sequence.current)return;setLoaded({context,value:checked});publishOperationFeedback(setNotice, checked.validation?.status==="VALID"?"Dati validati da CARGOS. Nessun invio effettuato.":"Controllo non riuscito: verifica i dati o riprova più tardi. Nessun invio effettuato.", notificationScope, "info");
    }else if(send){
     if(!value.canSend){setError(value.message??"Completa i dati indicati prima di inviare.");return;}
     const result=await contractCargosUseCases.transmit(bookingId,value.sourceHash);assertSiteStamp(stamp);if(current!==sequence.current)return;
     outcomeSnapshot={...value,status:result.status,canSend:false,transactionId:result.transactionId??null,acceptedAt:null};
     setLoaded({context,value:outcomeSnapshot});
-    setNotice(result.status==="ACCEPTED"?null:result.status==="UNKNOWN"?"Esito incerto: verifica sul portale CARGOS prima di riprovare.":result.status==="REJECTED"?"CARGOS ha rifiutato i dati. Verifica il tracciato prima di riprovare.":"Servizio non disponibile. Nessuna trasmissione confermata.");
+    publishOperationFeedback(setNotice, result.status==="ACCEPTED"?null:result.status==="UNKNOWN"?"Esito incerto: verifica sul portale CARGOS prima di riprovare.":result.status==="REJECTED"?"CARGOS ha rifiutato i dati. Verifica il tracciato prima di riprovare.":"Servizio non disponibile. Nessuna trasmissione confermata.", notificationScope, "info");
     const refreshed=await contractCargosUseCases.preflight(bookingId);assertSiteStamp(stamp);if(current!==sequence.current)return;setLoaded({context,value:refreshed});onUpdated();
-   }else setNotice("Dati per la trasmissione salvati.");
+   }else publishOperationFeedback(setNotice, "Dati per la trasmissione salvati.", notificationScope, "info");
   }catch(e){
    if(current===sequence.current){
     setError((e as Error).message);

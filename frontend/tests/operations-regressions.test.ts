@@ -1,3 +1,4 @@
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync}from'node:fs';
@@ -21,11 +22,12 @@ function harness(kind:'maintenance'|'deadlines'|'calendar',permissions=['*'],ini
  const states:any[]=[],pending:any[]=[],refs:any[]=[],effects:any[]=[];let index=0,refIndex=0,functions:any;const api=new Proxy({},{get:(_,method)=> (...args:any[])=>new Promise((resolve,reject)=>pending.push({method,args,resolve,reject}))});
  const exports:any={};const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  runInNewContext(compiled,{exports,Date,Intl,URL,console,URLSearchParams,AbortController,FormData:class{values:any;constructor(values:any){this.values=values}get(key:string){return this.values[key]??null}},window:{setTimeout:()=>0,clearTimeout:()=>{}},expose:(f:any)=>functions=f,require(id:string){
-  if(id==='react')return{...React,useState:(value:any)=>{const i=index++;if(!(i in states))states[i]=i in initial?initial[i]:typeof value==='function'?value():value;return[states[i],(next:any)=>{states[i]=typeof next==='function'?next(states[i]):next}]},useEffect:(fn:any,deps:any[])=>{effects.push({fn,deps})},useRef:(value:any)=>{const i=refIndex++;return refs[i]??(refs[i]={current:value})},useCallback:(f:any)=>f,useMemo:(f:any)=>f()};
+  if(id.endsWith('operation-feedback'))return operationFeedback;
+ if(id==='react')return{...React,useState:(value:any)=>{const i=index++;if(!(i in states))states[i]=i in initial?initial[i]:typeof value==='function'?value():value;return[states[i],(next:any)=>{states[i]=typeof next==='function'?next(states[i]):next}]},useEffect:(fn:any,deps:any[])=>{effects.push({fn,deps})},useRef:(value:any)=>{const i=refIndex++;return refs[i]??(refs[i]={current:value})},useCallback:(f:any)=>f,useMemo:(f:any)=>f()};
   if(id==='react/jsx-runtime')return{jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props}),Fragment:'Fragment'};
   if(id==='react-router-dom')return{useNavigate:()=>()=>{}};
   if(id.endsWith('operations-workspace'))return{emptyStoppageFilters:{search:'',status:'',siteId:'',workshopId:''},useOperationsAccess:(scope='stoppages')=>({canRead:permissions.includes('*')||permissions.includes(scope+':read'),canWrite:permissions.includes('*')||permissions.includes(scope+':write'),identity:'synthetic:qa'}),useOperationsTask:()=>({busy:false,error:null,success:null,run:async(fn:any)=>{await fn();return true}})};
-  if(id.endsWith('snackbar-store'))return{snackbar:{success:()=>{},error:()=>{},info:()=>{}}};
+  if(id.endsWith('snackbar-store'))return{snackbar:{capture:()=>"synthetic-scope",success:()=>{},error:()=>{},info:()=>{}}};
   if(id.endsWith('auth-store'))return{useAuthStore:(fn:any)=>fn({user:{id:'qa',tenantId:'synthetic',permissions}})};
   if(id.endsWith('use-entitlements'))return{useEntitlements:()=>({can:()=>true})};
   if(id.endsWith('master-data-usecases'))return{masterDataUseCases:api};if(id.endsWith('stoppages-usecases'))return{stoppagesUseCases:api};

@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarPlus, CalendarDays, Gauge, Wrench, Car, Clock } from "lucide-react";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
@@ -97,8 +98,9 @@ export const VehicleDeadlinesPage = () => {
  };
  useEffect(()=>{void load()},[canRead,identity]);
  const sync=async(vehicleId?:string)=>{
+    const notificationScope=captureOperationContext();
   if(!canWrite||syncLock.current)return;syncLock.current=true;setError(null);setSuccess(null);setSyncingAll(!vehicleId);setSyncingVehicleId(vehicleId||null);
-  try{const result=await masterDataUseCases.syncVehicleDeadlinesCalendar({...params(),includeSoon:true,...(vehicleId?{vehicleIds:[vehicleId]}:{})});setSuccess(`Calendario aggiornato: ${result.created} creati, ${result.updated} aggiornati, ${result.removed} rimossi.`);await load()}
+  try{const result=await masterDataUseCases.syncVehicleDeadlinesCalendar({...params(),includeSoon:true,...(vehicleId?{vehicleIds:[vehicleId]}:{})});publishOperationFeedback(setSuccess, `Calendario aggiornato: ${result.created} creati, ${result.updated} aggiornati, ${result.removed} rimossi.`, notificationScope);await load()}
   catch(e){setError((e as Error).message)}finally{syncLock.current=false;setSyncingAll(false);setSyncingVehicleId(null)}
  };
  const busy=syncingAll||!!syncingVehicleId;

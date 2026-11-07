@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import {useSiteAccessStore} from "../../../application/stores/site-access-store";
 import {useCompanySiteView} from "../../components/layout/site-context";
 import {reloadSiteAccess} from "../../../application/usecases/site-access-usecases";
@@ -66,13 +67,14 @@ export const UsersPage = () => {
   }, [identity, canRead]);
 
   const mutate = async (action: () => Promise<unknown>, message: string) => {
+    const notificationScope=captureOperationContext();
     if (!canWrite || lock.current) return;
     lock.current = true; setBusy(true); setError(null); setSuccess(null);
     const owner = identity;
     try {
       await action();
       if (activeIdentity.current !== owner) return;
-      setEditor(null); setChange(null); setDirty(false); setDiscardOpen(false); setSuccess(message);
+      setEditor(null); setChange(null); setDirty(false); setDiscardOpen(false); publishOperationFeedback(setSuccess, message, notificationScope);
       await loadData();
     } catch (e) {
       if (activeIdentity.current === owner) setError((e as Error).message);

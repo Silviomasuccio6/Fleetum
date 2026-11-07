@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import {useEffect,useId,useRef,useState} from "react";
 import {amountLabels,conditionLabels,contractRentalDetailsUseCases as api,parseContractCents,type DriverOption,type RentalDetails,type RentalTerms} from "../../../application/usecases/contract-rental-details-usecases";
 import {captureSiteStamp,assertSiteStamp,useSiteAccessStore} from "../../../application/stores/site-access-store";
@@ -24,10 +25,11 @@ export function ContractRentalDetailsPanel({bookingId,canManage,freeze,onSaved}:
   try{const values=await api.candidates(bookingId,search.trim());assertSiteStamp(stamp);if(epoch!==seq.current||n!==searchSeq.current)return;setOptions(old=>[...new Map([...old,...values].map(value=>[value.id,value])).values()]);setSearchMessage(values.length?`${values.length} conducenti trovati. Seleziona la persona qui sotto.`:"Nessuna persona trovata. Completa prima l’anagrafica Clienti.");}
   catch(e){if(epoch===seq.current&&n===searchSeq.current)setError((e as Error).message);}finally{if(epoch===seq.current&&n===searchSeq.current)setSearchBusy(false);}
  };
- const save=async()=>{if(disabled||!draft||!current||saving.current)return;setError("");setInvalid(null);setNotice("");let terms:RentalTerms;
+ const save=async()=>{
+    const notificationScope=captureOperationContext();if(disabled||!draft||!current||saving.current)return;setError("");setInvalid(null);setNotice("");let terms:RentalTerms;
   try{const values:Record<string,number|null>={};for(const key of Object.keys(amountLabels)){try{values[key]=parseContractCents(amounts[key]??"");}catch(e){setInvalid(key);throw e;}}terms={...draft,...values,annexes:annexes.split("\n").map(value=>value.trim()).filter(Boolean)};}
   catch(e){setError((e as Error).message);return;}
-  saving.current=true;setBusy(true);const n=seq.current,stamp=captureSiteStamp();try{const value=await api.save(bookingId,current.revision,terms);assertSiteStamp(stamp);if(n!==seq.current)return;apply(value);setNotice("Condizioni salvate. Il PDF usa questa versione.");onSaved();}
+  saving.current=true;setBusy(true);const n=seq.current,stamp=captureSiteStamp();try{const value=await api.save(bookingId,current.revision,terms);assertSiteStamp(stamp);if(n!==seq.current)return;apply(value);publishOperationFeedback(setNotice, "Condizioni salvate. Il PDF usa questa versione.", notificationScope, "info");onSaved();}
   catch(e){if(n===seq.current)setError((e as Error).message);}finally{if(n===seq.current){setBusy(false);saving.current=false;}}
  };
  return <section className="rounded-lg border bg-card p-4 space-y-3" aria-label="Condizioni specifiche del noleggio" aria-busy={busy}>

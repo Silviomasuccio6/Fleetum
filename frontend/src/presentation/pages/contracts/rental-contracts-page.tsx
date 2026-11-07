@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -349,6 +350,7 @@ export const RentalContractsPage = () => {
   };
 
   const runDownload = async (row: RentalContractsMonitoringItem) => {
+    const notificationScope=captureOperationContext();
     if(!canRead||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
@@ -362,7 +364,7 @@ export const RentalContractsPage = () => {
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 120000);
-      setSuccess(`PDF scaricato: ${row.booking.code}`);
+      publishOperationFeedback(setSuccess, `PDF scaricato: ${row.booking.code}`, notificationScope);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -371,6 +373,7 @@ export const RentalContractsPage = () => {
   };
 
   const runSendEmail = async (row: RentalContractsMonitoringItem) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
@@ -385,7 +388,7 @@ export const RentalContractsPage = () => {
         contractEmailRequestRef.current.key
       );
       contractEmailRequestRef.current = null;
-      setSuccess(`Email contratto accodata (${row.booking.code}).`);
+      publishOperationFeedback(setSuccess, `Email contratto accodata (${row.booking.code}).`, notificationScope, "info");
       await loadContracts(page);
     } catch (e) {
       setError((e as Error).message);
@@ -395,6 +398,7 @@ export const RentalContractsPage = () => {
   };
 
   const runSendWhatsapp = async (row: RentalContractsMonitoringItem) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
@@ -406,7 +410,7 @@ export const RentalContractsPage = () => {
       if (!popup) {
         setError("Popup WhatsApp bloccato dal browser. Consenti i popup e riprova.");
       } else {
-        setSuccess(`WhatsApp pronto per ${row.booking.code}.`);
+        publishOperationFeedback(setSuccess, `WhatsApp pronto per ${row.booking.code}.`, notificationScope, "info");
       }
       await loadContracts(page);
     } catch (e) {
@@ -417,6 +421,7 @@ export const RentalContractsPage = () => {
   };
 
   const runMarkSigned = async (row: RentalContractsMonitoringItem, signatureDataUrl?: string) => {
+    const notificationScope=captureOperationContext();
     if(!canWrite||actionBusyId)return false;
     setActionBusyId(row.id);
     setError(null);
@@ -429,7 +434,7 @@ export const RentalContractsPage = () => {
         throw new Error("Firma non acquisita nel contratto. Riprova.");
       }
       const alreadySigned = row.status === "SIGNED";
-      setSuccess(alreadySigned ? `Contratto rifirmato (${row.booking.code}).` : `Contratto firmato (${row.booking.code}).`);
+      publishOperationFeedback(setSuccess, alreadySigned ? `Contratto rifirmato (${row.booking.code}).` : `Contratto firmato (${row.booking.code}).`, notificationScope);
       await loadContracts(page);
       if (actionPanelRow?.id === row.id) {
         await loadActionPanelPreview(row);

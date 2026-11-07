@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { ContractSigningPanel } from "../../components/contracts/contract-signing-panel";
 import { ContractRentalDetailsPanel } from "../../components/contracts/contract-rental-details-panel";
 import { ContractCargosDialog } from "../../components/contracts/contract-cargos-dialog";
@@ -1411,6 +1412,7 @@ export const RentalBookingsPage = () => {
   };
 
   const onBookingSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if (saving) return;
     const invalid: Partial<Record<keyof BookingFormState, string>> = {};
@@ -1462,13 +1464,13 @@ export const RentalBookingsPage = () => {
         );
         targetBookingId = created.id;
         selectBooking(created.id);
-        setSuccess("Prenotazione creata con successo.");
+        publishOperationFeedback(setSuccess, "Prenotazione creata con successo.", notificationScope);
         if(created.contractCreated)setCargosPromptBookingId(created.id);
       } else if (bookingForm.bookingId) {
         await rentalBookingsUseCases.update(bookingForm.bookingId, payload);
         targetBookingId = bookingForm.bookingId;
         selectBooking(bookingForm.bookingId);
-        setSuccess("Prenotazione aggiornata.");
+        publishOperationFeedback(setSuccess, "Prenotazione aggiornata.", notificationScope);
       }
 
       if (targetBookingId && bookingForm.priceListId && (bookingForm.mode === "create" || bookingForm.pricingTermsChanged)) {
@@ -1547,6 +1549,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runCustomerScanAutofill = async () => {
+    const notificationScope=captureOperationContext();
     if (customerScanFiles.length === 0) {
       setError("Seleziona prima almeno una scansione documento (PDF/JPG/PNG/WebP).");
       return;
@@ -1569,7 +1572,7 @@ export const RentalBookingsPage = () => {
       if (inferredType !== "PERSONA_GIURIDICA" && !result.fields?.drivingLicenseNumber) {
         setError("Patente non rilevata automaticamente. Inseriscila manualmente (obbligatoria).");
       } else {
-        setSuccess("Dati cliente precompilati dalla scansione documento.");
+        publishOperationFeedback(setSuccess, "Dati cliente precompilati dalla scansione documento.", notificationScope);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1579,6 +1582,7 @@ export const RentalBookingsPage = () => {
   };
 
   const onCustomerSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if (saving) return;
     setSaving(true);
@@ -1681,7 +1685,7 @@ export const RentalBookingsPage = () => {
       }
       const actionLabel = customerForm.mode === "create" ? "Cliente creato." : "Cliente aggiornato.";
       const docsLabel = customerScanFiles.length > 0 ? ` Documenti salvati: ${customerScanFiles.length}.` : " Nessun documento allegato.";
-      setSuccess(`${actionLabel}${docsLabel}`);
+      publishOperationFeedback(setSuccess, `${actionLabel}${docsLabel}`, notificationScope);
       setCustomerModalOpen(false);
       setCustomerForm(defaultCustomerForm());
       setCustomerScanFiles([]);
@@ -1699,13 +1703,14 @@ export const RentalBookingsPage = () => {
   };
 
   const runTransition = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !transitionTo) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.transition(selectedBooking.id, transitionTo);
-      setSuccess(`Stato aggiornato a ${BOOKING_STATUS_LABELS[transitionTo]}.`);
+      publishOperationFeedback(setSuccess, `Stato aggiornato a ${BOOKING_STATUS_LABELS[transitionTo]}.`, notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1715,13 +1720,14 @@ export const RentalBookingsPage = () => {
   };
 
   const runContractUpdate = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.setContractStatus(selectedBooking.id, { status: contractTo });
-      setSuccess(`Contratto aggiornato: ${CONTRACT_STATUS_LABELS[contractTo]}.`);
+      publishOperationFeedback(setSuccess, `Contratto aggiornato: ${CONTRACT_STATUS_LABELS[contractTo]}.`, notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1731,6 +1737,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runGenerateContract = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setSaving(true);
     setError(null);
@@ -1741,7 +1748,7 @@ export const RentalBookingsPage = () => {
       contractRequestVersionRef.current += 1;
       setContract(generated);
       syncContractEditor(generated);
-      setSuccess("Contratto generato dal template tenant.");
+      publishOperationFeedback(setSuccess, "Contratto generato dal template tenant.", notificationScope);
       if(!contract)setCargosPromptBookingId(selectedBooking.id);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
@@ -1753,6 +1760,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runSaveContractDocument = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1770,7 +1778,7 @@ export const RentalBookingsPage = () => {
       contractRequestVersionRef.current += 1;
       setContract(updated);
       syncContractEditor(updated);
-      setSuccess("Contratto salvato.");
+      publishOperationFeedback(setSuccess, "Contratto salvato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
@@ -1781,6 +1789,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runDownloadContractPdf = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setError(null);
     try {
@@ -1793,7 +1802,7 @@ export const RentalBookingsPage = () => {
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 120000);
-      setSuccess("PDF contratto generato e scaricato.");
+      publishOperationFeedback(setSuccess, "PDF contratto generato e scaricato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1801,6 +1810,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runPrintContractPdf = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setError(null);
     try {
@@ -1823,13 +1833,14 @@ export const RentalBookingsPage = () => {
           // no-op
         }
       }, 350);
-      setSuccess("Anteprima stampa contratto aperta.");
+      publishOperationFeedback(setSuccess, "Anteprima stampa contratto aperta.", notificationScope, "info");
     } catch (e) {
       setError((e as Error).message);
     }
   };
 
   const runSendContractEmail = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1851,7 +1862,7 @@ export const RentalBookingsPage = () => {
       );
       contractEmailRequestRef.current = null;
       await loadContract(selectedBooking.id);
-      setSuccess("Invio email contratto accodato.");
+      publishOperationFeedback(setSuccess, "Invio email contratto accodato.", notificationScope, "info");
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1861,6 +1872,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runSendContractWhatsapp = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1873,7 +1885,7 @@ export const RentalBookingsPage = () => {
       if (!popup) {
         setError("Popup WhatsApp bloccato dal browser. Consenti i popup e riprova.");
       } else {
-        setSuccess("Finestra WhatsApp aperta con link contratto sicuro.");
+        publishOperationFeedback(setSuccess, "Finestra WhatsApp aperta con link contratto sicuro.", notificationScope, "info");
       }
       await loadContract(selectedBooking.id);
       setRefreshKey((prev) => prev + 1);
@@ -1885,6 +1897,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runMarkContractSigned = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1896,7 +1909,7 @@ export const RentalBookingsPage = () => {
       setContract(updated);
       syncContractEditor(updated);
       setContractTo("SIGNED");
-      setSuccess("Contratto marcato come firmato.");
+      publishOperationFeedback(setSuccess, "Contratto marcato come firmato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
@@ -1960,6 +1973,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runPreviewTemplate = async () => {
+    const notificationScope=captureOperationContext();
     if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     if (!selectedBooking) {
       setError("Seleziona una prenotazione per vedere la preview del template.");
@@ -1975,7 +1989,7 @@ export const RentalBookingsPage = () => {
         emailBody: templateEditor.emailBody
       });
       setTemplatePreview(preview);
-      setSuccess("Preview template aggiornata.");
+      publishOperationFeedback(setSuccess, "Preview template aggiornata.", notificationScope, "info");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1984,6 +1998,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runSaveTemplate = async () => {
+    const notificationScope=captureOperationContext();
     if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     setTemplateSaving(true);
     setError(null);
@@ -2017,7 +2032,7 @@ export const RentalBookingsPage = () => {
         brandFont: updated.brandFont ?? "helvetica"
       });
       setTemplateDirty(false);
-      setSuccess("Template default aggiornato.");
+      publishOperationFeedback(setSuccess, "Template default aggiornato.", notificationScope);
       if (selectedBookingId) {
         await loadContract(selectedBookingId);
       }
@@ -2029,6 +2044,7 @@ export const RentalBookingsPage = () => {
   };
 
   const uploadTemplateLogo = async (file: File) => {
+    const notificationScope=captureOperationContext();
     if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     setTemplateLogoUploading(true);
     setError(null);
@@ -2041,7 +2057,7 @@ export const RentalBookingsPage = () => {
         return logoUrl;
       });
       setTemplateLogoFileName(updated.logoFileName ?? file.name);
-      setSuccess("Logo contratto aggiornato.");
+      publishOperationFeedback(setSuccess, "Logo contratto aggiornato.", notificationScope);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2050,6 +2066,7 @@ export const RentalBookingsPage = () => {
   };
 
   const removeTemplateLogo = async () => {
+    const notificationScope=captureOperationContext();
     if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     setTemplateLogoUploading(true);
     setError(null);
@@ -2060,7 +2077,7 @@ export const RentalBookingsPage = () => {
         return null;
       });
       setTemplateLogoFileName("");
-      setSuccess("Logo contratto rimosso.");
+      publishOperationFeedback(setSuccess, "Logo contratto rimosso.", notificationScope);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2074,6 +2091,7 @@ export const RentalBookingsPage = () => {
   },[searchParams,canManageBookings]);
 
   const runAddNote = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     const message = noteInput.trim();
     if (!message) return;
@@ -2083,7 +2101,7 @@ export const RentalBookingsPage = () => {
     try {
       await rentalBookingsUseCases.addNote(selectedBooking.id, message);
       setNoteInput("");
-      setSuccess("Nota operativa aggiunta.");
+      publishOperationFeedback(setSuccess, "Nota operativa aggiunta.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2093,6 +2111,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runDeleteBooking = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || saving) return;
     const confirmed = window.confirm(`Confermi eliminazione prenotazione ${selectedBooking.code}?`);
     if (!confirmed) return;
@@ -2104,7 +2123,7 @@ export const RentalBookingsPage = () => {
       await rentalBookingsUseCases.remove(selectedBooking.id);
       selectBooking(null, true);
       setSelectedBooking(null);
-      setSuccess("Prenotazione eliminata.");
+      publishOperationFeedback(setSuccess, "Prenotazione eliminata.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2114,6 +2133,7 @@ export const RentalBookingsPage = () => {
   };
 
   const uploadCustomerDocs = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking?.customer?.id || customerUploadFiles.length === 0) return;
     setSaving(true);
     setError(null);
@@ -2123,7 +2143,7 @@ export const RentalBookingsPage = () => {
         bookingId: selectedBooking.id
       });
       setCustomerUploadFiles([]);
-      setSuccess("Documenti cliente caricati.");
+      publishOperationFeedback(setSuccess, "Documenti cliente caricati.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2144,12 +2164,13 @@ export const RentalBookingsPage = () => {
   };
 
   const removeCustomerAttachment = async (attachmentId: string) => {
+    const notificationScope=captureOperationContext();
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.deleteCustomerAttachment(attachmentId);
-      setSuccess("Documento cliente eliminato.");
+      publishOperationFeedback(setSuccess, "Documento cliente eliminato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);

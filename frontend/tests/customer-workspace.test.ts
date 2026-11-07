@@ -1,3 +1,4 @@
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -35,6 +36,7 @@ function loader(permissions=['*']){
  const callbacks:any[]=[],states:any[]=[],refs:any[]=[],pending:Array<{resolve:(x:any)=>void;reject:(e:Error)=>void;args:any[]}>=[];let state=0;
  const exports:any={};const source=readFileSync(new URL('../src/presentation/pages/customers/customers-page.tsx',import.meta.url),'utf8');const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  runInNewContext(compiled,{exports,Date,Promise,URLSearchParams,require(id:string){
+  if(id.endsWith('operation-feedback'))return operationFeedback;
   if(id==='react')return {...React,useState:(v:any)=>{const i=state++;states[i]=typeof v==='function'?v():v;return[states[i],(next:any)=>{states[i]=typeof next==='function'?next(states[i]):next}]},useRef:(v:any)=>{const r={current:v};refs.push(r);return r},useCallback:(fn:any)=>{callbacks.push(fn);return fn},useMemo:(fn:any)=>fn(),useEffect:()=>{}};
   if(id==='react/jsx-runtime')return {jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props}),Fragment:'Fragment'};
   if(id==='react-router-dom')return {useNavigate:()=>()=>{},useSearchParams:()=>[new URLSearchParams('customerId=qa-current'),()=>{}]};

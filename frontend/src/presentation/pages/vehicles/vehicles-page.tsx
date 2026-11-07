@@ -1,3 +1,4 @@
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { type ChangeEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -76,6 +77,7 @@ export const VehiclesPage = () => {
     try{const blob=await masterDataUseCases.downloadVehicleBooklet(bookletId);const url=URL.createObjectURL(blob);window.open(url,"_blank","noopener,noreferrer");window.setTimeout(()=>URL.revokeObjectURL(url),60_000)}catch(e){setError((e as Error).message)}
   };
   const onSubmit=async(event:FormEvent<HTMLFormElement>)=>{
+    const notificationScope=captureOperationContext();
     event.preventDefault();if(!canWrite||saving)return;
     setError(null);setSuccess(null);
     const {payload,errors}=vehicleFormData(new FormData(event.currentTarget));setFieldErrors(errors);
@@ -90,12 +92,13 @@ export const VehiclesPage = () => {
         setMode("edit");setEditingVehicle(savedVehicle);
         await masterDataUseCases.uploadVehicleBooklet(savedVehicle.id,bookletFile);
       }
-      setSuccess(mode==="create"?`Veicolo ${payload.plate} creato correttamente.`:`Veicolo ${payload.plate} aggiornato correttamente.`);
+      publishOperationFeedback(setSuccess, mode==="create"?`Veicolo ${payload.plate} creato correttamente.`:`Veicolo ${payload.plate} aggiornato correttamente.`, notificationScope);
       setPanelOpen(false);setEditingVehicle(null);setBookletFile(null);await reloadVehicles();
     }catch(e){setError(savedVehicle?`Veicolo salvato. Caricamento libretto non riuscito: ${(e as Error).message}`:(e as Error).message)}
     finally{setSaving(false)}
   };
   const onImportSubmit=async(event:FormEvent<HTMLFormElement>)=>{
+    const notificationScope=captureOperationContext();
     event.preventDefault();if(!canWrite||importLoading)return;setError(null);setSuccess(null);
     if(!importFile){setError("Seleziona un file Excel o CSV da importare.");return;}
     try{
@@ -103,16 +106,17 @@ export const VehiclesPage = () => {
       const result=await masterDataUseCases.importVehicles({file:importFile,dryRun:importDryRun,defaultSiteId:importDefaultSiteId||undefined});
       setImportResult(result);
       if(!result.dryRun&&result.inserted>0)await reloadVehicles();
-      setSuccess(result.dryRun?`Anteprima completata: ${result.validRows} righe valide su ${result.totalRows}. Nessun dato salvato.`:`Import completato: ${result.inserted} veicoli creati su ${result.totalRows} righe. Errori: ${result.errors.length}.`);
+      publishOperationFeedback(setSuccess, result.dryRun?`Anteprima completata: ${result.validRows} righe valide su ${result.totalRows}. Nessun dato salvato.`:`Import completato: ${result.inserted} veicoli creati su ${result.totalRows} righe. Errori: ${result.errors.length}.`, notificationScope);
     }catch(e){setError((e as Error).message)}finally{setImportLoading(false)}
   };
   const confirmDeletion=async()=>{
+    const notificationScope=captureOperationContext();
     if(!canWrite||!deletion||deleting)return;
     setDeleting(true);setError(null);setSuccess(null);
     try{
       if(deletion.kind==="vehicle")await masterDataUseCases.deleteVehicle(deletion.id);
       else {await masterDataUseCases.deleteVehicleBooklet(deletion.id);setEditingVehicle((v:any)=>v?.booklet?.id===deletion.id?{...v,booklet:null}:v)}
-      setSuccess(deletion.kind==="vehicle"?"Veicolo eliminato.":"Libretto rimosso.");setDeletion(null);await reloadVehicles();
+      publishOperationFeedback(setSuccess, deletion.kind==="vehicle"?"Veicolo eliminato.":"Libretto rimosso.", notificationScope);setDeletion(null);await reloadVehicles();
     }catch(e){setError((e as Error).message)}finally{setDeleting(false)}
   };
   const panelErrors=<div ref={editorErrorRef} tabIndex={-1} className="vehicle-error" role="alert">{error?<p>{error}</p>:null}{Object.keys(fieldErrors).length?<><p>Controlla i campi indicati prima di salvare.</p><ul>{Object.entries(fieldErrors).map(([key,message])=><li key={key}><a href={`#vehicle-${key}`} onClick={e=>{e.preventDefault();document.getElementById(`vehicle-${key}`)?.focus()}}>{vehicleFieldGroups.flatMap(group=>group.fields).find(field=>field.name===key)?.label ?? "Campo"}: {message}</a></li>)}</ul></>:null}</div>;

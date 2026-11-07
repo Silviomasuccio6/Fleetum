@@ -1,3 +1,4 @@
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -86,6 +87,7 @@ const createPage = (overrides: Record<string, (...args: any[]) => any> = {}, per
   const jsxRuntime = { jsx, jsxs: jsx, Fragment: "Fragment" };
   const month = { data: [], loading: false, error: null, summary: { totalVehicles: 0, bookedVehicles: 0, availableVehicles: 0, occupancyRate: 0 } };
   const imports = (id: string) => {
+    if(id.endsWith("operation-feedback"))return operationFeedback;
     if (id === "react") return React;
     if (id === "react/jsx-runtime") return jsxRuntime;
     if (id === "react-router-dom") return {

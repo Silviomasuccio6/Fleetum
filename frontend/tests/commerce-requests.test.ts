@@ -1,3 +1,6 @@
+import {useSnackbarStore} from "../src/application/stores/snackbar-store";
+import {randomUUID} from "node:crypto";
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -18,8 +21,9 @@ function pageHarness(kind: 'contracts' | 'pricing', permissions = ['*'], initial
  const api = new Proxy({}, { get: (_, method:string) => (...args:any[]) => new Promise((resolve,reject)=>pending.push({method,args,resolve,reject})) });
  const compiled = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  const exports:any = {};
- runInNewContext(compiled, {exports, Date, Intl, URLSearchParams, console, expose:(value:any)=>{functions=value;}, require(id:string){
-  if(id==='react')return {...React,useState:(initial:any)=>{const i=stateIndex++;states[i]=i in initialStates?initialStates[i]:typeof initial==='function'?initial():initial;return[states[i],(next:any)=>{states[i]=typeof next==='function'?next(states[i]):next}]},useRef:(initial:any)=>({current:initial}),useMemo:(fn:any)=>fn(),useCallback:(fn:any)=>fn,useEffect:()=>{}};
+ runInNewContext(compiled, {exports, Date, Intl, URLSearchParams, console, crypto:{randomUUID}, expose:(value:any)=>{functions=value;}, require(id:string){
+  if(id.endsWith('operation-feedback'))return operationFeedback;
+ if(id==='react')return {...React,useState:(initial:any)=>{const i=stateIndex++;states[i]=i in initialStates?initialStates[i]:typeof initial==='function'?initial():initial;return[states[i],(next:any)=>{states[i]=typeof next==='function'?next(states[i]):next}]},useRef:(initial:any)=>({current:initial}),useMemo:(fn:any)=>fn(),useCallback:(fn:any)=>fn,useEffect:()=>{}};
   if(id==='react/jsx-runtime')return {jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props}),Fragment:'Fragment'};
   if(id==='react-router-dom')return {useNavigate:()=>()=>{}};
   if(id.endsWith('auth-store'))return {useAuthStore:(fn:any)=>fn({user:{permissions}})};
@@ -69,4 +73,32 @@ test('a failed signature remains a failed operation and can be retried',async()=
 test('read-only contract roles cannot invoke email, WhatsApp or signature mutations',async()=>{
  const h=pageHarness('contracts',['vehicles:read']);for(const name of ['runSendEmail','runSendWhatsapp','runMarkSigned'])await h.functions[name]({id:'contract',bookingId:'booking'});
  assert.equal(h.pending.length,0);
+});
+
+// Execute the actual domain handler: a queue acknowledgment is not email delivery.
+test('contract email acceptance produces one finite informational popup with the original queued outcome',async()=>{
+ useSnackbarStore.getState().clear();const h=pageHarness('contracts');
+ const task=h.functions.runSendEmail({id:'contract',bookingId:'booking',booking:{code:'QA'},status:'READY'});
+ assert.equal(h.pending[0].method,'sendContractEmail');h.pending[0].resolve({status:'QUEUED'});
+ await new Promise(resolve=>setImmediate(resolve));
+ const items=useSnackbarStore.getState().items;assert.equal(items.length,1);assert.equal(items[0].tone,'info');
+ assert.equal(items[0].message,'Email contratto accodata (QA).');assert.equal(items[0].durationMs,4000);
+ assert.equal(h.pending[1].method,'listContractsMonitoring');
+ h.pending[1].resolve({data:[],timeline:[],kpis:{},total:0});await task;
+});
+
+test('the customer detail uses the same informational queued outcome for contract email',async()=>{
+ useSnackbarStore.getState().clear();
+ const source=readFileSync(new URL('../src/presentation/pages/customers/customers-page.tsx',import.meta.url),'utf8');
+ const ast=ts.createSourceFile('customer.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let handler='';
+ const walk=(node:ts.Node)=>{if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='contractAction')handler=node.initializer!.getText(ast);ts.forEachChild(node,walk)};walk(ast);assert.ok(handler);
+ let sends=0,inline='';
+ const run=runInNewContext(ts.transpileModule('('+handler+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{
+  ...operationFeedback,locked:false,selectedId:'synthetic-customer',canWrite:true,setBusy(){},setActionError(){},
+  emailKeys:{current:new Map()},crypto:{randomUUID},identity:{current:'synthetic-customer'},
+  rentalBookingsUseCases:{sendContractEmail:async()=>{sends++;return{status:'QUEUED'}}},
+  setSuccess:(value:string)=>inline=value,loadTimeline:async()=>{},timelinePage:1,appliedFilters:{}
+ });
+ await run('email','synthetic-booking');assert.equal(sends,1);assert.equal(inline,'Invio email contratto accodato.');
+ const items=useSnackbarStore.getState().items;assert.equal(items.length,1);assert.equal(items[0].tone,'info');assert.equal(items[0].durationMs,4000);
 });
