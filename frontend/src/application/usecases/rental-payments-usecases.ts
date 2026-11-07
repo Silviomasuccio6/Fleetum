@@ -60,6 +60,7 @@ export type RentalPaymentMethodDto = {
 };
 
 export type RentalDepositDto = {
+  captureBefore?: string | null;
   id: string;
   bookingId: string;
   rentalCustomerId: string;

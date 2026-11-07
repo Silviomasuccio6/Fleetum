@@ -38,6 +38,7 @@ export function sitePreviewResponse(scope,status,body,sites){
  if(path==='/settings/reports'&&view==='all'&&body?.enabled)return{status,body:{...body,siteConfirmationRequired:true}};
  if(view==='all'||path.startsWith('/auth/')||path==='/health')return{status,body};
  if(scope.denied)return{status:404,body:{message:'Risorsa non disponibile nella sede scelta.'}};
+ if(path==='/rental-payments/workspace')return{status,body}; // Already scoped before fixture aggregation.
  if(path==='/notifications/inbox')return{status,body:{data:[]}};
  if(path==='/master-data/sites')return{status,body:{data:sites.filter(s=>s.id===view),total:1,page:1,pageSize:200}};
  if(path==='/users/roles'||path==='/settings/sla'||path==='/settings/playbooks'||path==='/master-data/workshops'||path.includes('suggest/customers'))return{status,body};

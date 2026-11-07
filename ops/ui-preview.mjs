@@ -1,3 +1,5 @@
+import {realpathSync} from "node:fs";
+import {collectionsFixture} from "./ui-collections-fixtures.mjs";
 import {uiContractFixture,uiContractPdf} from "./ui-contract-fixture.mjs";
 import { uiSubscriptionInvoiceData, uiSubscriptionInvoiceFixture } from "./ui-subscription-invoice-fixture.mjs";
 import {sitePreviewRequest,sitePreviewScope,sitePreviewResponse} from "./ui-site-fixtures.mjs";
@@ -206,6 +208,9 @@ const apiHandler = async (req, res, next) => {
     if (detail[2] === "pricing") return send(res, 200, { snapshot: null });
     return send(res, 200, booking);
   }
+  const collectionBookings=res.fleetumSiteScope?.view&&res.fleetumSiteScope.view!=="all"?bookings.filter(b=>[b.siteId,b.pickupSiteId,b.returnSiteId,b.vehicle.site.id].includes(res.fleetumSiteScope.view)):bookings;
+  const collections=collectionsFixture({path,params:url.searchParams,scenario,bookings:collectionBookings});
+  if(collections){if(scenario==='slow')await new Promise(resolve=>setTimeout(resolve,2000));return send(res,collections.status,collections.body);}
   const payments = path.match(/^\/rental-payments\/bookings\/(demo-booking-\d+)\/summary$/);
   if (payments) {
     if (scenario === "slow") await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -224,7 +229,7 @@ const server = await createServer({
   root, envDir: false,
   // Prerender creates another Vite server: its optimizer must not replace this lab's modules.
   cacheDir: fileURLToPath(new URL('../node_modules/.vite-fleetum-ui-preview', import.meta.url)),
-  server: { host, port, strictPort: true, allowedHosts: [host, "localhost"] },
+  server: { host, port, strictPort: true, allowedHosts: [host, "localhost"], fs:{allow:[fileURLToPath(new URL("..",import.meta.url)),realpathSync(fileURLToPath(new URL("../node_modules/@fontsource",import.meta.url))),realpathSync(fileURLToPath(new URL("../node_modules/@fontsource-variable",import.meta.url)))]} },
   plugins: [{ name: "fleetum-local-ui-preview", enforce: "pre", configureServer(instance) { instance.middlewares.use((req, res, next) => { void apiHandler(req, res, next).catch(() => send(res, 500, { message: "Errore del laboratorio locale" })); }); }, transformIndexHtml(html) { return html.replace('<div id="root">', `${previewBanner.replace(`value="${scenario}"`, `value="${scenario}" selected`)}<div id="root">`); } }]
 });
 await server.listen();

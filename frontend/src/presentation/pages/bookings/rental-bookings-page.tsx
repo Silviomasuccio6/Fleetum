@@ -41,7 +41,7 @@ import { useRentalMonthAvailability } from "../../hooks/use-rental-month-availab
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CalendarCheck2, CalendarDays, Car, ChevronLeft, ChevronRight, Clock3, Plus, RotateCcw, Search, UserPlus, List, LayoutGrid, X, FileText, MessageSquare, Radio, UserRound, ArrowUp } from "lucide-react";
 import { BookingDetailSection } from "../../components/bookings/booking-detail-section";
-import { RentalPaymentGuaranteePanel } from "../../components/rental-payments/RentalPaymentGuaranteePanel";
+import { RentalPaymentSummaryLink } from "../../components/rental-payments/rental-payment-summary-link";
 import {
   CountrySelect,
   CustomerAddressFields,
@@ -2521,7 +2521,7 @@ export const RentalBookingsPage = () => {
                   )}
                 </div>
                   </BookingDetailSection>
-                  <RentalPaymentGuaranteePanel key={selectedBooking.id} booking={selectedBooking} paymentSetupStatus={paymentSetupStatus} />
+                  <RentalPaymentSummaryLink key={selectedBooking.id} booking={selectedBooking} paymentSetupStatus={paymentSetupStatus} />
 <BookingDetailSection title="Cliente e documenti" description="Anagrafica associata, allegati e collegamenti al cliente." icon={<UserRound />} >
             {!selectedBooking?.customer ? (
               <p className="text-xs text-muted-foreground">Seleziona una prenotazione con cliente associato per gestire i documenti.</p>

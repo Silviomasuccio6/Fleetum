@@ -141,7 +141,7 @@ try{
   const section=app.locator('details.booking-detail-section').filter({has:app.getByRole('heading',{name:'Pagamenti e garanzie',exact:true})});await section.locator('summary').click();
   await section.getByRole('button',{name:'Aggiorna',exact:true}).waitFor();
   await app.evaluate(async()=>{const{useSnackbarStore}=await import('/src/application/stores/snackbar-store.ts');useSnackbarStore.getState().clear()});
-  await app.route('**/api/rental-payments/bookings/*/summary',async route=>{const response=await route.fetch();return route.fulfill({response,status:503,json:{error:'SYNTHETIC_SUMMARY_UNAVAILABLE',message:'Verifica sintetica del riepilogo non completata. Controlla la pratica.'}})});
+  await app.route('**/api/rental-payments/bookings/*/collections',async route=>{const response=await route.fetch();return route.fulfill({response,status:503,json:{error:'SYNTHETIC_SUMMARY_UNAVAILABLE',message:'Verifica sintetica del riepilogo non completata. Controlla la pratica.'}})});
   await section.getByRole('button',{name:'Aggiorna',exact:true}).click();await section.locator('.booking-detail-error').waitFor();await app.clock.runFor(160);
   assert.equal(await app.locator('.fleetum-notice--error.fleetum-notice--compact').count(),1);await position(app);
   await app.locator('.fleetum-notices').screenshot({path:`${output}/actual-booking-error.png`,animations:'disabled'});

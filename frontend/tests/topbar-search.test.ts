@@ -29,3 +29,9 @@ test('a context change recomputes the catalogue rather than retaining formerly a
  assert.ok(allowedSearchSections(entries,['*'],true,true).some(e=>e.to==='/profilo/azienda'));
  assert.deepEqual(matchSections(allowedSearchSections(entries,[],false,false),'azienda'),[]);
 });
+
+test('payments are searchable only with their dedicated read permission',()=>{
+ const payment={label:'Pagamenti e garanzie',to:'/pagamenti-garanzie',group:'Operatività'};
+ assert.equal(allowedSearchSections([payment],['vehicles:read'],false,false).length,0);
+ assert.deepEqual(allowedSearchSections([payment],['rental-payments:read'],false,false),[payment]);
+});

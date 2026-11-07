@@ -88,6 +88,7 @@ const originalNavSections: Array<{ title: string; items: NavItem[] }> = [
         icon: ClipboardList,
         match: (path) => path.startsWith("/booking/contratti")
       },
+      {key:"rental-payments",to:"/pagamenti-garanzie",label:"Pagamenti e garanzie",icon:CreditCard,match:(path)=>path.startsWith("/pagamenti-garanzie")},
       {
         key: "booking-listini",
         to: "/booking/listini",
@@ -169,7 +170,7 @@ const originalNavSections: Array<{ title: string; items: NavItem[] }> = [
 const allNavItems = originalNavSections.flatMap((section) => section.items);
 const orderNavItems = (keys: string[]) => keys.map((key) => allNavItems.find((item) => item.key === key)!).filter(Boolean);
 const navSections = [
-  { title: "Operatività", items: orderNavItems(["dashboard", "booking", "booking-contratti", "booking-listini"]) },
+  { title: "Operatività", items: orderNavItems(["dashboard", "booking", "booking-contratti", "rental-payments", "booking-listini"]) },
   { title: "Flotta", items: orderNavItems(["veicoli", "fermi-calendario", "fermi-tecnici"]) },
   { title: "Anagrafiche", items: orderNavItems(["clienti", "sedi", "officine"]) },
   { title: "Gestione", items: orderNavItems(["statistiche", "billing"]) }
@@ -186,6 +187,7 @@ export const AppLayout = () => {
   const companyView=useCompanySiteView();
   const canManageBilling = canManageTenantBilling(user) && companyView;
   const canReadBilling = canReadTenantBilling(user) && companyView;
+  const canReadRentalPayments=Boolean(user?.permissions.some(p=>p==="*"||p==="rental-payments:read"));
   const canReadUsers = Boolean(user?.permissions.some(p => p === "*" || p === "users:read"));
   const [mobileOpen, setMobileOpen] = useState(false);
   const mobilePointer = useRef(false);
@@ -504,10 +506,10 @@ export const AppLayout = () => {
       navSections
         .map((section) => ({
           ...section,
-          items: filterFeatureVisibleItems(section.items, entitlementsLoaded, can)
+          items: filterFeatureVisibleItems(section.items, entitlementsLoaded, can).filter(item=>item.key!=="rental-payments"||canReadRentalPayments)
         }))
         .filter((section) => section.items.length > 0),
-    [can, entitlementsLoaded]
+    [can, entitlementsLoaded,canReadRentalPayments]
   );
 
   const searchSections = allowedSearchSections([

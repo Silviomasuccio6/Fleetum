@@ -1,5 +1,6 @@
 export type SectionEntry = { label: string; to: string; group: string };
 const readPermission: Record<string, string> = {
+  "/pagamenti-garanzie": "rental-payments:read",
   "/dashboard": "stats:read", "/booking": "vehicles:read", "/booking/contratti": "vehicles:read",
   "/booking/listini": "vehicles:read", "/anagrafiche/veicoli": "vehicles:read", "/anagrafiche/clienti": "vehicles:read",
   "/anagrafiche/scadenziario": "vehicles:read", "/anagrafiche/manutenzioni": "vehicles:read",

@@ -43,6 +43,7 @@ type RentalPaymentBooking = {
 };
 
 type Props = {
+  onChanged?:()=>void;
   booking: RentalPaymentBooking;
   paymentSetupStatus?: string | null;
 };
@@ -172,13 +173,14 @@ const noticeLabels = {
 const canChargeExtra = (charge: RentalExtraChargeDto) => ["APPROVED", "NOTIFIED", "FAILED", "REQUIRES_ACTION"].includes(charge.status);
 const canCancelExtra = (charge: RentalExtraChargeDto) => !["PAID", "REFUNDED", "DISPUTED", "CANCELED"].includes(charge.status);
 
-export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Props) => {
+export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus,onChanged }: Props) => {
   const user = useAuthStore((state) => state.user);
   const permissions = user?.permissions ?? [];
-  const canRead = permissions.includes("rental-payments:read");
-  const canWrite = permissions.includes("rental-payments:write");
-  const canCharge = permissions.includes("rental-payments:charge");
+  const canRead = permissions.includes("*")||permissions.includes("rental-payments:read");
+  const canWrite = permissions.includes("*")||permissions.includes("rental-payments:write");
+  const canCharge = permissions.includes("*")||permissions.includes("rental-payments:charge");
 
+  const actionLock=useRef(false);
   const [summary, setSummary] = useState<RentalPaymentSummaryDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
@@ -255,7 +257,9 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
   };
 
   const runSetupSession = async () => {
+    if(actionLock.current||!stripeAvailable||!canWrite)return;
     if (!mandateAccepted) return;
+    actionLock.current=true;
     setActionBusy({ type: "setup" });
     setError(null);
     try {
@@ -266,17 +270,20 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       window.location.href = session.checkoutUrl;
     } catch (e) {
       setError((e as Error).message);
+      actionLock.current=false;
       setActionBusy(null);
     }
   };
 
   const runCreateDeposit = async () => {
+    if(actionLock.current||!stripeAvailable||!canCharge)return;
     const notificationScope=captureOperationContext();
     const amountCents = eurosToCents(depositAmount);
     if (!selectedPaymentMethodId || !amountCents) {
       setError("Seleziona una carta attiva e inserisci un importo deposito valido.");
       return;
     }
+    actionLock.current=true;
     setActionBusy({ type: "create-deposit" });
     setError(null);
     try {
@@ -284,14 +291,17 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       publishOperationFeedback(setNotice, "Deposito creato. Lo stato viene aggiornato in base all'esito Stripe.", notificationScope, "info");
       closeModal();
       await loadSummary();
+      onChanged?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      actionLock.current=false;
       setActionBusy(null);
     }
   };
 
   const runCaptureDeposit = async (deposit: RentalDepositDto, partial = false) => {
+    if(actionLock.current||!stripeAvailable||!canCharge)return;
     const notificationScope=captureOperationContext();
     let amountToCaptureCents: number | undefined;
     if (partial) {
@@ -304,35 +314,45 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       }
       amountToCaptureCents = parsed;
     }
+    if(!window.confirm(`Catturare ${money(amountToCaptureCents??deposit.amountCents-deposit.capturedAmountCents,deposit.currency)} dalla garanzia della prenotazione ${booking.code}? L’importo non salda il noleggio.`))return;
+    actionLock.current=true;
     setActionBusy({ type: partial ? "capture-partial" : "capture", id: deposit.id });
     setError(null);
     try {
       await rentalPaymentsUseCases.captureDeposit(deposit.id, partial ? { amountToCaptureCents } : undefined);
       publishOperationFeedback(setNotice, partial ? "Deposito catturato parzialmente." : "Deposito catturato.", notificationScope, "info");
       await loadSummary();
+      onChanged?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      actionLock.current=false;
       setActionBusy(null);
     }
   };
 
   const runReleaseDeposit = async (deposit: RentalDepositDto) => {
+    if(actionLock.current||!stripeAvailable||!canCharge)return;
     const notificationScope=captureOperationContext();
+    if(!window.confirm(`Rilasciare la garanzia di ${money(deposit.amountCents-deposit.capturedAmountCents,deposit.currency)} della prenotazione ${booking.code}?`))return;
+    actionLock.current=true;
     setActionBusy({ type: "release", id: deposit.id });
     setError(null);
     try {
       await rentalPaymentsUseCases.releaseDeposit(deposit.id);
       publishOperationFeedback(setNotice, "Deposito rilasciato.", notificationScope, "info");
       await loadSummary();
+      onChanged?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      actionLock.current=false;
       setActionBusy(null);
     }
   };
 
   const runCreateExtraCharge = async () => {
+    if(actionLock.current||!canWrite)return;
     const notificationScope=captureOperationContext();
     const amountCents = eurosToCents(extraForm.amount);
     const adminFeeCents = optionalEurosToCents(extraForm.adminFee);
@@ -340,6 +360,7 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       setError("Compila tipo, descrizione e importi validi per creare l'addebito extra.");
       return;
     }
+    actionLock.current=true;
     setActionBusy({ type: "create-extra" });
     setError(null);
     try {
@@ -355,15 +376,20 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       setExtraForm({ type: "FINE", description: "", amount: "", adminFee: "", evidenceFileUrl: "", paymentMethodId: activePaymentMethods[0]?.id ?? "" });
       closeModal();
       await loadSummary();
+      onChanged?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      actionLock.current=false;
       setActionBusy(null);
     }
   };
 
   const runExtraAction = async (charge: RentalExtraChargeDto, action: "approve" | "notify" | "charge" | "cancel") => {
+    if(actionLock.current||!canWrite||(["approve","charge"].includes(action)&&!canCharge)||(action==="charge"&&!stripeAvailable))return;
     const notificationScope=captureOperationContext();
+    if(action==="charge"&&!window.confirm(`Addebitare ${money(charge.totalAmountCents,charge.currency)} per ${charge.description} sulla prenotazione ${booking.code}?`))return;
+    actionLock.current=true;
     setActionBusy({ type: action, id: charge.id });
     setError(null);
     try {
@@ -373,9 +399,11 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
       if (action === "cancel") await rentalPaymentsUseCases.cancelExtraCharge(charge.id);
       publishOperationFeedback(setNotice, "Workflow addebito aggiornato.", notificationScope, "info");
       await loadSummary();
+      onChanged?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      actionLock.current=false;
       setActionBusy(null);
     }
   };
@@ -492,15 +520,16 @@ export const RentalPaymentGuaranteePanel = ({ booking, paymentSetupStatus }: Pro
                   <div>
                     <p className="font-semibold">{money(deposit.amountCents, deposit.currency)}</p>
                     <p className="text-muted-foreground">Catturato {money(deposit.capturedAmountCents, deposit.currency)}</p>
+                    <p className="text-muted-foreground">{deposit.captureBefore?<>Termine autorizzazione: <time dateTime={deposit.captureBefore}>{new Date(deposit.captureBefore).toLocaleString()}</time>{new Date(deposit.captureBefore).getTime()<=Date.now()?" · Termine superato, verifica Stripe.":null}</>:"Scadenza dell’autorizzazione non disponibile."}</p>
                     {deposit.failureReason ? <p className="text-rose-600">{deposit.failureReason}</p> : null}
                   </div>
                   <Badge variant={statusVariant(deposit.status)}>{depositLabels[deposit.status]}</Badge>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  <Button size="sm" variant="outline" onClick={() => void runCaptureDeposit(deposit)} disabled={!stripeAvailable || !canCharge || !canCaptureDeposit(deposit) || isActionBusy(actionBusy, "capture", deposit.id)}>
+                  <Button size="sm" variant="outline" onClick={() => void runCaptureDeposit(deposit)} disabled={!stripeAvailable || !canCharge || !canCaptureDeposit(deposit) || !!(deposit.captureBefore&&new Date(deposit.captureBefore).getTime()<=Date.now()) || isActionBusy(actionBusy, "capture", deposit.id)}>
                     Cattura totale
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => void runCaptureDeposit(deposit, true)} disabled={!stripeAvailable || !canCharge || !canCaptureDeposit(deposit) || isActionBusy(actionBusy, "capture-partial", deposit.id)}>
+                  <Button size="sm" variant="outline" onClick={() => void runCaptureDeposit(deposit, true)} disabled={!stripeAvailable || !canCharge || !canCaptureDeposit(deposit) || !!(deposit.captureBefore&&new Date(deposit.captureBefore).getTime()<=Date.now()) || isActionBusy(actionBusy, "capture-partial", deposit.id)}>
                     Cattura parziale
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => void runReleaseDeposit(deposit)} disabled={!stripeAvailable || !canCharge || !canReleaseDeposit(deposit) || isActionBusy(actionBusy, "release", deposit.id)}>

@@ -264,6 +264,7 @@ model Tenant {
   rentalDeposits                RentalDeposit[]
   rentalExtraCharges            RentalExtraCharge[]
   rentalPaymentEvents           RentalPaymentEvent[]
+  rentalCollectionEntries       RentalCollectionEntry[]
   contractTemplates             ContractTemplate[]
   bookingContracts              BookingContract[]
   contractSigningRequests       ContractSigningRequest[]
@@ -478,12 +479,14 @@ model User {
   refreshSessions       RefreshSession[]
   rentalBookingsCreated RentalBooking[]      @relation("RentalBookingCreator")
   rentalPaymentMethodsCreated RentalCustomerPaymentMethod[] @relation("RentalPaymentMethodCreator")
+  rentalCollectionEntries     RentalCollectionEntry[]
   rentalDepositsCreated       RentalDeposit[]               @relation("RentalDepositCreator")
   rentalDepositsApproved      RentalDeposit[]               @relation("RentalDepositApprover")
   rentalExtraChargesCreated   RentalExtraCharge[]           @relation("RentalExtraChargeCreator")
   rentalExtraChargesApproved  RentalExtraCharge[]           @relation("RentalExtraChargeApprover")
   privacyAcceptances    PrivacyAcceptance[]
 
+  @@unique([id, tenantId])
   @@index([tenantId, assignedSiteId])
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -855,8 +858,10 @@ model RentalBooking {
   rentalDeposits       RentalDeposit[]
   rentalExtraCharges   RentalExtraCharge[]
   rentalPaymentEvents  RentalPaymentEvent[]
+  collectionEntries    RentalCollectionEntry[]
   createRequest        RentalBookingCreateRequest?
 
+  @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, status])
   @@index([tenantId, contractStatus])
@@ -1133,6 +1138,7 @@ model RentalDeposit {
   currency              String                     @default("EUR")
   status                RentalDepositStatus        @default(DRAFT)
   failureReason         String?
+  captureBefore         DateTime?
   authorizedAt          DateTime?
   capturedAt            DateTime?
   releasedAt            DateTime?
@@ -2173,4 +2179,43 @@ model ContractSigningRequest {
   @@unique([tenantId,idempotencyKey])
   @@unique([contractId,version])
   @@index([tenantId,contractId,status])
+}
+
+// Confirmed manual base-rental receipts only. Deposits, extras and SaaS invoices
+// retain their own records. Append-only: corrections use linked reversals.
+enum RentalCollectionKind {
+  RECEIPT
+  REFUND
+  REVERSAL
+}
+enum RentalCollectionMethod {
+  CASH
+  BANK_TRANSFER
+  EXTERNAL_POS
+}
+model RentalCollectionEntry {
+  id              String @id @default(cuid())
+  tenantId        String
+  bookingId       String
+  createdByUserId String
+  kind            RentalCollectionKind
+  method          RentalCollectionMethod
+  amountCents     Int
+  currency        String @default("EUR")
+  occurredAt      DateTime
+  reference       String
+  reason          String
+  requestKey      String
+  requestHash     String
+  sourceId        String?
+  createdAt       DateTime @default(now())
+  tenant          Tenant @relation(fields:[tenantId], references:[id], onDelete:Restrict,map:"RentalCollectionEntry_tenant_fkey")
+  booking         RentalBooking @relation(fields:[bookingId,tenantId],references:[id,tenantId],onDelete:Restrict,onUpdate:Restrict,map:"RentalCollectionEntry_booking_fkey")
+  createdBy       User @relation(fields:[createdByUserId,tenantId],references:[id,tenantId],onDelete:Restrict,onUpdate:Restrict,map:"RentalCollectionEntry_author_fkey")
+  source          RentalCollectionEntry? @relation("CollectionSource",fields:[sourceId,tenantId,bookingId],references:[id,tenantId,bookingId],onDelete:Restrict,onUpdate:Restrict,map:"RentalCollectionEntry_source_fkey")
+  dependents      RentalCollectionEntry[] @relation("CollectionSource")
+  @@unique([id,tenantId,bookingId])
+  @@unique([tenantId,requestKey])
+  @@index([tenantId,bookingId,createdAt])
+  @@index([tenantId,occurredAt])
 }

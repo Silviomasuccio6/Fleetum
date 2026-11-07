@@ -1,3 +1,5 @@
+import {RentalCollectionService} from "../../../application/services/rental-collection-service.js";
+import {rentalCollectionQuerySchema,rentalCollectionReceiptSchema,rentalCollectionRefundSchema,rentalCollectionReversalSchema,rentalCollectionRequestKeySchema} from "../validators/rental-payments-validators.js";
 import { Request, Response } from "express";
 import { RentalPaymentService } from "../../../application/services/rental-payment-service.js";
 import {
@@ -10,7 +12,19 @@ import {
 } from "../validators/rental-payments-validators.js";
 
 export class RentalPaymentsController {
-  constructor(private readonly rentalPaymentService: RentalPaymentService) {}
+  constructor(private readonly rentalPaymentService: RentalPaymentService, private readonly collections=new RentalCollectionService()) {}
+
+  workspace=async(req:Request,res:Response)=>{res.json(await this.collections.list(req.auth!.tenantId,rentalCollectionQuerySchema.parse(req.query)));};
+  collectionDetail=async(req:Request,res:Response)=>{res.json(await this.collections.detail(req.auth!.tenantId,rentalPaymentIdParamSchema.parse(req.params.bookingId)));};
+  private collectionCommand=async(req:Request,res:Response,kind:"RECEIPT"|"REFUND"|"REVERSAL")=>{
+    const schema=kind==="RECEIPT"?rentalCollectionReceiptSchema:kind==="REFUND"?rentalCollectionRefundSchema:rentalCollectionReversalSchema;
+    const input=schema.parse(req.body),requestKey=rentalCollectionRequestKeySchema.parse(req.headers["idempotency-key"]);
+    const result=await this.collections.record(req.auth!.tenantId,rentalPaymentIdParamSchema.parse(req.params.bookingId),req.auth!.userId,kind,{...input,requestKey},kind==="RECEIPT"?null:rentalPaymentIdParamSchema.parse(req.params.entryId));
+    res.status(result.replayed?200:201).json(result);
+  };
+  recordCollection=(req:Request,res:Response)=>this.collectionCommand(req,res,"RECEIPT");
+  recordRefund=(req:Request,res:Response)=>this.collectionCommand(req,res,"REFUND");
+  recordReversal=(req:Request,res:Response)=>this.collectionCommand(req,res,"REVERSAL");
 
   summary = async (req: Request, res: Response) => {
     const bookingId = rentalPaymentIdParamSchema.parse(req.params.bookingId);

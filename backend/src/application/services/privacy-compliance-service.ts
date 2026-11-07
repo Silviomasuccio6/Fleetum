@@ -327,6 +327,7 @@ export class PrivacyComplianceService {
           orderBy: { pickupAt: "desc" },
           select: {
             id: true,
+            collectionEntries:{where:{tenantId:input.tenantId},orderBy:{createdAt:"asc"},select:{id:true,kind:true,method:true,amountCents:true,currency:true,occurredAt:true,reference:true,reason:true,sourceId:true,createdAt:true}},
             code: true,
             status: true,
             contractStatus: true,
@@ -658,7 +659,7 @@ export class PrivacyComplianceService {
         attachments: attachments.length,
         paymentRecords:
           paymentProfiles.length + paymentMethods.length + rentalDeposits.length +
-          rentalExtraCharges.length + rentalPaymentEvents.length,
+          rentalExtraCharges.length + rentalPaymentEvents.length + bookings.reduce((sum,booking)=>sum+(booking.collectionEntries?.length??0),0),
         consents: exportedConsents.length,
         communications: contractDeliveries.length + emailQueue.length,
         auditEvents: exportedAuditTrail.length,

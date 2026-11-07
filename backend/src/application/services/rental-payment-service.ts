@@ -1,3 +1,4 @@
+import {captureBeforeFromIntent} from "../../domain/payments/rental-deposit-deadline.js";
 import crypto from "node:crypto";
 import { rentalStripeAvailability } from "./rental-payment-availability.js";
 import Stripe from "stripe";
@@ -250,6 +251,7 @@ type PaymentMethodRecord = {
 };
 
 type DepositRecord = {
+  captureBefore?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
   id: string;
@@ -832,6 +834,7 @@ export class RentalPaymentService {
       throw new AppError("Deposito non catturabile nello stato corrente", 409, "RENTAL_DEPOSIT_NOT_CAPTURABLE");
     }
 
+    if(deposit.captureBefore && deposit.captureBefore.getTime()<=Date.now())throw new AppError("Termine della garanzia superato. Verifica lo stato Stripe prima di una nuova autorizzazione.",409,"RENTAL_DEPOSIT_CAPTURE_DEADLINE");
     const remaining = deposit.amountCents - deposit.capturedAmountCents;
     const amountToCapture = input.amountToCaptureCents ?? remaining;
     if (amountToCapture <= 0 || amountToCapture > remaining) {
@@ -1219,7 +1222,7 @@ export class RentalPaymentService {
     // Each conflict reloads both the committed row and the provider object; never reuse a stale snapshot.
     for (let attempt = 0; attempt < 5; attempt++) {
       const snapshot = kind === "extra" ? await this.getExtraChargeOrThrow(tenantId, recordId) : await this.getDepositOrThrow(tenantId, recordId);
-      const intent = await this.requireStripeClient().paymentIntents.retrieve(intentId);
+      const intent = await this.requireStripeClient().paymentIntents.retrieve(intentId, {expand:["latest_charge"]});
       if (intent.id !== intentId) this.bindingError();
       if (kind === "extra") {
         const row = snapshot as ExtraChargeRecord;
@@ -1244,6 +1247,7 @@ export class RentalPaymentService {
       }
       const row = snapshot as DepositRecord;
       await this.validateIntent(kind, row, intent);
+      const captureBefore=captureBeforeFromIntent(intent)??row.captureBefore??null;
       if (row.capturedAmountCents > 0 || ["CAPTURED", "PARTIALLY_CAPTURED"].includes(row.status)) return row;
       if (["RELEASED", "CANCELED", "EXPIRED"].includes(row.status) && intent.status !== "canceled") this.bindingError();
       const status = intent.status === "succeeded" ? (intent.amount_received < row.amountCents ? RentalDepositStatus.PARTIALLY_CAPTURED : RentalDepositStatus.CAPTURED)
@@ -1251,8 +1255,9 @@ export class RentalPaymentService {
         : intent.status === "canceled" ? RentalDepositStatus.RELEASED
         : ["requires_payment_method", "requires_action"].includes(intent.status) ? RentalDepositStatus.FAILED : RentalDepositStatus.AUTHORIZING;
       if (intent.status === "succeeded" && intent.amount_received <= 0) this.bindingError();
-      if (row.status === status && row.stripePaymentIntentId === intent.id) return row;
+      if (row.status === status && row.stripePaymentIntentId === intent.id && (row.captureBefore?.getTime()??null)===(captureBefore?.getTime()??null)) return row;
       const updated = await this.deps.compareAndUpdateDeposit(row, {
+        captureBefore,
         stripePaymentIntentId: intent.id, status,
         capturedAmountCents: intent.status === "succeeded" ? intent.amount_received : row.capturedAmountCents,
         capturedAt: intent.status === "succeeded" ? new Date() : undefined,

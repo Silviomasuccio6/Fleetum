@@ -7,12 +7,12 @@ import { useDialogFocus } from '../../hooks/use-dialog-focus';
 import { usePanelMotion } from '../../hooks/use-panel-motion';
 import type { PanelMotionHandle } from './panel-motion';
 
-export function CommerceDrawer({title,description,onClose,children,footer,origin=null,motionRef,compact=false,busy=false,level=90,translateTitle=true,translateDescription=true}:{title:string;translateTitle?:boolean;translateDescription?:boolean;description?:string;onClose:()=>void;children:ReactNode;footer?:ReactNode;origin?:HTMLElement|null;motionRef?:RefObject<PanelMotionHandle|null>;compact?:boolean;busy?:boolean;level?:number}){
+export function CommerceDrawer({title,description,onClose,children,footer,origin=null,motionRef,compact=false,busy=false,level=90,translateTitle=true,translateDescription=true,showEyebrow=true}:{showEyebrow?:boolean;title:string;translateTitle?:boolean;translateDescription?:boolean;description?:string;onClose:()=>void;children:ReactNode;footer?:ReactNode;origin?:HTMLElement|null;motionRef?:RefObject<PanelMotionHandle|null>;compact?:boolean;busy?:boolean;level?:number}){
  const ref=useRef<HTMLElement>(null),frame=useRef<HTMLDivElement>(null),id=useId();
  const close=()=>{if(!busy)onClose()};
  usePanelMotion(ref,frame,origin,!compact,id,motionRef);useDialogFocus(true,ref,close);
  return <div className="commerce-overlay" style={{zIndex:level}}><div className="commerce-scrim" aria-hidden="true" onClick={close}/><section ref={ref} className={`commerce-drawer${compact?' commerce-drawer-compact':''}`} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1} aria-busy={busy}>
-  <div className="commerce-drawer-frame" ref={frame}><header className="commerce-drawer-header"><div><p data-panel-eyebrow className="commerce-eyebrow">FLEETUM</p><h2 id={id} data-panel-title translate={translateTitle?"yes":"no"}>{title}</h2>{description?<p translate={translateDescription?"yes":"no"}>{description}</p>:null}</div><Button data-panel-close variant="ghost" size="icon" aria-label="Chiudi pannello" onClick={close} disabled={busy}><X aria-hidden="true" className="h-5 w-5"/></Button></header>
+  <div className="commerce-drawer-frame" ref={frame}><header className="commerce-drawer-header"><div>{showEyebrow?<p data-panel-eyebrow className="commerce-eyebrow">FLEETUM</p>:null}<h2 id={id} data-panel-title translate={translateTitle?"yes":"no"}>{title}</h2>{description?<p translate={translateDescription?"yes":"no"}>{description}</p>:null}</div><Button data-panel-close variant="ghost" size="icon" aria-label="Chiudi pannello" onClick={close} disabled={busy}><X aria-hidden="true" className="h-5 w-5"/></Button></header>
   <div data-panel-content className="commerce-drawer-content">{children}</div>{footer?<footer data-panel-footer className="commerce-drawer-footer">{footer}</footer>:null}</div>
  </section></div>;
 }
