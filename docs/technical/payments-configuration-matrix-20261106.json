@@ -1,0 +1,169 @@
+{
+  "date": "2026-11-06",
+  "sourceBaseline": "ad9a3f35729d087ccafc8e6010e7bf0cde6b5872",
+  "scope": "repository and synthetic local tests; staging historical observation only; production unverified",
+  "rows": [
+    {
+      "functionality": "Abbonamento Fleetum",
+      "environment": "Staging, ultima osservazione",
+      "configurationState": "Disabilitato intenzionalmente",
+      "evidenceAndTests": "Chiavi Stripe vietate da `staging-safety.ts`; runtime documentato senza provider",
+      "missingAndNextAction": "Conservare isolamento; prova esterna solo nel laboratorio provider separato"
+    },
+    {
+      "functionality": "Abbonamento Fleetum",
+      "environment": "Locale sintetico",
+      "configurationState": "Non verificato sul provider",
+      "evidenceAndTests": "Test webhook, firma, duplicati, stato abbonamento e concorrenza",
+      "missingAndNextAction": "Catalogo prezzi, account, portale e recapito webhook reali da verificare separatamente"
+    },
+    {
+      "functionality": "Abbonamento Fleetum",
+      "environment": "Produzione",
+      "configurationState": "Non verificato",
+      "evidenceAndTests": "Solo codice/runbook; nessuna lettura di configurazioni live",
+      "missingAndNextAction": "Accertare identità account, sei prezzi, modalità live e portale senza riusare le garanzie"
+    },
+    {
+      "functionality": "Carte e garanzie",
+      "environment": "Staging, ultima osservazione",
+      "configurationState": "Disabilitato intenzionalmente; errore applicativo corretto localmente",
+      "evidenceAndTests": "Nuovi test di summary e guardia; UI con stato esplicito",
+      "missingAndNextAction": "Installazione futura del candidato; nessuna attivazione Stripe nello staging corrente"
+    },
+    {
+      "functionality": "Carte e garanzie",
+      "environment": "Locale, provider assente",
+      "configurationState": "Configurazione mancante riconosciuta",
+      "evidenceAndTests": "Nessun checkout fittizio; errore 503; azioni Stripe bloccate e letture disponibili",
+      "missingAndNextAction": "Completare modello destinatario prima della configurazione reale"
+    },
+    {
+      "functionality": "Carte e garanzie",
+      "environment": "Produzione",
+      "configurationState": "Non verificato; capacità multi-esercente mancante nel modello",
+      "evidenceAndTests": "Client globale, nessun account destinatario persistito né richiesta Connect individuata",
+      "missingAndNextAction": "Definire esercente, beneficiario, responsabilità e conto del singolo autonoleggio"
+    },
+    {
+      "functionality": "Incasso del corrispettivo base",
+      "environment": "Codice / locale",
+      "configurationState": "Permesso/capacità mancante",
+      "evidenceAndTests": "Modelli prezzi, garanzie ed extra presenti; nessun registro dedicato degli incassi base trovato nei percorsi analizzati",
+      "missingAndNextAction": "Blocco 3: fonte contabile unica per ricevuto/residuo, metodi manuali e rettifiche"
+    },
+    {
+      "functionality": "Email transazionali",
+      "environment": "Staging e provider QA",
+      "configurationState": "Disabilitato intenzionalmente",
+      "evidenceAndTests": "`email-sender.ts` rifiuta prima di creare SDK; cron spenti",
+      "missingAndNextAction": "Non forzare `SENT`; eseguire solo prove simulate"
+    },
+    {
+      "functionality": "Email transazionali",
+      "environment": "Locale simulato",
+      "configurationState": "Non verificato sulla consegna reale",
+      "evidenceAndTests": "Test sender/outbox/lease/permessi e ricevute simulate",
+      "missingAndNextAction": "Test esterno separato per dominio mittente, recapito, errori e reputazione"
+    },
+    {
+      "functionality": "Email transazionali",
+      "environment": "Produzione",
+      "configurationState": "Non verificato",
+      "evidenceAndTests": "Richiesti API key e mittente dal loader; non prova del dominio verificato",
+      "missingAndNextAction": "Controllare dominio e mittente, DNS email, worker e monitoraggio coda autorizzati"
+    },
+    {
+      "functionality": "Firma OTP email",
+      "environment": "Staging / locale",
+      "configurationState": "Dipende dalla configurazione; consegna reale disabilitata",
+      "evidenceAndTests": "`configured` controlla soltanto la chiave di firma; test OTP provano integrità e consumo con sender simulato",
+      "missingAndNextAction": "Distinguere chiave, disponibilità email e worker nel blocco 4; nessuna promessa di email effettivamente inviata"
+    },
+    {
+      "functionality": "Firma OTP email",
+      "environment": "Produzione",
+      "configurationState": "Non verificato",
+      "evidenceAndTests": "Flusso applicativo presente, nessuna consegna live esercitata",
+      "missingAndNextAction": "Chiave dedicata, conservazione documenti, email, worker e revisione del processo"
+    },
+    {
+      "functionality": "Firma in presenza",
+      "environment": "Codice",
+      "configurationState": "Permesso/capacità mancante per il nuovo flusso richiesto",
+      "evidenceAndTests": "Esistono mark-signed e registrazioni firma; non equivalgono alla nuova raccolta grafica del cliente vincolata al PDF",
+      "missingAndNextAction": "Blocco 4: acquisizione firma, consenso, versione e PDF finale"
+    },
+    {
+      "functionality": "PDF e storage",
+      "environment": "Locale / PostgreSQL sintetico",
+      "configurationState": "Non verificato sullo storage live",
+      "evidenceAndTests": "Test rendering, storage, download, congelamento, integrità e isolamento",
+      "missingAndNextAction": "Conservare originali e firmati; verifica visiva del nuovo modello nel blocco 5"
+    },
+    {
+      "functionality": "PDF e storage",
+      "environment": "Staging, ultima osservazione",
+      "configurationState": "Non verificato da questa tranche; precedente E2E riuscito",
+      "evidenceAndTests": "Precedente PDF/firma e storage locale documentati",
+      "missingAndNextAction": "Non dedurre recuperabilità e documenti reali da una sola generazione"
+    },
+    {
+      "functionality": "PDF e storage",
+      "environment": "Produzione",
+      "configurationState": "Non verificato",
+      "evidenceAndTests": "Provider local/S3 nel codice; nessun bucket, disco o backup live letto",
+      "missingAndNextAction": "Verificare persistenza, quote, backup e ripristino prima di una futura attivazione"
+    },
+    {
+      "functionality": "Profilo, logo, condizioni",
+      "environment": "Codice / locale",
+      "configurationState": "Dati per tenant non verificati",
+      "evidenceAndTests": "Servizio completezza, validatori aziendali e controllo dei dati per firma; PDF fattura di noleggio marcato bozza",
+      "missingAndNextAction": "Completare dati dell'esercente, logo valido, condizioni revisionate e campi obbligatori; blocco 5"
+    },
+    {
+      "functionality": "Profilo, logo, condizioni",
+      "environment": "Staging / produzione",
+      "configurationState": "Non verificato",
+      "evidenceAndTests": "Nessuna anagrafica personale o reale letta",
+      "missingAndNextAction": "Verifica nel tenant autorizzato; non inventare campi o clausole"
+    },
+    {
+      "functionality": "CARGOS",
+      "environment": "Staging / provider QA",
+      "configurationState": "Disabilitato intenzionalmente; guardia mancante corretta localmente",
+      "evidenceAndTests": "Nuovo test blocca Token/Check/Send prima della rete; preflight comunica il blocco",
+      "missingAndNextAction": "Nessuna utenza API abilitata disponibile secondo Silvio; non riattivare trasporto"
+    },
+    {
+      "functionality": "CARGOS e ricevute",
+      "environment": "Locale simulato",
+      "configurationState": "Non verificato sul servizio reale",
+      "evidenceAndTests": "Protocollo, concorrenza, esito incerto, ricevute e isolamento testati con risposte simulate",
+      "missingAndNextAction": "Utenza esercente abilitata, sedi/codici ufficiali e prova esterna autorizzata"
+    },
+    {
+      "functionality": "CARGOS e ricevute",
+      "environment": "Produzione",
+      "configurationState": "Non verificato",
+      "evidenceAndTests": "Endpoint ufficiale e configurazione per tenant nel codice",
+      "missingAndNextAction": "Credenziali tenant cifrate, mappatura sedi, verifica tabelle/processo e attestazioni"
+    },
+    {
+      "functionality": "Ruoli, sedi e licenze",
+      "environment": "Locale / PostgreSQL sintetico",
+      "configurationState": "Capacità dipendente da ruolo e licenza",
+      "evidenceAndTests": "Guardie API e suite tenant/sedi/permessi",
+      "missingAndNextAction": "Riutilizzare gli stessi controlli nelle future pagine; non confondere assenza permesso e provider mancante"
+    },
+    {
+      "functionality": "Ruoli, sedi e licenze",
+      "environment": "Staging / produzione",
+      "configurationState": "Non verificato per l'utente che ha segnalato il problema",
+      "evidenceAndTests": "Nessuna nuova sessione/account reale ispezionato",
+      "missingAndNextAction": "Confermare ruolo/sedi/licenza tramite API autorizzata quando necessario"
+    }
+  ],
+  "completedOn": "2026-11-07"
+}
