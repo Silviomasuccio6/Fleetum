@@ -1,3 +1,5 @@
+import {buildProfessionalSigningAppendix} from './contract-signing-appendix-pdf.js';
+import {CONTRACT_PDF_LAYOUT} from './contract-pdf-fonts.js';
 import type {ContractSigningRequest} from '@prisma/client';
 import sharp from 'sharp';
 import {PDFDocument,rgb,StandardFonts} from 'pdf-lib';
@@ -5,7 +7,26 @@ import {buildSigningEvidencePdf} from './contract-signing-evidence-pdf.js';
 import {AppError} from '../../shared/errors/app-error.js';
 /** Preserve the original separately; append an evidence page to its exact pages. */
 export async function buildSignedContractPdf(original:Buffer,row:ContractSigningRequest,signatureDataUrl?:string){
- const pdf=await PDFDocument.load(original),evidence=await PDFDocument.load(await buildSigningEvidencePdf(row));
+ const pdf=await PDFDocument.load(original);
+ if(pdf.getSubject()===CONTRACT_PDF_LAYOUT){
+  const evidence=row.evidence as Record<string,unknown>;
+  // The caller seals this layout marker together with the immutable signing evidence.
+  evidence.pdfLayoutVersion=2;
+  let image:Buffer|undefined;
+  if(row.method==='IN_PERSON'){
+   if(!signatureDataUrl||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(signatureDataUrl)||signatureDataUrl.length>400000)throw new AppError('Acquisisci una firma PNG valida.',422,'CONTRACT_SIGNATURE_INVALID');
+   try{
+    image=Buffer.from(signatureDataUrl.split(',')[1],'base64');
+    const stats=await sharp(image,{limitInputPixels:2880000}).flatten({background:'#ffffff'}).stats(),meta=await sharp(image,{limitInputPixels:2880000}).metadata();
+    if(stats.channels.slice(0,3).every(channel=>channel.min>230)||!meta.width||!meta.height||meta.width<100||meta.height<40||meta.width>2400||meta.height>1200)throw new Error('invalid signature');
+   }catch{throw new AppError('La firma non è un’immagine PNG leggibile.',422,'CONTRACT_SIGNATURE_INVALID');}
+  }
+  const appendix=await PDFDocument.load(await buildProfessionalSigningAppendix(row,image));
+  for(const page of await pdf.copyPages(appendix,appendix.getPageIndices()))pdf.addPage(page);
+  pdf.setModificationDate(row.signedAt!);return Buffer.from(await pdf.save());
+ }
+ // Keep the established signing output for already-frozen historical originals.
+ const evidence=await PDFDocument.load(await buildSigningEvidencePdf(row));
  for(const page of await pdf.copyPages(evidence,evidence.getPageIndices()))pdf.addPage(page);
  if(row.method==='IN_PERSON'){
   if(!signatureDataUrl||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(signatureDataUrl)||signatureDataUrl.length>400000)throw new AppError('Acquisisci una firma PNG valida.',422,'CONTRACT_SIGNATURE_INVALID');

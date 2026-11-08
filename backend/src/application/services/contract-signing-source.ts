@@ -1,3 +1,4 @@
+import {collectionBalance} from "../../domain/payments/rental-collection-policy.js";
 import {ExactMoneyReader} from "../../infrastructure/database/exact-money-reader.js";
 import {resolveContractDrivers,driverIssues} from "./contract-rental-drivers.js";
 import {rentalTermsSchema,rentalTermsIssues} from "./contract-rental-terms.js";
@@ -22,10 +23,16 @@ export async function loadSigningSource(tenantId:string,bookingId:string,db:Pris
  const drivers=await resolveContractDrivers(tenantId,contract.rentalTerms,db,false);
  const companyName=profile?.tradeName??profile?.legalName??template?.companyName??tenant.name;
  const input:Parameters<typeof buildEnterpriseContractPdf>[0]={
-  contract:{rentalTerms:contract.rentalTerms,drivers,title:contract.title,content:[contract.content,legal?.defaultContractTerms&&!contract.content.includes(legal.defaultContractTerms)?"CONDIZIONI AZIENDALI\n"+legal.defaultContractTerms:null,legal?.contractFooterText].filter(Boolean).join("\n\n"),status:"READY",templateVersion:contract.templateVersion,createdAt:contract.createdAt,updatedAt:contract.createdAt,signedAt:null,lastSentAt:null,latestDelivery:null},
+  contract:{issuedAt:contract.issuedAt,documentRevision:contract.documentRevision,rentalTerms:contract.rentalTerms,drivers,title:contract.title,content:[contract.content,legal?.defaultContractTerms&&!contract.content.includes(legal.defaultContractTerms)?"CONDIZIONI AZIENDALI\n"+legal.defaultContractTerms:null,legal?.contractFooterText].filter(Boolean).join("\n\n"),status:"READY",templateVersion:contract.templateVersion,createdAt:contract.createdAt,updatedAt:contract.createdAt,signedAt:null,lastSentAt:null,latestDelivery:null},
   booking:{code:booking.code,status:"CONFIRMED",contractStatus:"READY",customerName:booking.customerName,customerEmail:booking.customerEmail,customerPhone:booking.customerPhone,customerDocument:booking.customerDocument,pickupAt:booking.pickupAt,returnAt:booking.returnAt,pickupLocation:booking.pickupLocation,returnLocation:booking.returnLocation,pickupKm:booking.pickupKm,returnKm:null,expectedTotal:booking.expectedTotal,finalTotal:booking.finalTotal,priceAgreement:booking.priceAgreement,vehicle:booking.vehicle,customer:booking.customer,pricingSnapshot:booking.pricingSnapshot},
   branding:{companyName,companyAddress:profile?[profile.legalAddress,profile.postalCode,profile.city,profile.province,profile.country].filter(Boolean).join(", "):template?.companyAddress,companyVat:profile?[profile.vatNumber?`P.IVA ${profile.vatNumber}`:null,profile.taxCode?`CF ${profile.taxCode}`:null].filter(Boolean).join(" · "):template?.companyVat,companyEmail:profile?.email??profile?.pec??template?.companyEmail,companyPhone:profile?.phone??template?.companyPhone,logoFilePath:branding?.logoFilePath??template?.logoFilePath,logoFileName:branding?.logoFileName??template?.logoFileName,brandPrimary:branding?.primaryColor??template?.brandPrimary,brandAccent:branding?.accentColor??template?.brandAccent,brandFont:branding?.fontFamily??template?.brandFont}
  };
+ // A ledger photograph is descriptive only. Later receipts must not invalidate an invitation
+ // or change a frozen document. Tenant and site visibility were established above.
+ const entries=await db.rentalCollectionEntry.findMany({where:{tenantId,bookingId},orderBy:[{createdAt:"asc"},{id:"asc"}]});
+ const amount=booking.finalTotal??booking.expectedTotal;
+ const balance=collectionBalance(amount===null?null:Math.round(amount*100),entries);
+ input.booking.collections={recordedAt:new Date(),receivedCents:balance.receivedCents,outstandingCents:balance.outstandingCents,creditCents:balance.creditCents,state:balance.state};
  // Exclude mutable workflow/email/PDF timestamps from the document fingerprint.
  // Customer and vehicle identity remain part of the source even when omitted by a template.
  const customer=booking.customer?Object.fromEntries(Object.entries(booking.customer).filter(([key])=>!["createdAt","updatedAt"].includes(key))):null;
@@ -47,11 +54,15 @@ export const assertSigningReady=(source:Awaited<ReturnType<typeof loadSigningSou
  if(booking.status!=="CONFIRMED")throw new AppError("Conferma la prenotazione prima di inviare il contratto per firma",409,"CONTRACT_BOOKING_CONFIRM_REQUIRED");
  if(!booking.customer||booking.customer.deletedAt||!signerName.trim())throw new AppError("Completa l’identità del firmatario nell’anagrafica",422,"CONTRACT_SIGNER_INCOMPLETE");
  if(!input.branding?.companyName||!input.branding.companyAddress||!input.branding.companyVat)throw new AppError("Completa i dati del locatore prima della firma",422,"CONTRACT_ISSUER_INCOMPLETE");
+ if(!booking.vehicle.plate?.trim()||!booking.vehicle.brand?.trim()||!booking.vehicle.model?.trim())throw new AppError("Completa targa, marca e modello del veicolo prima di emettere il contratto",422,"CONTRACT_VEHICLE_INCOMPLETE");
+ if(!booking.pickupLocation?.trim()||!booking.returnLocation?.trim())throw new AppError("Completa luogo di ritiro e luogo di restituzione prima di emettere il contratto",422,"CONTRACT_LOCATIONS_INCOMPLETE");
+ if(!Number.isFinite(booking.pickupAt.getTime())||!Number.isFinite(booking.returnAt.getTime())||booking.returnAt<=booking.pickupAt)throw new AppError("Verifica date e orari di ritiro e restituzione",422,"CONTRACT_PERIOD_INVALID");
  if(booking.finalTotal===null&&booking.expectedTotal===null)throw new AppError("Completa le condizioni economiche concordate",422,"CONTRACT_PRICE_REQUIRED");
  const terms=rentalTermsSchema.safeParse(contract.rentalTerms);
  const missing=terms.success&&source.drivers.length!==[terms.data.primaryDriverId,...terms.data.additionalDriverIds].filter(Boolean).length;
  const issues=[...rentalTermsIssues(contract.rentalTerms),...(missing?["Conducente non disponibile: verifica l’anagrafica"]:[]),...driverIssues(source.drivers,booking.returnAt)];
  if(issues.length)throw new AppError(issues.join(". "),422,"CONTRACT_RENTAL_DETAILS_INCOMPLETE");
+ if(!input.contract.title.trim()||!input.contract.content.trim())throw new AppError("Completa titolo e condizioni contrattuali del locatore prima di emettere il documento",422,"CONTRACT_TERMS_REQUIRED");
  if(/\{\{[^}]+\}\}/.test(input.contract.content))throw new AppError("Il contratto contiene campi ancora da compilare",422,"CONTRACT_TEMPLATE_INCOMPLETE");
 };
 export async function lockSigningBusinessSource(tx:Prisma.TransactionClient,tenantId:string,bookingId:string,write=false){

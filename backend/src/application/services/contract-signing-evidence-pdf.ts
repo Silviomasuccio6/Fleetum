@@ -1,9 +1,11 @@
+import {buildProfessionalSigningAppendix} from './contract-signing-appendix-pdf.js';
 import type {ContractSigningRequest} from "@prisma/client";
 import {PDFDocument,StandardFonts,rgb} from "pdf-lib";
 import {AppError} from "../../shared/errors/app-error.js";
 
 /** Human-readable receipt. The original signed document is never rewritten. */
 export async function buildSigningEvidencePdf(row:ContractSigningRequest){
+ if((row.evidence as Record<string,unknown>|null)?.pdfLayoutVersion===2)return buildProfessionalSigningAppendix(row);
  if(!row.signedAt||!row.evidence)throw new AppError("Registrazione non disponibile",409,"CONTRACT_NOT_SIGNED");
  const evidence=row.evidence as Record<string,unknown>,pdf=await PDFDocument.create();
  pdf.setTitle(`Registrazione firma email — ${row.bookingCode}`);pdf.setAuthor(row.issuerName);pdf.setCreationDate(row.signedAt);pdf.setModificationDate(row.signedAt);

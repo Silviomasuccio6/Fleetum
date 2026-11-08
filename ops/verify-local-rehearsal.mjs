@@ -57,6 +57,7 @@ const cleanEnv = {
   NODE_ENV: "test", E2E_TARGET_MODE: "local-rehearsal", DOTENV_CONFIG_PATH: "/dev/null", CHECKPOINT_DISABLE: "1",
   npm_config_userconfig: "/dev/null", npm_config_globalconfig: path.join(scratch, "npmrc"),
   npm_config_audit: "false", npm_config_fund: "false", DOCKER_CONFIG: path.join(scratch, "docker-config"),
+  CONTRACT_SIGNING_KEY: randomBytes(32).toString("hex"),
   DEMO_ADMIN_PASSWORD: password, UPLOAD_DIR: path.join(scratch, "uploads"),
   E2E_TENANT_EMAIL: "rehearsal-a@example.invalid", E2E_OTHER_TENANT_EMAIL: "rehearsal-b@example.invalid",
   E2E_TENANT_PASSWORD: password, E2E_OTHER_TENANT_PASSWORD: password
@@ -176,7 +177,7 @@ try {
   await writeFile(configPath, `import base from "./playwright.config";\nexport default {...base, workers:1, retries:0, reporter:[["list"],["json",{outputFile:${JSON.stringify(reportPath)}}]], outputDir:${JSON.stringify(path.join(evidence, "artifacts"))}, use:{...base.use, serviceWorkers:"block", ignoreHTTPSErrors:true, launchOptions:{proxy:{server:${JSON.stringify(proxyUrl)},bypass:"<-loopback>"}, args:["--proxy-bypass-list=<-loopback>"]}}};\n`);
   try {
     await run(process.execPath, ["ops/e2e/validate-config.mjs"], "e2e-config.log");
-    console.log("[rehearsal] Running the six critical browser/API cases with zero skips");
+    console.log("[rehearsal] Running the seven critical browser/API cases with zero skips");
     await run(process.execPath, ["node_modules/@playwright/test/cli.js", "test", "--config", configPath, "--project=chromium"], "e2e.log");
     await run(process.execPath, ["ops/e2e/verify-report.mjs", reportPath], "e2e-gate.log");
     success = true;

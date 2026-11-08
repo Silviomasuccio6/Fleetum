@@ -1,3 +1,4 @@
+import {PDFDocument} from "pdf-lib";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RentalBookingsController } from "../src/interfaces/http/controllers/rental-bookings-controller.js";
@@ -141,10 +142,11 @@ test("contracts smoke: sendContractEmail reports the queue SENT state without fi
   } as any;
 
   (controller as any).tenantProfileService = {
-    contractBranding: async () => ({
-      companyName: "Fleetum Demo",
-      companyEmail: "noreply@fleetum.it"
-    })
+    contractBranding: async () => ({companyName:"Fleetum Demo",companyEmail:"noreply@example.invalid"})
+  };
+  // Queue ownership is tested here; actual PDF loading/rendering has its own unit and PostgreSQL coverage.
+  (controller as any).buildContractPdf = async () => {
+    const pdf=await PDFDocument.create();pdf.addPage();return Buffer.from(await pdf.save());
   };
 
   const originalTransaction = prisma.$transaction;
@@ -233,10 +235,11 @@ test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queu
   } as any;
 
   (controller as any).tenantProfileService = {
-    contractBranding: async () => ({
-      companyName: "Fleetum Demo",
-      companyEmail: "noreply@fleetum.it"
-    })
+    contractBranding: async () => ({companyName:"Fleetum Demo",companyEmail:"noreply@example.invalid"})
+  };
+  // Queue ownership is tested here; actual PDF loading/rendering has its own unit and PostgreSQL coverage.
+  (controller as any).buildContractPdf = async () => {
+    const pdf=await PDFDocument.create();pdf.addPage();return Buffer.from(await pdf.save());
   };
   (controller as any).getContractOrThrow = async () => ({
     issuedAt:new Date("2026-11-07T00:00:00Z"),

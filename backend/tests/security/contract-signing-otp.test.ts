@@ -233,6 +233,41 @@ describe(legacyOnly?"pre-upgrade contract invitations on synthetic PostgreSQL":"
   assert.equal(await prisma.bookingContractEvent.count({where:{contractId:p.contract.id,type:"ISSUED_MANUALLY"}}),1);
   for(const[path,method,body]of[["/contract","PATCH",{status:"SIGNED"}],["/contract","POST",{status:"SIGNED"}],["/transition","POST",{toStatus:"CONTRACT_SIGNED"}],["","PATCH",{contractStatus:"SIGNED"}]] as const)assert.equal((await api(p.path+path,method,body)).status,409);
  });
+ test("issuance rejects missing locations and unsupported identity without an issuance event",async()=>{
+  const p=await newPractice();
+  await prisma.rentalBooking.update({where:{id:p.booking.id},data:{pickupLocation:null}});
+  let review=await(await api(p.path+"/contract/conversion")).json() as any;
+  assert.ok(review.readinessIssues.some((issue:string)=>issue.includes("luogo di ritiro")));
+  assert.equal((await api(p.path+"/contract/convert","POST",{reviewHash:review.reviewHash})).status,422);
+  await prisma.rentalBooking.update({where:{id:p.booking.id},data:{pickupLocation:"Roma sintetica"}});
+  await prisma.bookingContract.update({where:{id:p.contract.id},data:{content:"Identità non rappresentabile: 漢字"}});
+  review=await(await api(p.path+"/contract/conversion")).json() as any;
+  assert.ok(review.readinessIssues.some((issue:string)=>issue.includes("caratteri non rappresentabili")));
+  assert.equal((await api(p.path+"/contract/convert","POST",{reviewHash:review.reviewHash})).status,422);
+  assert.equal((await prisma.bookingContract.findUniqueOrThrow({where:{id:p.contract.id}})).issuedAt,null);
+  assert.equal(await prisma.bookingContractEvent.count({where:{contractId:p.contract.id,type:"ISSUED_MANUALLY"}}),0);
+ });
+ test("free, discounted unpaid, partial and fully paid rentals issue with their real balances",async()=>{
+  const {PDFParse}=await import("pdf-parse");
+  for(const scenario of [{list:10000,discount:10000,receipt:0,state:"FREE",due:0},{list:10000,discount:2000,receipt:0,state:"DUE",due:8000},{list:10000,discount:2000,receipt:5000,state:"PARTIAL",due:3000},{list:10000,discount:2000,receipt:8000,state:"PAID",due:0}]){
+   const p=await newPractice();let review=await(await api(p.path+"/contract/conversion")).json() as any;
+   const price=await api(p.path+"/contract/agreed-price","PUT",{listCents:scenario.list,discountCents:scenario.discount,reason:"Collaudo sintetico del PDF",reviewHash:review.reviewHash});assert.equal(price.status,200,await price.clone().text());
+   if(scenario.receipt){const receipt=await fetch(base+"/rental-payments/bookings/"+p.booking.id+"/collections",{method:"POST",headers:{Authorization:`Bearer ${tokens.admin}`,"Content-Type":"application/json","X-Fleetum-Site":"all","Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({amountCents:scenario.receipt,method:"CASH",occurredAt:new Date().toISOString(),reference:"QA PDF",reason:"Incasso sintetico"})});assert.equal(receipt.status,201,await receipt.clone().text());}
+   review=await(await api(p.path+"/contract/conversion")).json() as any;assert.equal(review.balance.state,scenario.state);
+   const converted=await api(p.path+"/contract/convert","POST",{reviewHash:review.reviewHash});assert.equal(converted.status,201,await converted.clone().text());
+   const result=await converted.json() as any;assert.equal(result.balance.outstandingCents,scenario.due);
+   assert.equal(await prisma.rentalCollectionEntry.count({where:{bookingId:p.booking.id}}),scenario.receipt?1:0);
+   const response=await api(p.path+"/contract/pdf");assert.equal(response.status,200);
+   const parser=new PDFParse({data:Buffer.from(await response.arrayBuffer())});try{const text=(await parser.getText()).text;assert.match(text,/Revisione 1/);assert.match(text,/Da sottoscrivere/);assert.match(text,/INCASSI NETTI REGISTRATI/);assert.ok(text.includes((scenario.receipt/100).toFixed(2).replace('.',',')));assert.ok(text.includes((scenario.due/100).toFixed(2).replace('.',',')));}finally{await parser.destroy();}
+   assert.equal((await(await api(p.path+"/contract/conversion")).json() as any).balance.state,scenario.state);
+  }
+ });
+
+ test("legacy signed contracts without a preserved original are never regenerated",async()=>{
+  const p=await newPractice();await prisma.bookingContract.update({where:{id:p.contract.id},data:{status:"SIGNED",signedAt:new Date()}});
+  const response=await api(p.path+"/contract/pdf");assert.equal(response.status,409,await response.clone().text());assert.equal((await response.json() as any).error,"CONTRACT_LEGACY_ORIGINAL_REQUIRED");
+  assert.equal(await prisma.contractSigningRequest.count({where:{contractId:p.contract.id}}),0);
+ });
  test("in-person signature requires consent, same-browser PDF proof, and conserves original and final PDF",async()=>{
   const p=await newPractice();await convertPractice(p);
   const endpoint=p.path+"/contract/signing/in-person",send=()=>fetch(base+endpoint,{method:"POST",headers:{Authorization:`Bearer ${tokens.admin}`,"Content-Type":"application/json","X-Fleetum-Site":"all","X-Idempotency-Key":p.contract.id},body:"{}"});
@@ -251,7 +286,8 @@ describe(legacyOnly?"pre-upgrade contract invitations on synthetic PostgreSQL":"
   const row=await prisma.contractSigningRequest.findUniqueOrThrow({where:{id:request.id}});assert.equal(row.status,"SIGNED");assert.ok(row.signedStoredFileObjectId);assert.ok(row.signedDocumentSha256);assert.notEqual(row.signedDocumentSha256,row.documentSha256);
   assert.equal(await prisma.bookingContractEvent.count({where:{contractId:p.contract.id,type:"SIGNED_IN_PERSON"}}),1);
   const final=await api(p.path+"/contract/pdf"),bytes=Buffer.from(await final.arrayBuffer());assert.equal(sha(bytes),row.signedDocumentSha256);
-  const {PDFDocument}=await import("pdf-lib");assert.equal((await PDFDocument.load(bytes)).getPageCount(),(await PDFDocument.load(original)).getPageCount()+2);
+  const {PDFDocument}=await import("pdf-lib");assert.equal((await PDFDocument.load(bytes)).getPageCount(),(await PDFDocument.load(original)).getPageCount()+1);
+  assert.equal((row.evidence as any).pdfLayoutVersion,2);
   if(process.env.BLOCK4_PDF_OUTPUT)await writeFile(process.env.BLOCK4_PDF_OUTPUT,bytes);
   assert.equal((await confirm({...body,confirmationId:crypto.randomUUID()})).status,409);
   assert.equal((await api(p.path+"/contract","PATCH",{content:"Cannot replace a signed document"})).status,409);

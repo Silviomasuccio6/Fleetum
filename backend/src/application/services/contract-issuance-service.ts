@@ -1,3 +1,4 @@
+import {buildEnterpriseContractPdf} from './enterprise-contract-pdf-service.js';
 import {Prisma} from '@prisma/client';
 import {storageProvider} from '../../infrastructure/storage/storage-provider.js';
 import {prisma} from '../../infrastructure/database/prisma/client.js';
@@ -14,7 +15,7 @@ export class ContractIssuanceService {
   const agreedCents=amount===null?null:Math.round(amount*100);
   const balance=collectionBalance(agreedCents,entries);
   const readinessIssues:string[]=[];
-  if(!source.contract.issuedAt&&!source.contract.signedAt){try{assertSigningReady(source);}catch(error){if(error instanceof AppError&&[409,422].includes(error.statusCode))readinessIssues.push(error.message);else throw error;}}
+  if(!source.contract.issuedAt&&!source.contract.signedAt){try{assertSigningReady(source);await buildEnterpriseContractPdf(source.input);}catch(error){if(error instanceof AppError&&[409,422].includes(error.statusCode))readinessIssues.push(error.message);else throw error;}}
   const reviewed={sourceHash:source.sourceHash,balance,entries:entries.map(e=>e.id)};
   return{source,value:{contractId:source.contract.id,documentRevision:source.contract.documentRevision,issuedAt:source.contract.issuedAt,legacySigned:source.contract.status==='SIGNED'&&!source.contract.issuedAt,customer:source.booking.customerName,bookingCode:source.booking.code,vehicle:source.booking.vehicle.plate,pickupAt:source.booking.pickupAt,returnAt:source.booking.returnAt,pickupLocation:source.booking.pickupLocation,returnLocation:source.booking.returnLocation,readinessIssues,priceAgreement:source.booking.priceAgreement,balance,reviewHash:signingHash(stableSigningJson(reviewed))}};
  }
@@ -25,6 +26,7 @@ export class ContractIssuanceService {
    const {source,value}=await this.review(tx,tenantId,bookingId);
    if(source.contract.issuedAt)return{...value,duplicate:true};
    assertSigningReady(source);
+   if(value.readinessIssues.length)throw new AppError(value.readinessIssues.join('. '),422,'CONTRACT_DOCUMENT_INCOMPLETE');
    await assertNoSigningFreeze(tx,tenantId,bookingId);
    if(value.reviewHash!==reviewHash)throw new AppError('I dati o gli incassi sono cambiati. Rileggi il riepilogo.',409,'CONTRACT_REVIEW_CHANGED');
    const now=new Date();

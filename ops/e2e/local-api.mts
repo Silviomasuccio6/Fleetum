@@ -49,6 +49,8 @@ const passwordHash = await bcrypt.hash(process.env.DEMO_ADMIN_PASSWORD!, 12);
 for (const suffix of ["a", "b"]) {
   await prisma.tenant.create({ data: {
     id: `synthetic-rehearsal-${suffix}`, name: `Synthetic rehearsal ${suffix.toUpperCase()}`,
+    tenantProfile: { create: { legalName: `Autonoleggio sintetico ${suffix.toUpperCase()}`, vatNumber: "00000000000",
+      legalAddress: "Via sintetica 1", city: "Roma", postalCode: "00100", country: "IT", email: "noleggio@example.invalid" } },
     tenantSubscription: { create: { provider: "local", plan: "ENTERPRISE", status: "ACTIVE", seats: 10,
       currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) } },
     users: { create: { email: `rehearsal-${suffix}@example.invalid`, passwordHash,

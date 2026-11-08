@@ -38,6 +38,7 @@ import {
   renderContractTemplate,
   sanitizeTemplateInput
 } from "../../../application/services/booking-contract-service.js";
+import {loadSigningSource} from "../../../application/services/contract-signing-source.js";
 import { buildEnterpriseContractPdf } from "../../../application/services/enterprise-contract-pdf-service.js";
 import {
   parseCustomerDocumentDraft,
@@ -1221,86 +1222,16 @@ export class RentalBookingsController {
   private async buildContractPdf(contract: Awaited<ReturnType<RentalBookingsController["getContractOrThrow"]>>) {
     const frozen = await this.frozenContractPdf(contract.tenantId,contract.bookingId);
     if(frozen)return frozen.bytes;
-    const events = Array.isArray(contract.events) ? contract.events : [];
-    const deliveries = Array.isArray(contract.deliveries) ? contract.deliveries : [];
-    const latestDelivery = deliveries[0] ?? null;
-
-    const signedEventWithSignature = events.find((entry) => {
-      if (entry.type !== "SIGNED") return false;
-      return Boolean(this.extractContractSignatureDetails(entry.details));
-    });
-    const signatureDetails = signedEventWithSignature
-      ? this.extractContractSignatureDetails(signedEventWithSignature.details)
-      : null;
-
-    try {
-      const tenantBranding = await this.tenantProfileService.contractBranding(contract.tenantId);
-      const templateBranding = contract.template
-        ? {
-            companyName: contract.template.companyName,
-            companyAddress: contract.template.companyAddress,
-            companyVat: contract.template.companyVat,
-            companyEmail: contract.template.companyEmail,
-            companyPhone: contract.template.companyPhone,
-            logoFilePath: contract.template.logoFilePath,
-            logoFileName: contract.template.logoFileName,
-            brandPrimary: contract.template.brandPrimary,
-            brandAccent: contract.template.brandAccent,
-            brandFont: contract.template.brandFont
-          }
-        : {};
-      return await buildEnterpriseContractPdf({
-        contract: {
-          rentalTerms: contract.rentalTerms,
-          drivers: await resolveContractDrivers(contract.tenantId,contract.rentalTerms),
-          title: !contract.issuedAt && !contract.signedAt ? `BOZZA — ${contract.title}` : contract.title,
-          content: contract.content,
-          status: contract.status,
-          templateVersion: contract.templateVersion,
-          emailTo: contract.emailTo,
-          createdAt: contract.createdAt,
-          updatedAt: contract.updatedAt,
-          lastSentAt: contract.lastSentAt,
-          signedAt: contract.signedAt,
-          latestDelivery: latestDelivery
-            ? {
-                channel: latestDelivery.channel,
-                recipient: latestDelivery.recipient,
-                status: latestDelivery.status,
-                sentAt: latestDelivery.sentAt,
-                createdAt: latestDelivery.createdAt,
-                errorMessage: latestDelivery.errorMessage
-              }
-            : null,
-          signatureFilePath: signatureDetails?.signatureFilePath ?? null,
-          signatureMimeType: signatureDetails?.signatureMimeType ?? null,
-          signatureSizeBytes: signatureDetails?.signatureSizeBytes ?? null
-        },
-        booking: {
-          code: contract.booking.code,
-          status: contract.booking.status,
-          contractStatus: contract.booking.contractStatus,
-          customerName: contract.booking.customerName,
-          customerEmail: contract.booking.customerEmail,
-          customerPhone: contract.booking.customerPhone,
-          customerDocument: contract.booking.customerDocument,
-          pickupAt: contract.booking.pickupAt,
-          returnAt: contract.booking.returnAt,
-          pickupLocation: contract.booking.pickupLocation,
-          returnLocation: contract.booking.returnLocation,
-          pickupKm: contract.booking.pickupKm,
-          returnKm: contract.booking.returnKm,
-          expectedTotal: contract.booking.expectedTotal,
-          finalTotal: contract.booking.finalTotal,
-          priceAgreement: contract.booking.priceAgreement,
-          vehicle: contract.booking.vehicle,
-          customer: contract.booking.customer,
-          contractSignedAt: contract.booking.contractSignedAt,
-          pricingSnapshot: contract.booking.pricingSnapshot
-        },
-        branding: { ...templateBranding, ...tenantBranding }
+    if(contract.signedAt||contract.status==="SIGNED")throw new AppError("Recupera il PDF storico originale: un contratto già firmato non può essere ricostruito con il nuovo modello.",409,"CONTRACT_LEGACY_ORIGINAL_REQUIRED");
+    try{
+      // Preview, download and new signing requests use the same complete business content.
+      const source=await loadSigningSource(contract.tenantId,contract.bookingId);
+      return await buildEnterpriseContractPdf({...source.input,
+        contract:{...source.input.contract,status:contract.status,signedAt:contract.signedAt},
+        booking:{...source.input.booking,status:contract.booking.status,contractStatus:contract.booking.contractStatus,
+          returnKm:contract.booking.returnKm,contractSignedAt:contract.booking.contractSignedAt}
       });
-    } catch (error) {
+    }catch(error){
       if(error instanceof AppError)throw error;
       throw new AppError("Impossibile preparare il contratto completo. Riprova prima dell’invio.",503,"CONTRACT_PDF_UNAVAILABLE");
     }
