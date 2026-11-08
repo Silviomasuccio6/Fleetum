@@ -11,7 +11,7 @@ import * as React from 'react';
 function pageHarness(kind: 'contracts' | 'pricing', permissions = ['*'], initial:Record<number,any> = {}) {
  const file = kind === 'contracts' ? 'contracts/rental-contracts-page' : 'pricing/rental-pricing-page';
  let source = readFileSync(new URL('../src/presentation/pages/' + file + '.tsx', import.meta.url), 'utf8');
- const exposed = kind === 'contracts' ? 'loadContracts,runMarkSigned,runSendEmail,runSendWhatsapp' : 'loadLists,loadListDetails,selectList,toDateInput';
+ const exposed = kind === 'contracts' ? 'loadContracts,runSendEmail,runSendWhatsapp' : 'loadLists,loadListDetails,selectList,toDateInput';
  const guard=source.indexOf('  if(!canRead)return <section');
  const at = guard>=0?guard:source.lastIndexOf('  return ('); assert.ok(at >= 0);
  source = source.slice(0, at) + `  expose({${exposed}});\n` + source.slice(at);
@@ -65,13 +65,13 @@ test('reopening the same price list reloads its packages and policies',async()=>
  h.pending[0].resolve({data:[{id:'fresh-package'}]});h.pending[1].resolve({data:[{id:'fresh-policy'}]});await new Promise(resolve=>setImmediate(resolve));
  assert.equal(h.states[4][0].id,'fresh-package');assert.equal(h.states[5][0].id,'fresh-policy');
 });
-test('a failed signature remains a failed operation and can be retried',async()=>{
- const h=pageHarness('contracts');const row={id:'contract',bookingId:'booking',booking:{code:'QA'},status:'READY'};
- const result=h.functions.runMarkSigned(row,'data:image/png;base64,synthetic');h.pending[0].reject(new Error('Temporary failure'));
- assert.equal(await result,false);assert.equal(h.pending.length,1);
+test('contract monitoring routes staff to the document-bound signing workflow',()=>{
+ const source=readFileSync(new URL('../src/presentation/pages/contracts/rental-contracts-page.tsx',import.meta.url),'utf8');
+ assert.ok(source.includes('Apri emissione e firma'));assert.ok(source.includes('/rental-bookings/${encodeURIComponent(actionPanelRow.bookingId)}'));
+ assert.equal(source.includes('markContractSigned('),false);
 });
 test('read-only contract roles cannot invoke email, WhatsApp or signature mutations',async()=>{
- const h=pageHarness('contracts',['vehicles:read']);for(const name of ['runSendEmail','runSendWhatsapp','runMarkSigned'])await h.functions[name]({id:'contract',bookingId:'booking'});
+ const h=pageHarness('contracts',['vehicles:read']);for(const name of ['runSendEmail','runSendWhatsapp'])await h.functions[name]({id:'contract',bookingId:'booking'});
  assert.equal(h.pending.length,0);
 });
 
@@ -101,4 +101,13 @@ test('the customer detail uses the same informational queued outcome for contrac
  });
  await run('email','synthetic-booking');assert.equal(sends,1);assert.equal(inline,'Invio email contratto accodato.');
  const items=useSnackbarStore.getState().items;assert.equal(items.length,1);assert.equal(items[0].tone,'info');assert.equal(items[0].durationMs,4000);
+});
+
+// Customer history must open the same document-bound workflow, never sign by status.
+test('customer history directs signing to the booking without invoking a signature mutation',async()=>{
+ const source=readFileSync(new URL('../src/presentation/pages/customers/customers-page.tsx',import.meta.url),'utf8');
+ const ast=ts.createSourceFile('customer.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let handler='';
+ const walk=(node:ts.Node)=>{if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='contractAction')handler=node.initializer!.getText(ast);ts.forEachChild(node,walk)};walk(ast);assert.ok(handler);
+ let target='';const run=runInNewContext(ts.transpileModule('('+handler+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{...operationFeedback,locked:false,selectedId:'synthetic-customer',canWrite:true,navigate:(value:string)=>{target=value},setBusy(){throw Error('Signing must not submit here')},setActionError(){},encodeURIComponent});
+ await run('signed','booking/id');assert.equal(target,'/rental-bookings/booking%2Fid');assert.equal(source.includes('markContractSigned('),false);
 });

@@ -1,3 +1,4 @@
+import {assertContractIssued} from "../../../application/services/contract-issuance-service.js";
 import {resolveContractDrivers} from "../../../application/services/contract-rental-drivers.js";
 import { contractSigningService } from "../../../application/services/contract-signing-service.js";
 import { assertNoSigningFreeze } from "../../../application/services/contract-signing-source.js";
@@ -1184,7 +1185,7 @@ export class RentalBookingsController {
       contractId: contract.id,
       actorUserId: input.actorUserId,
       type: existing ? "REGENERATED" : "GENERATED",
-      message: existing ? "Contratto rigenerato da template" : "Contratto generato da template",
+      message: existing ? "Bozza contratto rigenerata da template" : "Bozza tecnica contratto predisposta",
       details: { templateVersion: template.version }
     }, tx);
     await tx.rentalBooking.update({where:{id:booking.id},data:{contractStatus:"READY",cargosStatus:"PENDING"}});
@@ -1252,7 +1253,7 @@ export class RentalBookingsController {
         contract: {
           rentalTerms: contract.rentalTerms,
           drivers: await resolveContractDrivers(contract.tenantId,contract.rentalTerms),
-          title: contract.title,
+          title: !contract.issuedAt && !contract.signedAt ? `BOZZA — ${contract.title}` : contract.title,
           content: contract.content,
           status: contract.status,
           templateVersion: contract.templateVersion,
@@ -1291,6 +1292,7 @@ export class RentalBookingsController {
           returnKm: contract.booking.returnKm,
           expectedTotal: contract.booking.expectedTotal,
           finalTotal: contract.booking.finalTotal,
+          priceAgreement: contract.booking.priceAgreement,
           vehicle: contract.booking.vehicle,
           customer: contract.booking.customer,
           contractSignedAt: contract.booking.contractSignedAt,
@@ -2285,6 +2287,9 @@ export class RentalBookingsController {
         where: { ...ownedBookingWhere(tenantId), id: booking.id, deletedAt: null }
       });
       if (!locked) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+      const issued=await tx.bookingContract.findFirst({where:{tenantId,bookingId:booking.id,issuedAt:{not:null}}});
+      if(issued||locked.priceAgreement)throw new AppError("Il prezzo concordato va modificato dal riepilogo prima dell’emissione.",409,"CONTRACT_PRICE_FROZEN");
+
       if (locked.vehicleId !== booking.vehicleId || locked.updatedAt.getTime() !== booking.updatedAt.getTime()) {
         throw new AppError("La prenotazione e' cambiata. Riprova.", 409, "BOOKING_CHANGED");
       }
@@ -2422,6 +2427,7 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
     const payload = bookingContractUpdateSchema.parse(req.body);
+    if (payload.status === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
 
     const updated = await prisma.$transaction(async tx => {
@@ -2497,6 +2503,7 @@ export class RentalBookingsController {
     const idempotencyKey = this.extractRequiredIdempotencyKey(req, "inviare un contratto via email");
     const payload = bookingContractEmailSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
+    assertContractIssued(contract);
     const dictionary = this.buildContractContext(contract.booking as Awaited<ReturnType<RentalBookingsController["getBookingOrThrow"]>>);
     const tenantBranding = await this.tenantProfileService.contractBranding(tenantId);
     const senderName = tenantBranding.companyName ?? undefined;
@@ -2568,6 +2575,7 @@ export class RentalBookingsController {
           bookingId: contract.bookingId,
           contractId: contract.id,
           contractDeliveryId: delivery.id,
+          contractRevision: contract.documentRevision,
           actorUserId,
           ...(siteAuthorization ? {siteAuthorization} : {}),
           fromName: senderName,
@@ -2651,6 +2659,7 @@ export class RentalBookingsController {
     const idempotencyKey = this.extractIdempotencyKey(req);
     const payload = bookingContractWhatsappSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
+    assertContractIssued(contract);
 
     const rawPhone = payload.phone ?? contract.booking.customer?.phone ?? contract.booking.customerPhone;
     const normalizedPhone = this.normalizeWhatsAppPhone(rawPhone);
@@ -2780,110 +2789,9 @@ export class RentalBookingsController {
     });
   };
 
-  markContractSigned = async (req: Request, res: Response) => {
-    const tenantId = req.auth!.tenantId;
-    const actorUserId = req.auth?.userId;
-    const idempotencyKey = this.extractIdempotencyKey(req);
-    const payload = bookingContractMarkSignedSchema.parse(req.body);
-    const contract = await this.getContractOrThrow(tenantId, req.params.id);
-    await prisma.$transaction(tx=>this.lockMutableContract(tx,tenantId,contract.bookingId));
-    const events = Array.isArray(contract.events) ? contract.events : [];
-
-    if (idempotencyKey) {
-      const alreadySignedByKey = events.find(
-        (entry) => entry.type === "SIGNED" && this.extractIdempotencyKeyFromDetails(entry.details) === idempotencyKey
-      );
-      if (alreadySignedByKey) {
-        const signatureDetails = this.extractContractSignatureDetails(alreadySignedByKey.details);
-        res.status(200).json({
-          ...contract,
-          signatureSaved: Boolean(signatureDetails),
-          signatureFilePath: signatureDetails?.signatureFilePath ?? null,
-          duplicate: true,
-          idempotent: true
-        });
-        return;
-      }
-    }
-
-    if (contract.status === "SIGNED" && !payload.signatureDataUrl) {
-      const latestSignedEvent = events.find((entry) => entry.type === "SIGNED");
-      const signatureDetails = latestSignedEvent ? this.extractContractSignatureDetails(latestSignedEvent.details) : null;
-      res.status(200).json({
-        ...contract,
-        signatureSaved: Boolean(signatureDetails),
-        signatureFilePath: signatureDetails?.signatureFilePath ?? null,
-        duplicate: true,
-        idempotent: true
-      });
-      return;
-    }
-
-    const signedAt = payload.signedAt ?? new Date();
-    const signature = payload.signatureDataUrl
-      ? await this.persistContractSignature({
-          tenantId,
-          contractId: contract.id,
-          signatureDataUrl: payload.signatureDataUrl
-        })
-      : null;
-
-    let updated;
-    try {
-      updated = await prisma.$transaction(async (tx) => {
-        await this.lockMutableContract(tx,tenantId,contract.bookingId);
-        const nextContract = await tx.bookingContract.update({
-          where: { id: contract.id },
-          data: {
-            status: "SIGNED",
-            signedAt,
-            errorMessage: null,
-            updatedByUserId: actorUserId
-          }
-        });
-
-        await tx.rentalBooking.update({
-          where: { id: contract.bookingId },
-          data: {
-            contractStatus: "SIGNED",
-            contractSignedAt: signedAt,
-            ...(contract.booking.status === "CONFIRMED" ? { status: "CONTRACT_SIGNED" } : {})
-          }
-        });
-
-        await this.logContractEvent({
-          tenantId,
-          bookingId: contract.bookingId,
-          contractId: contract.id,
-          actorUserId,
-          type: "SIGNED",
-          message: signature ? "Contratto firmato con acquisizione grafica" : "Contratto marcato come firmato",
-          details: withDefined({
-            signedAt: signedAt.toISOString(),
-            signatureFilePath: signature?.filePath,
-            signatureMimeType: signature?.mimeType,
-            signatureSizeBytes: signature?.sizeBytes,
-            idempotencyKey: idempotencyKey ?? undefined
-          })
-        }, tx);
-        return nextContract;
-      });
-    } catch (error) {
-      if (signature) {
-        await compensateCommittedUpload({
-          tenantId,
-          key: signature.filePath,
-          resourceType: "BookingContractSignature"
-        });
-      }
-      throw error;
-    }
-
-    res.json({
-      ...updated,
-      signatureSaved: Boolean(signature),
-      signatureFilePath: signature?.filePath ?? null
-    });
+  markContractSigned = async (req: Request, _res: Response) => {
+    await this.getContractOrThrow(req.auth!.tenantId,req.params.id);
+    throw new AppError("Apri il documento e usa la firma email o la firma in loco con consenso.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
   };
 
   downloadContractPdfPublic = async (req: Request, res: Response) => {
@@ -3821,6 +3729,7 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingCreateSchema.parse(req.body);
+    if (payload.contractStatus === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     if (payload.cargosStatus && payload.cargosStatus !== "PENDING") throw new AppError("Lo stato CARGOS è gestito dal servizio di trasmissione", 422, "CARGOS_STATUS_SERVER_MANAGED");
     const idempotencyKey = this.extractRequiredIdempotencyKey(req);
     const requestHash = this.bookingCreateRequestHash(payload);
@@ -3995,6 +3904,7 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingUpdateSchema.parse(req.body);
+    if (payload.contractStatus === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     if (payload.cargosStatus !== undefined) throw new AppError("Lo stato CARGOS è gestito dal servizio di trasmissione", 422, "CARGOS_STATUS_SERVER_MANAGED");
     const updated = await prisma.$transaction(async (tx) => {
       await this.lockBookingMutation(tx, tenantId, req.params.id);
@@ -4041,6 +3951,11 @@ export class RentalBookingsController {
 
       if (!nextCustomerId) throw new AppError("Cliente obbligatorio", 400, "CUSTOMER_REQUIRED");
       const nextCustomer = await this.getCustomerOrThrow(tenantId, nextCustomerId, tx);
+      if ((payload.expectedTotal !== undefined && payload.expectedTotal !== lockedBooking.expectedTotal) || (payload.finalTotal !== undefined && payload.finalTotal !== lockedBooking.finalTotal)) {
+        const issued=await tx.bookingContract.findFirst({where:{tenantId,bookingId:current.id,issuedAt:{not:null}}});
+        if (issued || lockedBooking.priceAgreement) throw new AppError("Modifica il prezzo dal riepilogo del contratto prima dell’emissione.",409,"CONTRACT_PRICE_FROZEN");
+      }
+
 
       if (nextReturnAt.getTime() <= nextPickupAt.getTime()) {
         throw new AppError("La data/ora di rientro deve essere successiva al ritiro", 400, "BOOKING_DATE_RANGE_INVALID");
@@ -4141,6 +4056,7 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingTransitionSchema.parse(req.body);
+    if (payload.toStatus === "CONTRACT_SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     const current = await this.getBookingOrThrow(tenantId, req.params.id);
 
     if (!this.canTransition(current.status, payload.toStatus)) {
@@ -4353,10 +4269,11 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingContractSchema.parse(req.body);
+    if (payload.status === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     const current = await this.getBookingOrThrow(tenantId, req.params.id);
 
-    const signedAt = payload.status === "SIGNED" ? payload.signedAt ?? current.contractSignedAt ?? new Date() : null;
-    const shouldPromoteToContractSigned = payload.status === "SIGNED" && ["DRAFT", "QUOTED", "HOLD", "CONFIRMED"].includes(current.status);
+    const signedAt = null;
+    const shouldPromoteToContractSigned = false;
 
     const updated = await prisma.$transaction(async tx=>{
       await this.lockMutableContract(tx,tenantId,current.id);

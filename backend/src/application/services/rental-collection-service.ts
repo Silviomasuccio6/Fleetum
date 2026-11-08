@@ -81,7 +81,8 @@ export class RentalCollectionService{
     unitRateAmount:hydrated.baseRateAmount===null?null:String(hydrated.baseRateAmount),unit:hydrated.baseRateUnit,discountPercent:hydrated.discountPercent,
     recordedAt:hydrated.createdAt,discountProvenance:{status:'NOT_RECORDED',actor:null,reason:null}}:null;
    const booking=rowDto(rows[0]);collectionBalance(booking.agreedCents,entries);
-   return{booking,entries,pricing,onlineCollection:{enabled:false,reason:'MERCHANT_CONFIGURATION_REQUIRED' as const}};
+   const agreement=await tx.rentalBooking.findFirst({where:{id:bookingId,tenantId},select:{priceAgreement:true}});
+   return{booking,entries,pricing,priceAgreement:agreement?.priceAgreement??null,onlineCollection:{enabled:false,reason:'MERCHANT_CONFIGURATION_REQUIRED' as const}};
   },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
  }
  async record(tenantId:string,bookingId:string,userId:string,kind:'RECEIPT'|'REFUND'|'REVERSAL',input:CollectionCommand,sourceId:string|null=null){

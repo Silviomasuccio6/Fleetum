@@ -55,6 +55,11 @@ export const createDemoCustomer = async (api: APIRequestContext, csrfToken: stri
       documentType: "CI",
       documentNumber: `E2E${prefix}`,
       drivingLicenseNumber: `PAT${prefix}`,
+      drivingLicenseCategory: "B",
+      drivingLicenseExpiresAt: "2035-01-01T00:00:00.000Z",
+      documentExpiresAt: "2035-01-01T00:00:00.000Z",
+      dateOfBirth: "1990-01-01T00:00:00.000Z",
+      residenceAddress: "Via sintetica QA 2",
       notes: "[E2E DATA] Cliente creato da Playwright"
     }
   });

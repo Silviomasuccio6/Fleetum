@@ -8,13 +8,16 @@ import {Label} from "../ui/label";
 import {Select} from "../ui/select";
 import {Textarea} from "../ui/textarea";
 
-export function ContractRentalDetailsPanel({bookingId,canManage,freeze,onSaved}:{bookingId:string;canManage:boolean;freeze:boolean;onSaved:()=>void}){
+export function ContractRentalDetailsPanel({bookingId,canManage,freeze,onSaved,onDirtyChange}:{bookingId:string;canManage:boolean;freeze:boolean;onSaved:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const owner=useSiteAccessStore(s=>s.owner),revision=useSiteAccessStore(s=>s.revision),context=`${owner}:${revision}:${bookingId}`,id=useId();
  const[data,setData]=useState<{context:string;value:RentalDetails}|null>(null),[draft,setDraft]=useState<RentalTerms|null>(null),[amounts,setAmounts]=useState<Record<string,string>>({}),[annexes,setAnnexes]=useState("");
  const[search,setSearch]=useState(""),[options,setOptions]=useState<DriverOption[]>([]),[searchBusy,setSearchBusy]=useState(false),[searchMessage,setSearchMessage]=useState("");
  const[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState(""),[reload,setReload]=useState(0),[invalid,setInvalid]=useState<string|null>(null);
  const seq=useRef(0),searchSeq=useRef(0),saving=useRef(false),alertRef=useRef<HTMLDivElement>(null);
  const current=data?.context===context?data.value:null,disabled=!current||!canManage||freeze||current.frozen||busy;
+ const dirtyCallback=useRef(onDirtyChange);dirtyCallback.current=onDirtyChange;
+ const dirty=Boolean(current&&draft&&(JSON.stringify(draft)!==JSON.stringify(current.terms)||annexes!==current.terms.annexes.join("\n")||Object.keys(amountLabels).some(key=>{const amount=current.terms[key as keyof typeof amountLabels];return(amounts[key]??"")!==(amount===null?"":(amount/100).toFixed(2).replace(".",","));})));
+ useEffect(()=>{dirtyCallback.current?.(dirty);},[dirty]);
  const apply=(value:RentalDetails)=>{setData({context,value});setDraft(value.terms);setOptions(value.drivers);setAmounts(Object.fromEntries(Object.keys(amountLabels).map(key=>{const v=value.terms[key as keyof typeof amountLabels];return[key,v===null?"":(v/100).toFixed(2).replace(".",",")];})));setAnnexes(value.terms.annexes.join("\n"));};
  useEffect(()=>{let disposed=false;const n=++seq.current,stamp=captureSiteStamp();saving.current=false;setData(null);setDraft(null);setError("");setNotice("");setSearch("");setOptions([]);setBusy(false);setSearchMessage("");setSearchBusy(false);
   void api.read(bookingId).then(value=>{assertSiteStamp(stamp);if(!disposed&&n===seq.current)apply(value);}).catch(e=>{if(!disposed&&n===seq.current)setError((e as Error).message);});

@@ -1,3 +1,4 @@
+import {ContractIssuancePanel} from "../../components/contracts/contract-issuance-panel";
 import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
 import { ContractSigningPanel } from "../../components/contracts/contract-signing-panel";
 import { ContractRentalDetailsPanel } from "../../components/contracts/contract-rental-details-panel";
@@ -551,7 +552,9 @@ export const RentalBookingsPage = () => {
 
   const [transitionTo, setTransitionTo] = useState<RentalBookingStatus | "">("");
   const [contractTo, setContractTo] = useState<RentalContractStatus>("NOT_READY");
+  const [termsDirty,setTermsDirty]=useState<{id:string;dirty:boolean}|null>(null);
   const [signingFreeze,setSigningFreeze]=useState<{id:string;locked:boolean}|null>(null);
+  const [contractWorkflowRevision,setContractWorkflowRevision]=useState(0);
   const [cargosPromptBookingId,setCargosPromptBookingId]=useState<string|null>(null);
   const [noteInput, setNoteInput] = useState("");
 
@@ -1465,7 +1468,7 @@ export const RentalBookingsPage = () => {
         targetBookingId = created.id;
         selectBooking(created.id);
         publishOperationFeedback(setSuccess, "Prenotazione creata con successo.", notificationScope);
-        if(created.contractCreated)setCargosPromptBookingId(created.id);
+        // Template creation is a technical draft, not commercial issuance.
       } else if (bookingForm.bookingId) {
         await rentalBookingsUseCases.update(bookingForm.bookingId, payload);
         targetBookingId = bookingForm.bookingId;
@@ -1749,7 +1752,7 @@ export const RentalBookingsPage = () => {
       setContract(generated);
       syncContractEditor(generated);
       publishOperationFeedback(setSuccess, "Contratto generato dal template tenant.", notificationScope);
-      if(!contract)setCargosPromptBookingId(selectedBooking.id);
+      // The CARGOS prompt belongs to explicit manual issuance.
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
@@ -1758,6 +1761,8 @@ export const RentalBookingsPage = () => {
       if (bookingSelectionMountedRef.current) setSaving(false);
     }
   };
+
+  const contractHasUnsavedChanges=()=>Boolean((termsDirty?.id===selectedBooking?.id&&termsDirty?.dirty)||(contract&&Object.entries(contractEditor).some(([key,value])=>String(value??"")!==String(contract[key as keyof BookingContract]??""))));
 
   const runSaveContractDocument = async () => {
     const notificationScope=captureOperationContext();
@@ -1778,6 +1783,7 @@ export const RentalBookingsPage = () => {
       contractRequestVersionRef.current += 1;
       setContract(updated);
       syncContractEditor(updated);
+      setContractWorkflowRevision(v=>v+1);
       publishOperationFeedback(setSuccess, "Contratto salvato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
@@ -1896,28 +1902,6 @@ export const RentalBookingsPage = () => {
     }
   };
 
-  const runMarkContractSigned = async () => {
-    const notificationScope=captureOperationContext();
-    if (!selectedBooking || !contract) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const updated = await rentalBookingsUseCases.markContractSigned(selectedBooking.id, {});
-      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
-      contractRequestVersionRef.current += 1;
-      setContract(updated);
-      syncContractEditor(updated);
-      setContractTo("SIGNED");
-      publishOperationFeedback(setSuccess, "Contratto marcato come firmato.", notificationScope);
-      setRefreshKey((prev) => prev + 1);
-    } catch (e) {
-      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
-      setError((e as Error).message);
-    } finally {
-      if (bookingSelectionMountedRef.current) setSaving(false);
-    }
-  };
 
   const openTemplateModal = async () => {
     if(!canManageBookings)return;const sequence=++templateRequestVersion.current;setTemplateLoading(true);setTemplateLoaded(false);setTemplateDirty(false);
@@ -2342,7 +2326,7 @@ export const RentalBookingsPage = () => {
                   <div className="flex items-center gap-2">
                     <Select id="booking-transition-to" value={transitionTo} onChange={(e) => setTransitionTo(e.target.value as RentalBookingStatus | "")}>
                       <option value="">Seleziona stato</option>
-                      {availableTransitions.map((status) => (
+                      {availableTransitions.filter(status=>status!=="CONTRACT_SIGNED").map((status) => (
                         <option key={status} value={status}>
                           {BOOKING_STATUS_LABELS[status]}
                         </option>
@@ -2361,14 +2345,15 @@ export const RentalBookingsPage = () => {
                   </BookingDetailSection>
                   <BookingInvoiceSection key={`invoice-${selectedBooking.id}`} bookingId={selectedBooking.id} bookingCode={selectedBooking.code} canRead={permissions.includes("vehicles:read") || permissions.includes("*")} />
                   <BookingDetailSection title="Contratto" description="Preparazione, documento, firma e invio." icon={<FileText />}>
-                    {contract?<ContractRentalDetailsPanel key={`terms-${selectedBooking.id}`} bookingId={selectedBooking.id} canManage={canManageBookings} freeze={signingFreeze?.id===selectedBooking.id?signingFreeze.locked:true} onSaved={()=>{void loadContract(selectedBooking.id);}}/>:null}
-                    {contract?<ContractSigningPanel key={selectedBooking.id} bookingId={selectedBooking.id} canManage={canManageBookings} onFreeze={locked=>setSigningFreeze({id:selectedBooking.id,locked})} onSigned={()=>{void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}}/>:null}
+                    {contract?<ContractIssuancePanel key={`issue-${selectedBooking.id}-${contractWorkflowRevision}`} bookingId={selectedBooking.id} canManage={canManageBookings} canAgreePrice={permissions.includes("rental-payments:charge")||permissions.includes("*")} hasUnsavedChanges={contractHasUnsavedChanges()} onIssued={()=>setCargosPromptBookingId(selectedBooking.id)} onChanged={kind=>{setContractWorkflowRevision(v=>v+1);if(kind==="issuance"){void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}else void loadSelectedBooking(selectedBooking.id);}}/>:null}
+                    {contract?<ContractRentalDetailsPanel key={`terms-${selectedBooking.id}-${contract.documentRevision??0}`} bookingId={selectedBooking.id} canManage={canManageBookings} onDirtyChange={dirty=>setTermsDirty({id:selectedBooking.id,dirty})} freeze={signingFreeze?.id===selectedBooking.id?signingFreeze.locked:true} onSaved={()=>setContractWorkflowRevision(v=>v+1)}/>:null}
+                    {contract?<ContractSigningPanel key={`${selectedBooking.id}-${contractWorkflowRevision}`} bookingId={selectedBooking.id} canManage={canManageBookings} hasUnsavedChanges={contractHasUnsavedChanges()} onRevision={()=>{setContractWorkflowRevision(v=>v+1);void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}} onFreeze={locked=>setSigningFreeze({id:selectedBooking.id,locked})} onSigned={()=>{void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}}/>:null}
                     {/* Workflow readiness remains distinct from the document's status. */}
                     <div className="space-y-2 rounded-lg border p-3">
                     <Label htmlFor="booking-field-7">Workflow contratto noleggio</Label>
                     <Select id="booking-field-7" value={contractTo} onChange={(e) => setContractTo(e.target.value as RentalContractStatus)}>
                       {(Object.keys(CONTRACT_STATUS_LABELS) as RentalContractStatus[]).map((status) => (
-                        <option key={status} value={status}>
+                        <option key={status} value={status} disabled={status==="SIGNED"}>
                           {CONTRACT_STATUS_LABELS[status]}
                         </option>
                       ))}
@@ -2385,7 +2370,7 @@ export const RentalBookingsPage = () => {
                         Template default
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => void runGenerateContract()} disabled={saving || !canManageBookings || (signingFreeze?.id===selectedBooking.id&&signingFreeze.locked)}>
-                        {contract ? "Rigenera" : "Genera contratto"}
+                        {contract ? "Rigenera bozza" : "Prepara bozza contratto"}
                       </Button>
                     </div>
                   </div>
@@ -2410,7 +2395,7 @@ export const RentalBookingsPage = () => {
                             }
                           >
                             {(Object.keys(BOOKING_CONTRACT_STATUS_LABELS) as BookingContractStatus[]).map((status) => (
-                              <option key={status} value={status}>
+                              <option key={status} value={status} disabled={status==="SIGNED"}>
                                 {BOOKING_CONTRACT_STATUS_LABELS[status]}
                               </option>
                             ))}
@@ -2467,15 +2452,13 @@ export const RentalBookingsPage = () => {
                         <Button size="sm" variant="outline" onClick={() => void runPrintContractPdf()} disabled={saving}>
                           Stampa
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => void runSendContractEmail()} disabled={saving || !canManageBookings}>
+                        <Button size="sm" variant="outline" onClick={() => void runSendContractEmail()} disabled={saving || !canManageBookings || (!contract.issuedAt&&!contract.signedAt&&contract.status!=="SIGNED")}>
                           Invia email
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => void runSendContractWhatsapp()} disabled={saving || !canManageBookings}>
+                        <Button size="sm" variant="outline" onClick={() => void runSendContractWhatsapp()} disabled={saving || !canManageBookings || (!contract.issuedAt&&!contract.signedAt&&contract.status!=="SIGNED")}>
                           Invia WhatsApp
                         </Button>
-                        <Button size="sm" onClick={() => void runMarkContractSigned()} disabled={saving || !canManageBookings || (signingFreeze?.id===selectedBooking.id&&signingFreeze.locked)}>
-                          Marca firmato
-                        </Button>
+
                       </div>
 
                       <div className="grid gap-2 lg:grid-cols-2">
@@ -3500,7 +3483,7 @@ export const RentalBookingsPage = () => {
         </>
       ) : null}
 
-      {cargosPromptBookingId&&!bookingModalOpen&&!saving?<ContractCargosDialog bookingId={cargosPromptBookingId} onClose={()=>setCargosPromptBookingId(null)} onUpdated={()=>setRefreshKey(value=>value+1)}/>:null}
+      {cargosPromptBookingId&&!saving?<ContractCargosDialog bookingId={cargosPromptBookingId} onClose={()=>setCargosPromptBookingId(null)} onUpdated={()=>setRefreshKey(value=>value+1)}/>:null}
       {templateModalOpen?<CommerceDrawer title="Modello contratto aziendale" description="Intestazione, clausole ed email del documento." onClose={requestCloseTemplate} motionRef={templateMotion} busy={templateSaving||templateLogoUploading} level={105} footer={<><Button variant="outline" disabled={templateSaving||templateLogoUploading} onClick={requestCloseTemplate}>Chiudi</Button><Button variant="outline" onClick={()=>void runPreviewTemplate()} disabled={templateLoading||!templateLoaded||!selectedBooking||templateSaving||templateLogoUploading}>Anteprima compilata</Button><Button onClick={()=>void runSaveTemplate()} disabled={templateLoading||!templateLoaded||templateSaving||templateLogoUploading}>{templateSaving?'Salvataggio...':'Salva template'}</Button></>}>
        {error?<CommerceNotice>{error}</CommerceNotice>:null}{templateLoading?<p role="status">Caricamento modello...</p>:null}{!templateLoading&&!templateLoaded?<Button variant="outline" onClick={()=>void openTemplateModal()}>Riprova caricamento modello</Button>:null}
        <ContractTemplateEditor value={templateEditor} onChange={patch=>{setTemplateEditor(current=>({...current,...patch}));setTemplateDirty(true)}} busy={templateLoading||!templateLoaded||templateSaving||templateLogoUploading} logoUrl={templateLogoPreviewUrl} logoName={templateLogoFileName} onUpload={file=>void uploadTemplateLogo(file)} onRemove={()=>void removeTemplateLogo()} preview={templatePreview}/>

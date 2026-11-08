@@ -85,7 +85,7 @@ describe("E02 notifications and public audit views", () => {
     ids.customer = (await prisma.rentalCustomer.create({data:{tenantId:ids.a,firstName:"Synthetic",lastName:"Shared"}})).id;
     for (const [name,tenant,vehicle,site,destination] of [["local","a",ids.milanVehicle,ids.rome,ids.rome],["cross","a",ids.naplesVehicle,ids.rome,ids.milan],["private","a",ids.romeVehicle,ids.milan,ids.milan],["legacy","a",ids.romeVehicle,null,null],["foreign","b",ids.foreignVehicle,ids.foreign,ids.foreign],["corrupt","a",ids.foreignVehicle,ids.rome,ids.rome]] as const) {
       ids[name+"Booking"] = (await prisma.rentalBooking.create({data:{tenantId:ids[tenant],vehicleId:vehicle,siteId:site,pickupSiteId:site,returnSiteId:destination,code:`${run}-${name}`,customerName:"Synthetic",pickupAt:new Date(),returnAt:new Date(Date.now()+86400000)}})).id;
-      ids[name+"Contract"] = (await prisma.bookingContract.create({data:{tenantId:ids[tenant],bookingId:ids[name+"Booking"],title:"Synthetic",content:"Synthetic"}})).id;
+      ids[name+"Contract"] = (await prisma.bookingContract.create({data:{tenantId:ids[tenant],bookingId:ids[name+"Booking"],issuedAt:new Date("2026-11-07T00:00:00Z"),title:"Synthetic",content:"Synthetic"}})).id;
     }
     const entries: Array<[string,string,string|null,string?,string?]> = [
       ["romeVehicleAudit","Vehicle",ids.romeVehicle], ["milanVehicleAudit","Vehicle",ids.milanVehicle],

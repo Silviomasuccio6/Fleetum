@@ -94,6 +94,8 @@ export type RentalCustomer = {
 };
 
 export type BookingContract = {
+  issuedAt?: string|null;
+  documentRevision?: number;
   id: string;
   tenantId: string;
   bookingId: string;

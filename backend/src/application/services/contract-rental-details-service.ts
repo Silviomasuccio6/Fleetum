@@ -16,7 +16,7 @@ export class ContractRentalDetailsService{
   // Registry is shared across this company's sites, never across tenants. Options are searched separately.
   const drivers=await resolveContractDrivers(tenantId,terms,prisma,false);
   const missing=drivers.length!==[terms.primaryDriverId,...terms.additionalDriverIds].filter(Boolean).length;
-  const frozen=Boolean(contract.signedAt)||contract.status==="SIGNED"||Boolean(await prisma.contractSigningRequest.findFirst({where:{tenantId,contractId:contract.id,OR:[{status:"SIGNED"},{status:"PENDING",expiresAt:{gt:new Date()}}]},select:{id:true}}));
+  const frozen=Boolean(contract.signedAt)||contract.status==="SIGNED"||Boolean(await prisma.contractSigningRequest.findFirst({where:{tenantId,contractId:contract.id,OR:[{status:"SIGNED",contractRevision:contract.documentRevision},{status:"PENDING",expiresAt:{gt:new Date()}}]},select:{id:true}}));
   return{terms,revision:contract.rentalTermsRevision,frozen,drivers:drivers.map(d=>({id:d.id,name:`${d.firstName} ${d.lastName}`})),issues:[...rentalTermsIssues(contract.rentalTerms),...(missing?["Conducente non più disponibile: seleziona una persona valida nell’anagrafica"]:[]),...driverIssues(drivers,contract.booking.returnAt)]};
  }
  async candidates(tenantId:string,bookingId:string,search:string){

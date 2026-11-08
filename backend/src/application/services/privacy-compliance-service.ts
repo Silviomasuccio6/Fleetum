@@ -327,6 +327,7 @@ export class PrivacyComplianceService {
           orderBy: { pickupAt: "desc" },
           select: {
             id: true,
+            priceAgreement:true,
             collectionEntries:{where:{tenantId:input.tenantId},orderBy:{createdAt:"asc"},select:{id:true,kind:true,method:true,amountCents:true,currency:true,occurredAt:true,reference:true,reason:true,sourceId:true,createdAt:true}},
             code: true,
             status: true,
@@ -406,6 +407,8 @@ export class PrivacyComplianceService {
                 id: true,
                 status: true,
                 templateVersion: true,
+                documentRevision:true,issuedAt:true,
+                signingRequests:{where:{tenantId:input.tenantId},orderBy:{version:"asc"},select:{id:true,version:true,contractRevision:true,method:true,status:true,documentTitle:true,documentSha256:true,signedDocumentSha256:true,signerName:true,recipient:true,signedAt:true,consentVersion:true,expiresAt:true,createdAt:true}},
                 title: true,
                 content: true,
                 emailTo: true,

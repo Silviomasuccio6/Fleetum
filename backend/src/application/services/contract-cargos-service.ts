@@ -41,8 +41,9 @@ export class ContractCargosService {
   const[connection,transmission]=await Promise.all([db.tenantCargosConnection.findUnique({where:{tenantId}}),db.contractCargosTransmission.findFirst({where:{tenantId,contractId:booking.contract.id}})]);
   const agency=((connection?.agencies??{}) as Record<string,Agency>)[booking.pickupSiteId??booking.siteId??""]??{};
   const structured=booking.contract.rentalTerms!==null,drivers=structured?await resolveContractDrivers(tenantId,booking.contract.rentalTerms,db,false):[];
+  const stipulatedAt=booking.contract.issuedAt??booking.contract.signedAt;
   const customer=structured?drivers[0]:booking.customer;const base:Record<string,string>={...recordObject(transmission?.recordDraft),
-   CONTRATTO_ID:booking.contract.id,CONTRATTO_DATA:date(booking.contract.signedAt),CONTRATTO_CHECKOUT_DATA:date(booking.pickupAt),CONTRATTO_CHECKIN_DATA:date(booking.returnAt),
+   CONTRATTO_ID:booking.contract.id,CONTRATTO_DATA:date(stipulatedAt),CONTRATTO_CHECKOUT_DATA:date(booking.pickupAt),CONTRATTO_CHECKIN_DATA:date(booking.returnAt),
    CONTRATTO_CHECKOUT_INDIRIZZO:booking.pickupLocation??"",CONTRATTO_CHECKIN_INDIRIZZO:booking.returnLocation??"",OPERATORE_ID:userId,
    AGENZIA_ID:agency.id??"",AGENZIA_NOME:agency.name??"",AGENZIA_LUOGO_COD:agency.placeCode??"",AGENZIA_INDIRIZZO:agency.address??"",AGENZIA_RECAPITO_TEL:agency.phone??"",
    VEICOLO_MARCA:booking.vehicle.brand??"",VEICOLO_MODELLO:booking.vehicle.model??"",VEICOLO_TARGA:booking.vehicle.plate,
@@ -58,7 +59,7 @@ export class ContractCargosService {
    Object.assign(base,{CONDUCENTE2_COGNOME:second?.lastName??"",CONDUCENTE2_NOME:second?.firstName??"",CONDUCENTE2_NASCITA_DATA:date(second?.dateOfBirth,false),CONDUCENTE2_DOCIDE_NUMERO:second?.documentNumber??"",CONDUCENTE2_PATENTE_NUMERO:second?.drivingLicenseNumber??"",CONDUCENTE2_RECAPITO:(second?.phone??"").replace(/[ +()-]/g,"")});
   }
   const{OPERATORE_ID:operator,...businessRecord}=base;
-  const sourceHash=hash(JSON.stringify([booking.contract.id,booking.contract.content,booking.contract.title,booking.contract.signedAt,booking.contract.rentalTerms,businessRecord]));
+  const sourceHash=hash(JSON.stringify([booking.contract.id,booking.contract.content,booking.contract.title,stipulatedAt,booking.contract.rentalTerms,businessRecord]));
   return{booking,connection,transmission,record:base,sourceHash};
  }
  private guard(tenantId:string,bookingId:string,userId:string,scope:unknown,expectedHash:string,credentialsEncrypted:string,claim?:{id:string;token:string}):CargosSendGuard{
@@ -164,7 +165,7 @@ export class ContractCargosService {
    if(context.sourceHash!==expectedHash)throw new AppError("I dati sono cambiati: ricarica il riepilogo",409,"CARGOS_SOURCE_CHANGED");
    if(["CANCELED","NO_SHOW"].includes(context.booking.status))throw new AppError("Prenotazione annullata: verifica l’adempimento prima della trasmissione",409,"CARGOS_BOOKING_CANCELED");
    const domainIssues=cargosDomainIssues(context.booking);if(domainIssues.length)throw new AppError(domainIssues[0],422,"CARGOS_MAPPING_REVIEW_REQUIRED");
-   if(!context.booking.contract!.signedAt)throw new AppError("Completa la stipula del contratto",409,"CARGOS_NOT_STIPULATED");
+   if(!context.booking.contract!.issuedAt&&!context.booking.contract!.signedAt)throw new AppError("Completa la stipula del contratto",409,"CARGOS_NOT_STIPULATED");
    let record:string;try{record=serializeCargosRecord(context.record);}catch(error){throw new AppError((error as Error).message,422,"CARGOS_DATA_INCOMPLETE");}
    const recordHash=hash(record);
    const row=await tx.contractCargosTransmission.upsert({where:{contractId},create:{tenantId,contractId},update:{}});

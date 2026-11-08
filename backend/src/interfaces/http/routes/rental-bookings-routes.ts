@@ -1,3 +1,4 @@
+import {contractIssuanceRoutes} from "./contract-issuance-routes.js";
 import { Router } from "express";
 import { uploadRentalCustomerAttachments } from "../../../infrastructure/storage/multer.js";
 import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
@@ -10,6 +11,7 @@ import { contractRentalDetailsRoutes } from "./contract-rental-details-routes.js
 
 export const rentalBookingsRoutes = (controller: RentalBookingsController) => {
   const router = Router();
+  router.use(contractIssuanceRoutes());
   router.use(contractCargosRoutes());
   router.use(contractSigningPrivateRoutes());
   router.use(contractRentalDetailsRoutes());

@@ -294,3 +294,9 @@ export async function getOptionalResource<T>(url: string): Promise<T | null> {
   });
   return response.status === 404 ? null : response.data;
 }
+
+/** Binary private POST keeps the normal tenant, site, CSRF and auth interceptors. */
+export async function postPrivatePdf(url:string,body:unknown){
+  const response=await api.post<ArrayBuffer>(url,body,{responseType:'arraybuffer'});
+  return new Uint8Array(response.data);
+}

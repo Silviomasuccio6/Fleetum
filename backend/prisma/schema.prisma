@@ -830,6 +830,8 @@ model RentalBooking {
   returnLocation       String?
   pickupKm             Int?
   returnKm             Int?
+  /// @pii authorized agreement reason and actor reference
+  priceAgreement       Json?
   expectedTotal        Float?
   expectedTotalExact   Decimal?                      @ignore @db.Decimal(19, 2)
   finalTotal           Float?
@@ -1455,6 +1457,10 @@ model BookingContract {
   bookingId       String                    @unique
   templateId      String?
   templateVersion Int                       @default(1)
+  documentRevision Int                       @default(0)
+  issuedAt        DateTime?
+  issuedByUserId  String?
+  issuanceHash    String?
   /// @pii driver references and expressly agreed rental conditions; frozen by signing source hash
   rentalTerms     Json?
   rentalTermsRevision Int                    @default(0)
@@ -1911,7 +1917,8 @@ model StoredFileObject {
   @@index([tenantId, resourceType, resourceId])
   @@index([tenantId, storageKey])
   @@index([deletedAt])
-  signingRequests ContractSigningRequest[]
+  signingRequests ContractSigningRequest[] @relation("SigningOriginal")
+  signedRequests ContractSigningRequest[] @relation("SigningFinal")
   cargosReceipts ContractCargosReceipt[]
   @@unique([id, tenantId])
 
@@ -2141,6 +2148,10 @@ model ContractSigningRequest {
   documentTitle String
   bookingCode String
   documentSha256 String
+  contractRevision Int @default(0)
+  method String @default("EMAIL_OTP")
+  signedDocumentSha256 String?
+  signedStoredFileObjectId String?
   sourceHash String
   storedFileObjectId String
   /// @pii
@@ -2175,7 +2186,8 @@ model ContractSigningRequest {
   updatedAt DateTime @updatedAt
   tenant Tenant @relation(fields:[tenantId],references:[id],onDelete:Restrict)
   contract BookingContract @relation(fields:[contractId,tenantId],references:[id,tenantId],onDelete:Restrict)
-  document StoredFileObject @relation(fields:[storedFileObjectId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  document StoredFileObject @relation("SigningOriginal",fields:[storedFileObjectId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  signedDocument StoredFileObject? @relation("SigningFinal",fields:[signedStoredFileObjectId,tenantId],references:[id,tenantId],onDelete:Restrict)
   @@unique([tenantId,idempotencyKey])
   @@unique([contractId,version])
   @@index([tenantId,contractId,status])

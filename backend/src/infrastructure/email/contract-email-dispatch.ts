@@ -46,10 +46,13 @@ export const dispatchContractEmail = async (
         recipient:item.recipient,subject:item.subject,body:item.body
       },select:{id:true}});
       if (!target) throw new ContractDispatchBlocked("DELIVERY_CHANGED");
+      const revisions=await tx.$queryRaw<Array<{documentRevision:number}>>`SELECT "documentRevision" FROM "BookingContract" WHERE "id"=${meta.contractId} AND "tenantId"=${tenantId}`;
+      const currentRevision=revisions[0]?.documentRevision??0;
+      if((meta.contractRevision??0)!==currentRevision)throw new ContractDispatchBlocked("CONTRACT_REVISION_CHANGED");
       const frozen=await tx.$queryRaw<Array<{documentSha256:string}>>`
-        SELECT "documentSha256" FROM "ContractSigningRequest"
+        SELECT CASE WHEN "status"='SIGNED' THEN COALESCE("signedDocumentSha256","documentSha256") ELSE "documentSha256" END AS "documentSha256" FROM "ContractSigningRequest"
         WHERE "tenantId"=${tenantId} AND "contractId"=${meta.contractId}
-        AND ("status"='SIGNED' OR ("status"='PENDING' AND "expiresAt">NOW()))
+        AND "contractRevision"=${currentRevision} AND ("status"='SIGNED' OR ("status"='PENDING' AND "expiresAt">NOW()))
         ORDER BY "version" DESC LIMIT 1`;
       if(typeof frozen[0]?.documentSha256==="string") {
         const attachments=Array.isArray(meta.attachments)?meta.attachments:[];

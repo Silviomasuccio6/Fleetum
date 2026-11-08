@@ -178,8 +178,8 @@ export const CustomerContractsTimeline = ({
                   {canWrite ? <><Button disabled={busy} size="sm" variant="outline" onClick={() => onSendEmail(item.bookingId)} aria-label="Invia contratto via email">
                     Invia email
                   </Button>
-                  <Button disabled={busy} size="sm" variant="outline" onClick={() => onMarkSigned(item.bookingId)} aria-label="Marca contratto firmato">
-                    Marca firmato
+                  <Button disabled={busy} size="sm" variant="outline" onClick={() => onMarkSigned(item.bookingId)} aria-label="Apri emissione e firma">
+                    Apri firma
                   </Button></> : null}
                 </div>
               </article>

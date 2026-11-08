@@ -117,6 +117,7 @@ describe("contract email transactional outbox idempotency", () => {
 
     const contractA = await prisma.bookingContract.create({
       data: {
+        issuedAt:new Date("2026-11-07T00:00:00Z"),
         tenantId,
         bookingId: bookingA.id,
         title: "Contratto A",
@@ -127,6 +128,7 @@ describe("contract email transactional outbox idempotency", () => {
     });
     const contractB = await prisma.bookingContract.create({
       data: {
+        issuedAt:new Date("2026-11-07T00:00:00Z"),
         tenantId,
         bookingId: bookingB.id,
         title: "Contratto B",

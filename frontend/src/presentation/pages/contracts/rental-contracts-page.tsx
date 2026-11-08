@@ -1,6 +1,6 @@
 import {collectionHref} from "../rental-payments/collection-presentation";
 import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BookingContractStatus,
@@ -150,18 +150,12 @@ export const RentalContractsPage = () => {
   const [actionPanelPreviewUrl, setActionPanelPreviewUrl] = useState<string | null>(null);
   const [actionPanelPreviewLoading, setActionPanelPreviewLoading] = useState(false);
   const [actionPanelPreviewError, setActionPanelPreviewError] = useState<string | null>(null);
-  const [signatureModalRow, setSignatureModalRow] = useState<RentalContractsMonitoringItem | null>(null);
-  const [signatureHasStroke, setSignatureHasStroke] = useState(false);
-  const [signatureSubmitting, setSignatureSubmitting] = useState(false);
-  const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const signatureDrawingRef = useRef(false);
-  const signatureLastPointRef = useRef<{ x: number; y: number } | null>(null);
   const contractEmailRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const permissions=useAuthStore(state=>state.user?.permissions)??[];
   const has=(permission:string)=>permissions.includes('*')||permissions.includes(permission);
   const canRead=has('vehicles:read'),canWrite=has('vehicles:write'),canReadSites=has('sites:read');
-  const listSequence=useRef(0),previewSequence=useRef(0),actionRowRef=useRef<string|null>(null),panelMotion=useRef<PanelMotionHandle|null>(null),panelOrigin=useRef<HTMLElement|null>(null),signatureStrokeRef=useRef(false);
+  const listSequence=useRef(0),previewSequence=useRef(0),actionRowRef=useRef<string|null>(null),panelMotion=useRef<PanelMotionHandle|null>(null),panelOrigin=useRef<HTMLElement|null>(null);
   const [sitesError,setSitesError]=useState<string|null>(null);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
@@ -229,21 +223,8 @@ export const RentalContractsPage = () => {
     };
   }, [actionPanelPreviewUrl]);
 
-  useEffect(() => {
-    if (!signatureModalRow) return;
-    const timer = window.setTimeout(() => {
-      setupSignatureCanvas();
-    }, 0);
-    const onResize = () => setupSignatureCanvas(true);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [signatureModalRow]);
-
   const closeActionPanel=()=>{
-    if(actionBusyId||signatureModalRow)return;previewSequence.current++;actionRowRef.current=null;
+    if(actionBusyId)return;previewSequence.current++;actionRowRef.current=null;
     const done=()=>{setActionPanelRow(null);setActionPanelPreviewLoading(false);setActionPanelPreviewError(null);setActionPanelPreviewUrl(prev=>{if(prev)URL.revokeObjectURL(prev);return null})};
     if(panelMotion.current)panelMotion.current.dismiss(done);else done();
   };
@@ -255,100 +236,6 @@ export const RentalContractsPage = () => {
   };
   const openActionPanel=(row:RentalContractsMonitoringItem,origin?:HTMLElement)=>{if(!canRead||actionBusyId)return;panelOrigin.current=origin??null;actionRowRef.current=row.id;setActionPanelPreviewUrl(null);setActionPanelRow(row);setError(null);void loadActionPanelPreview(row)};
   useEffect(()=>()=>{previewSequence.current++;actionRowRef.current=null},[]);
-
-  const setupSignatureCanvas = (preserve=false) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const keep=preserve&&signatureStrokeRef.current;const copy=keep?document.createElement("canvas"):null;if(copy){copy.width=canvas.width;copy.height=canvas.height;copy.getContext("2d")?.drawImage(canvas,0,0)}
-    const width = Math.max(280, Math.floor(canvas.clientWidth || 640));
-    const height = 220;
-    const ratio = Math.max(1, window.devicePixelRatio || 1);
-    canvas.width = Math.floor(width * ratio);
-    canvas.height = Math.floor(height * ratio);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(ratio, ratio);
-    // Keep pixel buffer transparent so exported PNG blends with PDF signature box colors.
-    ctx.clearRect(0, 0, width, height);
-    ctx.strokeStyle = "#1f2937";
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    signatureDrawingRef.current = false;
-    signatureLastPointRef.current = null;
-    if(copy)ctx.drawImage(copy,0,0,width,height);signatureStrokeRef.current=keep;setSignatureHasStroke(keep);
-  };
-
-  const getSignaturePoint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-  };
-
-  const onSignaturePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if(!canWrite||signatureSubmitting)return;
-    const canvas = signatureCanvasRef.current;
-    const point = getSignaturePoint(event);
-    if (!canvas || !point) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    signatureDrawingRef.current = true;
-    signatureLastPointRef.current = point;
-    canvas.setPointerCapture(event.pointerId);
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, 1.1, 0, Math.PI * 2);
-    ctx.fillStyle = "#1f2937";
-    ctx.fill();
-    signatureStrokeRef.current=true;setSignatureHasStroke(true);
-  };
-
-  const onSignaturePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!signatureDrawingRef.current) return;
-    const canvas = signatureCanvasRef.current;
-    const point = getSignaturePoint(event);
-    if (!canvas || !point) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const previous = signatureLastPointRef.current;
-    if (!previous) {
-      signatureLastPointRef.current = point;
-      return;
-    }
-    ctx.beginPath();
-    ctx.moveTo(previous.x, previous.y);
-    ctx.lineTo(point.x, point.y);
-    ctx.stroke();
-    signatureLastPointRef.current = point;
-    signatureStrokeRef.current=true;setSignatureHasStroke(true);
-  };
-
-  const endSignatureDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!signatureDrawingRef.current) return;
-    const canvas = signatureCanvasRef.current;
-    signatureDrawingRef.current = false;
-    signatureLastPointRef.current = null;
-    if (canvas && canvas.hasPointerCapture(event.pointerId)) {
-      canvas.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  const closeSignatureModal = () => {
-    if(signatureSubmitting)return;
-    setSignatureModalRow(null);
-    setSignatureSubmitting(false);
-    signatureDrawingRef.current = false;
-    signatureLastPointRef.current = null;
-  };
-
-  const openSignatureModal = (row: RentalContractsMonitoringItem) => {
-    if(!canWrite||actionBusyId)return;setError(null);
-    setSignatureModalRow(row);
-  };
 
   const runDownload = async (row: RentalContractsMonitoringItem) => {
     const notificationScope=captureOperationContext();
@@ -421,55 +308,6 @@ export const RentalContractsPage = () => {
     }
   };
 
-  const runMarkSigned = async (row: RentalContractsMonitoringItem, signatureDataUrl?: string) => {
-    const notificationScope=captureOperationContext();
-    if(!canWrite||actionBusyId)return false;
-    setActionBusyId(row.id);
-    setError(null);
-    try {
-      const result = await rentalBookingsUseCases.markContractSigned(
-        row.bookingId,
-        signatureDataUrl ? { signatureDataUrl } : undefined
-      );
-      if (signatureDataUrl && !(result as unknown as { signatureSaved?: boolean }).signatureSaved) {
-        throw new Error("Firma non acquisita nel contratto. Riprova.");
-      }
-      const alreadySigned = row.status === "SIGNED";
-      publishOperationFeedback(setSuccess, alreadySigned ? `Contratto rifirmato (${row.booking.code}).` : `Contratto firmato (${row.booking.code}).`, notificationScope);
-      await loadContracts(page);
-      if (actionPanelRow?.id === row.id) {
-        await loadActionPanelPreview(row);
-      }
-      return true;
-    } catch (e) {
-      setError((e as Error).message);return false;
-    } finally {
-      setActionBusyId(null);
-    }
-  };
-
-  const submitSignature = async () => {
-    if (!signatureModalRow||!canWrite||signatureSubmitting) return;
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) {
-      setError("Canvas firma non disponibile.");
-      return;
-    }
-    if (!signatureHasStroke) {
-      setError("Disegna la firma prima di confermare.");
-      return;
-    }
-
-    setSignatureSubmitting(true);
-    try {
-      const signatureDataUrl = canvas.toDataURL("image/png");
-      const saved=await runMarkSigned(signatureModalRow, signatureDataUrl);
-      if(saved)closeSignatureModal();
-    } finally {
-      setSignatureSubmitting(false);
-    }
-  };
-
   const code=(row:RentalContractsMonitoringItem)=><><button className="commerce-name" onClick={event=>openActionPanel(row,event.currentTarget)} aria-haspopup="dialog" aria-expanded={actionPanelRow?.id===row.id}><strong data-panel-origin-title translate="no">{contractCodeBySite(row)}</strong></button><small>{row.booking.code}</small></>;
   const states=(row:RentalContractsMonitoringItem)=><div className="commerce-states"><span>Documento: <Badge variant={toBadgeVariant(row.status)}>{CONTRACT_STATUS_LABELS[row.status]}</Badge></span><span>Noleggio: <Badge variant={toBadgeVariant(row.booking.status)}>{BOOKING_STATUS_LABELS[row.booking.status]}</Badge></span></div>;
   const columns=[
@@ -486,7 +324,7 @@ export const RentalContractsPage = () => {
   return (
    <section className="contracts-workspace commerce-workspace" aria-label="Gestione contratti">
     <WorkspacePageHeader eyebrow="I TUOI DOCUMENTI" title="Contratti" description="Documenti, firme e invii. Segui ogni contratto insieme alla sua prenotazione." actions={<>{canWrite?<Button variant="outline" onClick={()=>navigate('/booking?template=1'+(rows[0]?.bookingId?'&bookingId='+encodeURIComponent(rows[0].bookingId):''))}>Modello aziendale</Button>:null}<Button onClick={()=>navigate('/booking')}>Apri prenotazioni</Button></>}/>
-    {!actionPanelRow&&!signatureModalRow&&error?<CommerceNotice>{error}</CommerceNotice>:null}{success?<CommerceNotice tone="success">{success}</CommerceNotice>:null}
+    {!actionPanelRow&&error?<CommerceNotice>{error}</CommerceNotice>:null}{success?<CommerceNotice tone="success">{success}</CommerceNotice>:null}
     <dl className="commerce-kpis" aria-label="Riepilogo contratti">{([['Da inviare',kpis.contractsToSend,'Pronti, non ancora inviati'],['Inviati oggi',kpis.sentToday,'Invii completati oggi'],['Firmati',kpis.signed,'Firma acquisita'],['In errore',kpis.inError,'Esiti da verificare'],['Uscite oggi',kpis.exitsToday,'Consegne della giornata'],['Rientri oggi',kpis.returnsToday,'Veicoli attesi oggi']]as const).map(([title,value,hint])=><div key={title}><dt>{title}</dt><dd>{loading||error?'—':value??'—'}</dd><dd className="commerce-hint">{hint}</dd></div>)}</dl>
     <section className="commerce-panel" aria-labelledby="contracts-list-title"><header className="commerce-panel-header"><div><h2 id="contracts-list-title">Elenco contratti <span>{loading?'—':total}</span></h2><p>Documenti generati e stato delle operazioni</p></div><Button variant="ghost" aria-label="Aggiorna contratti" disabled={loading} onClick={()=>void loadContracts(page)}>Aggiorna</Button></header>
      <div className="commerce-filters contracts-filters">
@@ -504,14 +342,11 @@ export const RentalContractsPage = () => {
     <details className="commerce-panel commerce-timeline" open><summary>Timeline operativa <span>Uscite, rientri e invii</span></summary>{!timeline.length?<p className="commerce-hint">Nessun evento recente.</p>:<ol>{timeline.map((item,index)=><li key={`${item.type}-${item.bookingId}-${index}`}><div><strong>{item.type==='PICKUP'?'Uscita':item.type==='RETURN'?'Rientro':`Invio ${item.channel??''}`}</strong><time>{formatWhen(item.occurredAt)}</time></div><p>{item.bookingCode} · {item.customerName}</p><small>{item.vehicle?.plate??'—'} {item.vehicle?.brand??''} {item.vehicle?.model??''}</small><small>{item.type==='DELIVERY'?`${item.recipient||'—'} · ${item.deliveryStatus||'—'}`:item.bookingStatus?BOOKING_STATUS_LABELS[item.bookingStatus]:'—'}</small></li>)}</ol>}</details>
     {actionPanelRow?<CommerceDrawer translateTitle={false} translateDescription={false} title={contractCodeBySite(actionPanelRow)} description={actionPanelRow.booking.customerName} onClose={closeActionPanel} motionRef={panelMotion} origin={panelOrigin.current} busy={!!actionBusyId} footer={<><Button variant="outline" disabled={!!actionBusyId} onClick={closeActionPanel}>Chiudi</Button><Button variant="outline" disabled={!!actionBusyId} onClick={()=>navigate(`/booking?bookingId=${actionPanelRow.bookingId}`)}>Apri prenotazione</Button>{has("rental-payments:read")?<Button variant="outline" disabled={!!actionBusyId} onClick={()=>navigate(collectionHref(actionPanelRow.bookingId,"/booking/contratti"))}>Pagamenti e garanzie</Button>:null}</>}>
      {error?<CommerceNotice>{error}</CommerceNotice>:null}{states(actionPanelRow)}
-     <div className="contract-action-buttons">{canWrite?<><Button variant="outline" onClick={()=>void runSendEmail(actionPanelRow)} disabled={!!actionBusyId}>Invia Email</Button><Button variant="outline" onClick={()=>void runSendWhatsapp(actionPanelRow)} disabled={!!actionBusyId}>Invia WhatsApp</Button><Button onClick={()=>openSignatureModal(actionPanelRow)} disabled={!!actionBusyId}>{actionPanelRow.status==='SIGNED'?'Rifirma contratto':'Firma contratto'}</Button></>:<p className="commerce-hint">Modalità sola lettura.</p>}<Button variant="outline" onClick={()=>void runDownload(actionPanelRow)} disabled={!!actionBusyId}>Scarica PDF</Button></div>
+     <div className="contract-action-buttons">{canWrite?<><Button variant="outline" onClick={()=>void runSendEmail(actionPanelRow)} disabled={!!actionBusyId}>Invia Email</Button><Button variant="outline" onClick={()=>void runSendWhatsapp(actionPanelRow)} disabled={!!actionBusyId}>Invia WhatsApp</Button><Button onClick={()=>navigate(`/rental-bookings/${encodeURIComponent(actionPanelRow.bookingId)}`)} disabled={!!actionBusyId}>{actionPanelRow.status==='SIGNED'?'Consulta firma':'Apri emissione e firma'}</Button></>:<p className="commerce-hint">Modalità sola lettura.</p>}<Button variant="outline" onClick={()=>void runDownload(actionPanelRow)} disabled={!!actionBusyId}>Scarica PDF</Button></div>
      <p className="commerce-hint">Preparazione e rigenerazione restano nella sezione Contratto della prenotazione.</p>
      <section className="contract-preview" aria-label="Anteprima contratto">{actionPanelPreviewLoading?<FleetumBlockLoader label="Caricamento anteprima PDF" className="min-h-0 h-72"/>:actionPanelPreviewError?<div className="commerce-empty"><CommerceNotice>{actionPanelPreviewError}</CommerceNotice><Button variant="outline" onClick={()=>void loadActionPanelPreview(actionPanelRow)}>Riprova anteprima</Button></div>:actionPanelPreviewUrl?<iframe title={`Contratto ${actionPanelRow.booking.code}`} src={actionPanelPreviewUrl}/>:<p>Anteprima non disponibile.</p>}</section>
     </CommerceDrawer>:null}
-    {signatureModalRow?<CommerceDrawer title={signatureModalRow.status==='SIGNED'?'Rifirma contratto':'Firma contratto'} description="Disegna con dito, mouse o trackpad. La firma verrà applicata al PDF." level={115} busy={signatureSubmitting} onClose={closeSignatureModal} footer={<><Button variant="outline" onClick={()=>setupSignatureCanvas()} disabled={signatureSubmitting}>Cancella firma</Button><Button onClick={()=>void submitSignature()} disabled={signatureSubmitting||!signatureHasStroke}>{signatureSubmitting?'Salvataggio...':'Conferma firma e aggiorna PDF'}</Button></>}>
-     <p>{contractCodeBySite(signatureModalRow)} · {signatureModalRow.booking.customerName}</p>{error?<CommerceNotice>{error}</CommerceNotice>:null}
-     <canvas ref={signatureCanvasRef} className="contract-signature" onPointerDown={onSignaturePointerDown} onPointerMove={onSignaturePointerMove} onPointerUp={endSignatureDraw} onPointerLeave={endSignatureDraw} aria-label="Canvas firma contratto"/>
-    </CommerceDrawer>:null}
+
    </section>
   );
 };

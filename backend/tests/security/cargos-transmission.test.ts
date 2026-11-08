@@ -117,6 +117,15 @@ const newPractice=async()=>{
  const data=await (await request(`/rental-bookings/${booking.id}/cargos`)).json() as any;
  return{booking,contract,data,send:()=>request(`/rental-bookings/${booking.id}/cargos/transmit`,"POST",{sourceHash:data.sourceHash})};
 };
+test("manually issued contracts transmit without waiting for OTP and preserve acceptance after signing",async()=>{
+ const practice=await newPractice();mode="accepted";const issuedAt=new Date("2026-10-30T10:00:00Z");
+ await prisma.bookingContract.update({where:{id:practice.contract.id},data:{issuedAt,signedAt:null,status:"READY"}});
+ const review=await (await request(`/rental-bookings/${practice.booking.id}/cargos`)).json() as any;
+ assert.equal(review.fields.find((field:any)=>field.key==="CONTRATTO_DATA").value,"30/10/2026 11:00");
+ const before=sendCalls,response=await request(`/rental-bookings/${practice.booking.id}/cargos/transmit`,"POST",{sourceHash:review.sourceHash});assert.equal(response.status,200,await response.clone().text());assert.equal((await response.json() as any).status,"ACCEPTED");assert.equal(sendCalls,before+1);
+ await prisma.bookingContract.update({where:{id:practice.contract.id},data:{signedAt:new Date(issuedAt.getTime()+3600000),status:"SIGNED"}});
+ const signed=await (await request(`/rental-bookings/${practice.booking.id}/cargos`)).json() as any;assert.equal(signed.sourceHash,review.sourceHash);assert.equal(signed.status,"ACCEPTED");
+});
 test("canceled practices cannot initiate a new transmission",async()=>{
  const practice=await newPractice();await prisma.rentalBooking.update({where:{id:practice.booking.id},data:{status:"CANCELED"}});
  const before=sendCalls;const response=await practice.send();assert.equal(response.status,409);assert.equal(sendCalls,before);

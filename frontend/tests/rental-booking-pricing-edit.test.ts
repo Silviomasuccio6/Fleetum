@@ -389,7 +389,7 @@ test("a return before pickup is rejected without changing the persisted booking"
 test("a read-only booking user can consult the contract but cannot use mutation actions", async () => {
   const page = createPage({ getContract: () => ({ id: "contract-a", bookingId: "booking-a", status: "DRAFT", title: "Synthetic contract", content: "Synthetic content" }) }, ["vehicles:read"]);
   await page.settle();
-  for (const action of ["Modifica prenotazione", "Elimina", "Salva stato workflow", "Template default", "Rigenera", "Trasmetti contratto a CARGOS", "Salva"]) {
+  for (const action of ["Modifica prenotazione", "Elimina", "Salva stato workflow", "Template default", "Rigenera bozza", "Trasmetti contratto a CARGOS", "Salva"]) {
     assert.equal(page.button(action)?.props.disabled, true, action);
   }
   assert.equal(page.button("Scarica PDF")?.props.disabled, false);
@@ -405,10 +405,10 @@ test("contract server failures mentioning 404 remain retryable errors rather tha
 });
 
 
-test("a newly created contract opens its CARGOS popup without sending automatically", async () => {
+test("a technical contract draft does not open CARGOS or send automatically", async () => {
   const page=createPage({create:()=>({id:"created-booking",contractStatus:"READY",contractCreated:true})});
   await page.create();await page.submit();
-  assert.equal(page.popup()?.props.bookingId,"created-booking");
+  assert.equal(page.popup(),undefined);
   assert.equal(page.calls.some(call=>call.method==="setCargosStatus"||call.method==="transmit"),false);
 });
 test("a booking without a generated contract and an idempotency replay do not open a new CARGOS popup", async () => {

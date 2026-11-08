@@ -58,6 +58,7 @@ type EnterpriseContractPdfInput = {
     returnKm?: number | null;
     expectedTotal?: number | null;
     finalTotal?: number | null;
+    priceAgreement?: unknown;
     contractSignedAt?: Date | string | null;
     vehicle?: {
       plate?: string | null;
@@ -1152,9 +1153,10 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     }
   ];
 
+  const agreement=input.booking.priceAgreement as {listCents:number;discountCents:number;agreedCents:number;reason:string}|undefined;
   const economicItems: InfoItem[] = [
-    { label: "Totale previsto", value: formatMoney(snapshot?.expectedTotal ?? input.booking.expectedTotal), emphasize: true },
-    { label: "Totale finale", value: formatMoney(snapshot?.finalTotal ?? input.booking.finalTotal), emphasize: true },
+    { label: "Totale previsto", value: formatMoney(input.booking.expectedTotal ?? snapshot?.expectedTotal), emphasize: true },
+    { label: "Totale finale", value: formatMoney(input.booking.finalTotal ?? snapshot?.finalTotal), emphasize: true },
     { label: "Listino", value: asText(snapshot?.priceListName) },
     { label: "Pacchetto km", value: asText(snapshot?.pricePackageName) },
     { label: "Policy km extra", value: asText(snapshot?.extraKmPolicyName) },
@@ -1172,15 +1174,19 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
   drawCompleteFields("Conducenti autorizzati",driverItems);
   drawPremiumVehiclePeriod();
 
-  drawPremiumEconomicTable([
+  drawPremiumEconomicTable(agreement ? [
+    ["Prezzo prima dello sconto", "Importo lordo concordato", formatMoney(agreement.listCents/100)],
+    ["Sconto concordato", agreement.reason, formatMoney(agreement.discountCents/100)],
+    ["Totale concordato", "Gli incassi e la cauzione sono registrati separatamente", formatMoney(agreement.agreedCents/100), true]
+  ] : [
     ["Listino applicato", asText(snapshot?.priceListName), `${formatMoney(snapshot?.baseRateAmount)} / ${labelOf(BASE_RATE_UNIT_LABELS, snapshot?.baseRateUnit)}`],
     ["Pacchetto km", asText(snapshot?.pricePackageName), `${formatNumber(snapshot?.includedKmTotal)} km inclusi`],
     ["Extra km", asText(snapshot?.extraKmPolicyName), `${formatNumber(snapshot?.extraKmActual ?? snapshot?.extraKmEstimated)} km`],
     ["Imponibile previsto", "Dati del preventivo salvato", formatMoney(snapshot?.expectedSubtotal)],
     ["IVA prevista", `Aliquota ${formatNumber(snapshot?.vatRate,2)}%`, formatMoney(snapshot?.expectedTaxAmount)],
     ["Sconto applicato", "Percentuale registrata nel preventivo", `${formatNumber(snapshot?.discountPercent,2)}%`],
-    ["Totale previsto", "Importo del preventivo; extra solo secondo condizioni concordate", formatMoney(snapshot?.expectedTotal ?? input.booking.expectedTotal), true],
-    ["Totale finale", "Valore consuntivo se disponibile", formatMoney(snapshot?.finalTotal ?? input.booking.finalTotal), true]
+    ["Totale previsto", "Importo del preventivo; extra solo secondo condizioni concordate", formatMoney(input.booking.expectedTotal ?? snapshot?.expectedTotal), true],
+    ["Totale finale", "Valore consuntivo se disponibile", formatMoney(input.booking.finalTotal ?? snapshot?.finalTotal), true]
   ]);
 
   const rentalTerms=rentalTermsSchema.safeParse(input.contract.rentalTerms);

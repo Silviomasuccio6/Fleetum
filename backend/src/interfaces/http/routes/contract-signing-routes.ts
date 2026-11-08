@@ -17,6 +17,19 @@ const actor=(req:Request)=>{if(!req.auth?.tenantId||!req.auth.userId)throw new A
 const pdf=(res:Response,bytes:Buffer,name:string)=>{res.setHeader("Content-Type","application/pdf");res.setHeader("Content-Disposition",`attachment; filename="${name}"`);res.send(bytes);};
 export const contractSigningPrivateRoutes=(service:ContractSigningService=contractSigningService)=>{
  const router=Router();
+ router.post("/:id/contract/signing/in-person",requirePermissions("vehicles:write"),asyncHandler(async(req,res)=>{
+  const a=actor(req);z.object({}).strict().parse(req.body);const key=z.string().min(8).max(128).parse(req.headers["x-idempotency-key"]);
+  res.status(202).json(await service.issue(a.tenantId,req.params.id,a.userId,{method:"IN_PERSON",idempotencyKey:key}));
+ }));
+ router.post("/:id/contract/signing/in-person/document",requirePermissions("vehicles:write"),asyncHandler(async(req,res)=>{
+  const a=actor(req);z.object({requestId:z.string().min(1)}).strict().parse(req.body);
+  const value=await service.inPersonDocument(a.tenantId,req.params.id,a.userId,getCookieValue(req,signingCookieName(req.body.requestId))??"");
+  res.cookie(signingCookieName(value.requestId),value.proof,cookieOptions());pdf(res,value.bytes,"Contratto_da_firmare.pdf");
+ }));
+ router.post("/:id/contract/signing/in-person/confirm",requirePermissions("vehicles:write"),asyncHandler(async(req,res)=>{
+  const a=actor(req),input=z.object({requestId:z.string().min(1),documentHash,confirmationId:z.string().uuid(),signatureDataUrl:z.string().max(400000),consent:z.literal(true),consentVersion:z.literal("in-person-v1")}).strict().parse(req.body);
+  res.json(await service.inPersonConfirm(a.tenantId,req.params.id,a.userId,input,getCookieValue(req,signingCookieName(input.requestId))??"",{ip:req.ip??"",userAgent:String(req.headers["user-agent"]??"").slice(0,1000)}));
+ }));
  router.use((_req,res,next)=>{res.setHeader("Cache-Control","private, no-store");next();});
  router.get("/:id/contract/signing",requirePermissions("vehicles:read"),asyncHandler(async(req,res)=>{const a=actor(req);res.setHeader("Cache-Control","private, no-store");res.json(await service.status(a.tenantId,req.params.id));}));
  router.post("/:id/contract/signing",requirePermissions("vehicles:write"),asyncHandler(async(req,res)=>{
@@ -24,6 +37,7 @@ export const contractSigningPrivateRoutes=(service:ContractSigningService=contra
   const key=z.string().min(8).max(128).parse(req.headers["x-idempotency-key"]);res.status(202).json(await service.issue(a.tenantId,req.params.id,a.userId,{...body,idempotencyKey:key}));
  }));
  router.post("/:id/contract/signing/revoke",requirePermissions("vehicles:write"),asyncHandler(async(req,res)=>{const a=actor(req);z.object({}).strict().parse(req.body);res.json(await service.revoke(a.tenantId,req.params.id,a.userId));}));
+ router.get("/:id/contract/signing/versions/:requestId/pdf",requirePermissions("vehicles:read"),asyncHandler(async(req,res)=>{const a=actor(req);pdf(res,await service.versionPdf(a.tenantId,req.params.id,req.params.requestId),"Contratto_firmato_conservato.pdf");}));
  router.get("/:id/contract/signing/evidence.pdf",requirePermissions("vehicles:read"),asyncHandler(async(req,res)=>{const a=actor(req),value=await service.frozen(a.tenantId,req.params.id);if(!value||value.row.status!=="SIGNED")throw new AppError("Firma non disponibile",404,"NOT_FOUND");res.setHeader("Cache-Control","private, no-store");pdf(res,await service.evidencePdf(value.row),"Registrazione_firma_email.pdf");}));
  return router;
 };

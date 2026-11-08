@@ -84,11 +84,10 @@ export const CustomersPage=()=>{
  };
  const applyFilters=()=>{if(filters.period==='custom'&&filters.dateFrom&&filters.dateTo&&filters.dateFrom>filters.dateTo){setTimelineError('La data finale deve seguire quella iniziale.');return}setTimelinePage(1);setAppliedFilters({...filters})};
  const contractAction=async(kind:'pdf'|'email'|'signed',bookingId:string)=>{
-    const notificationScope=captureOperationContext();const id=selectedId;if(locked||!id||(kind!=='pdf'&&!canWrite))return;setBusy(true);setActionError(null);
+    const notificationScope=captureOperationContext();const id=selectedId;if(locked||!id||(kind!=='pdf'&&!canWrite))return;if(kind==='signed'){navigate(`/rental-bookings/${encodeURIComponent(bookingId)}`);return;}setBusy(true);setActionError(null);
   try{if(kind==='pdf'){const blob=await rentalBookingsUseCases.downloadContractPdf(bookingId);const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`Contratto_${bookingId}.pdf`;document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),120000)}
    else if(kind==='email'){const key=emailKeys.current.get(bookingId)??globalThis.crypto.randomUUID();emailKeys.current.set(bookingId,key);await rentalBookingsUseCases.sendContractEmail(bookingId,undefined,key);emailKeys.current.delete(bookingId)}
-   else await rentalBookingsUseCases.markContractSigned(bookingId);
-   if(identity.current!==id)return;publishOperationFeedback(setSuccess, kind==='pdf'?'PDF contratto scaricato.':kind==='email'?'Invio email contratto accodato.':'Contratto marcato come firmato.', notificationScope, kind==='email'?'info':'success');if(kind!=='pdf')await loadTimeline(id,timelinePage,appliedFilters)
+   if(identity.current!==id)return;publishOperationFeedback(setSuccess, kind==='pdf'?'PDF contratto scaricato.':'Invio email contratto accodato.', notificationScope, kind==='email'?'info':'success');if(kind!=='pdf')await loadTimeline(id,timelinePage,appliedFilters)
   }catch(e){setActionError((e as Error).message)}finally{setBusy(false)}
  };
  const summary=useMemo(()=>profile?.stats??{bookingsTotal:profile?._count?.bookings,contractsTotal:undefined,attachmentsTotal:profile?._count?.attachments},[profile]);
