@@ -782,19 +782,11 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
   }else drawCompleteFields("Condizioni specifiche",[{label:"Bozza da completare",value:"Conducente, cauzione, franchigie, coperture e regole operative devono essere completati prima dell’invito alla firma."}]);
 
   drawPremiumDeliverySummary();
-  createContentPage("Condizioni, responsabilita e firme");
-  page.drawText("CONDIZIONI, RESPONSABILITA E FIRME", {
-    x: MARGIN_X,
-    y: PAGE_H - 66,
-    size: 17,
-    font: boldFont,
-    color: hexToRgb(primaryHex)
-  });
-  page.drawText("Testo integrale predisposto dal locatore e incluso nel documento da sottoscrivere.", {
-    x:MARGIN_X,y:PAGE_H-84,size:8.8,font:regularFont,color:hexToRgb("#66758d")
-  });
-  cursorY=PAGE_H-120;
-  drawSectionTitle("Condizioni contrattuali integrali");
+  // A complete delivery section may leave ample space: keep short terms on that
+  // page instead of forcing a nearly empty page before the contractual text.
+  ensureSpace(190,"Condizioni contrattuali - continua");
+  cursorY-=10;
+  drawSectionTitle("Condizioni contrattuali integrali","Testo integrale predisposto dal locatore e incluso nel documento da sottoscrivere.");
   // Paginate every line, including long clauses; never truncate agreed text.
   for(const paragraph of normalizeMultiline(input.contract.content).split("\n")) {
     if(!paragraph.trim()){cursorY-=8;continue;}

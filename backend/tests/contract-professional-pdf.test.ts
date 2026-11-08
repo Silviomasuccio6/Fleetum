@@ -46,3 +46,8 @@ test('a light brand colour cannot make contract text disappear on white paper',a
   for(const ref of refs){const stream=pdf.context.lookup(ref);assert.ok(stream instanceof PDFRawStream);assert.doesNotMatch(Buffer.from(decodePDFRawStream(stream).decode()).toString(),/BT\s+1 1 1 rg/);}
  }
 });
+test('short terms can follow the delivery section without an unconditional blank page break',async()=>{
+ const fixture=professionalContractFixture();fixture.contract.rentalTerms=null as any;
+ const parser=new PDFParse({data:await buildEnterpriseContractPdf(fixture)});
+ try{const result=await parser.getText();assert.ok(result.pages.some(page=>page.text.includes('CONSEGNA E RICONSEGNA')&&page.text.includes('CONDIZIONI CONTRATTUALI INTEGRALI')));}finally{await parser.destroy();}
+});
