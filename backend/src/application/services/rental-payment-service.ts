@@ -1,4 +1,6 @@
+import {captureBeforeFromIntent} from "../../domain/payments/rental-deposit-deadline.js";
 import crypto from "node:crypto";
+import { rentalStripeAvailability } from "./rental-payment-availability.js";
 import Stripe from "stripe";
 import { Prisma } from "@prisma/client";
 import { AuditLogRepository } from "../../domain/repositories/audit-log-repository.js";
@@ -10,6 +12,8 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { ownedVehicleWhere } from "../../infrastructure/repositories/vehicle-tenant-scope.js";
 import { requestExtraChargeNotice, withExtraChargeNoticeStates } from "../../infrastructure/email/extra-charge-notice.js";
 import type { ExtraNoticeStatus } from "../../infrastructure/email/extra-charge-notice.js";
+import { assertPaymentBookingVisible, assertPaymentMethodVisible, financialRowsWhere, visiblePaymentMethodWhere, ownedHistoricalPaymentMethodWhere } from "../../infrastructure/repositories/payment-site-scope.js";
+import { runWithoutSiteAccess, siteAccessForTenant } from "../../infrastructure/auth/site-access-context.js";
 
 const RENTAL_PAYMENT_DOMAIN = "rental_payments";
 const SETUP_PURPOSE = "rental_guarantee_card";
@@ -247,6 +251,7 @@ type PaymentMethodRecord = {
 };
 
 type DepositRecord = {
+  captureBefore?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
   id: string;
@@ -457,17 +462,21 @@ const defaultDeps: RentalPaymentServiceDeps = {
     return prisma.rentalCustomerPaymentMethod.findFirst({ where: { stripeSetupIntentId, deletedAt: null }, select: paymentMethodSelect });
   },
   async listPaymentMethods(tenantId, rentalCustomerId) {
-    return prisma.rentalCustomerPaymentMethod.findMany({
-      where: { tenantId, rentalCustomerId, deletedAt: null },
+    const rows = await prisma.rentalCustomerPaymentMethod.findMany({
+      where: visiblePaymentMethodWhere(tenantId, rentalCustomerId),
       orderBy: { createdAt: "desc" },
-      select: paymentMethodSelect
+      select: { ...paymentMethodSelect, paymentProfile: { select: { stripeCustomerId: true } } }
     });
+    return rows.filter(row => row.stripeCustomerId === row.paymentProfile.stripeCustomerId)
+      .map(({ paymentProfile: _profile, ...row }) => row);
   },
   async listDepositsByBooking(tenantId, bookingId) {
-    return prisma.rentalDeposit.findMany({ where: { tenantId, bookingId, deletedAt: null }, orderBy: { createdAt: "desc" }, select: depositSelect });
+    const where = await financialRowsWhere(tenantId, bookingId);
+    return prisma.rentalDeposit.findMany({ where: { ...where, deletedAt: null, paymentMethod: { is: ownedHistoricalPaymentMethodWhere(tenantId, "rentalCustomerId" in where ? where.rentalCustomerId : undefined) } }, orderBy: { createdAt: "desc" }, select: depositSelect });
   },
   async listExtraChargesByBooking(tenantId, bookingId) {
-    const rows = await prisma.rentalExtraCharge.findMany({ where: { tenantId, bookingId, deletedAt: null }, orderBy: { createdAt: "desc" }, select: extraChargeSelect });
+    const where = await financialRowsWhere(tenantId, bookingId);
+    const rows = await prisma.rentalExtraCharge.findMany({ where: { ...where, deletedAt: null, AND: [{ OR: [{ paymentMethodId: null }, { paymentMethod: { is: ownedHistoricalPaymentMethodWhere(tenantId, "rentalCustomerId" in where ? where.rentalCustomerId : undefined) } }] }] }, orderBy: { createdAt: "desc" }, select: extraChargeSelect });
     return withExtraChargeNoticeStates(tenantId, rows);
   },
   async findActiveDeposit(tenantId, bookingId) {
@@ -624,10 +633,15 @@ export class RentalPaymentService {
       this.deps.listExtraChargesByBooking(tenantId, bookingId)
     ]);
 
-    return { booking: { id: booking.id, code: booking.code, customerId }, paymentMethods, deposits, extraCharges };
+    return { booking: { id: booking.id, code: booking.code, customerId }, paymentMethods, deposits, extraCharges,
+      capabilities: { stripe: this.stripeAvailability() } };
   }
 
   async listPaymentMethods(tenantId: string, rentalCustomerId: string) {
+    if (siteAccessForTenant(tenantId)) {
+      const customer = await prisma.rentalCustomer.findFirst({ where: { tenantId, id: rentalCustomerId, deletedAt: null }, select: { id: true } });
+      if (!customer) throw new AppError("Cliente non trovato",404,"RENTAL_CUSTOMER_NOT_FOUND");
+    }
     return this.deps.listPaymentMethods(tenantId, rentalCustomerId);
   }
 
@@ -644,8 +658,8 @@ export class RentalPaymentService {
       throw new AppError("Consenso mandato obbligatorio", 400, "RENTAL_PAYMENT_MANDATE_REQUIRED");
     }
 
-    const stripe = this.requireStripeClient();
     const booking = await this.getBookingOrThrow(input.tenantId, input.bookingId);
+    const stripe = this.requireStripeClient();
     const rentalCustomerId = this.requireBookingCustomerId(booking);
     const profile = await this.getOrCreateRentalStripeCustomer(input.tenantId, rentalCustomerId, booking);
     const pending = await this.deps.createPendingPaymentMethod({
@@ -719,8 +733,8 @@ export class RentalPaymentService {
 
   async createDeposit(input: { tenantId: string; bookingId: string; paymentMethodId: string; amountCents: number; userId: string }) {
     if (input.amountCents <= 0) throw new AppError("Importo deposito non valido", 400, "RENTAL_DEPOSIT_AMOUNT_INVALID");
-    const stripe = this.requireStripeClient();
     const booking = await this.getBookingOrThrow(input.tenantId, input.bookingId);
+    const stripe = this.requireStripeClient();
     const rentalCustomerId = this.requireBookingCustomerId(booking);
     const paymentMethod = await this.getActivePaymentMethodOrThrow(input.tenantId, input.paymentMethodId, rentalCustomerId);
     const claim = await this.deps.claimActiveDeposit({
@@ -738,6 +752,7 @@ export class RentalPaymentService {
     const deposit = claim.deposit;
 
     if (!claim.created) {
+      await assertPaymentBookingVisible(input.tenantId,deposit.bookingId,deposit);
       const sameRequest = deposit.rentalCustomerId === rentalCustomerId &&
         deposit.paymentMethodId === paymentMethod.id &&
         deposit.amountCents === input.amountCents &&
@@ -812,13 +827,14 @@ export class RentalPaymentService {
   }
 
   async captureDeposit(input: { tenantId: string; depositId: string; amountToCaptureCents?: number; userId: string }) {
-    const stripe = this.requireStripeClient();
     const deposit = await this.getDepositOrThrow(input.tenantId, input.depositId);
+    const stripe = this.requireStripeClient();
     if (!deposit.stripePaymentIntentId) throw new AppError("PaymentIntent deposito mancante", 409, "RENTAL_DEPOSIT_PAYMENT_INTENT_MISSING");
     if (!CAPTURABLE_DEPOSIT_STATUSES.includes(deposit.status)) {
       throw new AppError("Deposito non catturabile nello stato corrente", 409, "RENTAL_DEPOSIT_NOT_CAPTURABLE");
     }
 
+    if(deposit.captureBefore && deposit.captureBefore.getTime()<=Date.now())throw new AppError("Termine della garanzia superato. Verifica lo stato Stripe prima di una nuova autorizzazione.",409,"RENTAL_DEPOSIT_CAPTURE_DEADLINE");
     const remaining = deposit.amountCents - deposit.capturedAmountCents;
     const amountToCapture = input.amountToCaptureCents ?? remaining;
     if (amountToCapture <= 0 || amountToCapture > remaining) {
@@ -840,8 +856,8 @@ export class RentalPaymentService {
   }
 
   async releaseDeposit(input: { tenantId: string; depositId: string; userId: string }) {
-    const stripe = this.requireStripeClient();
     const deposit = await this.getDepositOrThrow(input.tenantId, input.depositId);
+    const stripe = this.requireStripeClient();
     if (!deposit.stripePaymentIntentId) throw new AppError("PaymentIntent deposito mancante", 409, "RENTAL_DEPOSIT_PAYMENT_INTENT_MISSING");
     if (!RELEASABLE_DEPOSIT_STATUSES.includes(deposit.status)) {
       throw new AppError("Deposito non rilasciabile nello stato corrente", 409, "RENTAL_DEPOSIT_NOT_RELEASABLE");
@@ -926,12 +942,13 @@ export class RentalPaymentService {
   }
 
   async notifyExtraCharge(input: { tenantId: string; extraChargeId: string; userId: string }) {
+    await this.getExtraChargeOrThrow(input.tenantId,input.extraChargeId);
     return requestExtraChargeNotice(input, this.emailQueueService);
   }
 
   async chargeExtraCharge(input: { tenantId: string; extraChargeId: string; paymentMethodId?: string; userId: string }) {
-    const stripe = this.requireStripeClient();
     const extra = await this.getExtraChargeOrThrow(input.tenantId, input.extraChargeId);
+    const stripe = this.requireStripeClient();
     if (!CHARGEABLE_EXTRA_STATUSES.includes(extra.status) && extra.status !== RentalExtraChargeStatus.PAYMENT_PROCESSING) {
       throw new AppError("Extra charge non addebitabile nello stato corrente", 409, "RENTAL_EXTRA_CHARGE_NOT_CHARGEABLE");
     }
@@ -1000,6 +1017,10 @@ export class RentalPaymentService {
   }
 
   async handleStripeEvent(event: Stripe.Event) {
+    return runWithoutSiteAccess(() => this.handleStripeEventWithoutUserScope(event));
+  }
+
+  private async handleStripeEventWithoutUserScope(event: Stripe.Event) {
     const dataObject = event.data.object as unknown as Record<string, unknown> | undefined;
     let metadata = metadataFromObject(dataObject);
     if (event.type.startsWith("payment_intent.")) {
@@ -1192,10 +1213,16 @@ export class RentalPaymentService {
   private async reconcileIntent(kind: "extra", tenantId: string, recordId: string, intentId: string): Promise<ExtraChargeRecord>;
   private async reconcileIntent(kind: "deposit", tenantId: string, recordId: string, intentId: string): Promise<DepositRecord>;
   private async reconcileIntent(kind: "extra" | "deposit", tenantId: string, recordId: string, intentId: string): Promise<ExtraChargeRecord | DepositRecord> {
+    // Once a provider intent is known, receipt reconciliation must survive a
+    // subsequent assignment change. User commands are guarded before this path.
+    return runWithoutSiteAccess(() => this.reconcileAuthoritativeIntent(kind,tenantId,recordId,intentId));
+  }
+
+  private async reconcileAuthoritativeIntent(kind: "extra" | "deposit", tenantId: string, recordId: string, intentId: string): Promise<ExtraChargeRecord | DepositRecord> {
     // Each conflict reloads both the committed row and the provider object; never reuse a stale snapshot.
     for (let attempt = 0; attempt < 5; attempt++) {
       const snapshot = kind === "extra" ? await this.getExtraChargeOrThrow(tenantId, recordId) : await this.getDepositOrThrow(tenantId, recordId);
-      const intent = await this.requireStripeClient().paymentIntents.retrieve(intentId);
+      const intent = await this.requireStripeClient().paymentIntents.retrieve(intentId, {expand:["latest_charge"]});
       if (intent.id !== intentId) this.bindingError();
       if (kind === "extra") {
         const row = snapshot as ExtraChargeRecord;
@@ -1220,6 +1247,7 @@ export class RentalPaymentService {
       }
       const row = snapshot as DepositRecord;
       await this.validateIntent(kind, row, intent);
+      const captureBefore=captureBeforeFromIntent(intent)??row.captureBefore??null;
       if (row.capturedAmountCents > 0 || ["CAPTURED", "PARTIALLY_CAPTURED"].includes(row.status)) return row;
       if (["RELEASED", "CANCELED", "EXPIRED"].includes(row.status) && intent.status !== "canceled") this.bindingError();
       const status = intent.status === "succeeded" ? (intent.amount_received < row.amountCents ? RentalDepositStatus.PARTIALLY_CAPTURED : RentalDepositStatus.CAPTURED)
@@ -1227,8 +1255,9 @@ export class RentalPaymentService {
         : intent.status === "canceled" ? RentalDepositStatus.RELEASED
         : ["requires_payment_method", "requires_action"].includes(intent.status) ? RentalDepositStatus.FAILED : RentalDepositStatus.AUTHORIZING;
       if (intent.status === "succeeded" && intent.amount_received <= 0) this.bindingError();
-      if (row.status === status && row.stripePaymentIntentId === intent.id) return row;
+      if (row.status === status && row.stripePaymentIntentId === intent.id && (row.captureBefore?.getTime()??null)===(captureBefore?.getTime()??null)) return row;
       const updated = await this.deps.compareAndUpdateDeposit(row, {
+        captureBefore,
         stripePaymentIntentId: intent.id, status,
         capturedAmountCents: intent.status === "succeeded" ? intent.amount_received : row.capturedAmountCents,
         capturedAt: intent.status === "succeeded" ? new Date() : undefined,
@@ -1336,9 +1365,17 @@ export class RentalPaymentService {
     return profile;
   }
 
+  private stripeAvailability() {
+    return rentalStripeAvailability(env.FLEETUM_ENVIRONMENT, Boolean(env.STRIPE_SECRET_KEY?.trim()), Boolean(this.stripeClient));
+  }
+
   private requireStripeClient() {
-    if (!env.STRIPE_SECRET_KEY || !this.stripeClient) {
-      throw new AppError("Stripe non configurato per garanzie noleggio", 500, "RENTAL_STRIPE_NOT_CONFIGURED");
+    const availability = this.stripeAvailability();
+    if (availability.status === "disabled_for_environment") {
+      throw new AppError("Operazioni Stripe disabilitate in questo ambiente di prova", 503, "RENTAL_STRIPE_DISABLED");
+    }
+    if (!availability.operationsEnabled || !this.stripeClient) {
+      throw new AppError("Stripe non configurato per garanzie noleggio", 503, "RENTAL_STRIPE_NOT_CONFIGURED");
     }
     return this.stripeClient;
   }
@@ -1346,6 +1383,7 @@ export class RentalPaymentService {
   private async getBookingOrThrow(tenantId: string, bookingId: string) {
     const booking = await this.deps.findBookingForPayment(tenantId, bookingId);
     if (!booking) throw new AppError("Prenotazione non trovata", 404, "RENTAL_BOOKING_NOT_FOUND");
+    await assertPaymentBookingVisible(tenantId,booking.id);
     return booking;
   }
 
@@ -1361,6 +1399,7 @@ export class RentalPaymentService {
     if (!paymentMethod || paymentMethod.rentalCustomerId !== rentalCustomerId) {
       throw new AppError("Metodo di pagamento non trovato", 404, "RENTAL_PAYMENT_METHOD_NOT_FOUND");
     }
+    await assertPaymentMethodVisible(tenantId,paymentMethod);
     if (paymentMethod.status !== RentalPaymentMethodStatus.ACTIVE || !paymentMethod.mandateAccepted) {
       throw new AppError("Metodo di pagamento non attivo o mandato mancante", 409, "RENTAL_PAYMENT_METHOD_NOT_ACTIVE");
     }
@@ -1370,12 +1409,24 @@ export class RentalPaymentService {
   private async getDepositOrThrow(tenantId: string, depositId: string) {
     const deposit = await this.deps.findDepositById(tenantId, depositId);
     if (!deposit) throw new AppError("Deposito non trovato", 404, "RENTAL_DEPOSIT_NOT_FOUND");
+    await assertPaymentBookingVisible(tenantId,deposit.bookingId,deposit);
+    if (siteAccessForTenant(tenantId)) {
+      const method = await this.deps.findHistoricalPaymentMethodById(tenantId,deposit.paymentMethodId);
+      if (!method || method.rentalCustomerId!==deposit.rentalCustomerId) throw new AppError("Metodo di pagamento non trovato",404,"RENTAL_PAYMENT_METHOD_NOT_FOUND");
+      await assertPaymentMethodVisible(tenantId,method,true);
+    }
     return deposit;
   }
 
   private async getExtraChargeOrThrow(tenantId: string, extraChargeId: string) {
     const extraCharge = await this.deps.findExtraChargeById(tenantId, extraChargeId);
     if (!extraCharge) throw new AppError("Extra charge non trovato", 404, "RENTAL_EXTRA_CHARGE_NOT_FOUND");
+    await assertPaymentBookingVisible(tenantId,extraCharge.bookingId,extraCharge);
+    if (siteAccessForTenant(tenantId) && extraCharge.paymentMethodId) {
+      const method = await this.deps.findHistoricalPaymentMethodById(tenantId,extraCharge.paymentMethodId);
+      if (!method || method.rentalCustomerId!==extraCharge.rentalCustomerId) throw new AppError("Metodo di pagamento non trovato",404,"RENTAL_PAYMENT_METHOD_NOT_FOUND");
+      await assertPaymentMethodVisible(tenantId,method,true);
+    }
     return extraCharge;
   }
 }

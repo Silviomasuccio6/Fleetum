@@ -264,11 +264,16 @@ model Tenant {
   rentalDeposits                RentalDeposit[]
   rentalExtraCharges            RentalExtraCharge[]
   rentalPaymentEvents           RentalPaymentEvent[]
+  rentalCollectionEntries       RentalCollectionEntry[]
   contractTemplates             ContractTemplate[]
   bookingContracts              BookingContract[]
+  contractSigningRequests       ContractSigningRequest[]
   bookingContractEvents         BookingContractEvent[]
   bookingContractDeliveries     BookingContractDelivery[]
   bookingContractEmailRequests  BookingContractEmailRequest[]
+  cargosConnection              TenantCargosConnection?
+  cargosTransmissions           ContractCargosTransmission[]
+  contractCargosReceipts ContractCargosReceipt[]
   invoiceEmailRequests          InvoiceEmailRequest[]
   rentalPriceLists              RentalPriceList[]
   rentalPricePackages           RentalPricePackage[]
@@ -465,6 +470,8 @@ model User {
   updatedAt             DateTime             @updatedAt
   deletedAt             DateTime?
   tenant                Tenant               @relation(fields: [tenantId], references: [id])
+  assignedSiteId        String?
+  assignedSite          Site?                @relation("UserAssignedSite", fields: [assignedSiteId, tenantId], references: [id, tenantId], onDelete: Restrict, onUpdate: Cascade)
   roles                 UserRole[]
   createdStoppages      Stoppage[]           @relation("StoppageCreator")
   passwordResetTokens   PasswordResetToken[]
@@ -472,12 +479,15 @@ model User {
   refreshSessions       RefreshSession[]
   rentalBookingsCreated RentalBooking[]      @relation("RentalBookingCreator")
   rentalPaymentMethodsCreated RentalCustomerPaymentMethod[] @relation("RentalPaymentMethodCreator")
+  rentalCollectionEntries     RentalCollectionEntry[]
   rentalDepositsCreated       RentalDeposit[]               @relation("RentalDepositCreator")
   rentalDepositsApproved      RentalDeposit[]               @relation("RentalDepositApprover")
   rentalExtraChargesCreated   RentalExtraCharge[]           @relation("RentalExtraChargeCreator")
   rentalExtraChargesApproved  RentalExtraCharge[]           @relation("RentalExtraChargeApprover")
   privacyAcceptances    PrivacyAcceptance[]
 
+  @@unique([id, tenantId])
+  @@index([tenantId, assignedSiteId])
   @@unique([tenantId, email])
   @@index([tenantId, status])
 }
@@ -605,6 +615,12 @@ model Site {
   vehicles         Vehicle[]
   stoppages        Stoppage[]
   rentalPriceLists RentalPriceList[]
+  assignedUsers    User[] @relation("UserAssignedSite")
+  responsibleBookings RentalBooking[] @relation("BookingResponsibleSite")
+  pickupBookings RentalBooking[] @relation("BookingPickupSite")
+  returnBookings RentalBooking[] @relation("BookingReturnSite")
+
+  @@unique([id, tenantId])
 
   @@index([tenantId, isActive])
   @@index([tenantId, city])
@@ -782,6 +798,12 @@ model VehicleBooklet {
 }
 
 model RentalBooking {
+  siteId               String?
+  pickupSiteId         String?
+  returnSiteId         String?
+  site                 Site? @relation("BookingResponsibleSite", fields: [siteId, tenantId], references: [id, tenantId], onDelete: Restrict, onUpdate: Cascade)
+  pickupSite           Site? @relation("BookingPickupSite", fields: [pickupSiteId, tenantId], references: [id, tenantId], onDelete: Restrict, onUpdate: Cascade)
+  returnSite           Site? @relation("BookingReturnSite", fields: [returnSiteId, tenantId], references: [id, tenantId], onDelete: Restrict, onUpdate: Cascade)
   id                   String                        @id @default(cuid())
   tenantId             String
   vehicleId            String
@@ -808,6 +830,8 @@ model RentalBooking {
   returnLocation       String?
   pickupKm             Int?
   returnKm             Int?
+  /// @pii authorized agreement reason and actor reference
+  priceAgreement       Json?
   expectedTotal        Float?
   expectedTotalExact   Decimal?                      @ignore @db.Decimal(19, 2)
   finalTotal           Float?
@@ -836,8 +860,10 @@ model RentalBooking {
   rentalDeposits       RentalDeposit[]
   rentalExtraCharges   RentalExtraCharge[]
   rentalPaymentEvents  RentalPaymentEvent[]
+  collectionEntries    RentalCollectionEntry[]
   createRequest        RentalBookingCreateRequest?
 
+  @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, status])
   @@index([tenantId, contractStatus])
@@ -846,6 +872,9 @@ model RentalBooking {
   @@index([tenantId, returnAt])
   @@index([tenantId, customerId])
   @@index([tenantId, customerId, pickupAt])
+  @@index([tenantId, siteId, pickupAt])
+  @@index([tenantId, pickupSiteId, pickupAt])
+  @@index([tenantId, returnSiteId, returnAt])
   @@index([vehicleId, pickupAt, returnAt])
 }
 
@@ -1111,6 +1140,7 @@ model RentalDeposit {
   currency              String                     @default("EUR")
   status                RentalDepositStatus        @default(DRAFT)
   failureReason         String?
+  captureBefore         DateTime?
   authorizedAt          DateTime?
   capturedAt            DateTime?
   releasedAt            DateTime?
@@ -1427,6 +1457,13 @@ model BookingContract {
   bookingId       String                    @unique
   templateId      String?
   templateVersion Int                       @default(1)
+  documentRevision Int                       @default(0)
+  issuedAt        DateTime?
+  issuedByUserId  String?
+  issuanceHash    String?
+  /// @pii driver references and expressly agreed rental conditions; frozen by signing source hash
+  rentalTerms     Json?
+  rentalTermsRevision Int                    @default(0)
   status          BookingContractStatus     @default(DRAFT)
   /// @pii
   title           String
@@ -1455,11 +1492,81 @@ model BookingContract {
   template        ContractTemplate?         @relation(fields: [templateId], references: [id])
   events          BookingContractEvent[]
   deliveries      BookingContractDelivery[]
+  cargosTransmission ContractCargosTransmission?
+  signingRequests ContractSigningRequest[]
 
+  @@unique([id, tenantId])
   @@index([tenantId, status, createdAt])
   @@index([tenantId, bookingId, updatedAt])
   @@index([tenantId, bookingId, status, createdAt])
   @@index([tenantId, lastSentAt])
+}
+
+model TenantCargosConnection {
+  tenantId             String @id
+  credentialsEncrypted String
+  agencies             Json @default("{}")
+  enabled              Boolean @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  tenant               Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model ContractCargosTransmission {
+  id               String @id @default(cuid())
+  tenantId         String
+  contractId       String @unique
+  status           String @default("DRAFT")
+  /// @pii
+  recordDraft      Json @default("{}")
+  sourceHash       String?
+  recordHash       String?
+  /// @pii encrypted exact outbound record, never returned to operational clients
+  recordEncrypted  String?
+  requestedByUserId String?
+  claimToken       String?
+  transactionId    String?
+  errorCode        String?
+  startedAt        DateTime?
+  acceptedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  tenant           Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  checkStatus      String?
+  checkedAt        DateTime?
+  checkSourceHash  String?
+  checkErrorCode   String?
+  manualConfirmedAt DateTime?
+  receipts         ContractCargosReceipt[]
+  contract         BookingContract @relation(fields: [contractId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([tenantId, transactionId])
+  @@unique([id, tenantId])
+  @@unique([contractId, tenantId])
+  @@index([tenantId, status])
+}
+
+model ContractCargosReceipt {
+  id String @id
+  tenantId String
+  transmissionId String
+  storedFileObjectId String @unique
+  idempotencyKey String
+  requestHash String
+  sha256 String
+  protocol String
+  receiptDate DateTime @db.Date
+  transactionId String
+  sourceHash String
+  recordHash String
+  kind String
+  actorUserId String
+  createdAt DateTime @default(now())
+  tenant Tenant @relation(fields:[tenantId],references:[id],onDelete:Cascade)
+  transmission ContractCargosTransmission @relation(fields:[transmissionId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  file StoredFileObject @relation(fields:[storedFileObjectId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  @@unique([tenantId,idempotencyKey])
+  @@index([tenantId,transmissionId,createdAt])
 }
 
 model BookingContractEvent {
@@ -1810,6 +1917,11 @@ model StoredFileObject {
   @@index([tenantId, resourceType, resourceId])
   @@index([tenantId, storageKey])
   @@index([deletedAt])
+  signingRequests ContractSigningRequest[] @relation("SigningOriginal")
+  signedRequests ContractSigningRequest[] @relation("SigningFinal")
+  cargosReceipts ContractCargosReceipt[]
+  @@unique([id, tenantId])
+
 }
 
 model EmailQueue {
@@ -2021,4 +2133,101 @@ model DemoLead {
   @@index([status, createdAt])
   @@index([email])
   @@index([createdAt])
+}
+
+
+model ContractSigningRequest {
+  id String @id @default(cuid())
+  tenantId String
+  contractId String
+  version Int
+  idempotencyKey String
+  requestHash String
+  tokenHash String @unique
+  status String @default("PENDING")
+  documentTitle String
+  bookingCode String
+  documentSha256 String
+  contractRevision Int @default(0)
+  method String @default("EMAIL_OTP")
+  signedDocumentSha256 String?
+  signedStoredFileObjectId String?
+  sourceHash String
+  storedFileObjectId String
+  /// @pii
+  recipient String
+  /// @pii
+  signerName String
+  issuerName String
+  actorUserId String
+  siteAuthorization Json
+  expiresAt DateTime
+  inviteQueueId String?
+  otpQueueId String?
+  copyQueueId String?
+  otpGeneration Int @default(0)
+  otpSendCount Int @default(0)
+  otpAttempts Int @default(0)
+  totalAttempts Int @default(0)
+  otpHash String?
+  browserHash String?
+  otpExpiresAt DateTime?
+  lastOtpAt DateTime?
+  documentRequestedAt DateTime?
+  signedAt DateTime?
+  confirmationId String?
+  consumedOtpHash String?
+  signedBrowserHash String?
+  consentVersion String?
+  /// @pii
+  evidence Json?
+  evidenceMac String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields:[tenantId],references:[id],onDelete:Restrict)
+  contract BookingContract @relation(fields:[contractId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  document StoredFileObject @relation("SigningOriginal",fields:[storedFileObjectId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  signedDocument StoredFileObject? @relation("SigningFinal",fields:[signedStoredFileObjectId,tenantId],references:[id,tenantId],onDelete:Restrict)
+  @@unique([tenantId,idempotencyKey])
+  @@unique([contractId,version])
+  @@index([tenantId,contractId,status])
+}
+
+// Confirmed manual base-rental receipts only. Deposits, extras and SaaS invoices
+// retain their own records. Append-only: corrections use linked reversals.
+enum RentalCollectionKind {
+  RECEIPT
+  REFUND
+  REVERSAL
+}
+enum RentalCollectionMethod {
+  CASH
+  BANK_TRANSFER
+  EXTERNAL_POS
+}
+model RentalCollectionEntry {
+  id              String @id @default(cuid())
+  tenantId        String
+  bookingId       String
+  createdByUserId String
+  kind            RentalCollectionKind
+  method          RentalCollectionMethod
+  amountCents     Int
+  currency        String @default("EUR")
+  occurredAt      DateTime
+  reference       String
+  reason          String
+  requestKey      String
+  requestHash     String
+  sourceId        String?
+  createdAt       DateTime @default(now())
+  tenant          Tenant @relation(fields:[tenantId], references:[id], onDelete:Restrict,map:"RentalCollectionEntry_tenant_fkey")
+  booking         RentalBooking @relation(fields:[bookingId,tenantId],references:[id,tenantId],onDelete:Restrict,onUpdate:Restrict,map:"RentalCollectionEntry_booking_fkey")
+  createdBy       User @relation(fields:[createdByUserId,tenantId],references:[id,tenantId],onDelete:Restrict,onUpdate:Restrict,map:"RentalCollectionEntry_author_fkey")
+  source          RentalCollectionEntry? @relation("CollectionSource",fields:[sourceId,tenantId,bookingId],references:[id,tenantId,bookingId],onDelete:Restrict,onUpdate:Restrict,map:"RentalCollectionEntry_source_fkey")
+  dependents      RentalCollectionEntry[] @relation("CollectionSource")
+  @@unique([id,tenantId,bookingId])
+  @@unique([tenantId,requestKey])
+  @@index([tenantId,bookingId,createdAt])
+  @@index([tenantId,occurredAt])
 }

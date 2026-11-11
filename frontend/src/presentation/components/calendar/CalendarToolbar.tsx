@@ -5,6 +5,7 @@ import { cn } from "../../../lib/utils";
 
 type CalendarToolbarProps = {
   monthLabel: string;
+  canWrite?:boolean;
   curView: CalendarView;
   onNavigate: (dir: -1 | 1) => void;
   onSetView: (view: CalendarView) => void;
@@ -19,30 +20,29 @@ const views: Array<{ id: CalendarView; label: string }> = [
   { id: "month", label: "Mese" }
 ];
 
-export const CalendarToolbar = ({ monthLabel, curView, onNavigate, onSetView, onCreate, onSendApple, onSendGoogle }: CalendarToolbarProps) => (
+export const CalendarToolbar = ({ canWrite=true,monthLabel, curView, onNavigate, onSetView, onCreate, onSendApple, onSendGoogle }: CalendarToolbarProps) => (
   <header className="calendar-toolbar">
     <div className="calendar-toolbar__group calendar-toolbar__group--left">
       <div className="calendar-toolbar__period" aria-label="Navigazione mese">
-        <Button size="icon" variant="outline" onClick={() => onNavigate(-1)} aria-label="Mese precedente">
+        <Button size="icon" variant="outline" onClick={() => onNavigate(-1)} aria-label="Periodo precedente">
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <h2 className="calendar-toolbar__title" title={monthLabel}>
           {monthLabel}
         </h2>
-        <Button size="icon" variant="outline" onClick={() => onNavigate(1)} aria-label="Mese successivo">
+        <Button size="icon" variant="outline" onClick={() => onNavigate(1)} aria-label="Periodo successivo">
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
     </div>
 
     <div className="calendar-toolbar__group calendar-toolbar__group--right">
-      <div className="calendar-toolbar__switch" role="tablist" aria-label="Selettore vista calendario">
+      <div className="calendar-toolbar__switch" role="group" aria-label="Selettore vista calendario">
         {views.map((view) => (
           <button
             key={view.id}
             type="button"
-            role="tab"
-            aria-selected={curView === view.id}
+            aria-pressed={curView === view.id}
             onClick={() => onSetView(view.id)}
             className={cn("calendar-toolbar__switch-btn", curView === view.id && "is-active")}
           >
@@ -58,7 +58,7 @@ export const CalendarToolbar = ({ monthLabel, curView, onNavigate, onSetView, on
         <Send className="h-4 w-4" />
         Invia a Google
       </Button>
-      <Button size="sm" onClick={onCreate}>
+      <Button size="sm" disabled={!canWrite} onClick={onCreate}>
         <Plus className="h-4 w-4" />
         Nuovo evento
       </Button>

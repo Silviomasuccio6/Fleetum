@@ -1,3 +1,4 @@
+import {createReportActor,reportAuthorization,removeReportActors,withCompanyScope} from "../helpers/site-command-fixtures.js";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
@@ -32,6 +33,7 @@ describe("scheduled report tenant enumeration", () => {
 
   after(async () => {
     await prisma.auditLog.deleteMany({ where: { tenantId: { in: allTenantIds } } });
+    await removeReportActors(allTenantIds);
     await prisma.tenant.deleteMany({ where: { id: { in: allTenantIds } } });
     await prisma.$disconnect();
   });
@@ -50,6 +52,7 @@ describe("scheduled report tenant enumeration", () => {
       ]
     });
 
+    for(const id of allTenantIds)await createReportActor(id);
     const scheduledAt = new Date();
     const hour = scheduledAt.getHours();
     const minute = scheduledAt.getMinutes();
@@ -60,7 +63,7 @@ describe("scheduled report tenant enumeration", () => {
         tenantId: tenantIds.old,
         action: "SETTINGS_REPORTS",
         resource: "reports",
-        details: settings(["old@example.test"], hour, minute),
+        details: {...settings(["old@example.test"], hour, minute),__siteAuthorization:reportAuthorization(tenantIds.old)},
         createdAt: new Date(base)
       }
     });
@@ -70,14 +73,14 @@ describe("scheduled report tenant enumeration", () => {
         tenantId: tenantIds.noisy,
         action: "SETTINGS_REPORTS",
         resource: "reports",
-        details: settings(
+        details: {...settings(
           index === 300
             ? ["noisy@example.test", " NOISY@example.test ", "second@example.test"]
             : [],
           hour,
           minute,
           index === 300
-        ),
+        ),__siteAuthorization:reportAuthorization(tenantIds.noisy)},
         createdAt: new Date(base + index + 1)
       }))
     });
@@ -88,35 +91,35 @@ describe("scheduled report tenant enumeration", () => {
           tenantId: tenantIds.afterFailure,
           action: "SETTINGS_REPORTS",
           resource: "reports",
-          details: settings(["after@example.test"], hour, minute),
+          details: {...settings(["after@example.test"], hour, minute),__siteAuthorization:reportAuthorization(tenantIds.afterFailure)},
           createdAt: new Date(base + 302)
         },
         {
           tenantId: tenantIds.failing,
           action: "SETTINGS_REPORTS",
           resource: "reports",
-          details: settings(["failure@example.test"], hour, minute),
+          details: {...settings(["failure@example.test"], hour, minute),__siteAuthorization:reportAuthorization(tenantIds.failing)},
           createdAt: new Date(base + 303)
         },
         {
           tenantId: tenantIds.inactive,
           action: "SETTINGS_REPORTS",
           resource: "reports",
-          details: settings(["inactive@example.test"], hour, minute),
+          details: {...settings(["inactive@example.test"], hour, minute),__siteAuthorization:reportAuthorization(tenantIds.inactive)},
           createdAt: new Date(base + 304)
         },
         {
           tenantId: tenantIds.blockedLicense,
           action: "SETTINGS_REPORTS",
           resource: "reports",
-          details: settings(["blocked@example.test"], hour, minute),
+          details: {...settings(["blocked@example.test"], hour, minute),__siteAuthorization:reportAuthorization(tenantIds.blockedLicense)},
           createdAt: new Date(base + 305)
         },
         {
           tenantId: tenantIds.afterPageBoundary,
           action: "SETTINGS_REPORTS",
           resource: "reports",
-          details: settings(["tail@example.test"], hour, minute),
+          details: {...settings(["tail@example.test"], hour, minute),__siteAuthorization:reportAuthorization(tenantIds.afterPageBoundary)},
           createdAt: new Date(base + 306)
         }
       ]

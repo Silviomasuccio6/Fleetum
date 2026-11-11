@@ -1,5 +1,6 @@
+import { useFleetumLanguage } from "../../../i18n/fleetum-language";
 import { CalendarEvent, CalendarItem } from "../calendar-types";
-import { getMonthGridDays, toDateKey, weekdayLabelsShort } from "../calendar-utils";
+import { getMonthGridDays, toDateKey } from "../calendar-utils";
 import { cn } from "../../../../lib/utils";
 
 type MonthViewProps = {
@@ -11,6 +12,8 @@ type MonthViewProps = {
 };
 
 export const MonthView = ({ viewDate, selDay, events, calendars, onPickDay }: MonthViewProps) => {
+  const { language } = useFleetumLanguage();
+  const locale = language === "en" ? "en-GB" : "it-IT";
   const days = getMonthGridDays(viewDate);
   const todayKey = toDateKey(new Date());
   const selectedKey = toDateKey(selDay);
@@ -24,10 +27,10 @@ export const MonthView = ({ viewDate, selDay, events, calendars, onPickDay }: Mo
   }, {});
 
   return (
-    <div className="calendar-month" role="grid" aria-label="Calendario mensile">
+    <div className="calendar-month" role="group" aria-label="Calendario mensile">
       <div className="calendar-month__weekdays">
-        {weekdayLabelsShort.map((weekday) => (
-          <span key={weekday}>{weekday}</span>
+        {days.slice(0, 7).map((day) => (
+          <span key={toDateKey(day)}>{day.toLocaleDateString(locale, { weekday: "short" })}</span>
         ))}
       </div>
 
@@ -50,6 +53,9 @@ export const MonthView = ({ viewDate, selDay, events, calendars, onPickDay }: Mo
                 isSelected && "is-selected"
               )}
               onClick={() => onPickDay(day)}
+              aria-current={isToday ? "date" : undefined}
+              aria-pressed={isSelected}
+              aria-label={day.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             >
               <span className={cn("calendar-month__daynum", isToday && "is-today", isSelected && "is-selected")}>{day.getDate()}</span>
 
@@ -60,6 +66,7 @@ export const MonthView = ({ viewDate, selDay, events, calendars, onPickDay }: Mo
                     <span
                       key={event.id}
                       className="calendar-month__event"
+                      translate="no"
                       style={{ background: calendar.bg, color: calendar.tc }}
                     >
                       {event.title}

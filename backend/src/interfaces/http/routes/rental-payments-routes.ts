@@ -5,6 +5,13 @@ import { asyncHandler } from "./async-handler.js";
 
 export const rentalPaymentsRoutes = (controller: RentalPaymentsController) => {
   const router = Router();
+  router.use((_req,res,next)=>{res.setHeader("Cache-Control","private, no-store");next();});
+
+  router.get("/workspace",requirePermissions("rental-payments:read"),asyncHandler(controller.workspace));
+  router.get("/bookings/:bookingId/collections",requirePermissions("rental-payments:read"),asyncHandler(controller.collectionDetail));
+  router.post("/bookings/:bookingId/collections",requirePermissions("rental-payments:charge"),asyncHandler(controller.recordCollection));
+  router.post("/bookings/:bookingId/collections/:entryId/refund",requirePermissions("rental-payments:refund"),asyncHandler(controller.recordRefund));
+  router.post("/bookings/:bookingId/collections/:entryId/reverse",requirePermissions("rental-payments:refund"),asyncHandler(controller.recordReversal));
 
   router.get("/bookings/:bookingId/summary", requirePermissions("rental-payments:read"), asyncHandler(controller.summary));
   router.post("/bookings/:bookingId/setup-session", requirePermissions("rental-payments:write"), asyncHandler(controller.setupSession));

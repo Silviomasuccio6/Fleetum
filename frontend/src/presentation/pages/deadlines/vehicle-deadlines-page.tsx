@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarPlus } from "lucide-react";
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CalendarPlus, CalendarDays, Gauge, Wrench, Car, Clock } from "lucide-react";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { CardStat } from "../../components/common/table";
@@ -9,6 +10,8 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+
+import {useOperationsAccess} from "../../components/operations/operations-workspace";
 
 type DeadlineRow = {
   vehicleId: string;
@@ -65,244 +68,66 @@ const severityBadgeVariant = (severity: DeadlineRow["severity"]) => {
   return "secondary";
 };
 
+import {Link} from "react-router-dom";
+import {WorkspacePageHeader,WorkspaceMetricStrip} from "../../components/ui/workspace-ui";
+import {CommerceCollection,CommerceNotice} from "../../components/ui/commerce-workspace";
+import {Label} from "../../components/ui/label";
+const deadlineStatus={SCADUTA:"Scaduta",IN_SCADENZA:"In scadenza",OK:"In regola"};
+const deadlineSeverity={CRITICAL:"Critica",HIGH:"Alta",MEDIUM:"Media",LOW:"Bassa"};
+const threshold=(value:string,fallback:number)=>value.trim()!==""&&Number.isFinite(Number(value))?Math.max(0,Number(value)):fallback;
 export const VehicleDeadlinesPage = () => {
-  const [rows, setRows] = useState<DeadlineRow[]>([]);
-  const [kpis, setKpis] = useState<DeadlineResponse["kpis"]>({
-    total: 0,
-    dueNowKm: 0,
-    dueSoonKm: 0,
-    dueNowRevision: 0,
-    dueSoonRevision: 0,
-    critical: 0
-  });
-  const [kmWarning, setKmWarning] = useState("1000");
-  const [revisionWarningDays, setRevisionWarningDays] = useState("30");
-  const [loading, setLoading] = useState(false);
-  const [syncingAll, setSyncingAll] = useState(false);
-  const [syncingVehicleId, setSyncingVehicleId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = (await masterDataUseCases.listVehicleDeadlines({
-        kmWarning: Number(kmWarning) || 1000,
-        revisionWarningDays: Number(revisionWarningDays) || 30
-      })) as DeadlineResponse;
-      setRows(result.data ?? []);
-      setKpis(result.kpis ?? kpis);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  const onSyncAll = async () => {
-    setSyncingAll(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const result = await masterDataUseCases.syncVehicleDeadlinesCalendar({
-        includeSoon: true,
-        kmWarning: Number(kmWarning) || 1000,
-        revisionWarningDays: Number(revisionWarningDays) || 30
-      });
-      setSuccess(`Calendario aggiornato: ${result.created} creati, ${result.updated} aggiornati, ${result.removed} rimossi.`);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSyncingAll(false);
-    }
-  };
-
-  const onSyncSingle = async (vehicleId: string) => {
-    setSyncingVehicleId(vehicleId);
-    setError(null);
-    setSuccess(null);
-    try {
-      const result = await masterDataUseCases.syncVehicleDeadlinesCalendar({
-        vehicleIds: [vehicleId],
-        includeSoon: true,
-        kmWarning: Number(kmWarning) || 1000,
-        revisionWarningDays: Number(revisionWarningDays) || 30
-      });
-      setSuccess(`Veicolo sincronizzato: ${result.created} creati, ${result.updated} aggiornati, ${result.removed} rimossi.`);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSyncingVehicleId(null);
-    }
-  };
-
-  const activeAlerts = useMemo(() => rows.filter((row) => row.status !== "OK"), [rows]);
-
-  return (
-    <section className="space-y-3">
-      <PageHeader
-        title="Scadenziario Veicoli"
-        subtitle="Alert su manutenzione chilometrica e revisione con sincronizzazione task nel calendario."
-        actions={
-          <Button onClick={() => void onSyncAll()} disabled={syncingAll || loading}>
-            <CalendarPlus className="h-4 w-4" />
-            {syncingAll ? "Sincronizzazione..." : "Sincronizza tutto nel calendario"}
-          </Button>
-        }
-      />
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
-
-      <div className="g-stats-grid grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <CardStat title="Alert totali" value={kpis.total} className="h-full" />
-        <CardStat title="KM scaduti" value={kpis.dueNowKm} className="h-full" />
-        <CardStat title="KM in scadenza" value={kpis.dueSoonKm} className="h-full" />
-        <CardStat title="Revisioni scadute" value={kpis.dueNowRevision} className="h-full" />
-        <CardStat title="Revisioni in scadenza" value={kpis.dueSoonRevision} className="h-full" />
-        <CardStat title="Critici" value={kpis.critical} className="h-full" />
-      </div>
-
-      <Card className="saas-surface shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Configurazione alert</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-2 md:grid-cols-[220px_220px_auto]">
-            <Input
-              type="number"
-              min={0}
-              value={kmWarning}
-              onChange={(event) => setKmWarning(event.target.value)}
-              placeholder="Soglia km avviso"
-            />
-            <Input
-              type="number"
-              min={0}
-              value={revisionWarningDays}
-              onChange={(event) => setRevisionWarningDays(event.target.value)}
-              placeholder="Giorni avviso revisione"
-            />
-            <Button variant="outline" onClick={() => void load()} disabled={loading}>
-              {loading ? <FleetumInlineLoader label="Aggiornamento" /> : "Aggiorna scadenziario"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {activeAlerts.length === 0 && !loading ? (
-        <Card className="saas-surface border-dashed">
-          <CardContent className="flex items-center gap-2 pt-5 text-sm text-muted-foreground">
-            <AlertTriangle className="h-4 w-4" />
-            Nessuna scadenza attiva con i parametri correnti.
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <Card className="saas-surface shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Elenco scadenze</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {loading ? <FleetumInlineLoader label="Caricamento scadenziario" /> : null}
-
-          <div className="space-y-3 md:hidden">
-            {activeAlerts.map((row) => (
-              <Card key={row.vehicleId} className="border-dashed">
-                <CardContent className="space-y-2 pt-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold">{row.plate}</p>
-                    <Badge variant={severityBadgeVariant(row.severity)}>{row.severity}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {row.brand} {row.model} · {row.siteName}
-                  </p>
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">KM residui: </span>
-                    {row.remainingKm == null ? "-" : row.remainingKm.toLocaleString("it-IT")}
-                  </p>
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Revisione: </span>
-                    {formatMonthYear(row.revisionDueAt)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Ultima revisione: {formatDate(row.lastRevisionAt)}</p>
-                  <p className="text-xs text-muted-foreground">{row.actions.join(" · ")}</p>
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void onSyncSingle(row.vehicleId)}
-                      disabled={syncingVehicleId === row.vehicleId}
-                    >
-                      {syncingVehicleId === row.vehicleId ? "Sync..." : "Segna nel calendario"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="hidden md:block">
-            <Table className="[&_th]:py-1.5 [&_td]:py-1.5 [&_td]:text-[12px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Veicolo</TableHead>
-                  <TableHead>Sede</TableHead>
-                  <TableHead>Km attuali</TableHead>
-                  <TableHead>Intervallo</TableHead>
-                  <TableHead>Km residui</TableHead>
-                  <TableHead>Revisione</TableHead>
-                  <TableHead>Alert</TableHead>
-                  <TableHead>Azione</TableHead>
-                  <TableHead className="text-right">Calendario</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {activeAlerts.map((row) => (
-                  <TableRow key={row.vehicleId}>
-                    <TableCell className="font-medium leading-tight">
-                      {row.plate}
-                      <p className="text-[11px] text-muted-foreground">{row.brand} {row.model}</p>
-                    </TableCell>
-                    <TableCell className="leading-tight">{row.siteName}</TableCell>
-                    <TableCell>{formatKm(row.currentKm)}</TableCell>
-                    <TableCell>{formatKm(row.maintenanceIntervalKm)}</TableCell>
-                    <TableCell>{row.remainingKm == null ? "-" : row.remainingKm.toLocaleString("it-IT")}</TableCell>
-                    <TableCell className="leading-tight">
-                      {formatMonthYear(row.revisionDueAt)}
-                      <p className="text-[11px] text-muted-foreground">Ultima: {formatDate(row.lastRevisionAt)}</p>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={severityBadgeVariant(row.severity)}>{row.status}</Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[260px]">
-                      <p className="line-clamp-2 text-xs text-muted-foreground">{row.actions.join(" · ")}</p>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-[11px]"
-                        onClick={() => void onSyncSingle(row.vehicleId)}
-                        disabled={syncingVehicleId === row.vehicleId}
-                      >
-                        {syncingVehicleId === row.vehicleId ? "Sync..." : "Segna"}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
+ const {canRead,canWrite,identity}=useOperationsAccess("vehicles");
+ const [rows,setRows]=useState<DeadlineRow[]>([]);
+ const [kpis,setKpis]=useState<DeadlineResponse["kpis"]|null>(null);
+ const [kmWarning,setKmWarning]=useState("1000");
+ const [revisionWarningDays,setRevisionWarningDays]=useState("30");
+ const [loading,setLoading]=useState(false);
+ const [syncingAll,setSyncingAll]=useState(false);
+ const [syncingVehicleId,setSyncingVehicleId]=useState<string|null>(null);
+ const [error,setError]=useState<string|null>(null);
+ const [success,setSuccess]=useState<string|null>(null);
+ const [showAll,setShowAll]=useState(false);
+ const sequence=useRef(0),syncLock=useRef(false);
+ useEffect(()=>{sequence.current++;setRows([]);setKpis(null);return()=>{sequence.current++}},[identity,canRead]);
+ const params=()=>({kmWarning:threshold(kmWarning,1000),revisionWarningDays:threshold(revisionWarningDays,30)});
+ const load=async()=>{
+  const current=++sequence.current;if(!canRead)return;
+  setLoading(true);setError(null);
+  try{const result=await masterDataUseCases.listVehicleDeadlines(params()) as DeadlineResponse;if(current!==sequence.current)return;setRows(result.data??[]);setKpis(result.kpis??null)}
+  catch(e){if(current===sequence.current)setError((e as Error).message)}finally{if(current===sequence.current)setLoading(false)}
+ };
+ useEffect(()=>{void load()},[canRead,identity]);
+ const sync=async(vehicleId?:string)=>{
+    const notificationScope=captureOperationContext();
+  if(!canWrite||syncLock.current)return;syncLock.current=true;setError(null);setSuccess(null);setSyncingAll(!vehicleId);setSyncingVehicleId(vehicleId||null);
+  try{const result=await masterDataUseCases.syncVehicleDeadlinesCalendar({...params(),includeSoon:true,...(vehicleId?{vehicleIds:[vehicleId]}:{})});publishOperationFeedback(setSuccess, `Calendario aggiornato: ${result.created} creati, ${result.updated} aggiornati, ${result.removed} rimossi.`, notificationScope);await load()}
+  catch(e){setError((e as Error).message)}finally{syncLock.current=false;setSyncingAll(false);setSyncingVehicleId(null)}
+ };
+ const busy=syncingAll||!!syncingVehicleId;
+ const activeAlerts=useMemo(()=>showAll?rows:rows.filter(row=>row.status!=="OK"),[rows,showAll]);
+ const columns=[
+  {key:"vehicle",label:"Veicolo",render:(r:DeadlineRow)=><><Link className="commerce-name" to={`/anagrafiche/veicoli?vehicleId=${encodeURIComponent(r.vehicleId)}`}><strong>{r.plate}</strong></Link><small>{r.brand} {r.model} · {r.siteName}</small></>},
+  {key:"km",label:"Manutenzione",render:(r:DeadlineRow)=><><strong>{r.remainingKm==null?"Non disponibile":`${formatKm(r.remainingKm)} km residui`}</strong><small>{formatKm(r.currentKm)} km attuali · ogni {formatKm(r.maintenanceIntervalKm)} km</small></>},
+  {key:"revision",label:"Revisione",render:(r:DeadlineRow)=><>{formatMonthYear(r.revisionDueAt)}<small>Ultima revisione: {formatDate(r.lastRevisionAt)}</small><small>{r.daysToRevision==null?"Scadenza non disponibile":r.daysToRevision<0?`Scaduta da ${Math.abs(r.daysToRevision)} giorni`:`Fra ${r.daysToRevision} giorni`}</small></>},
+  {key:"status",label:"Urgenza",render:(r:DeadlineRow)=><><Badge variant={severityBadgeVariant(r.severity)}>{deadlineStatus[r.status]}</Badge><small>Priorità {deadlineSeverity[r.severity]}</small><small>{r.actions.join(" · ")||"Nessuna azione richiesta"}</small></>},
+  {key:"actions",label:"Calendario",render:(r:DeadlineRow)=>canWrite?<Button variant="outline" disabled={busy||loading} onClick={()=>void sync(r.vehicleId)}>{syncingVehicleId===r.vehicleId?"Sincronizzazione...":"Segna nel calendario"}</Button>:<span className="operations-hint">Sola lettura</span>}
+ ];
+ if(!canRead)return <section className="operations-workspace"><h1>Scadenziario veicoli</h1><p>Il tuo ruolo non consente l’accesso ai veicoli.</p></section>;
+ return (
+  <section className="operations-workspace">
+   <WorkspacePageHeader eyebrow="PREVENZIONE E CONTINUITÀ" title="Scadenziario veicoli" description="Revisione e manutenzione chilometrica, con le priorità e i prossimi interventi." actions={canWrite?<Button disabled={busy||loading} onClick={()=>void sync()}><CalendarPlus aria-hidden="true" className="h-4 w-4"/>{syncingAll?"Sincronizzazione...":"Sincronizza tutto nel calendario"}</Button>:undefined}/>
+   {error?<CommerceNotice>{error}</CommerceNotice>:null}{success?<CommerceNotice tone="success">{success}</CommerceNotice>:null}
+   <WorkspaceMetricStrip loading={loading||!!error||!kpis} items={[
+    {label:"Alert totali",value:kpis?.total??"—",hint:"Tutti i veicoli",icon:Car},
+    {label:"Km scaduti",value:kpis?.dueNowKm??"—",hint:"Intervento necessario",icon:Gauge},
+    {label:"Km in scadenza",value:kpis?.dueSoonKm??"—",hint:"Entro la soglia scelta",icon:Wrench},
+    {label:"Revisioni scadute",value:kpis?.dueNowRevision??"—",hint:"Da verificare",icon:CalendarDays},
+    {label:"Revisioni in scadenza",value:kpis?.dueSoonRevision??"—",hint:"Entro il periodo scelto",icon:Clock},
+    {label:"Critici",value:kpis?.critical??"—",hint:"Priorità più alta",icon:AlertTriangle}
+   ]}/>
+   <section className="commerce-panel"><header className="commerce-panel-header"><div><h2>Soglie di avviso</h2><p>Imposta quando anticipare gli avvisi. Il valore zero è consentito.</p></div></header><form className="operations-thresholds" onSubmit={e=>{e.preventDefault();void load()}}><div><Label htmlFor="deadline-km">Preavviso manutenzione · km</Label><Input id="deadline-km" type="number" min={0} value={kmWarning} onChange={e=>setKmWarning(e.target.value)} disabled={busy}/></div><div><Label htmlFor="deadline-days">Preavviso revisione · giorni</Label><Input id="deadline-days" type="number" min={0} value={revisionWarningDays} onChange={e=>setRevisionWarningDays(e.target.value)} disabled={busy}/></div><Button type="submit" variant="outline" disabled={loading||busy}>{loading?"Aggiornamento...":"Aggiorna scadenziario"}</Button></form></section>
+   <section className="commerce-panel"><header className="commerce-panel-header"><div><h2>Scadenze della flotta <span>{loading||error?"—":activeAlerts.length}</span></h2><p>Priorità espresse con stato, testo e colore</p></div><label className="operations-check"><input type="checkbox" checked={showAll} onChange={e=>setShowAll(e.target.checked)}/>Mostra anche i veicoli in regola</label></header>
+   {loading?<div className="commerce-empty"><FleetumInlineLoader label="Caricamento scadenziario"/></div>:error?<div className="commerce-empty"><p>Lo scadenziario non è disponibile.</p><Button variant="outline" onClick={()=>void load()}>Riprova scadenziario</Button></div>:!activeAlerts.length?<div className="commerce-empty"><h3>Nessuna scadenza attiva</h3><p>Nessun veicolo richiede un intervento con i parametri correnti.</p></div>:<CommerceCollection rows={activeAlerts.map(r=>({...r,id:r.vehicleId}))} columns={columns} caption="Scadenze, priorità e interventi dei veicoli"/>}</section>
+  </section>
+ );
 };

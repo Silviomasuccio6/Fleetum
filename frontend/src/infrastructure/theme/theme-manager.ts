@@ -1,12 +1,13 @@
 export type ThemeMode = "light" | "dark";
 
-const themeStorageKey = "fermi_theme_mode";
+export const themeStorageKey = "fermi_theme_mode";
 
 export const getStoredTheme = (): ThemeMode => {
   if (typeof window === "undefined") return "light";
-  const stored = localStorage.getItem(themeStorageKey);
+  let stored: string | null = null;
+  try { stored = window.localStorage.getItem(themeStorageKey); } catch { /* Fall back to the system preference. */ }
   if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
 export const applyTheme = (theme: ThemeMode) => {
@@ -16,7 +17,7 @@ export const applyTheme = (theme: ThemeMode) => {
 
 export const setTheme = (theme: ThemeMode) => {
   if (typeof window !== "undefined") {
-    localStorage.setItem(themeStorageKey, theme);
+    try { window.localStorage.setItem(themeStorageKey, theme); } catch { /* Still apply the selection for this session. */ }
   }
   applyTheme(theme);
 };

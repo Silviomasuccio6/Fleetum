@@ -1,0 +1,18 @@
+import {tsImport} from "tsx/esm/api";
+const terms=booking=>({version:1,primaryDriverId:booking.customer.id,additionalDriverIds:[],depositCents:30000,damageDeductibleCents:50000,theftDeductibleCents:100000,paymentTerms:"Condizioni di pagamento dimostrative, senza addebiti.",insuranceSummary:"Coperture sintetiche da verificare con il locatore.",fuelPolicy:"Pieno/pieno secondo verbale di consegna.",territory:"Italia, salvo accordo scritto.",assistance:"Contatti di prova nel verbale di consegna.",cancellation:"Condizioni concordate prima della prenotazione.",lateReturn:"Contattare il locatore prima del rientro previsto.",damageProcedure:"Verbale congiunto e fotografie di consegna e riconsegna.",annexes:["Verbale di consegna e riconsegna"]});
+const contract=(booking,current)=>({id:"demo-contract-"+booking.id,tenantId:"demo-tenant",bookingId:booking.id,status:"DRAFT",title:"FACSIMILE - Contratto con dati sintetici",content:"Anteprima tecnica e grafica. Documento sintetico senza efficacia contrattuale. Le condizioni e i conducenti sono riportati nelle sezioni specifiche.",templateId:null,templateVersion:1,emailTo:booking.customerEmail,emailSubject:"Contratto dimostrativo",emailBody:"Solo anteprima locale",createdAt:current.toISOString(),updatedAt:current.toISOString(),signedAt:null,lastSentAt:null,events:[],deliveries:[],booking});
+export function uiContractFixture({path,bookings,current,params}){
+ const match=path.match(/^\/rental-bookings\/(demo-booking-\d+)\/contract(?:\/(rental-details|signing|conversion)(\/drivers)?)?$/);if(!match)return null;
+ const booking=bookings.find(value=>value.id===match[1]);if(!booking)return{status:404,body:{message:"Pratica non trovata"}};
+ if(match[2]==="conversion"){const agreedCents=Math.round((booking.finalTotal??booking.expectedTotal??0)*100);return{status:200,body:{contractId:"demo-contract-"+booking.id,issuedAt:null,legacySigned:false,customer:booking.customerName,bookingCode:booking.code,vehicle:booking.vehicle.plate,priceAgreement:null,reviewHash:"a".repeat(64),balance:{agreedCents,receivedCents:0,outstandingCents:agreedCents,creditCents:0,state:agreedCents===0?"FREE":"DUE"}}};}
+ if(match[2]==="signing")return{status:200,body:{configured:false,recipient:booking.customerEmail,request:null}};
+ if(match[3]){const search=params.get("search")?.toLocaleLowerCase()??"";return{status:200,body:bookings.map(value=>({id:value.customer.id,name:value.customerName})).filter(value=>value.name.toLocaleLowerCase().includes(search))};}
+ if(match[2]==="rental-details")return{status:200,body:{terms:terms(booking),revision:0,frozen:false,drivers:[{id:booking.customer.id,name:booking.customerName}],issues:["Anteprima fittizia: verifica identità, scadenze e condizioni nella pratica reale prima della firma."]}};
+ return{status:200,body:contract(booking,current)};
+}
+let renderer;
+export async function uiContractPdf(booking,current){
+ renderer??=tsImport("../backend/src/application/services/enterprise-contract-pdf-service.ts",import.meta.url);
+ const{buildEnterpriseContractPdf}=await renderer;
+ return buildEnterpriseContractPdf({contract:{...contract(booking,current),rentalTerms:terms(booking),drivers:[{...booking.customer,drivingLicenseCategory:"B",drivingLicenseExpiresAt:new Date("2035-01-01"),documentNumber:"DOCUMENTO-SINTETICO",documentExpiresAt:new Date("2035-01-01"),residenceAddress:"Via di prova 2"}]},booking:{...booking,pickupAt:new Date(booking.pickupAt),returnAt:new Date(booking.returnAt)},branding:{companyName:"Autonoleggio Demo - azienda fittizia",companyAddress:"Via di prova 1, Milano",companyVat:"00000000000",companyEmail:"noleggio@example.invalid"}});
+}

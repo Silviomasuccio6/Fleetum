@@ -96,6 +96,7 @@ describe("email command outbox atomicity", () => {
     });
     const contract = await prisma.bookingContract.create({
       data: {
+        issuedAt:new Date("2026-11-07T00:00:00Z"),
         tenantId: tenant.id,
         bookingId: booking.id,
         title: "Contratto sintetico",

@@ -1,0 +1,23 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {runInNewContext} from 'node:vm';import ts from 'typescript';
+function harness(overrides:any={},form=false,confirm=true,edited=form){
+ let error:any=null,confirmations=0;const changes:string[]=[],navigation:any[]=[];
+ const state:any={status:'ready',view:'all',writing:0,context:{enforced:true,canViewAllSites:true,sites:[{id:'rome',name:'Roma'},{id:'milan',name:'Milano'}]},...overrides};
+ const store:any=()=>state;store.getState=()=>({...state,select:(value:string)=>{if(state.writing||!state.context.canViewAllSites)throw Error('Unavailable');changes.push(value);state.view=value;}});
+ class Field {getClientRects(){return[{}]} matches(){return true}}
+ const field=new Field();const exports:any={};runInNewContext(ts.transpileModule(readFileSync(new URL('../src/presentation/components/layout/site-context.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,Array,HTMLElement:Field,WeakSet,document:{querySelectorAll:()=>form?[field]:[]},window:{confirm:()=>{confirmations++;return confirm;}},require(id:string){
+ if(id==='react')return{useId:()=> 'site-qa',useState:()=>[error,(value:any)=>error=value],useEffect:()=>{}};
+ if(id==='react/jsx-runtime')return{jsx:(type:any,props:any)=>({type,props}),jsxs:(type:any,props:any)=>({type,props})};
+ if(id==='react-router-dom')return{useNavigate:()=> (...args:any[])=>navigation.push(args),useLocation:()=>({pathname:'/rental-bookings/synthetic'})};
+ if(id.endsWith('site-access-store'))return{useSiteAccessStore:store};
+ if(id.endsWith('/anchored-select'))return{AnchoredSelect:'site-selector'};if(id.endsWith('/button'))return{Button:'button'};return{};
+ }});if(edited)exports.trackSiteDraftEdit({target:field});const render=()=>exports.SiteContextControl();
+ function nodes(value:any):any[]{if(!value||typeof value!=='object')return[];if(Array.isArray(value))return value.flatMap(nodes);return[value,...nodes(value.props?.children)];}
+ return{state,render,nodes,changes,navigation,get confirmations(){return confirmations},get error(){return error}};
+}
+test('manager selector contains only authorized sites and aggregate',()=>{const h=harness(),nodes=h.nodes(h.render()),select=nodes.find(v=>v.type==='site-selector');assert.ok(select);assert.equal(select.props.value,'all');assert.equal(select.props.describedBy,'site-qa-help');assert.deepEqual(Array.from(select.props.options,(v:any)=>v.value),['all','rome','milan']);select.props.onValueChange('rome');assert.deepEqual(h.changes,['rome']);assert.equal(h.navigation[0][0],'/booking');assert.equal(h.confirmations,0);});
+test('an operator gets an assigned-site label and no site-switching control',()=>{const h=harness({view:'rome',context:{enforced:true,canViewAllSites:false,sites:[{id:'rome',name:'Roma'}],assignedSite:{id:'rome',name:'Roma',isActive:true}}});const nodes=h.nodes(h.render());assert.equal(nodes.some(v=>v.type==='site-selector'),false);assert.ok(nodes.some(v=>v.type==='strong'&&v.props.children==='Roma'));});
+test('writing disables selection and a late writing lock prevents handlers from switching',()=>{const h=harness(),select=h.nodes(h.render()).find(v=>v.type==='site-selector');h.state.writing=1;select.props.onValueChange('milan');assert.equal(h.changes.length,0);assert.ok(h.error);assert.equal(h.nodes(h.render()).find(v=>v.type==='site-selector').props.disabled,true);});
+test('canceling the draft warning preserves the old site and route; confirmation changes once',()=>{const h=harness({},true,false);h.nodes(h.render()).find(v=>v.type==='site-selector').props.onValueChange('rome');assert.equal(h.confirmations,1);assert.equal(h.state.view,'all');assert.equal(h.navigation.length,0);const accepted=harness({},true,true);accepted.nodes(accepted.render()).find(v=>v.type==='site-selector').props.onValueChange('rome');assert.deepEqual(accepted.changes,['rome']);});
+test('loading, error and unavailable rollout never expose a switcher',()=>{for(const input of[{status:'loading'},{status:'error',context:null},{context:{enforced:false}}]){const h=harness(input),nodes=h.nodes(h.render());assert.equal(nodes.some(v=>v.type==='site-selector'),false);if(input.status==='error')assert.ok(nodes.some(v=>v.type==='button'&&v.props.children==='Riprova'));}});
+
+test('a pristine form does not interrupt a direct site selection',()=>{const h=harness({},true,false,false);h.nodes(h.render()).find(v=>v.type==='site-selector').props.onValueChange('rome');assert.equal(h.confirmations,0);assert.deepEqual(h.changes,['rome']);});

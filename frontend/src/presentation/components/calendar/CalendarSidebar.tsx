@@ -1,7 +1,8 @@
+import { useFleetumLanguage } from "../../i18n/fleetum-language";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { CalendarItem } from "./calendar-types";
 import { Button } from "../ui/button";
-import { getMonthGridDays, toDateKey, weekdayLabelsMini } from "./calendar-utils";
+import { getMonthGridDays, toDateKey } from "./calendar-utils";
 import { cn } from "../../../lib/utils";
 
 type CalendarSidebarProps = {
@@ -25,6 +26,8 @@ export const CalendarSidebar = ({
   onToggleCalendar,
   onCreateEvent
 }: CalendarSidebarProps) => {
+  const { language } = useFleetumLanguage();
+  const locale = language === "en" ? "en-GB" : "it-IT";
   const miniDays = getMonthGridDays(miniDate);
   const todayKey = toDateKey(new Date());
   const selectedKey = toDateKey(selDay);
@@ -44,19 +47,19 @@ export const CalendarSidebar = ({
           <button type="button" className="calendar-mini__nav" onClick={() => onMiniNav(-1)} aria-label="Mese precedente">
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <p className="calendar-mini__month">{miniDate.toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</p>
+          <p className="calendar-mini__month">{miniDate.toLocaleDateString(locale, { month: "long", year: "numeric" })}</p>
           <button type="button" className="calendar-mini__nav" onClick={() => onMiniNav(1)} aria-label="Mese successivo">
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
 
         <div className="calendar-mini__weekdays">
-          {weekdayLabelsMini.map((label, idx) => (
-            <span key={`${label}-${idx}`}>{label}</span>
+          {miniDays.slice(0, 7).map((day) => (
+            <span key={toDateKey(day)}>{day.toLocaleDateString(locale, { weekday: "narrow" })}</span>
           ))}
         </div>
 
-        <div className="calendar-mini__grid" role="grid" aria-label="Giorni del mini calendario">
+        <div className="calendar-mini__grid" role="group" aria-label="Giorni del mini calendario">
           {miniDays.map((day) => {
             const key = toDateKey(day);
             const isToday = key === todayKey;
@@ -76,6 +79,8 @@ export const CalendarSidebar = ({
                 )}
                 onClick={() => onPickDay(day)}
                 aria-current={isToday ? "date" : undefined}
+                aria-pressed={isSelected}
+                aria-label={day.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
               >
                 <span>{day.getDate()}</span>
                 {showDot ? <i className="calendar-mini__dot" /> : null}
@@ -94,7 +99,7 @@ export const CalendarSidebar = ({
               onChange={(event) => onToggleCalendar(calendar.id, event.target.checked)}
             />
             <span className="calendar-list__swatch" style={{ background: calendar.color }} />
-            <span>{calendar.name}</span>
+            <span translate="no">{calendar.name}</span>
           </label>
         ))}
       </section>

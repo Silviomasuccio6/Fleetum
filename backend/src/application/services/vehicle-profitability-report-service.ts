@@ -6,6 +6,9 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { ownedStoppageWhere } from "../../infrastructure/repositories/stoppage-tenant-scope.js";
 import { ownedVehicleWhere } from "../../infrastructure/repositories/vehicle-tenant-scope.js";
 
+import { visibleVehicleWhere, visibleBookingWhere } from "../../infrastructure/repositories/resource-site-scope.js";
+import { siteAccessForTenant } from "../../infrastructure/auth/site-access-context.js";
+
 const DAY_MS = 86_400_000;
 
 const DEFAULT_STATUSES = ["CONFIRMED", "CONTRACT_SIGNED", "READY_FOR_HANDOVER", "IN_RENT", "CLOSED"] as const;
@@ -67,9 +70,9 @@ export class VehicleProfitabilityReportService {
 
     const statuses = params.statuses?.length ? params.statuses : [...DEFAULT_STATUSES];
     const vehicleWhere: any = {
-      ...ownedVehicleWhere(tenantId),
+      ...visibleVehicleWhere(tenantId),
       ...(params.vehicleId ? { id: params.vehicleId } : {}),
-      ...(params.siteId ? { AND: [{ siteId: params.siteId }] } : {})
+      ...(params.siteId ? { siteId: params.siteId } : {})
     };
 
     const vehicleRows = await prisma.vehicle.findMany({
@@ -97,10 +100,9 @@ export class VehicleProfitabilityReportService {
     const [bookingRows, maintenanceRows, vehicleCostRows, stoppages] = await Promise.all([
       prisma.rentalBooking.findMany({
         where: {
-          tenantId,
+          ...visibleBookingWhere(tenantId),
           deletedAt: null,
           vehicleId: { in: vehicleIds },
-          vehicle: historicalVehicleScope,
           status: { in: statuses as any },
           pickupAt: { lte: params.dateTo },
           returnAt: { gte: params.dateFrom }
@@ -108,8 +110,8 @@ export class VehicleProfitabilityReportService {
         orderBy: [{ pickupAt: "asc" }],
         include: {
           vehicle: { select: { id: true, plate: true, brand: true, model: true } },
-          contract: { select: { id: true, status: true } },
-          pricingSnapshot: true
+          contract: { where: { tenantId }, select: { id: true, status: true } },
+          pricingSnapshot: { where: { tenantId } }
         }
       }),
       prisma.vehicleMaintenance.findMany({
@@ -326,7 +328,8 @@ export class VehicleProfitabilityReportService {
         siteId: params.siteId ?? null,
         includeVat: params.includeVat,
         includeCosts: params.includeCosts,
-        statuses
+        statuses,
+        ...(siteAccessForTenant(tenantId) ? { authorizedSiteIds: siteAccessForTenant(tenantId)!.allSites ? "all" : [...siteAccessForTenant(tenantId)!.siteIds] } : {})
       },
       dataQuality: {
         revenueBasis: "Basato su booking, contratti e pricing snapshot disponibili",
@@ -334,7 +337,8 @@ export class VehicleProfitabilityReportService {
         isEstimate: true,
         notes: [
           "Ricavi incassati e fatturati sono disponibili solo se collegati a moduli pagamento/fatture.",
-          "ROI e break-even sono stime operative basate sui dati presenti nel gestionale."
+          "ROI e break-even sono stime operative basate sui dati presenti nel gestionale.",
+          ...(siteAccessForTenant(tenantId)?.allSites === false ? ["Ricavi e storico limitati alle sedi autorizzate; queste stime non rappresentano la storia aziendale completa del veicolo."] : [])
         ]
       },
       summary: {
@@ -368,7 +372,11 @@ export class VehicleProfitabilityReportService {
   }
 
   async toCsv(report: any) {
-    const esc = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const esc = (value: unknown) => {
+      const raw = String(value ?? "");
+      const literal = typeof value === "string" && /^[\s]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
+      return `"${literal.replace(/"/g, '""')}"`;
+    };
     const lines = [
       ["Fleetum", "Report redditivita veicolo"],
       ["Periodo", `${report.period.from} - ${report.period.to}`],

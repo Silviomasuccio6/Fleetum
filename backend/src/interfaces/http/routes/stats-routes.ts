@@ -6,6 +6,7 @@ import { asyncHandler } from "./async-handler.js";
 
 export const statsRoutes = (controller: StatsController, requireFeature: (feature: FeatureKey) => RequestHandler) => {
   const router = Router();
+  router.use((_req, res, next) => { res.setHeader("Cache-Control", "private, no-store"); next(); });
 
   router.get("/dashboard", requireFeature("reports_basic"), requirePermissions("stats:read"), asyncHandler(controller.dashboard));
   router.get("/analytics", requireFeature("reports_advanced"), requirePermissions("stats:read"), asyncHandler(controller.analytics));

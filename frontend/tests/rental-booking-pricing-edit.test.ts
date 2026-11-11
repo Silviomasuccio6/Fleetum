@@ -1,3 +1,4 @@
+import * as operationFeedback from "../src/application/stores/operation-feedback";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -31,7 +32,7 @@ const quote = { pricingRef: { priceListName: "Current list", pricePackageName: "
   duration: { daysCharged: 1, chargedUnits: 1, unit: "DAY" }, km: { includedKmTotal: 100, extraKmEstimated: 0 },
   pricing: { expectedTotal: 999, finalTotal: 999, extraKmEstimatedCost: 0 } };
 
-const createPage = (overrides: Record<string, (...args: any[]) => any> = {}) => {
+const createPage = (overrides: Record<string, (...args: any[]) => any> = {}, permissions = ["vehicles:read", "vehicles:write"]) => {
   const calls: Call[] = [];
   const slots: any[] = [];
   let cursor = 0;
@@ -86,13 +87,18 @@ const createPage = (overrides: Record<string, (...args: any[]) => any> = {}) => 
   const jsxRuntime = { jsx, jsxs: jsx, Fragment: "Fragment" };
   const month = { data: [], loading: false, error: null, summary: { totalVehicles: 0, bookedVehicles: 0, availableVehicles: 0, occupancyRate: 0 } };
   const imports = (id: string) => {
+    if(id.endsWith("operation-feedback"))return operationFeedback;
     if (id === "react") return React;
     if (id === "react/jsx-runtime") return jsxRuntime;
     if (id === "react-router-dom") return {
       useNavigate: () => () => {}, useParams: () => ({}), useSearchParams: () => [params, (next: URLSearchParams) => { params = next; dirty = true; }]
     };
+    if (id.endsWith("auth-store")) return { useAuthStore: (selector: any) => selector({ user: { permissions } }) };
     if (id.endsWith("rental-bookings-usecases")) return { rentalBookingsUseCases: api };
     if (id.endsWith("master-data-usecases")) return { masterDataUseCases: api };
+    if (id.endsWith("fleetum-language")) return { useFleetumLanguage: () => ({ language: "it" }) };
+    if (id.endsWith("use-panel-motion")) return { usePanelMotion: () => undefined };
+    if (id.endsWith("use-dialog-focus")) return { useDialogFocus: () => undefined };
     if (id.endsWith("use-rental-month-availability")) return { useRentalMonthAvailability: () => month };
     return new Proxy({}, { get: (_target, key) => key === "countryNameFromCode" ? () => "Italy" : String(key) });
   };
@@ -104,7 +110,7 @@ const createPage = (overrides: Record<string, (...args: any[]) => any> = {}) => 
   runInNewContext(compiled, {
     exports, require: imports, URLSearchParams, URL, crypto: { randomUUID },
     document: { body: { style: {} }, addEventListener() {}, removeEventListener() {} },
-    window: { setTimeout(callback: () => any) { const id = ++timerId; timers.set(id, callback); return id; },
+    window: { matchMedia: () => ({ matches: false }), setTimeout(callback: () => any) { const id = ++timerId; timers.set(id, callback); return id; },
       clearTimeout(id: number) { timers.delete(id); }, requestAnimationFrame() {} }
   });
   const settle = async (runTimers = false) => {
@@ -128,6 +134,8 @@ const createPage = (overrides: Record<string, (...args: any[]) => any> = {}) => 
     return input as Element;
   };
   return { calls, settle, button, field,
+    customerNotices: () => {const dialog=elements().find(node=>node.props['aria-label']==='Anagrafica cliente');const local=descendants(dialog);return elements().filter(node=>node.type==='CommerceNotice').map(node=>({text:textOf(node),insideCustomer:local.includes(node)}));},
+    popup: () => elements().find(node => node.type === "ContractCargosDialog"), text: () => textOf(tree),
     async edit() { await settle(); assert.ok(button("Modifica prenotazione")); button("Modifica prenotazione").props.onClick(); await settle(true); },
     async change(label: string, value: string) {
       field(label).props.onChange({ target: { value } });
@@ -145,6 +153,8 @@ const createPage = (overrides: Record<string, (...args: any[]) => any> = {}) => 
       customerOption.props.onClick();
       await settle(true);
     },
+    async newCustomer() { button("Nuovo cliente").props.onClick(); await settle(); },
+    async submitCustomer() { const form = elements().find(node => node.type === "form" && node.props.onSubmit?.name === "onCustomerSubmit"); assert.ok(form); await form.props.onSubmit({preventDefault(){}}); await settle(true); },
     async submit() { const form = elements().find((node) => node.type === "form" && node.props.onSubmit)!; await form.props.onSubmit({ preventDefault() {} }); await settle(); },
     async select(id: string) { params = new URLSearchParams({ bookingId: id }); dirty = true; await settle(); },
     async close() {
@@ -203,7 +213,7 @@ test("estimated km, actual km and pricing notes use the saved-terms path without
   await page.edit();
   await page.change("Km stimati", "350");
   await page.change("Km reali (consuntivo)", "325");
-  await page.change("Note pricing", "Synthetic operational adjustment");
+  await page.change("Note economiche", "Synthetic operational adjustment");
   await page.submit();
   const pricing = page.calls.find((call) => call.method === "updateBookingPricing")!;
   assert.equal(JSON.stringify(pricing.args), JSON.stringify(["booking-a", {
@@ -217,7 +227,7 @@ test("blank km and pricing notes are cleared explicitly, and untouched snapshot 
   const page = createPage({ getBookingPricing: () => ({ ...snapshot(), snapshot: { ...snapshot().snapshot, actualKm: 80 } }) });
   await page.edit();
   await page.change("Km reali (consuntivo)", "");
-  await page.change("Note pricing", "");
+  await page.change("Note economiche", "");
   await page.submit();
   const payload = page.calls.find((call) => call.method === "updateBookingPricing")!.args[1];
   assert.equal(JSON.stringify(payload), JSON.stringify({ preserveTerms: true, actualKm: null, notes: "" }));
@@ -231,7 +241,7 @@ test("a snapshot arriving after a field edit fills only untouched fields", async
   resolve(snapshot());
   await page.settle(true);
   assert.equal(page.field("Km stimati").props.value, "350");
-  assert.equal(page.field("Note pricing").props.value, "Agreed terms");
+  assert.equal(page.field("Note economiche").props.value, "Agreed terms");
   await page.submit();
   assert.equal(JSON.stringify(page.calls.find((call) => call.method === "updateBookingPricing")!.args[1]),
     JSON.stringify({ preserveTerms: true, estimatedKm: 350 }));
@@ -288,7 +298,7 @@ test("a legacy pricing snapshot without live references can update notes and acc
   } }),
     updateBookingPricing: () => ({ quote: null }) });
   await page.edit();
-  await page.change("Note pricing", "Synthetic legacy note");
+  await page.change("Note economiche", "Synthetic legacy note");
   await page.submit();
   assert.equal(JSON.stringify(page.calls.find((call) => call.method === "updateBookingPricing")!.args[1]),
     JSON.stringify({ preserveTerms: true, notes: "Synthetic legacy note" }));
@@ -330,4 +340,100 @@ test("a missing snapshot arriving after explicit repricing cannot clear the new 
   await page.settle(true);
   assert.equal(page.field("Totale previsto (EUR)").props.readOnly, true);
   assert.equal(page.field("Totale previsto (EUR)").props.value, "999.00");
+});
+
+
+test("an empty pickup is identified at its field before conversion or any booking mutation", async () => {
+  const page = createPage();
+  await page.edit();
+  await page.change("Data/ora uscita", "");
+  await page.submit();
+  assert.equal(page.calls.some((call) => ["create", "update", "updateBookingPricing"].includes(call.method)), false);
+  assert.equal(page.field("Data/ora uscita").props["aria-invalid"], true);
+  assert.equal(page.field("Data/ora uscita").props["aria-describedby"], "booking-field-19-error");
+  assert.equal(page.field("Totale previsto (EUR)").props.value, "123");
+});
+
+test("typing an unselected customer is rejected at the customer field without creating a booking", async () => {
+  const page = createPage();
+  await page.create();
+  await page.change("Cliente", "Unknown synthetic customer");
+  await page.submit();
+  assert.equal(page.calls.some((call) => call.method === "create"), false);
+  assert.equal(page.field("Cliente").props["aria-invalid"], true);
+});
+
+test("a failed booking save keeps entered values and a subsequent retry can use the same form", async () => {
+  let attempts = 0;
+  const page = createPage({ update: () => { if (++attempts === 1) throw new Error("Synthetic write rejected"); return {}; } });
+  await page.edit();
+  await page.change("Luogo rientro", "Synthetic retry depot");
+  await page.submit();
+  assert.equal(page.field("Luogo rientro").props.value, "Synthetic retry depot");
+  assert.equal(page.field("Totale previsto (EUR)").props.value, "123");
+  await page.submit();
+  assert.equal(attempts, 2);
+  assert.equal(page.calls.some((call) => call.method === "updateBookingPricing"), false);
+});
+
+
+test("a return before pickup is rejected without changing the persisted booking", async () => {
+  const page = createPage();
+  await page.edit();
+  await page.change("Data/ora rientro", "2026-10-07T08:00");
+  await page.submit();
+  assert.equal(page.calls.some((call) => ["update", "updateBookingPricing"].includes(call.method)), false);
+  assert.equal(page.field("Data/ora rientro").props["aria-invalid"], true);
+});
+
+test("a read-only booking user can consult the contract but cannot use mutation actions", async () => {
+  const page = createPage({ getContract: () => ({ id: "contract-a", bookingId: "booking-a", status: "DRAFT", title: "Synthetic contract", content: "Synthetic content" }) }, ["vehicles:read"]);
+  await page.settle();
+  for (const action of ["Modifica prenotazione", "Elimina", "Salva stato workflow", "Template default", "Rigenera bozza", "Trasmetti contratto a CARGOS", "Salva"]) {
+    assert.equal(page.button(action)?.props.disabled, true, action);
+  }
+  assert.equal(page.button("Scarica PDF")?.props.disabled, false);
+  assert.equal(page.button("Stampa")?.props.disabled, false);
+});
+
+test("contract server failures mentioning 404 remain retryable errors rather than an empty contract", async () => {
+  const page = createPage({ getContract: () => { throw Object.assign(new Error("Dependency returned 404; contract service failed"), { status: 500 }); } });
+  await page.settle();
+  assert.ok(page.text().includes("Dependency returned 404; contract service failed"));
+  assert.ok(page.button("Riprova caricamento contratto"));
+  assert.equal(page.text().includes("Contratto non ancora generato per questa prenotazione."), false);
+});
+
+
+test("a technical contract draft does not open CARGOS or send automatically", async () => {
+  const page=createPage({create:()=>({id:"created-booking",contractStatus:"READY",contractCreated:true})});
+  await page.create();await page.submit();
+  assert.equal(page.popup(),undefined);
+  assert.equal(page.calls.some(call=>call.method==="setCargosStatus"||call.method==="transmit"),false);
+});
+test("a booking without a generated contract and an idempotency replay do not open a new CARGOS popup", async () => {
+  for(const result of [{id:"created-booking",contractStatus:"NOT_READY",contractCreated:false},{id:"existing-booking",contractStatus:"READY",contractCreated:false}]){
+    const page=createPage({create:()=>result});await page.create();await page.submit();assert.equal(page.popup(),undefined);
+  }
+});
+test("a failed contract creation does not show a CARGOS success popup",async()=>{
+  const page=createPage({create:()=>{throw Error("Synthetic creation failure")}});await page.create();await page.submit();assert.equal(page.popup(),undefined);
+});
+
+
+test("inline customer creation survives the background selected-booking refresh", async () => {
+  const page = createPage({ createCustomer: () => ({id:"new-inline-customer"}) });
+  await page.create();
+  await page.newCustomer();
+  await page.change("Nome", "Inline");
+  await page.change("Cognome", "Customer");
+  await page.change("Patente numero *", "WF-INLINE-CUSTOMER");
+  await page.submitCustomer();
+  assert.equal(page.field("Cliente").props.value, "Inline Customer");
+});
+
+
+test("customer save failures stay visible inside the foremost customer dialog without a duplicate behind it",async()=>{
+ const page=createPage({createCustomer:()=>{throw Error("Errore sintetico anagrafica")}});await page.create();await page.newCustomer();await page.change("Nome","Synthetic");await page.change("Cognome","Failure");await page.change("Patente numero *","QA-FAILURE");await page.submitCustomer();
+ const notices=page.customerNotices().filter(notice=>notice.text.includes("Errore sintetico anagrafica"));assert.equal(notices.length,1);assert.equal(notices[0].insideCustomer,true);
 });

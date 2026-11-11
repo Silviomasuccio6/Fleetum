@@ -1,5 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState, useRef } from "react";
+import {useNavigate} from "react-router-dom";
+import {CommerceDrawer,CommerceNotice} from "../ui/commerce-workspace";
+import {DiscardDialog,useOperationsAccess,useOperationsTask,OperationFeedback} from "../operations/operations-workspace";
+import type {PanelMotionHandle} from "../ui/panel-motion";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { stoppagesUseCases } from "../../../application/usecases/stoppages-usecases";
 import { usersUseCases } from "../../../application/usecases/users-usecases";
@@ -14,6 +17,7 @@ import { Textarea } from "../ui/textarea";
 
 type Props = {
   open: boolean;
+  origin?: HTMLElement|null;
   stoppageId: string | null;
   mode: "detail" | "edit" | "create";
   onClose: () => void;
@@ -70,7 +74,8 @@ export const StoppageQuickPanel = ({
   initialOpenedAt,
   initialClosedAt,
   initialColor,
-  onSavedRecord
+  onSavedRecord,
+  origin=null
 }: Props) => {
   const [tab, setTab] = useState<"detail" | "edit">(mode === "create" ? "edit" : (mode as "detail" | "edit"));
   const [detail, setDetail] = useState<any | null>(null);
@@ -107,6 +112,13 @@ export const StoppageQuickPanel = ({
   const [closedAtInput, setClosedAtInput] = useState("");
   const [selectedColor, setSelectedColor] = useState(initialColor ?? eventColorOptions[0]);
 
+  const {canRead,canWrite,canRemind,has,identity}=useOperationsAccess();const navigate=useNavigate();const task=useOperationsTask();const motion=useRef<PanelMotionHandle|null>(null);
+  const quickLock=useRef(false),saveLock=useRef(false);const[quickBusy,setQuickBusy]=useState(false);
+  const [quickStatus,setQuickStatus]=useState("OPEN");
+  const [loaded,setLoaded]=useState(false),[loadKey,setLoadKey]=useState(0),[dirty,setDirty]=useState(false),[discard,setDiscard]=useState(false);
+  const finishClose=()=>{setDirty(false);if(motion.current)motion.current.dismiss(onClose);else onClose()};
+  const requestClose=()=>{if(saving||task.busy||quickLock.current)return;if(dirty)setDiscard(true);else finishClose()};
+  useEffect(()=>{if(!dirty||!open)return;const protect=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=""};window.addEventListener("beforeunload",protect);return()=>window.removeEventListener("beforeunload",protect)},[dirty,open]);
   useEffect(() => setTab(mode === "create" ? "edit" : (mode as "detail" | "edit")), [mode, stoppageId]);
   useEffect(() => {
     setSelectedColor(initialColor ?? eventColorOptions[0]);
@@ -116,27 +128,29 @@ export const StoppageQuickPanel = ({
     const opened = new Date(openedAtInput);
     if (Number.isNaN(opened.getTime())) return;
     const closed = closedAtInput ? new Date(closedAtInput) : null;
+    if(mode!=="create"&&!closedAtInput)return;
     if (!closed || Number.isNaN(closed.getTime()) || closed.getTime() <= opened.getTime()) {
       const nextClosed = new Date(opened.getTime() + 60 * 60000);
       setClosedAtInput(toLocalDateTimeInput(nextClosed.toISOString()));
     }
-  }, [openedAtInput, closedAtInput]);
+  }, [openedAtInput, closedAtInput,mode]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open||!canRead) return;
+    setLoaded(false);setDirty(false);setDetail(null);
     let mounted = true;
 
     setError(null);
     setShowQuickVehicle(false);
     setShowQuickWorkshop(false);
-    if (mode === "create") setDetail(null);
+    setDetail(null);
 
     Promise.allSettled([
       stoppageId ? stoppagesUseCases.getById(stoppageId) : Promise.resolve(null),
-      masterDataUseCases.listSites({ page: 1, pageSize: 200 }),
-      masterDataUseCases.listWorkshops({ page: 1, pageSize: 200 }),
-      masterDataUseCases.listVehicles({ page: 1, pageSize: 200 }),
-      usersUseCases.list()
+      has("sites:read")?masterDataUseCases.listSites({ page: 1, pageSize: 200 }):Promise.resolve({data:[]}),
+      has("workshops:read")?masterDataUseCases.listWorkshops({ page: 1, pageSize: 200 }):Promise.resolve({data:[]}),
+      has("vehicles:read")?masterDataUseCases.listVehicles({ page: 1, pageSize: 200 }):Promise.resolve({data:[]}),
+      has("users:read")?usersUseCases.list():Promise.resolve({data:[]})
     ])
       .then((results) => {
         if (!mounted) return;
@@ -149,11 +163,14 @@ export const StoppageQuickPanel = ({
         const nextVehicles = vehiclesRes.status === "fulfilled" ? toList(vehiclesRes.value) : [];
         const nextUsers = usersRes.status === "fulfilled" ? toList(usersRes.value) : [];
 
-        setDetail(nextDetail);
-        setSites(nextSites);
-        setWorkshops(nextWorkshops);
-        setVehicles(nextVehicles);
-        setUsers(nextUsers);
+        setLoaded(true);
+        if(stoppageId&&!nextDetail){setError("Fermo non disponibile. Riprova il caricamento.");return}
+        setDetail(nextDetail);setQuickStatus(String(nextDetail?.status??"OPEN"));
+        const withCurrent=(items:any[],item:any)=>item&&!items.some(x=>x.id===item.id)?[item,...items]:items;
+        setSites(withCurrent(nextSites,nextDetail?.site));
+        setWorkshops(withCurrent(nextWorkshops,nextDetail?.workshop));
+        setVehicles(withCurrent(nextVehicles,nextDetail?.vehicle));
+        setUsers(withCurrent(nextUsers,nextDetail?.assignedToUser));
 
         const fallbackSiteId = nextSites[0]?.id ? String(nextSites[0].id) : "";
         const fallbackWorkshopId = nextWorkshops[0]?.id ? String(nextWorkshops[0].id) : "";
@@ -165,7 +182,7 @@ export const StoppageQuickPanel = ({
         const vehiclePool = siteVehicles.length ? siteVehicles : nextVehicles;
         const fallbackVehicleId = vehiclePool[0]?.id ? String(vehiclePool[0].id) : "";
         const requestedVehicleId = String(nextDetail?.vehicleId ?? "");
-        const nextVehicleId = vehiclePool.some((v) => String(v.id) === requestedVehicleId) ? requestedVehicleId : fallbackVehicleId;
+        const nextVehicleId = requestedVehicleId || fallbackVehicleId;
 
         setSelectedSiteId(nextSiteId);
         setSelectedWorkshopId(nextWorkshopId);
@@ -177,12 +194,12 @@ export const StoppageQuickPanel = ({
           setError("Alcuni dati non sono disponibili. Puoi comunque continuare.");
         }
       })
-      .catch((e: Error) => mounted && setError(e.message));
+      .catch((e: Error) => {if(mounted){setLoaded(true);setError(e.message)}});
 
     return () => {
       mounted = false;
     };
-  }, [open, stoppageId, mode, initialOpenedAt, initialClosedAt]);
+  }, [open, stoppageId, mode, initialOpenedAt, initialClosedAt,canRead,loadKey,identity]);
 
   const filteredVehicles = useMemo(() => {
     if (!selectedSiteId) return vehicles;
@@ -191,6 +208,7 @@ export const StoppageQuickPanel = ({
   }, [selectedSiteId, vehicles]);
 
   useEffect(() => {
+    if(!loaded||mode!=="create")return;
     if (!filteredVehicles.length) {
       setSelectedVehicleId("");
       return;
@@ -199,7 +217,7 @@ export const StoppageQuickPanel = ({
     if (!filteredVehicles.some((v) => String(v.id) === String(selectedVehicleId))) {
       setSelectedVehicleId(String(filteredVehicles[0].id));
     }
-  }, [filteredVehicles, selectedVehicleId]);
+  }, [filteredVehicles, selectedVehicleId,loaded,mode]);
 
   const vehicleLabel = useMemo(() => {
     if (!detail) return "";
@@ -207,8 +225,10 @@ export const StoppageQuickPanel = ({
   }, [detail]);
 
   if (!open) return null;
+  if(!canRead)return <CommerceDrawer compact title="Accesso ai fermi" onClose={onClose}><p>Il tuo ruolo non consente l’accesso ai fermi.</p></CommerceDrawer>;
 
   const onQuickWorkshopCreate = async () => {
+    if(!has("workshops:write")||saving||task.busy||quickLock.current)return;
     setQuickWorkshopError(null);
     setQuickWorkshopSuccess(null);
 
@@ -229,6 +249,7 @@ export const StoppageQuickPanel = ({
       return;
     }
 
+    quickLock.current=true;setQuickBusy(true);
     try {
       const created = (await masterDataUseCases.createWorkshop(payload)) as any;
       const workshopRes = await masterDataUseCases.listWorkshops({ page: 1, pageSize: 200 });
@@ -247,10 +268,11 @@ export const StoppageQuickPanel = ({
       setShowQuickWorkshop(false);
     } catch (e) {
       setQuickWorkshopError((e as Error).message);
-    }
+    }finally{quickLock.current=false;setQuickBusy(false)}
   };
 
   const onQuickVehicleCreate = async () => {
+    if(!has("vehicles:write")||saving||task.busy||quickLock.current)return;
     setQuickVehicleError(null);
     setQuickVehicleSuccess(null);
 
@@ -268,6 +290,7 @@ export const StoppageQuickPanel = ({
       return;
     }
 
+    quickLock.current=true;setQuickBusy(true);
     try {
       const created = (await masterDataUseCases.createVehicle(payload)) as any;
       const vehicleRes = await masterDataUseCases.listVehicles({ page: 1, pageSize: 200 });
@@ -298,11 +321,13 @@ export const StoppageQuickPanel = ({
         // keep backend message as fallback
       }
       setQuickVehicleError((e as Error).message);
-    }
+    }finally{quickLock.current=false;setQuickBusy(false)}
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if(!canWrite||saveLock.current||quickLock.current||task.busy||!loaded)return;
+    saveLock.current=true;
     setSaving(true);
     setError(null);
 
@@ -314,7 +339,7 @@ export const StoppageQuickPanel = ({
     const reason = String(form.get("reason") || "").trim();
 
     if (!siteId || !vehicleId || !workshopId || !reason) {
-      setSaving(false);
+      saveLock.current=false;setSaving(false);
       setError("Compila i campi obbligatori (sede, veicolo, officina, motivo).");
       return;
     }
@@ -323,12 +348,12 @@ export const StoppageQuickPanel = ({
       const openedAt = fromLocalDateTimeInput(openedAtInput);
       const closedAt = fromLocalDateTimeInput(closedAtInput);
       if (!openedAt) {
-        setSaving(false);
+        saveLock.current=false;setSaving(false);
         setError("Data/ora inizio non valida.");
         return;
       }
       if (closedAt && new Date(closedAt).getTime() <= new Date(openedAt).getTime()) {
-        setSaving(false);
+        saveLock.current=false;setSaving(false);
         setError("La data/ora fine deve essere successiva all'inizio.");
         return;
       }
@@ -351,41 +376,34 @@ export const StoppageQuickPanel = ({
       if (mode === "create") result = await stoppagesUseCases.create(payload);
       else if (stoppageId) result = await stoppagesUseCases.update(stoppageId, payload);
 
-      onSaved();
+      setDirty(false);onSaved();
       if (result && onSavedRecord) onSavedRecord(result, { color: selectedColor });
       onClose();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setSaving(false);
+      saveLock.current=false;setSaving(false);
     }
   };
 
   return (
     <>
-      <div className="fixed inset-0 z-[70] bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <aside className="fixed z-[80] right-0 top-0 h-full w-full max-w-xl border-l bg-card shadow-2xl max-sm:bottom-0 max-sm:top-auto max-sm:max-h-[88vh] max-sm:rounded-t-2xl max-sm:border-t max-sm:border-l-0">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <p className="text-sm font-semibold">{mode === "create" ? "Nuovo fermo" : `Fermo ${detail?.vehicle?.plate || ""}`}</p>
-          <Button variant="outline" size="icon" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2 border-b px-4 py-2">
+      <CommerceDrawer title={mode==="create"?"Nuovo fermo":`Fermo ${detail?.vehicle?.plate||""}`} description="Dati e operazioni del fermo, senza perdere il contesto." origin={origin} motionRef={motion} onClose={requestClose} busy={saving||task.busy||quickBusy} footer={<><Button variant="outline" onClick={requestClose} disabled={saving||task.busy||quickBusy}>Chiudi</Button>{stoppageId&&tab==='detail'?<Button variant="outline" onClick={()=>navigate('/fermi/'+encodeURIComponent(stoppageId))}>Scheda completa</Button>:null}{tab==='edit'&&canWrite?<Button type="submit" form="stoppage-quick-form" disabled={saving||task.busy||quickBusy||!loaded||!selectedVehicleId||(!detail&&mode!=='create')}>{saving?'Salvataggio...':mode==='create'?'Crea fermo':'Salva modifiche'}</Button>:null}</>}>
+        <OperationFeedback error={task.error} success={task.success}/>
+        <nav className="commerce-section-nav" aria-label="Sezioni fermo">
           {mode !== "create" ? (
             <Button size="sm" variant={tab === "detail" ? "default" : "outline"} onClick={() => setTab("detail")}>Dettaglio</Button>
           ) : null}
-          <Button size="sm" variant={tab === "edit" ? "default" : "outline"} onClick={() => setTab("edit")}>
+          <Button disabled={!canWrite||saving||task.busy||quickBusy} size="sm" variant={tab === "edit" ? "default" : "outline"} onClick={() => setTab("edit")}>
             {mode === "create" ? "Inserimento" : "Modifica"}
           </Button>
-        </div>
+        </nav>
 
-        <div className="h-[calc(100%-108px)] overflow-auto px-4 py-4">
-          {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
-          {!detail && mode !== "create" ? (
+        <div className="operations-quick-content">
+          {error ? <CommerceNotice>{error}</CommerceNotice> : null}
+          {!loaded ? (
             <FleetumInlineLoader label="Caricamento fermo" />
-          ) : tab === "detail" ? (
+          ) : !detail&&mode!=="create" ? <Button variant="outline" onClick={()=>setLoadKey(x=>x+1)}>Riprova fermo</Button> : (<> {tab === "detail" ? (
             <div className="space-y-3">
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Veicolo</p>
@@ -393,27 +411,26 @@ export const StoppageQuickPanel = ({
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Stato</p>
-                <StoppageStatusBadge status={detail.status} />
+                <StoppageStatusBadge status={detail.status} />{canWrite?<div className="operations-quick-status"><Label htmlFor="stoppage-quick-status">Nuovo stato</Label><Select id="stoppage-quick-status" value={quickStatus} onChange={e=>setQuickStatus(e.target.value)} disabled={task.busy}>{stoppageStatusOptions.map(x=><option key={x.value} value={x.value}>{x.label}</option>)}</Select><Button variant="outline" disabled={task.busy||quickStatus===detail.status} onClick={()=>void task.run(async()=>{await stoppagesUseCases.updateStatus(stoppageId!,quickStatus as any);onSaved();setLoadKey(k=>k+1)},"Stato del fermo aggiornato.")}>Aggiorna stato</Button></div>:null}
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Sede / Officina</p>
-                <p className="text-sm">{detail.site?.name} · {detail.workshop?.name}</p>
+                <p className="text-sm" translate="no">{detail.site?.name} · {detail.workshop?.name}</p>
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Motivo</p>
-                <p className="text-sm">{detail.reason}</p>
+                <p className="text-sm" translate="no">{detail.reason}</p>
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Note</p>
                 <p className="text-sm">{detail.notes || "-"}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button
+                <Button disabled={!canRemind||task.busy}
                   size="sm"
                   onClick={async () => {
-                    if (!stoppageId) return;
-                    await stoppagesUseCases.sendEmailReminder(stoppageId);
-                    onSaved();
+                    if (!stoppageId||!canRemind) return;
+                    await task.run(async()=>{await stoppagesUseCases.sendEmailReminder(stoppageId);onSaved()},"Reminder accodato.");
                   }}
                 >
                   Invia reminder email
@@ -421,36 +438,36 @@ export const StoppageQuickPanel = ({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={!canRemind||task.busy}
                   onClick={async () => {
-                    if (!stoppageId) return;
-                    const { url } = await stoppagesUseCases.getWhatsappLink(stoppageId);
-                    window.open(url, "_blank", "noopener,noreferrer");
+                    if (!stoppageId||!canRemind) return;
+                    await task.run(async()=>{const {url}=await stoppagesUseCases.getWhatsappLink(stoppageId);if(!window.open(url,"_blank","noopener,noreferrer"))throw Error("Popup WhatsApp bloccato dal browser. Consenti i popup e riprova.")});
                   }}
                 >
                   Invia WhatsApp
                 </Button>
               </div>
             </div>
-          ) : (
-            <form key={detail?.id ?? "new"} className="grid gap-3" onSubmit={onSubmit}>
+          ) : null}
+            <form hidden={tab!=="edit"} id="stoppage-quick-form" key={detail?.id ?? "new"} className="operations-form" onChangeCapture={()=>setDirty(true)} onSubmit={onSubmit}><fieldset className="operations-form-fields" disabled={!canWrite||saving||task.busy||quickBusy}>
               <div className="grid gap-1.5">
-                <Label>Sede</Label>
-                <Select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)}>
+                <Label htmlFor="stoppage-quick-field-1">Sede</Label>
+                <Select id="stoppage-quick-field-1" value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)}>
                   <option value="" disabled>Seleziona sede</option>
                   {sites.map((x) => (
-                    <option key={x.id} value={x.id}>{x.name}</option>
+                    <option translate="no" key={x.id} value={x.id}>{x.name}</option>
                   ))}
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label>Veicolo</Label>
-                <Select value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)}>
+                <Label htmlFor="stoppage-quick-field-2">Veicolo</Label>
+                <Select id="stoppage-quick-field-2" value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)}>
                   <option value="" disabled>Seleziona veicolo</option>
                   {filteredVehicles.map((x) => (
-                    <option key={x.id} value={x.id}>{x.plate} · {x.brand} {x.model}</option>
+                    <option translate="no" key={x.id} value={x.id}>{x.plate} · {x.brand} {x.model}</option>
                   ))}
                 </Select>
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickVehicle((prev) => !prev)}>
+                <Button disabled={!has("vehicles:write")} type="button" variant="outline" size="sm" onClick={() => setShowQuickVehicle((prev) => !prev)}>
                   {showQuickVehicle ? "Chiudi inserimento veicolo" : "+ Nuovo veicolo"}
                 </Button>
               </div>
@@ -489,14 +506,14 @@ export const StoppageQuickPanel = ({
               )}
 
               <div className="grid gap-1.5">
-                <Label>Officina</Label>
-                <Select value={selectedWorkshopId} onChange={(e) => setSelectedWorkshopId(e.target.value)}>
+                <Label htmlFor="stoppage-quick-field-3">Officina</Label>
+                <Select id="stoppage-quick-field-3" value={selectedWorkshopId} onChange={(e) => setSelectedWorkshopId(e.target.value)}>
                   <option value="" disabled>Seleziona officina</option>
                   {workshops.map((x) => (
-                    <option key={x.id} value={x.id}>{x.name}</option>
+                    <option translate="no" key={x.id} value={x.id}>{x.name}</option>
                   ))}
                 </Select>
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickWorkshop((prev) => !prev)}>
+                <Button disabled={!has("workshops:write")} type="button" variant="outline" size="sm" onClick={() => setShowQuickWorkshop((prev) => !prev)}>
                   {showQuickWorkshop ? "Chiudi creazione officina" : "Officina non presente? Creala qui"}
                 </Button>
               </div>
@@ -535,33 +552,33 @@ export const StoppageQuickPanel = ({
               )}
 
               <div className="grid gap-1.5">
-                <Label>Stato</Label>
-                <Select name="status" defaultValue={detail?.status ?? "OPEN"}>
+                <Label htmlFor="stoppage-quick-field-4">Stato</Label>
+                <Select id="stoppage-quick-field-4" name="status" defaultValue={detail?.status ?? "OPEN"}>
                   {stoppageStatusOptions.map((x) => (
                     <option key={x.value} value={x.value}>{x.label}</option>
                   ))}
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label>Priorità</Label>
-                <Select name="priority" defaultValue={detail?.priority ?? "MEDIUM"}>
+                <Label htmlFor="stoppage-quick-field-5">Priorità</Label>
+                <Select id="stoppage-quick-field-5" name="priority" defaultValue={detail?.priority ?? "MEDIUM"}>
                   {priorityOptions.map((x) => (
                     <option key={x.value} value={x.value}>{x.label}</option>
                   ))}
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label>Assegnato a</Label>
-                <Select name="assignedToUserId" defaultValue={detail?.assignedToUserId || ""}>
+                <Label htmlFor="stoppage-quick-field-6">Assegnato a</Label>
+                <Select id="stoppage-quick-field-6" name="assignedToUserId" defaultValue={detail?.assignedToUserId || ""}>
                   <option value="">Non assegnato</option>
                   {users.map((x) => (
-                    <option key={x.id} value={x.id}>{x.firstName} {x.lastName}</option>
+                    <option translate="no" key={x.id} value={x.id}>{x.firstName} {x.lastName}</option>
                   ))}
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label>Reminder dopo giorni</Label>
-                <Input type="number" min={1} name="reminderAfterDays" defaultValue={detail?.reminderAfterDays || ""} />
+                <Label htmlFor="stoppage-quick-field-7">Reminder dopo giorni</Label>
+                <Input id="stoppage-quick-field-7" type="number" min={1} name="reminderAfterDays" defaultValue={detail?.reminderAfterDays || ""} />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="openedAt">Da (data/ora)</Label>
@@ -570,7 +587,7 @@ export const StoppageQuickPanel = ({
               <div className="grid gap-1.5">
                 <Label htmlFor="closedAt">A (data/ora)</Label>
                 <Input id="closedAt" type="datetime-local" step={900} value={closedAtInput} onChange={(e) => setClosedAtInput(e.target.value)} />
-                <p className="text-xs text-muted-foreground">Durata predefinita: 1 ora (modificabile).</p>
+                <p className="text-xs text-muted-foreground">{closedAtInput?"Puoi modificare la data e l’ora di fine.":"La fine resta aperta finché non viene indicata."}</p>
               </div>
               <div className="grid gap-1.5">
                 <Label>Colore promemoria</Label>
@@ -588,21 +605,19 @@ export const StoppageQuickPanel = ({
                 </div>
               </div>
               <div className="grid gap-1.5">
-                <Label>Motivo</Label>
-                <Input name="reason" defaultValue={detail?.reason || ""} required />
+                <Label htmlFor="stoppage-quick-field-8">Motivo</Label>
+                <Input id="stoppage-quick-field-8" name="reason" defaultValue={detail?.reason || ""} required />
               </div>
               <div className="grid gap-1.5">
-                <Label>Note</Label>
-                <Textarea name="notes" defaultValue={detail?.notes || ""} />
+                <Label htmlFor="stoppage-quick-field-9">Note</Label>
+                <Textarea id="stoppage-quick-field-9" name="notes" defaultValue={detail?.notes || ""} />
               </div>
-              <Button type="submit" disabled={saving || !selectedVehicleId}>
-                {saving ? "Salvataggio..." : mode === "create" ? "Crea fermo" : "Salva modifiche"}
-              </Button>
               {!selectedVehicleId ? <p className="text-xs text-muted-foreground">Seleziona o crea un veicolo prima di salvare.</p> : null}
-            </form>
-          )}
+            </fieldset></form>
+          </>)}
         </div>
-      </aside>
+      </CommerceDrawer>
+      {discard?<DiscardDialog onContinue={()=>setDiscard(false)} onDiscard={()=>{setDiscard(false);finishClose()}}/>:null}
     </>
   );
 };

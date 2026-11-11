@@ -1,11 +1,16 @@
 import { WorkshopRepository } from "../../domain/repositories/workshop-repository.js";
 import { prisma } from "../database/prisma/client.js";
+import { assertCompanyResourceView, canReadSharedCompanyResources } from "../auth/company-resource-access.js";
+import { scalarWriteFields } from "./vehicle-tenant-scope.js";
+
+const writableFields = ["name", "contactName", "email", "phone", "whatsapp", "address", "city", "notes", "isActive"] as const;
 
 export class PrismaWorkshopRepository implements WorkshopRepository {
   async list(tenantId: string, params: { search?: string; skip: number; take: number }) {
     const where = {
       tenantId,
       deletedAt: null,
+      ...(!canReadSharedCompanyResources(tenantId) ? { id: { in: [] as string[] } } : {}),
       ...(params.search
         ? {
             OR: [
@@ -25,15 +30,19 @@ export class PrismaWorkshopRepository implements WorkshopRepository {
   }
 
   create(tenantId: string, input: Record<string, unknown>) {
-    return prisma.workshop.create({ data: { tenantId, ...input } as never });
+    assertCompanyResourceView(tenantId);
+    return prisma.workshop.create({ data: { ...scalarWriteFields(input, writableFields), tenantId } as never });
   }
 
   async update(tenantId: string, id: string, input: Record<string, unknown>) {
-    await prisma.workshop.updateMany({ where: { id, tenantId, deletedAt: null }, data: input as never });
+    assertCompanyResourceView(tenantId);
+    const data = scalarWriteFields(input, writableFields);
+    await prisma.workshop.updateMany({ where: { id, tenantId, deletedAt: null }, data: data as never });
     return prisma.workshop.findFirst({ where: { id, tenantId, deletedAt: null } });
   }
 
   async delete(tenantId: string, id: string): Promise<void> {
+    assertCompanyResourceView(tenantId);
     await prisma.workshop.updateMany({ where: { id, tenantId, deletedAt: null }, data: { deletedAt: new Date() } });
   }
 }

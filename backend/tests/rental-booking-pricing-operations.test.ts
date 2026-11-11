@@ -42,6 +42,7 @@ const exercise = async (body: Record<string, unknown>, options: {
   const snapshotWrites: any[] = [];
   const bookingWrites: any[] = [];
   const tx = {
+    bookingContract:{findFirst:async()=>null},
     $queryRaw: async () => { events.push("row-lock"); return [{ id: "tenant-a", deletedAt: null }]; },
     vehicle: { findFirst: async () => ({ id: "vehicle-a", tenantId: "tenant-a", siteId: "site-a", deletedAt: null }) },
     rentalBooking: {

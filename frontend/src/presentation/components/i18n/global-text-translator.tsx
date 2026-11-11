@@ -25,7 +25,7 @@ function preserveSpacing(source: string, translated: string) {
 
 export function translateTextNode(node: Text, language: FleetumLanguage) {
   const parent = node.parentElement;
-  if (!parent || SKIP_TAGS.has(parent.tagName)) return;
+  if (!parent || SKIP_TAGS.has(parent.tagName) || parent.closest?.('[translate="no"], [data-no-translate]')) return;
 
   const raw = node.textContent ?? "";
   const trimmed = raw.trim();
@@ -45,6 +45,7 @@ export function translateTextNode(node: Text, language: FleetumLanguage) {
 }
 
 export function translateElementAttributes(element: Element, language: FleetumLanguage) {
+  if (element.closest?.('[translate="no"], [data-no-translate]')) return;
   const originals = attributeOriginals.get(element) ?? new Map<string, TranslationState>();
   attributeOriginals.set(element, originals);
   for (const attr of ATTRIBUTES) {

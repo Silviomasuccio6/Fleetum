@@ -34,8 +34,9 @@
     "react-router-dom": "7.18.3",
     "recharts": "^2.12.7",
     "tailwind-merge": "^2.6.0",
-    "zod": "^3.23.8",
-    "zustand": "^4.5.5"
+    "zod": "4.6.7",
+    "zustand": "^4.5.5",
+    "pdfjs-dist": "5.4.296"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",

@@ -174,12 +174,13 @@ export const PlatformAdminLayout = () => {
               size="sm"
               disabled={loggingOut}
               onClick={async () => {
+    const notificationScope = snackbar.capture();
                 setLoggingOut(true);
                 try {
                   const result = await platformAdminUseCases.logout();
                   if (result.sessionCleared && !platformAuthStorage.get()) navigate("/login", { replace: true });
                 } catch {
-                  snackbar.error("Uscita non confermata. La sessione resta aperta: riprova.");
+                  snackbar.error("Uscita non confermata. La sessione resta aperta: riprova.", {scope: notificationScope});
                 } finally {
                   setLoggingOut(false);
                 }

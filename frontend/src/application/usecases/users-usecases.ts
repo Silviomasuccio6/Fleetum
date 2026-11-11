@@ -11,5 +11,6 @@ export const usersUseCases = {
     httpClient.patch(`/users/${id}`, input),
   updateRole: (id: string, roleKey: "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER") =>
     httpClient.patch(`/users/${id}/role`, { roleKey }),
+  assignSite: (id: string, siteId: string | null) => httpClient.patch(`/users/${id}/site`, {siteId}),
   remove: (id: string) => httpClient.delete(`/users/${id}`)
 };

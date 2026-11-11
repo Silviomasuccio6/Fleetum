@@ -1,3 +1,4 @@
+import { partialUpdateSchema } from "./partial-update-schema.js";
 import { z } from "zod";
 
 const optionalString = z.preprocess((value) => (value === "" ? undefined : value), z.string().optional());
@@ -30,6 +31,8 @@ export const rentalCustomerTypeSchema = z.enum(["PERSONA_FISICA", "PERSONA_GIURI
 
 const rentalBookingBaseSchema = z.object({
   vehicleId: z.string().trim().min(1),
+  pickupSiteId: z.string().trim().min(1).optional(),
+  returnSiteId: z.string().trim().min(1).optional(),
   customerId: z.string().trim().min(1, "Cliente obbligatorio"),
   contractRequired: z.boolean().optional(),
   customerName: optionalString,
@@ -66,7 +69,7 @@ export const rentalBookingCreateSchema = rentalBookingBaseSchema
     path: ["returnKm"]
   });
 
-export const rentalBookingUpdateSchema = rentalBookingBaseSchema.partial().refine((input) => {
+export const rentalBookingUpdateSchema = partialUpdateSchema(rentalBookingBaseSchema).refine((input) => {
   if (!input.pickupAt || !input.returnAt) return true;
   return input.returnAt.getTime() > input.pickupAt.getTime();
 }, {
@@ -175,7 +178,7 @@ export const rentalPricingCreateListSchema = pricingListBaseSchema.refine((input
   path: ["validTo"]
 });
 
-export const rentalPricingUpdateListSchema = pricingListBaseSchema.partial().refine((input) => {
+export const rentalPricingUpdateListSchema = partialUpdateSchema(pricingListBaseSchema).refine((input) => {
   if (!input.validFrom || !input.validTo) return true;
   return input.validTo.getTime() >= input.validFrom.getTime();
 }, {
@@ -202,7 +205,7 @@ export const rentalPricingCreatePackageSchema = packageBaseSchema.refine((input)
   path: ["kmIncluded"]
 });
 
-export const rentalPricingUpdatePackageSchema = packageBaseSchema.partial();
+export const rentalPricingUpdatePackageSchema = partialUpdateSchema(packageBaseSchema);
 
 const extraTierSchema = z.object({
   fromKm: z.coerce.number().int().min(1),
@@ -219,7 +222,7 @@ const extraPolicyBaseSchema = z.object({
   isDefault: z.boolean().optional().default(false),
   isActive: z.boolean().optional().default(true),
   sortOrder: z.coerce.number().int().min(0).max(10000).optional().default(0),
-  tiers: z.array(extraTierSchema).optional().default([])
+  tiers: z.array(extraTierSchema).max(1000).optional().default([])
 });
 
 export const rentalPricingCreateExtraPolicySchema = extraPolicyBaseSchema.refine((input) => {
@@ -230,7 +233,7 @@ export const rentalPricingCreateExtraPolicySchema = extraPolicyBaseSchema.refine
   path: ["tiers"]
 });
 
-export const rentalPricingUpdateExtraPolicySchema = extraPolicyBaseSchema.partial();
+export const rentalPricingUpdateExtraPolicySchema = partialUpdateSchema(extraPolicyBaseSchema);
 
 export const rentalPricingQuoteSchema = z
   .object({
@@ -390,7 +393,7 @@ export const rentalCustomerCreateSchema = customerBaseSchema.superRefine((input,
   }
 });
 
-export const rentalCustomerUpdateSchema = customerBaseSchema.partial().superRefine((input, ctx) => {
+export const rentalCustomerUpdateSchema = partialUpdateSchema(customerBaseSchema).superRefine((input, ctx) => {
   const customerType = input.customerType;
   if (!customerType) return;
 

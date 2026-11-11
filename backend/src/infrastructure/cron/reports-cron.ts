@@ -7,6 +7,8 @@ import { EmailQueueService } from "../email/email-queue-service.js";
 import { logger } from "../logging/logger.js";
 import { ownedStoppageWhere } from "../repositories/stoppage-tenant-scope.js";
 import { ownedVehicleWhere } from "../repositories/vehicle-tenant-scope.js";
+import { companyReportAuthorizationReason } from "../../application/services/company-report-authorization.js";
+import { currentSiteAccess, runWithSiteAccess } from "../auth/site-access-context.js";
 import {
   latestDueOccurrence,
   nextScheduledOccurrence,
@@ -92,6 +94,7 @@ const uniqueRecipients = (settings: any) => {
 const buildTenantReportInputs = async (
   tenantId: string,
   settings: any,
+  settingsAuditLogId: string,
   occurrence: Date,
   now: Date,
   recipientsWithKeys: Array<{ recipient: string; deduplicationKey: string }>
@@ -189,6 +192,7 @@ const buildTenantReportInputs = async (
     subject,
     body,
     meta: {
+      ...(Object.hasOwn(settings, "__siteAuthorization") ? { companyReportAuthorization: settings.__siteAuthorization, settingsAuditLogId } : {}),
       reportStyle: format,
       generatedAt: now.toISOString(),
       scheduledFor: occurrence.toISOString(),
@@ -231,6 +235,7 @@ const processTenantReport = async (
   now: Date
 ) => {
   const settings = settingsRow.details as any;
+  const attributed = settings && typeof settings === "object" && Object.hasOwn(settings, "__siteAuthorization");
   const timeZone = reportTimeZone();
   let cursor = await prisma.scheduledReportCursor.findUnique({ where: { tenantId } });
   if (!cursor) {
@@ -277,6 +282,10 @@ const processTenantReport = async (
       : recipients.length
         ? null
         : "NO_RECIPIENTS";
+  if (!skipReason && !attributed) skipReason = "SITE_LEGACY_REVIEW_REQUIRED";
+  if (!skipReason && attributed && await companyReportAuthorizationReason(prisma, tenantId, settings.__siteAuthorization)) {
+    skipReason = "REPORT_AUTHORITY_REVOKED";
+  }
   if (!skipReason) {
     const entitlements = await licensePolicyService.getTenantEntitlements(tenantId);
     if (
@@ -301,7 +310,7 @@ const processTenantReport = async (
       }
     });
     if (existing !== recipientsWithKeys.length) {
-      inputs = await buildTenantReportInputs(tenantId, settings, latest, now, recipientsWithKeys);
+      inputs = await buildTenantReportInputs(tenantId, settings, settingsRow.id, latest, now, recipientsWithKeys);
     }
   }
 
@@ -333,7 +342,7 @@ const processTenantReport = async (
     // An eligibility decision made before the locks may already be stale.
     // If it changed from ineligible to eligible, retry on the next tick so
     // the report body can be built before we advance the cursor.
-    let finalSkipReason = skipReason === "INELIGIBLE" ? null : skipReason;
+    let finalSkipReason = skipReason === "INELIGIBLE" || skipReason === "REPORT_AUTHORITY_REVOKED" ? null : skipReason;
     if (!finalSkipReason && (!lockedTenant.isActive || lockedTenant.deletedAt)) {
       finalSkipReason = "TENANT_INACTIVE";
     }
@@ -358,7 +367,10 @@ const processTenantReport = async (
         finalSkipReason = "INELIGIBLE";
       }
     }
-    if (!finalSkipReason && skipReason === "INELIGIBLE") return;
+    if (!finalSkipReason && attributed && await companyReportAuthorizationReason(tx, tenantId, settings.__siteAuthorization)) {
+      finalSkipReason = "REPORT_AUTHORITY_REVOKED";
+    }
+    if (!finalSkipReason && (skipReason === "INELIGIBLE" || skipReason === "REPORT_AUTHORITY_REVOKED")) return;
 
     const skippedThrough = finalSkipReason
       ? latest
@@ -422,13 +434,11 @@ export const runReportsCronCycle = async (
         });
         if (!settingsRow) continue;
 
-        await processTenantReport(
-          emailQueue,
-          licensePolicyService,
-          tenant.id,
-          settingsRow,
-          now
-        );
+        const process = () => processTenantReport(emailQueue, licensePolicyService, tenant.id, settingsRow, now);
+        // This is an internal company job, never an HTTP branch export. Resolve
+        // its configuration authority inside processTenantReport; prevent ambient branch leakage.
+        if (currentSiteAccess()) await runWithSiteAccess({ tenantId: tenant.id, canViewAllSites: true, allSites: true, siteIds: [] }, process);
+        else await process();
       } catch (error) {
         logger.error({ error, tenantId: tenant.id }, "Scheduled report failed for tenant");
       }

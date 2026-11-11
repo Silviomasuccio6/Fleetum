@@ -3,6 +3,10 @@ import { AuditLogRepository, AuditLogRow } from "../../domain/repositories/audit
 import { initialReportNextRunAt, reportTimeZone } from "../cron/report-schedule.js";
 import { prisma } from "../database/prisma/client.js";
 
+import { companyReportAuthorizationReason } from "../../application/services/company-report-authorization.js";
+import { AppError } from "../../shared/errors/app-error.js";
+import { auditViewScope } from "./audit-view-scope.js";
+
 type CreateAuditLogInput = Parameters<AuditLogRepository["create"]>[0];
 
 export const createAuditLog = async (client: Pick<typeof prisma, "auditLog">, input: CreateAuditLogInput, createdAt?: Date) => {
@@ -44,24 +48,19 @@ export const createAuditLog = async (client: Pick<typeof prisma, "auditLog">, in
 
 export class PrismaAuditLogRepository implements AuditLogRepository {
   async countByTenant(tenantId: string): Promise<number> {
-    return prisma.auditLog.count({ where: { tenantId } });
+    const view = auditViewScope(tenantId);
+    const [row] = await prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*) AS "count" FROM "AuditLog" a WHERE ${view.where}`;
+    return Number(row.count);
   }
 
   async listByTenant(tenantId: string, input: { skip: number; take: number }): Promise<AuditLogRow[]> {
-    return prisma.auditLog.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: "desc" },
-      skip: input.skip,
-      take: input.take
-    });
+    const view = auditViewScope(tenantId);
+    return prisma.$queryRaw<AuditLogRow[]>`SELECT ${view.columns} FROM "AuditLog" a WHERE ${view.where}
+      ORDER BY a."createdAt" DESC, a."id" DESC OFFSET ${input.skip} LIMIT ${input.take}`;
   }
 
   async listLatestByTenant(tenantId: string, take: number): Promise<AuditLogRow[]> {
-    return prisma.auditLog.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: "desc" },
-      take
-    });
+    return this.listByTenant(tenantId, { skip: 0, take });
   }
 
   async getLatestByAction(tenantId: string, resource: string, action: string): Promise<AuditLogRow | null> {
@@ -81,6 +80,11 @@ export class PrismaAuditLogRepository implements AuditLogRepository {
         `;
         if (locked.length !== 1) throw new Error("Tenant not found while saving report settings");
 
+        const details = input.details as Record<string, unknown> | null;
+        if (details && Object.hasOwn(details, "__siteAuthorization") &&
+            await companyReportAuthorizationReason(tx, input.tenantId, details.__siteAuthorization)) {
+          throw new AppError("Configurazione report non consentita", 403, "FORBIDDEN");
+        }
         // PostgreSQL now() is fixed at transaction start; clock_timestamp()
         // preserves write order after a concurrent writer releases the lock.
         const [clock] = await tx.$queryRaw<Array<{ currentTime: Date }>>`

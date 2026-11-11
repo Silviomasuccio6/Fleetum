@@ -44,6 +44,7 @@ import {
   PlatformWebsiteAnalytics,
   QuickAction
 } from "../../../application/usecases/platform/platform-admin-usecases";
+import {useOperationIssue} from "../../hooks/use-operation-issue";
 import { snackbar } from "../../../application/stores/snackbar-store";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PlatformEventItem } from "../../components/platform/platform-event-item";
@@ -336,6 +337,7 @@ const useCountUp = (target: number, duration = 560) => {
 };
 
 export const PlatformAdminPage = () => {
+  const {issue:operationIssue,remember:rememberOperationIssue,clear:clearOperationIssue}=useOperationIssue();
   const navigate = useNavigate();
   const sidebarStorageKey = "platform_sidebar_hidden";
 
@@ -384,18 +386,21 @@ export const PlatformAdminPage = () => {
     : { range: revenueRange };
 
   const loadDashboardLive = async (options?: { silent?: boolean }) => {
+    const notificationScope = snackbar.capture();
     try {
       const metrics = await platformAdminUseCases.dashboardLiveMetrics({ windowMinutes: 15 });
       setDashboardLive(metrics);
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
       if (!options?.silent) {
-        snackbar.error((err as Error).message);
+        rememberOperationIssue((err as Error).message, notificationScope);
+        snackbar.error((err as Error).message, {scope: notificationScope});
       }
     }
   };
 
   const load = async (options?: { silent?: boolean }) => {
+    const notificationScope = snackbar.capture();
     setError(null);
     if (!options?.silent) setLoading(true);
     if (options?.silent) setRefreshing(true);
@@ -430,7 +435,7 @@ export const PlatformAdminPage = () => {
       if (handlePlatformAuthError(err)) return;
       const message = (err as Error).message;
       setError(message);
-      snackbar.error(message);
+      snackbar.error(message, {scope: notificationScope});
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -647,36 +652,41 @@ export const PlatformAdminPage = () => {
   };
 
   const runAction = async (tenantId: string, action: QuickAction) => {
+    const notificationScope = snackbar.capture();
     setRowLoading((old) => ({ ...old, [tenantId]: true }));
     setRowFeedback((old) => ({ ...old, [tenantId]: { type: "loading", message: "Operazione in corso..." } }));
 
     try {
       await platformAdminUseCases.quickAction(tenantId, action);
       setRowFeedback((old) => ({ ...old, [tenantId]: { type: "success", message: `${actionLabels[action]} completata` } }));
-      snackbar.success(`${actionLabels[action]} eseguita`);
+      snackbar.success(`${actionLabels[action]} eseguita`, {scope: notificationScope});
       await load({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
       const message = (err as Error).message;
       setRowFeedback((old) => ({ ...old, [tenantId]: { type: "error", message } }));
-      snackbar.error(message);
+      snackbar.error(message, {scope: notificationScope});
     } finally {
       setRowLoading((old) => ({ ...old, [tenantId]: false }));
     }
   };
 
   const revokeTrustedDevice = async (device: PlatformTrustedDevice) => {
+    clearOperationIssue();
+    const notificationScope = snackbar.capture();
     try {
       await platformAdminUseCases.revokeTrustedDevice(device.id);
-      snackbar.success("Dispositivo fidato revocato");
+      snackbar.success("Dispositivo fidato revocato", {scope: notificationScope});
       await load({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      rememberOperationIssue((err as Error).message, notificationScope);
+      snackbar.error((err as Error).message, {scope: notificationScope});
     }
   };
 
   const updateTenantPlan = async (tenant: TenantRow, nextPlan: PlanTier, forceActivate: boolean) => {
+    const notificationScope = snackbar.capture();
     const currentPlan = normalizePlanTier(tenant.license?.plan);
     const licenseStatus = tenant.license?.status ?? "PENDING";
     const planChanged = hasPlanChange(currentPlan, nextPlan);
@@ -713,14 +723,14 @@ export const PlatformAdminPage = () => {
           message: forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`
         }
       }));
-      snackbar.success(forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`);
+      snackbar.success(forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`, {scope: notificationScope});
       await load({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
       const message = (err as Error).message;
       setPlanDrafts((old) => rollbackPlanDraft(old, tenant.id, currentPlan));
       setRowFeedback((old) => ({ ...old, [tenant.id]: { type: "error", message } }));
-      snackbar.error(message);
+      snackbar.error(message, {scope: notificationScope});
     } finally {
       setRowLoading((old) => ({ ...old, [tenant.id]: false }));
     }
@@ -760,32 +770,38 @@ export const PlatformAdminPage = () => {
   };
 
   const generateInvoice = async (tenant: TenantRow) => {
+    clearOperationIssue();
+    const notificationScope = snackbar.capture();
     setInvoiceLoading((old) => ({ ...old, [tenant.id]: true }));
     try {
       const result = await platformAdminUseCases.generateInvoice(tenant.id);
-      snackbar.success(`Fattura ${result.data.invoiceNumber} generata`);
+      snackbar.success(`Fattura ${result.data.invoiceNumber} generata`, {scope: notificationScope});
       setInvoices((old) => [result.data, ...old]);
       setActiveSection("billing");
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      rememberOperationIssue((err as Error).message, notificationScope);
+      snackbar.error((err as Error).message, {scope: notificationScope});
     } finally {
       setInvoiceLoading((old) => ({ ...old, [tenant.id]: false }));
     }
   };
 
   const sendInvoice = async (invoice: PlatformInvoice) => {
+    clearOperationIssue();
+    const notificationScope = snackbar.capture();
     setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
     const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
     invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
     try {
       const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
       invoiceEmailRequestKeys.current.delete(invoice.id);
-      snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
+      snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`, {scope: notificationScope});
       setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      rememberOperationIssue((err as Error).message, notificationScope);
+      snackbar.error((err as Error).message, {scope: notificationScope});
       void load({ silent: true });
     } finally {
       setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
@@ -793,20 +809,25 @@ export const PlatformAdminPage = () => {
   };
 
   const markInvoicePaid = async (invoice: PlatformInvoice) => {
+    clearOperationIssue();
+    const notificationScope = snackbar.capture();
     setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
     try {
       const result = await platformAdminUseCases.updateInvoiceStatus(invoice.id, "PAID");
-      snackbar.success(`Fattura ${result.data.invoiceNumber} marcata pagata`);
+      snackbar.success(`Fattura ${result.data.invoiceNumber} marcata pagata`, {scope: notificationScope});
       setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      rememberOperationIssue((err as Error).message, notificationScope);
+      snackbar.error((err as Error).message, {scope: notificationScope});
     } finally {
       setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
     }
   };
 
   const downloadInvoice = async (invoice: PlatformInvoice) => {
+    clearOperationIssue();
+    const notificationScope = snackbar.capture();
     try {
       const blob = await platformAdminUseCases.downloadInvoicePdf(invoice.id);
       const url = URL.createObjectURL(blob);
@@ -817,23 +838,28 @@ export const PlatformAdminPage = () => {
       URL.revokeObjectURL(url);
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      rememberOperationIssue((err as Error).message, notificationScope);
+      snackbar.error((err as Error).message, {scope: notificationScope});
     }
   };
 
   const updateDemoLeadStatus = async (lead: PlatformDemoLead, status: PlatformDemoLead["status"]) => {
+    clearOperationIssue();
+    const notificationScope = snackbar.capture();
     try {
       const result = await platformAdminUseCases.updateDemoLead(lead.id, status);
       setDemoLeads((old) => old.map((item) => (item.id === lead.id ? result.data : item)));
-      snackbar.success(`Lead ${lead.companyName} aggiornato`);
+      snackbar.success(`Lead ${lead.companyName} aggiornato`, {scope: notificationScope});
       void load({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      rememberOperationIssue((err as Error).message, notificationScope);
+      snackbar.error((err as Error).message, {scope: notificationScope});
     }
   };
 
   const onLicenseSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope = snackbar.capture();
     event.preventDefault();
     if (!editingTenant) return;
 
@@ -848,14 +874,14 @@ export const PlatformAdminPage = () => {
         priceMonthly: priceMonthlyRaw ? Number(priceMonthlyRaw) : null,
         billingCycle: String(form.get("billingCycle") || "monthly") as "monthly" | "yearly"
       });
-      snackbar.success("Licenza aggiornata");
+      snackbar.success("Licenza aggiornata", {scope: notificationScope});
       setEditingTenant(null);
       await load({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
       const message = (err as Error).message;
       setError(message);
-      snackbar.error(message);
+      snackbar.error(message, {scope: notificationScope});
     }
   };
 
@@ -1092,6 +1118,7 @@ export const PlatformAdminPage = () => {
       </aside>
 
       <div className="space-y-4">
+      {operationIssue?<div className="rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground" role="alert">{operationIssue}</div>:null}
       {activeSection === "overview" ? (
         <div className="space-y-4">
           <Card className="platform-command-hero">
@@ -1821,6 +1848,8 @@ export const PlatformAdminPage = () => {
                   variant="outline"
                   size="sm"
                   onClick={async () => {
+                    clearOperationIssue();
+                    const notificationScope = snackbar.capture();
                     try {
                       const blob = await platformAdminUseCases.revenueCsv(revenueQuery);
                       const url = URL.createObjectURL(blob);
@@ -1829,10 +1858,11 @@ export const PlatformAdminPage = () => {
                       link.download = `platform-revenue-${revenueRange}.csv`;
                       link.click();
                       URL.revokeObjectURL(url);
-                      snackbar.success("Export ricavi completato");
+                      snackbar.success("Export ricavi completato", {scope: notificationScope});
                     } catch (err) {
                       if (handlePlatformAuthError(err)) return;
-                      snackbar.error((err as Error).message);
+                      rememberOperationIssue((err as Error).message, notificationScope);
+                      snackbar.error((err as Error).message, {scope: notificationScope});
                     }
                   }}
                 >

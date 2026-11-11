@@ -4,8 +4,11 @@ import { getSlaThresholdForPriority } from "../../services/sla-policy.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
 import {
-  automaticReminderIsDue, automaticReminderTypes, lockReminderContext, ReminderStoppage
+  automaticReminderIsDue, automaticReminderTypes, lockReminderContext, ReminderStoppage,
+  manualReminderSiteAuthorizationReason
 } from "../../../infrastructure/email/reminder-email-dispatch.js";
+import { siteAccessForTenant } from "../../../infrastructure/auth/site-access-context.js";
+import { assertSiteAccess } from "../../../domain/policies/site-access.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { daysBetween } from "../../../shared/utils/date.js";
@@ -26,8 +29,11 @@ export class SendReminderUseCase {
     return { subject, body };
   }
 
-  async manualEmail(tenantId: string, stoppageId: string) {
+  async manualEmail(tenantId: string, stoppageId: string, userId?: string) {
     const now = new Date();
+    const scope = siteAccessForTenant(tenantId);
+    if (scope && !userId) throw new AppError("Richiedente sollecito non valido", 403, "REMINDER_NOT_ALLOWED");
+    const siteAuthorization = scope ? { version: 1, userId: userId!, allSites: scope.allSites, siteIds: [...scope.siteIds] } : undefined;
     const item = await prisma.$transaction(async (tx) => {
       const { reason, stoppage } = await lockReminderContext(tx, tenantId, stoppageId);
       if (reason || !stoppage) {
@@ -36,12 +42,18 @@ export class SendReminderUseCase {
         }
         throw new AppError("Invio sollecito non consentito", 403, "REMINDER_NOT_ALLOWED");
       }
+      if (scope) {
+        assertSiteAccess(scope, { tenantId, siteIds: [stoppage.siteId] });
+        if (await manualReminderSiteAuthorizationReason(tx, tenantId, stoppage.siteId, siteAuthorization)) {
+          throw new AppError("Invio sollecito non consentito", 403, "REMINDER_NOT_ALLOWED");
+        }
+      }
       const recipient = stoppage.workshopEmailSnapshot || stoppage.workshop.email;
       if (!recipient) throw new AppError("Email officina mancante", 400, "VALIDATION_ERROR");
       const { subject, body } = this.buildMessage(stoppage, now);
       return this.emailQueueService.enqueue({
         tenantId, type: "REMINDER_EMAIL", recipient, subject, body,
-        meta: { tenantId, stoppageId, reminderType: "MANUAL" }
+        meta: { tenantId, stoppageId, reminderType: "MANUAL", ...(siteAuthorization ? { siteAuthorization } : {}) }
       }, tx);
     }, { maxWait: 5000, timeout: 10000 });
     // Immediate dispatch preserves the HTTP success/queued contract while all

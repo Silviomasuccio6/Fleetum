@@ -1,3 +1,8 @@
+import {ContractIssuancePanel} from "../../components/contracts/contract-issuance-panel";
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
+import { ContractSigningPanel } from "../../components/contracts/contract-signing-panel";
+import { ContractRentalDetailsPanel } from "../../components/contracts/contract-rental-details-panel";
+import { ContractCargosDialog } from "../../components/contracts/contract-cargos-dialog";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BookingContract,
@@ -14,7 +19,11 @@ import {
   RentalCustomerDocumentDraft,
   RentalCustomerType
 } from "../../../application/usecases/rental-bookings-usecases";
+import { useAuthStore } from "../../../application/stores/auth-store";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
+import { WorkspacePageHeader, WorkspaceMetricStrip, WorkspaceFilterGroup } from "../../components/ui/workspace-ui";
+import { BookingInvoiceSection } from "../../components/bookings/booking-invoice-section";
+import { RentalBookingList } from "../../components/bookings/rental-booking-list";
 import { RentalBookingMonthlyGrid } from "../../components/bookings/rental-booking-monthly-grid";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { Button } from "../../components/ui/button";
@@ -23,10 +32,17 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
+import { useFleetumLanguage } from "../../i18n/fleetum-language";
+import { CommerceDrawer,CommerceNotice } from "../../components/ui/commerce-workspace";
+import { ContractTemplateEditor } from "../../components/contracts/contract-template-editor";
+import { usePanelMotion } from "../../hooks/use-panel-motion";
+import type { PanelMotionHandle } from "../../components/ui/panel-motion";
+import { useDialogFocus } from "../../hooks/use-dialog-focus";
 import { useRentalMonthAvailability } from "../../hooks/use-rental-month-availability";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AlertTriangle, CalendarCheck2, CalendarDays, Car, ChevronLeft, ChevronRight, Clock3, Plus, RotateCcw, Search, UserPlus } from "lucide-react";
-import { RentalPaymentGuaranteePanel } from "../../components/rental-payments/RentalPaymentGuaranteePanel";
+import { AlertTriangle, CalendarCheck2, CalendarDays, Car, ChevronLeft, ChevronRight, Clock3, Plus, RotateCcw, Search, UserPlus, List, LayoutGrid, X, FileText, MessageSquare, Radio, UserRound, ArrowUp } from "lucide-react";
+import { BookingDetailSection } from "../../components/bookings/booking-detail-section";
+import { RentalPaymentSummaryLink } from "../../components/rental-payments/rental-payment-summary-link";
 import {
   CountrySelect,
   CustomerAddressFields,
@@ -230,9 +246,9 @@ const CONTRACT_STATUS_LABELS: Record<RentalContractStatus, string> = {
 };
 
 const CARGOS_STATUS_LABELS: Record<RentalCargosStatus, string> = {
-  NOT_REQUIRED: "Non richiesto",
+  NOT_REQUIRED: "Da verificare",
   PENDING: "In attesa invio",
-  SENT: "Inviato",
+  SENT: "Verifica riscontro",
   ERROR: "Errore"
 };
 
@@ -478,6 +494,9 @@ const defaultTemplateEditor = (): TemplateFormState => ({
 });
 
 export const RentalBookingsPage = () => {
+  const { language } = useFleetumLanguage();
+  const permissions = useAuthStore((state) => state.user?.permissions) ?? [];
+  const canManageBookings = permissions.includes("vehicles:write") || permissions.includes("*");
   const navigate = useNavigate();
   const { bookingId: routeBookingId } = useParams<{ bookingId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -499,6 +518,7 @@ export const RentalBookingsPage = () => {
   const [vehicleSearch, setVehicleSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RentalBookingStatus | "">("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [bookingView, setBookingView] = useState<"calendar" | "list">(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches ? "list" : "calendar");
 
   const selectedBookingId = routeBookingId ?? searchParams.get("bookingId");
   const selectedBookingIdRef = useRef(selectedBookingId);
@@ -532,16 +552,35 @@ export const RentalBookingsPage = () => {
 
   const [transitionTo, setTransitionTo] = useState<RentalBookingStatus | "">("");
   const [contractTo, setContractTo] = useState<RentalContractStatus>("NOT_READY");
-  const [cargosTo, setCargosTo] = useState<RentalCargosStatus>("NOT_REQUIRED");
-  const [cargosTransmissionId, setCargosTransmissionId] = useState("");
-  const [cargosMessage, setCargosMessage] = useState("");
+  const [termsDirty,setTermsDirty]=useState<{id:string;dirty:boolean}|null>(null);
+  const [signingFreeze,setSigningFreeze]=useState<{id:string;locked:boolean}|null>(null);
+  const [contractWorkflowRevision,setContractWorkflowRevision]=useState(0);
+  const [cargosPromptBookingId,setCargosPromptBookingId]=useState<string|null>(null);
   const [noteInput, setNoteInput] = useState("");
 
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [bookingForm, setBookingForm] = useState<BookingFormState>(() => buildBookingFormForCell());
   const [bookingFormDirty, setBookingFormDirty] = useState(false);
+  const [bookingFieldErrors, setBookingFieldErrors] = useState<Partial<Record<keyof BookingFormState, string>>>({});
+  const bookingErrorRef = useRef<HTMLDivElement | null>(null);
   const [bookingCloseConfirmOpen, setBookingCloseConfirmOpen] = useState(false);
+  const bookingDialogRef = useRef<HTMLDivElement | null>(null);
+  const closeDialogRef = useRef<HTMLDivElement | null>(null);
+  const customerDialogRef = useRef<HTMLDivElement | null>(null);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  useDialogFocus(bookingModalOpen, bookingDialogRef);
+  useDialogFocus(bookingCloseConfirmOpen, closeDialogRef);
+  const [customerFormDirty, setCustomerFormDirty] = useState(false);
+  const requestCloseCustomer = () => {
+    if (saving) return;
+    if (customerFormDirty && !window.confirm("Chiudere l’anagrafica cliente? Le modifiche non salvate verranno perse.")) return;
+    setCustomerModalOpen(false);
+    setCustomerFormDirty(false);
+    setCustomerScanFiles([]);
+    setCustomerScanInfo(null);
+  };
+  useDialogFocus(customerModalOpen, customerDialogRef, () => requestCloseCustomer());
+  useEffect(() => { if (customerModalOpen) setCustomerFormDirty(false); }, [customerModalOpen]);
   const [customerForm, setCustomerForm] = useState<CustomerFormState>(() => defaultCustomerForm());
   const [customerUploadFiles, setCustomerUploadFiles] = useState<File[]>([]);
   const [customerScanFiles, setCustomerScanFiles] = useState<File[]>([]);
@@ -551,6 +590,8 @@ export const RentalBookingsPage = () => {
   const contract = bookingContract?.bookingId === selectedBookingId ? bookingContract : null;
   const [contractEditor, setContractEditor] = useState<ContractEditorState>(() => defaultContractEditor());
   const [contractLoading, setContractLoading] = useState(false);
+  const [contractError, setContractError] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [priceLists, setPriceLists] = useState<RentalPriceList[]>([]);
   const [pricePackages, setPricePackages] = useState<RentalPricePackage[]>([]);
   const [extraPolicies, setExtraPolicies] = useState<RentalExtraKmPolicy[]>([]);
@@ -575,6 +616,7 @@ export const RentalBookingsPage = () => {
   });
   const ctxMenuRef = useRef<HTMLDivElement | null>(null);
   const controlPanelRef = useRef<HTMLDivElement | null>(null);
+  const calendarPanelRef = useRef<HTMLDivElement | null>(null);
   const vehicleSuggestRef = useRef<HTMLDivElement | null>(null);
   const customerSuggestRef = useRef<HTMLDivElement | null>(null);
   const bookingCreateRequestRef = useRef<string | null>(null);
@@ -585,15 +627,27 @@ export const RentalBookingsPage = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const paymentSetupStatus = searchParams.get("payment_setup") ?? searchParams.get("rental_payment");
 
+  const [templateLoading,setTemplateLoading]=useState(false),[templateLoaded,setTemplateLoaded]=useState(false),[templateDirty,setTemplateDirty]=useState(false),[templateDiscardOpen,setTemplateDiscardOpen]=useState(false);
+  const templateRequestVersion=useRef(0),templateMotion=useRef<PanelMotionHandle|null>(null);
+  const closeTemplateNow=()=>{templateRequestVersion.current++;setTemplateDiscardOpen(false);setTemplateDirty(false);const done=()=>setTemplateModalOpen(false);if(templateMotion.current)templateMotion.current.dismiss(done);else done()};
+  const requestCloseTemplate=()=>{if(templateSaving||templateLogoUploading)return;if(templateDirty)setTemplateDiscardOpen(true);else closeTemplateNow()};
+  useEffect(()=>{if(!templateDirty)return;const protect=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',protect);return()=>window.removeEventListener('beforeunload',protect)},[templateDirty]);
+
+  const bookingCardRef = useRef<HTMLDivElement>(null), bookingMotionRef = useRef<PanelMotionHandle|null>(null);
+  usePanelMotion(bookingCardRef, bookingCardRef, null, bookingModalOpen, "booking-editor", bookingMotionRef);
+
   const forceCloseBookingModal = useCallback(() => {
     bookingPricingModalRef.current = { version: bookingPricingModalRef.current.version + 1, open: false };
-    setBookingModalOpen(false);
     setBookingCloseConfirmOpen(false);
-    setBookingFormDirty(false);
-    setVehicleSuggestOpen(false);
-    setCustomerSuggestOpen(false);
-    setVehicleActiveIdx(-1);
-    setCustomerActiveIdx(-1);
+    const done = () => {
+      setBookingModalOpen(false);
+      setBookingFormDirty(false);
+      setVehicleSuggestOpen(false);
+      setCustomerSuggestOpen(false);
+      setVehicleActiveIdx(-1);
+      setCustomerActiveIdx(-1);
+    };
+    if (bookingMotionRef.current) bookingMotionRef.current.dismiss(done); else done();
   }, []);
 
   const requestCloseBookingModal = useCallback(() => {
@@ -616,8 +670,8 @@ export const RentalBookingsPage = () => {
   const monthIso = useMemo(() => toMonthIso(monthCursor), [monthCursor]);
   const days = useMemo(() => monthDays(monthCursor), [monthCursor]);
   const monthLabel = useMemo(
-    () => monthCursor.toLocaleDateString("it-IT", { month: "long", year: "numeric" }),
-    [monthCursor]
+    () => monthCursor.toLocaleDateString(language === "en" ? "en-GB" : "it-IT", { month: "long", year: "numeric" }),
+    [monthCursor, language]
   );
 
   const monthAvailability = useRentalMonthAvailability({
@@ -626,21 +680,6 @@ export const RentalBookingsPage = () => {
     search: vehicleSearch || undefined,
     refreshKey
   });
-
-  const bookingSummaryPills = useMemo(
-    () => [
-      { label: "Veicoli", value: monthAvailability.summary.totalVehicles },
-      { label: "Occupati", value: monthAvailability.summary.bookedVehicles },
-      { label: "Liberi", value: monthAvailability.summary.availableVehicles },
-      { label: "Occupazione", value: `${monthAvailability.summary.occupancyRate}%` }
-    ],
-    [
-      monthAvailability.summary.availableVehicles,
-      monthAvailability.summary.bookedVehicles,
-      monthAvailability.summary.occupancyRate,
-      monthAvailability.summary.totalVehicles
-    ]
-  );
 
   const operationalStats = useMemo(() => {
     const todayKey = toDayKey(new Date());
@@ -702,12 +741,12 @@ export const RentalBookingsPage = () => {
       {
         label: "Disponibili",
         value: operationalStats.availableVehicles,
-        hint: `${operationalStats.occupancyRate}% occupazione mese`,
+        hint: `${operationalStats.occupancyRate}% ${language === "en" ? "monthly occupancy" : "occupazione mese"}`,
         icon: AlertTriangle,
         tone: "text-slate-700 bg-slate-50 border-slate-200 dark:text-slate-300 dark:bg-slate-900/40 dark:border-slate-800"
       }
     ],
-    [operationalStats]
+    [operationalStats, language]
   );
 
   useEffect(
@@ -855,20 +894,20 @@ export const RentalBookingsPage = () => {
     const requestVersion = ++detailRequestVersionRef.current;
     const isCurrent = () => bookingSelectionMountedRef.current &&
       selectedBookingIdRef.current === bookingId && detailRequestVersionRef.current === requestVersion;
+    setDetailLoading(true);
     try {
       const detail = (await rentalBookingsUseCases.getById(bookingId)) as BookingDetail;
       if (!isCurrent()) return;
       setSelectedBooking(detail);
       setContractTo(detail.contractStatus);
-      setCargosTo(detail.cargosStatus);
       setTransitionTo("");
-      setCargosTransmissionId(detail.cargosTransmissionId ?? "");
-      setCargosMessage(detail.cargosOutcomeMessage ?? "");
-      setVehicleInput(`${detail.vehicle.plate} · ${detail.vehicle.brand} ${detail.vehicle.model}`);
-      setCustomerInput(detail.customer ? customerDisplayName(detail.customer) : detail.customerName);
+      // Form inputs are initialized by their explicit create/edit actions.
+      // A background detail refresh must not overwrite an open booking draft.
     } catch (e) {
       if (!isCurrent()) return;
       setError((e as Error).message);
+    } finally {
+      if (isCurrent()) setDetailLoading(false);
     }
   };
 
@@ -893,6 +932,7 @@ export const RentalBookingsPage = () => {
     const isCurrent = () => bookingSelectionMountedRef.current &&
       selectedBookingIdRef.current === bookingId && contractRequestVersionRef.current === requestVersion;
     setContractLoading(true);
+    setContractError(null);
     try {
       const contractData = await rentalBookingsUseCases.getContract(bookingId);
       if (!isCurrent()) return;
@@ -901,12 +941,12 @@ export const RentalBookingsPage = () => {
     } catch (e) {
       if (!isCurrent()) return;
       const message = (e as Error).message || "";
-      if (message.toLowerCase().includes("non trovato") || message.includes("404")) {
-        setContract(null);
-        syncContractEditor(null);
-      } else {
-        setError(message);
-      }
+      // An absent optional document resolves to null. All rejected requests
+      // remain errors, including failures whose message mentions a missing dependency.
+      setContract(null);
+      syncContractEditor(null);
+      setContractError(message || "Impossibile caricare il contratto.");
+      setError(message);
     } finally {
       if (isCurrent()) setContractLoading(false);
     }
@@ -955,11 +995,10 @@ export const RentalBookingsPage = () => {
     setContract(null);
     syncContractEditor(null);
     setContractLoading(false);
+    setContractError(null);
+    setDetailLoading(false);
     setTransitionTo("");
     setContractTo("NOT_READY");
-    setCargosTo("NOT_REQUIRED");
-    setCargosTransmissionId("");
-    setCargosMessage("");
     setNoteInput("");
     setError(null);
   }, [selectedBookingId]);
@@ -1186,6 +1225,7 @@ export const RentalBookingsPage = () => {
     setCustomerSuggestOpen(false);
     setBookingFormDirty(false);
     setBookingCloseConfirmOpen(false);
+    setBookingFieldErrors({});
     setBookingModalOpen(true);
     setError(null);
     setSuccess(null);
@@ -1230,6 +1270,7 @@ export const RentalBookingsPage = () => {
     setCustomerSuggestOpen(false);
     setBookingFormDirty(false);
     setBookingCloseConfirmOpen(false);
+    setBookingFieldErrors({});
     setBookingModalOpen(true);
     setPricingQuote(null);
     setError(null);
@@ -1239,7 +1280,8 @@ export const RentalBookingsPage = () => {
 
   const scrollToControlPanel = () => {
     window.requestAnimationFrame(() => {
-      controlPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      controlPanelRef.current?.focus({ preventScroll: true });
+      controlPanelRef.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
       setControlPanelPulse(true);
       window.setTimeout(() => setControlPanelPulse(false), 1200);
     });
@@ -1261,6 +1303,7 @@ export const RentalBookingsPage = () => {
   const pickVehicle = (vehicle: VehicleOption) => {
     markBookingFormDirty();
     setBookingForm((state) => ({ ...state, vehicleId: vehicle.id }));
+    clearBookingFieldError("vehicleId");
     setVehicleInput(`${vehicle.plate} · ${vehicle.brand} ${vehicle.model}`);
     setVehicleSuggestOpen(false);
     setVehicleActiveIdx(-1);
@@ -1269,6 +1312,7 @@ export const RentalBookingsPage = () => {
   const pickCustomer = (customer: RentalCustomer) => {
     markBookingFormDirty();
     setBookingForm((state) => ({ ...state, customerId: customer.id }));
+    clearBookingFieldError("customerId");
     setCustomerInput(customerDisplayName(customer));
     setCustomerSuggestOpen(false);
     setCustomerActiveIdx(-1);
@@ -1349,9 +1393,50 @@ export const RentalBookingsPage = () => {
     }
   };
 
+  const clearBookingFieldError = (field: keyof BookingFormState) => setBookingFieldErrors((current) => {
+    if (!current[field]) return current;
+    const next = { ...current }; delete next[field]; return next;
+  });
+  const bookingFieldProps = (field: keyof BookingFormState, id: string, required = false) => ({
+    name: field,
+    "aria-required": required || undefined,
+    "aria-invalid": bookingFieldErrors[field] ? true : undefined,
+    "aria-describedby": bookingFieldErrors[field] ? id + "-error" : undefined,
+    onInvalid: (event: { currentTarget: { validationMessage: string } }) => {
+      const message = event.currentTarget.validationMessage;
+      setBookingFieldErrors((current) => ({ ...current, [field]: message }));
+    }
+  });
+  const bookingFieldError = (field: keyof BookingFormState, id: string) => bookingFieldErrors[field]
+    ? <p id={id + "-error"} className="booking-editor-field-error">{bookingFieldErrors[field]}</p> : null;
+  const formatBookingDate = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "Da definire" : date.toLocaleString(language === "en" ? "en-GB" : "it-IT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
   const onBookingSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if (saving) return;
+    const invalid: Partial<Record<keyof BookingFormState, string>> = {};
+    if (!bookingForm.vehicleId) invalid.vehicleId = "Seleziona un veicolo dai risultati.";
+    if (!bookingForm.customerId) invalid.customerId = "Seleziona un cliente dai risultati.";
+    const pickupDate = new Date(bookingForm.pickupAt);
+    const returnDate = new Date(bookingForm.returnAt);
+    if (Number.isNaN(pickupDate.getTime())) invalid.pickupAt = "Inserisci una data e un'ora di uscita valide.";
+    if (Number.isNaN(returnDate.getTime())) invalid.returnAt = "Inserisci una data e un'ora di rientro valide.";
+    if (!invalid.pickupAt && !invalid.returnAt && returnDate <= pickupDate) invalid.returnAt = "Il rientro deve essere successivo all'uscita.";
+    if (bookingForm.mode === "edit" && bookingForm.pricingTermsChanged && !bookingForm.priceListId) invalid.priceListId = "Seleziona un listino per modificare le condizioni economiche.";
+    for (const field of ["pickupKm", "returnKm"] as const) {
+      if (bookingForm[field] && (!Number.isInteger(Number(bookingForm[field])) || Number(bookingForm[field]) < 0)) invalid[field] = "Inserisci un numero intero di km maggiore o uguale a zero.";
+    }
+    if (!invalid.pickupKm && !invalid.returnKm && bookingForm.pickupKm && bookingForm.returnKm && Number(bookingForm.returnKm) < Number(bookingForm.pickupKm)) invalid.returnKm = "I km rientro devono essere maggiori o uguali ai km uscita.";
+    setBookingFieldErrors(invalid);
+    if (Object.keys(invalid).length) {
+      setError("Controlla i campi indicati prima di salvare.");
+      window.requestAnimationFrame(() => bookingDialogRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+      return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -1373,29 +1458,6 @@ export const RentalBookingsPage = () => {
         reason: bookingForm.reason || undefined,
         internalNotes: bookingForm.internalNotes || undefined
       };
-      if (!payload.vehicleId || !payload.customerId) {
-        throw new Error("Seleziona veicolo e cliente.");
-      }
-      if (bookingForm.mode === "edit" && bookingForm.pricingTermsChanged && !bookingForm.priceListId) {
-        throw new Error("Seleziona un listino per modificare le condizioni economiche.");
-      }
-      if (Number.isNaN(new Date(payload.pickupAt).getTime()) || Number.isNaN(new Date(payload.returnAt).getTime())) {
-        throw new Error("Date prenotazione non valide.");
-      }
-      if ((payload.pickupKm ?? null) != null && Number.isNaN(payload.pickupKm as number)) {
-        throw new Error("Km uscita non validi.");
-      }
-      if ((payload.returnKm ?? null) != null && Number.isNaN(payload.returnKm as number)) {
-        throw new Error("Km rientro non validi.");
-      }
-      if (
-        typeof payload.pickupKm === "number" &&
-        typeof payload.returnKm === "number" &&
-        payload.returnKm < payload.pickupKm
-      ) {
-        throw new Error("I km rientro devono essere maggiori o uguali ai km uscita.");
-      }
-
       let targetBookingId: string | undefined = bookingForm.bookingId;
       if (bookingForm.mode === "create") {
         bookingCreateRequestRef.current ??= globalThis.crypto.randomUUID();
@@ -1405,12 +1467,13 @@ export const RentalBookingsPage = () => {
         );
         targetBookingId = created.id;
         selectBooking(created.id);
-        setSuccess("Prenotazione creata con successo.");
+        publishOperationFeedback(setSuccess, "Prenotazione creata con successo.", notificationScope);
+        // Template creation is a technical draft, not commercial issuance.
       } else if (bookingForm.bookingId) {
         await rentalBookingsUseCases.update(bookingForm.bookingId, payload);
         targetBookingId = bookingForm.bookingId;
         selectBooking(bookingForm.bookingId);
-        setSuccess("Prenotazione aggiornata.");
+        publishOperationFeedback(setSuccess, "Prenotazione aggiornata.", notificationScope);
       }
 
       if (targetBookingId && bookingForm.priceListId && (bookingForm.mode === "create" || bookingForm.pricingTermsChanged)) {
@@ -1441,12 +1504,14 @@ export const RentalBookingsPage = () => {
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
+      window.requestAnimationFrame(() => bookingErrorRef.current?.focus());
     } finally {
       setSaving(false);
     }
   };
 
   const applyCustomerDraft = (draft: Partial<RentalCustomer>) => {
+    setCustomerFormDirty(true);
     setCustomerForm((current) => ({
       ...current,
       customerType: (draft.customerType as RentalCustomerType) ?? current.customerType,
@@ -1487,6 +1552,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runCustomerScanAutofill = async () => {
+    const notificationScope=captureOperationContext();
     if (customerScanFiles.length === 0) {
       setError("Seleziona prima almeno una scansione documento (PDF/JPG/PNG/WebP).");
       return;
@@ -1509,7 +1575,7 @@ export const RentalBookingsPage = () => {
       if (inferredType !== "PERSONA_GIURIDICA" && !result.fields?.drivingLicenseNumber) {
         setError("Patente non rilevata automaticamente. Inseriscila manualmente (obbligatoria).");
       } else {
-        setSuccess("Dati cliente precompilati dalla scansione documento.");
+        publishOperationFeedback(setSuccess, "Dati cliente precompilati dalla scansione documento.", notificationScope);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1519,11 +1585,13 @@ export const RentalBookingsPage = () => {
   };
 
   const onCustomerSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
     if (saving) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
+    let savedCustomerId: string | undefined;
     try {
       const payload = {
         customerType: customerForm.customerType,
@@ -1604,44 +1672,48 @@ export const RentalBookingsPage = () => {
         await rentalBookingsUseCases.updateCustomer(customerForm.customerId, payload);
       }
 
+      // Persist the primary result before uploads/list refreshes: a retry must
+      // update this customer rather than create another record.
+      savedCustomerId = customerId;
+      if (customerId) {
+        setCustomerForm(current => ({ ...current, mode: "edit", customerId }));
+        setBookingForm(current => ({ ...current, customerId }));
+        setCustomerInput(payload.customerType === "PERSONA_GIURIDICA"
+          ? (payload.companyName ?? "")
+          : `${payload.firstName ?? ""} ${payload.lastName ?? ""}`.trim());
+      }
       if (customerId && customerScanFiles.length > 0) {
         await rentalBookingsUseCases.uploadCustomerAttachments(customerId, customerScanFiles);
+        setCustomerScanFiles([]);
       }
-
       const actionLabel = customerForm.mode === "create" ? "Cliente creato." : "Cliente aggiornato.";
-      const docsLabel =
-        customerScanFiles.length > 0 ? ` Documenti salvati: ${customerScanFiles.length}.` : " Nessun documento allegato.";
-      setSuccess(`${actionLabel}${docsLabel}`);
-
-      await loadCustomers(customerSearch.trim());
-      if (customerId) {
-        setBookingForm((current) => ({ ...current, customerId: customerId! }));
-        setCustomerInput(
-          payload.customerType === "PERSONA_GIURIDICA"
-            ? (payload.companyName ?? "")
-            : `${payload.firstName ?? ""} ${payload.lastName ?? ""}`.trim()
-        );
-      }
+      const docsLabel = customerScanFiles.length > 0 ? ` Documenti salvati: ${customerScanFiles.length}.` : " Nessun documento allegato.";
+      publishOperationFeedback(setSuccess, `${actionLabel}${docsLabel}`, notificationScope);
       setCustomerModalOpen(false);
       setCustomerForm(defaultCustomerForm());
       setCustomerScanFiles([]);
       setCustomerScanInfo(null);
       setRefreshKey((prev) => prev + 1);
+      try { await loadCustomers(customerSearch.trim()); }
+      catch { setError("Cliente salvato e selezionato. Non è stato possibile aggiornare l’elenco clienti; riprova ad aggiornarlo."); }
     } catch (e) {
-      setError((e as Error).message);
+      setError(savedCustomerId
+        ? `Cliente salvato e selezionato. ${(e as Error).message} Riprova per completare i documenti senza creare un’altra anagrafica.`
+        : (e as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
   const runTransition = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !transitionTo) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.transition(selectedBooking.id, transitionTo);
-      setSuccess(`Stato aggiornato a ${BOOKING_STATUS_LABELS[transitionTo]}.`);
+      publishOperationFeedback(setSuccess, `Stato aggiornato a ${BOOKING_STATUS_LABELS[transitionTo]}.`, notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1651,13 +1723,14 @@ export const RentalBookingsPage = () => {
   };
 
   const runContractUpdate = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.setContractStatus(selectedBooking.id, { status: contractTo });
-      setSuccess(`Contratto aggiornato: ${CONTRACT_STATUS_LABELS[contractTo]}.`);
+      publishOperationFeedback(setSuccess, `Contratto aggiornato: ${CONTRACT_STATUS_LABELS[contractTo]}.`, notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1667,6 +1740,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runGenerateContract = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setSaving(true);
     setError(null);
@@ -1677,7 +1751,8 @@ export const RentalBookingsPage = () => {
       contractRequestVersionRef.current += 1;
       setContract(generated);
       syncContractEditor(generated);
-      setSuccess("Contratto generato dal template tenant.");
+      publishOperationFeedback(setSuccess, "Contratto generato dal template tenant.", notificationScope);
+      // The CARGOS prompt belongs to explicit manual issuance.
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
@@ -1687,7 +1762,10 @@ export const RentalBookingsPage = () => {
     }
   };
 
+  const contractHasUnsavedChanges=()=>Boolean((termsDirty?.id===selectedBooking?.id&&termsDirty?.dirty)||(contract&&Object.entries(contractEditor).some(([key,value])=>String(value??"")!==String(contract[key as keyof BookingContract]??""))));
+
   const runSaveContractDocument = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1705,7 +1783,8 @@ export const RentalBookingsPage = () => {
       contractRequestVersionRef.current += 1;
       setContract(updated);
       syncContractEditor(updated);
-      setSuccess("Contratto salvato.");
+      setContractWorkflowRevision(v=>v+1);
+      publishOperationFeedback(setSuccess, "Contratto salvato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
@@ -1716,6 +1795,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runDownloadContractPdf = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setError(null);
     try {
@@ -1728,7 +1808,7 @@ export const RentalBookingsPage = () => {
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 120000);
-      setSuccess("PDF contratto generato e scaricato.");
+      publishOperationFeedback(setSuccess, "PDF contratto generato e scaricato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1736,6 +1816,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runPrintContractPdf = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     setError(null);
     try {
@@ -1758,13 +1839,14 @@ export const RentalBookingsPage = () => {
           // no-op
         }
       }, 350);
-      setSuccess("Anteprima stampa contratto aperta.");
+      publishOperationFeedback(setSuccess, "Anteprima stampa contratto aperta.", notificationScope, "info");
     } catch (e) {
       setError((e as Error).message);
     }
   };
 
   const runSendContractEmail = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1786,7 +1868,7 @@ export const RentalBookingsPage = () => {
       );
       contractEmailRequestRef.current = null;
       await loadContract(selectedBooking.id);
-      setSuccess("Invio email contratto accodato.");
+      publishOperationFeedback(setSuccess, "Invio email contratto accodato.", notificationScope, "info");
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1796,6 +1878,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runSendContractWhatsapp = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || !contract) return;
     setSaving(true);
     setError(null);
@@ -1808,7 +1891,7 @@ export const RentalBookingsPage = () => {
       if (!popup) {
         setError("Popup WhatsApp bloccato dal browser. Consenti i popup e riprova.");
       } else {
-        setSuccess("Finestra WhatsApp aperta con link contratto sicuro.");
+        publishOperationFeedback(setSuccess, "Finestra WhatsApp aperta con link contratto sicuro.", notificationScope, "info");
       }
       await loadContract(selectedBooking.id);
       setRefreshKey((prev) => prev + 1);
@@ -1819,37 +1902,19 @@ export const RentalBookingsPage = () => {
     }
   };
 
-  const runMarkContractSigned = async () => {
-    if (!selectedBooking || !contract) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const updated = await rentalBookingsUseCases.markContractSigned(selectedBooking.id, {});
-      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
-      contractRequestVersionRef.current += 1;
-      setContract(updated);
-      syncContractEditor(updated);
-      setContractTo("SIGNED");
-      setSuccess("Contratto marcato come firmato.");
-      setRefreshKey((prev) => prev + 1);
-    } catch (e) {
-      if (!bookingSelectionMountedRef.current || selectedBookingIdRef.current !== selectedBooking.id) return;
-      setError((e as Error).message);
-    } finally {
-      if (bookingSelectionMountedRef.current) setSaving(false);
-    }
-  };
 
   const openTemplateModal = async () => {
+    if(!canManageBookings)return;const sequence=++templateRequestVersion.current;setTemplateLoading(true);setTemplateLoaded(false);setTemplateDirty(false);
     setTemplateModalOpen(true);
     setTemplatePreview(null);
     setError(null);
     try {
       const template = await rentalBookingsUseCases.getDefaultContractTemplate();
+      if(sequence!==templateRequestVersion.current)return;
       if (template.logoFilePath) {
         try {
           const logoBlob = await rentalBookingsUseCases.downloadDefaultContractTemplateLogo();
+          if(sequence!==templateRequestVersion.current)return;
           const logoUrl = URL.createObjectURL(logoBlob);
           setTemplateLogoPreviewUrl((current) => {
             if (current) URL.revokeObjectURL(current);
@@ -1857,6 +1922,7 @@ export const RentalBookingsPage = () => {
           });
           setTemplateLogoFileName(template.logoFileName ?? "logo-contratto");
         } catch {
+          if(sequence!==templateRequestVersion.current)return;
           setTemplateLogoPreviewUrl((current) => {
             if (current) URL.revokeObjectURL(current);
             return null;
@@ -1870,6 +1936,7 @@ export const RentalBookingsPage = () => {
         });
         setTemplateLogoFileName("");
       }
+      if(sequence!==templateRequestVersion.current)return;setTemplateLoaded(true);
       setTemplateEditor({
         name: template.name,
         content: template.content,
@@ -1885,11 +1952,13 @@ export const RentalBookingsPage = () => {
         brandFont: template.brandFont ?? "helvetica"
       });
     } catch (e) {
-      setError((e as Error).message);
-    }
+      if(sequence===templateRequestVersion.current)setError((e as Error).message);
+    }finally{if(sequence===templateRequestVersion.current)setTemplateLoading(false)}
   };
 
   const runPreviewTemplate = async () => {
+    const notificationScope=captureOperationContext();
+    if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     if (!selectedBooking) {
       setError("Seleziona una prenotazione per vedere la preview del template.");
       return;
@@ -1904,7 +1973,7 @@ export const RentalBookingsPage = () => {
         emailBody: templateEditor.emailBody
       });
       setTemplatePreview(preview);
-      setSuccess("Preview template aggiornata.");
+      publishOperationFeedback(setSuccess, "Preview template aggiornata.", notificationScope, "info");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1913,6 +1982,8 @@ export const RentalBookingsPage = () => {
   };
 
   const runSaveTemplate = async () => {
+    const notificationScope=captureOperationContext();
+    if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     setTemplateSaving(true);
     setError(null);
     try {
@@ -1944,7 +2015,8 @@ export const RentalBookingsPage = () => {
         brandAccent: updated.brandAccent ?? "#5d82c2",
         brandFont: updated.brandFont ?? "helvetica"
       });
-      setSuccess("Template default aggiornato.");
+      setTemplateDirty(false);
+      publishOperationFeedback(setSuccess, "Template default aggiornato.", notificationScope);
       if (selectedBookingId) {
         await loadContract(selectedBookingId);
       }
@@ -1956,6 +2028,8 @@ export const RentalBookingsPage = () => {
   };
 
   const uploadTemplateLogo = async (file: File) => {
+    const notificationScope=captureOperationContext();
+    if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     setTemplateLogoUploading(true);
     setError(null);
     try {
@@ -1967,7 +2041,7 @@ export const RentalBookingsPage = () => {
         return logoUrl;
       });
       setTemplateLogoFileName(updated.logoFileName ?? file.name);
-      setSuccess("Logo contratto aggiornato.");
+      publishOperationFeedback(setSuccess, "Logo contratto aggiornato.", notificationScope);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1976,6 +2050,8 @@ export const RentalBookingsPage = () => {
   };
 
   const removeTemplateLogo = async () => {
+    const notificationScope=captureOperationContext();
+    if(!canManageBookings||!templateLoaded||templateSaving||templateLogoUploading)return;
     setTemplateLogoUploading(true);
     setError(null);
     try {
@@ -1985,7 +2061,7 @@ export const RentalBookingsPage = () => {
         return null;
       });
       setTemplateLogoFileName("");
-      setSuccess("Logo contratto rimosso.");
+      publishOperationFeedback(setSuccess, "Logo contratto rimosso.", notificationScope);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1993,27 +2069,13 @@ export const RentalBookingsPage = () => {
     }
   };
 
-  const runCargosUpdate = async () => {
-    if (!selectedBooking) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      await rentalBookingsUseCases.setCargosStatus(selectedBooking.id, {
-        status: cargosTo,
-        transmissionId: cargosTransmissionId || undefined,
-        message: cargosMessage || undefined
-      });
-      setSuccess(`CARGOS aggiornato: ${CARGOS_STATUS_LABELS[cargosTo]}.`);
-      setRefreshKey((prev) => prev + 1);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  useEffect(()=>{
+    if(searchParams.get('template')!=='1'||!canManageBookings)return;
+    const next=new URLSearchParams(searchParams);next.delete('template');setSearchParams(next,{replace:true});void openTemplateModal();
+  },[searchParams,canManageBookings]);
 
   const runAddNote = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking) return;
     const message = noteInput.trim();
     if (!message) return;
@@ -2023,7 +2085,7 @@ export const RentalBookingsPage = () => {
     try {
       await rentalBookingsUseCases.addNote(selectedBooking.id, message);
       setNoteInput("");
-      setSuccess("Nota operativa aggiunta.");
+      publishOperationFeedback(setSuccess, "Nota operativa aggiunta.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2033,6 +2095,7 @@ export const RentalBookingsPage = () => {
   };
 
   const runDeleteBooking = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking || saving) return;
     const confirmed = window.confirm(`Confermi eliminazione prenotazione ${selectedBooking.code}?`);
     if (!confirmed) return;
@@ -2044,7 +2107,7 @@ export const RentalBookingsPage = () => {
       await rentalBookingsUseCases.remove(selectedBooking.id);
       selectBooking(null, true);
       setSelectedBooking(null);
-      setSuccess("Prenotazione eliminata.");
+      publishOperationFeedback(setSuccess, "Prenotazione eliminata.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2054,6 +2117,7 @@ export const RentalBookingsPage = () => {
   };
 
   const uploadCustomerDocs = async () => {
+    const notificationScope=captureOperationContext();
     if (!selectedBooking?.customer?.id || customerUploadFiles.length === 0) return;
     setSaving(true);
     setError(null);
@@ -2063,7 +2127,7 @@ export const RentalBookingsPage = () => {
         bookingId: selectedBooking.id
       });
       setCustomerUploadFiles([]);
-      setSuccess("Documenti cliente caricati.");
+      publishOperationFeedback(setSuccess, "Documenti cliente caricati.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2084,12 +2148,13 @@ export const RentalBookingsPage = () => {
   };
 
   const removeCustomerAttachment = async (attachmentId: string) => {
+    const notificationScope=captureOperationContext();
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.deleteCustomerAttachment(attachmentId);
-      setSuccess("Documento cliente eliminato.");
+      publishOperationFeedback(setSuccess, "Documento cliente eliminato.", notificationScope);
       setRefreshKey((prev) => prev + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -2099,154 +2164,62 @@ export const RentalBookingsPage = () => {
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-5.5rem)] flex-col gap-4 bg-slate-50/40 dark:bg-transparent">
-      <div className="saas-hero-header grid gap-5 rounded-[28px] border border-white/70 px-4 py-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.55)] backdrop-blur lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-center sm:px-6">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary/70">Centro operativo noleggi</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-foreground sm:text-3xl">Booking Noleggi</h1>
-          <p className="mt-2 max-w-[660px] text-sm leading-relaxed text-muted-foreground">
-            Calendario operativo per leggere consegne, riconsegne, disponibilita veicoli e stato prenotazioni per sede.
-          </p>
-        </div>
+    <section className="booking-workspace" aria-label="Gestione prenotazioni">
+      <WorkspacePageHeader
+        eyebrow="OPERATIVITÀ"
+        title="Prenotazioni"
+        description="Disponibilità, consegne e rientri. Tutta la flotta, nello stesso posto."
+        actions={<>
+          <Button variant="outline" onClick={() => {
+            setCustomerForm(defaultCustomerForm()); setCustomerScanFiles([]); setCustomerScanInfo(null); setCustomerModalOpen(true);
+          }}><UserPlus className="h-4 w-4" aria-hidden="true" />Nuovo cliente</Button>
+          <Button onClick={() => openCreateModalFromCell()}><Plus className="h-4 w-4" aria-hidden="true" />Nuova prenotazione</Button>
+        </>}
+      />
+      <WorkspaceMetricStrip collapsible items={bookingMetricCards} loading={monthAvailability.loading} />
 
-        <div className="flex min-w-0 flex-col gap-3 lg:items-end">
-          <div className="hidden flex-wrap items-center justify-start gap-2 xl:flex xl:justify-end">
-            {bookingSummaryPills.map((pill) => (
-              <span
-                key={pill.label}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border/70 bg-card/85 px-4 text-[11px] font-semibold shadow-sm"
-              >
-                <span className="text-muted-foreground">{pill.label}</span>
-                <span className="text-sm text-foreground">{pill.value}</span>
-              </span>
-            ))}
+      {error && !bookingModalOpen && !customerModalOpen && !templateModalOpen ? <CommerceNotice>{error}</CommerceNotice> : null}
+      {success && !customerModalOpen ? <CommerceNotice tone="success">{success}</CommerceNotice> : null}
+      <div className="booking-toolbar" role="region" aria-label="Filtri e periodo">
+        <div className="booking-toolbar-top">
+          <div className="booking-period">
+            <Button variant="ghost" size="icon" onClick={goPrevMonth} aria-label="Mese precedente"><ChevronLeft className="h-4 w-4" aria-hidden="true" /></Button>
+            <h2 className="booking-month" aria-live="polite">{monthLabel}</h2>
+            <Button variant="ghost" size="icon" onClick={goNextMonth} aria-label="Mese successivo"><ChevronRight className="h-4 w-4" aria-hidden="true" /></Button>
+            <Button variant="outline" onClick={() => setMonthCursor(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}><span translate="no">{language === "en" ? "Today" : "Oggi"}</span></Button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <Button
-              variant="outline"
-              className="h-11 min-w-[170px] gap-2 rounded-2xl"
-              onClick={() => {
-                setCustomerForm(defaultCustomerForm());
-                setCustomerScanFiles([]);
-                setCustomerScanInfo(null);
-                setCustomerModalOpen(true);
-              }}
-            >
-              <UserPlus className="h-4 w-4" aria-hidden="true" />
-              Nuovo cliente
-            </Button>
-            <Button className="h-11 min-w-[210px] gap-2 rounded-2xl" onClick={() => openCreateModalFromCell()}>
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Nuova prenotazione
-            </Button>
+          <div className="booking-view-switch" role="group" aria-label="Vista prenotazioni">
+            <button type="button" aria-pressed={bookingView === "calendar"} onClick={() => setBookingView("calendar")}><LayoutGrid className="h-4 w-4" aria-hidden="true" />Calendario</button>
+            <button type="button" aria-pressed={bookingView === "list"} onClick={() => setBookingView("list")}><List className="h-4 w-4" aria-hidden="true" />Elenco</button>
           </div>
+        </div>
+        <div className="booking-filters">
+          <div className="booking-search">
+            <label htmlFor="booking-search">Cerca nella flotta</label>
+            <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input id="booking-search" className="pl-9 pr-11" value={vehicleSearch} onChange={(e) => setVehicleSearch(e.target.value)} placeholder="Targa, modello o cliente" aria-label="Ricerca booking" />
+              {vehicleSearch ? <button type="button" className="absolute inset-y-0 right-0 grid w-10 place-items-center" aria-label="Cancella ricerca" onClick={() => setVehicleSearch("")}><X className="h-4 w-4" aria-hidden="true" /></button> : null}
+            </div>
+          </div>
+          <WorkspaceFilterGroup activeCount={Number(Boolean(siteId)) + Number(Boolean(statusFilter))}>
+          <div><label htmlFor="booking-site">Sede</label><Select id="booking-site" value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Filtra sede booking">
+            <option value="">Tutte le sedi</option>{sites.map((site) => <option translate="no" key={site.id} value={site.id}>{site.name}{site.city ? ` · ${site.city}` : ""}</option>)}
+          </Select></div>
+          <div><label htmlFor="booking-status">Stato prenotazione</label><Select id="booking-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as RentalBookingStatus | "")} aria-label="Filtra stato prenotazione">
+            <option value="">Tutti gli stati</option>{(Object.keys(BOOKING_STATUS_LABELS) as RentalBookingStatus[]).map((key) => <option key={key} value={key}>{BOOKING_STATUS_LABELS[key]}</option>)}
+          </Select></div>
+          <Button variant="ghost" disabled={!siteId && !vehicleSearch && !statusFilter} onClick={() => {setSiteId(""); setVehicleSearch(""); setStatusFilter("");}}><RotateCcw className="h-4 w-4" aria-hidden="true" />Azzera filtri</Button>
+          </WorkspaceFilterGroup>
+        </div>
+        <div className="booking-toolbar-foot">
+          <p role="status">{monthAvailability.loading ? "Aggiornamento disponibilità…" : `${monthAvailability.data.length} veicoli nel periodo`}</p>
+          <details className="booking-legend"><summary>Legenda stati</summary><div>{BOOKING_STATUS_LEGEND.map((item) => <span key={item.status} data-booking-status={item.status} className={toBadgeClass(item.status)}>{BOOKING_STATUS_LABELS[item.status]}</span>)}</div></details>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {bookingMetricCards.map((metric) => {
-          const Icon = metric.icon;
-          return (
-          <div key={metric.label} className="rounded-[24px] border border-slate-200/80 bg-white/90 px-4 py-3.5 shadow-[0_18px_55px_-44px_rgba(15,23,42,0.75)] dark:border-border dark:bg-card/85">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{metric.label}</p>
-                <p className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-foreground">{metric.value}</p>
-              </div>
-              <span className={`grid h-10 w-10 place-items-center rounded-2xl border ${metric.tone}`}>
-                <Icon className="h-4 w-4" aria-hidden="true" />
-              </span>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">{metric.hint}</p>
-          </div>
-          );
-        })}
-      </div>
-
-      {error ? <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
-      <Card className="saas-surface overflow-hidden border-slate-200/80 bg-white/95 shadow-[0_22px_70px_-54px_rgba(15,23,42,0.9)] dark:border-border dark:bg-card">
-        <CardContent className="!py-4 sm:!py-4">
-          <div className="flex min-h-[52px] flex-col justify-center gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="inline-flex h-11 items-center justify-between gap-2 rounded-2xl border bg-card/75 p-1 shadow-sm xl:min-w-[300px]">
-              <Button variant="outline" size="sm" className="h-9 w-9 rounded-xl p-0" onClick={goPrevMonth} aria-label="Mese precedente">
-                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-              </Button>
-              <div className="flex min-w-[170px] items-center justify-center gap-2 px-2 text-center text-sm font-semibold capitalize">
-                <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                {monthLabel}
-              </div>
-              <Button variant="outline" size="sm" className="h-9 w-9 rounded-xl p-0" onClick={goNextMonth} aria-label="Mese successivo">
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
-
-            <div className="grid flex-1 items-center gap-2 md:grid-cols-[minmax(150px,0.8fr)_minmax(150px,0.8fr)_minmax(220px,1.2fr)_auto] xl:max-w-[850px]">
-              <div className="flex items-center">
-                <Select className="h-11 rounded-xl" value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Filtra sede booking">
-                  <option value="">Tutte le sedi</option>
-                  {sites.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {site.name}{site.city ? ` · ${site.city}` : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <Select
-                className="h-11 rounded-xl"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as RentalBookingStatus | "")}
-                aria-label="Filtra stato prenotazione"
-              >
-                <option value="">Tutti gli stati</option>
-                {(Object.keys(BOOKING_STATUS_LABELS) as RentalBookingStatus[]).map((key) => (
-                  <option key={key} value={key}>
-                    {BOOKING_STATUS_LABELS[key]}
-                  </option>
-                ))}
-              </Select>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                <Input
-                  className="h-11 rounded-xl pl-9"
-                  value={vehicleSearch}
-                  onChange={(e) => setVehicleSearch(e.target.value)}
-                  placeholder="Cerca targa, modello o cliente..."
-                  aria-label="Ricerca booking"
-                />
-              </div>
-
-              <Button
-                className="h-11 rounded-xl gap-2"
-                variant="outline"
-                onClick={() => {
-                  setSiteId("");
-                  setVehicleSearch("");
-                  setStatusFilter("");
-                }}
-              >
-                <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                Reset
-              </Button>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-border/60">
-            <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Legenda</span>
-            {BOOKING_STATUS_LEGEND.map((item) => (
-              <span key={item.status} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${toBadgeClass(item.status)}`}>
-                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
-                {item.tone}
-              </span>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid min-h-[calc(100vh-22rem)] flex-1 gap-3 2xl:grid-cols-[minmax(0,1fr)_390px]">
-        <Card className="saas-surface flex min-h-[620px] flex-col overflow-hidden border-slate-200/80 bg-white shadow-[0_26px_90px_-60px_rgba(15,23,42,0.85)] dark:border-border dark:bg-card">
-          <CardContent className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
+      <div className="booking-content-grid" data-has-selection={Boolean(selectedBookingId)}>
+        <Card ref={calendarPanelRef} tabIndex={-1} aria-label="Pianificazione prenotazioni" className="saas-surface booking-calendar-card">
+          <CardContent className="!p-0">
             {monthAvailability.loading ? (
               <div className="space-y-2 p-2" aria-label="Caricamento calendario booking">
                 <FleetumInlineLoader label="Caricamento calendario" className="px-2 pb-1" />
@@ -2267,9 +2240,11 @@ export const RentalBookingsPage = () => {
                   </Button>
                 </div>
               </div>
+            ) : bookingView === "list" ? (
+              <RentalBookingList rows={monthAvailability.data} statusFilter={statusFilter} selectedBookingId={selectedBookingId} getStatusLabel={(status) => BOOKING_STATUS_LABELS[status]} onSelectBooking={(id) => {selectBooking(id); scrollToControlPanel();}} />
             ) : (
               <RentalBookingMonthlyGrid
-                className="h-full min-h-[590px]"
+                className="booking-calendar-scroller"
                 monthKey={monthIso}
                 monthDays={days}
                 rows={monthAvailability.data}
@@ -2277,6 +2252,7 @@ export const RentalBookingsPage = () => {
                 selectedBookingId={selectedBookingId}
                 onSelectBooking={(bookingId) => {
                   selectBooking(bookingId);
+                  scrollToControlPanel();
                   setCtxMenu((prev) => ({ ...prev, open: false, booking: null }));
                 }}
                 onEmptyCellClick={({ vehicleId, date }) => {
@@ -2302,160 +2278,132 @@ export const RentalBookingsPage = () => {
 
         <aside
           ref={controlPanelRef}
-          className={`min-w-0 rounded-xl transition-all duration-300 2xl:sticky 2xl:top-3 2xl:max-h-[calc(100vh-7rem)] ${
+          tabIndex={-1} aria-labelledby="booking-detail-title"
+          className={`booking-detail min-w-0 rounded-xl ${
             controlPanelPulse ? "ring-2 ring-primary/60 shadow-[0_0_0_5px_rgba(109,75,191,0.08)]" : ""
           }`}
         >
-        <Card className="saas-surface flex h-full min-h-[560px] flex-col overflow-hidden">
-          <CardHeader className="border-b border-border/60 pb-3">
-            <CardTitle className="text-base">Control Booking</CardTitle>
-            <p className="text-xs text-muted-foreground">Azioni rapide sulla prenotazione selezionata.</p>
+        <Card className="saas-surface booking-detail-card">
+          <CardHeader className="booking-detail-header">
+            <div><h2 id="booking-detail-title" className="font-semibold">Dettaglio prenotazione</h2><p className="text-muted-foreground">Tutte le informazioni e le operazioni, nello stesso posto.</p></div>
+            <Button variant="outline" onClick={() => { calendarPanelRef.current?.focus({ preventScroll: true }); calendarPanelRef.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }}><ArrowUp aria-hidden="true" className="h-4 w-4" />{bookingView === "calendar" ? "Torna al calendario" : "Torna all’elenco"}</Button>
           </CardHeader>
-          <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
+          <CardContent className="booking-detail-content">
             {!selectedBooking ? (
-              <p className="text-sm text-muted-foreground">Seleziona una prenotazione dal calendario.</p>
+              detailLoading ? <FleetumInlineLoader label="Caricamento dettaglio prenotazione" /> : <p className="text-sm text-muted-foreground">{selectedBookingId ? "Dettaglio non disponibile. Seleziona una prenotazione o riprova." : "Seleziona una prenotazione per vedere le operazioni disponibili."}</p>
             ) : (
               <>
-                <div className="rounded-2xl border bg-muted/20 p-3 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
+                {!canManageBookings ? <p className="booking-detail-readonly" role="status">Modalità sola lettura. Il tuo ruolo può consultare questa prenotazione, ma non modificarla.</p> : null}
+                <div className="booking-detail-summary" key={`summary-${selectedBooking.id}`}>
+                  <div className="booking-detail-identity">
+                    <div className="booking-detail-avatar" aria-hidden="true"><Car /></div>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Prenotazione selezionata</p>
-                      <p className="mt-1 truncate text-sm font-semibold">{selectedBooking.customerName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{selectedBooking.code}</p>
+                      <p className="booking-detail-eyebrow">{selectedBooking.code} · <span className={`booking-detail-badge ${toBadgeClass(selectedBooking.status)}`}>{BOOKING_STATUS_LABELS[selectedBooking.status]}</span></p>
+                      <h3 translate="no">{selectedBooking.customerName}</h3>
+                      <p>{selectedBooking.vehicle.brand} {selectedBooking.vehicle.model} · <strong>{selectedBooking.vehicle.plate}</strong></p>
+                      <p className="text-muted-foreground">{selectedBooking.vehicle.site?.name || "Sede non indicata"}</p>
                     </div>
-                    <div className="shrink-0 rounded-2xl border bg-card/85 px-3 py-2 text-right shadow-sm">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Targa</p>
-                      <p className="text-sm font-semibold">{selectedBooking.vehicle.plate}</p>
-                    </div>
+                    <Button onClick={openEditModal} disabled={saving || !canManageBookings}>Modifica prenotazione</Button>
                   </div>
-
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 2xl:grid-cols-1">
-                    <div className="rounded-xl border bg-card/80 p-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Uscita</p>
-                      <p className="mt-1 text-xs font-semibold">
-                        {new Date(selectedBooking.pickupAt).toLocaleString("it-IT", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        })}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border bg-card/80 p-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rientro</p>
-                      <p className="mt-1 text-xs font-semibold">
-                        {new Date(selectedBooking.returnAt).toLocaleString("it-IT", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        })}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border bg-card/80 p-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Km uscita</p>
-                      <p className="mt-1 text-xs font-semibold">{selectedBooking.pickupKm ?? "-"}</p>
-                    </div>
-                    <div className="rounded-xl border bg-card/80 p-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Km rientro</p>
-                      <p className="mt-1 text-xs font-semibold">
-                        {selectedBooking.returnKm ?? "-"}
-                        {typeof selectedBooking.pickupKm === "number" && typeof selectedBooking.returnKm === "number"
-                          ? ` · ${Math.max(0, selectedBooking.returnKm - selectedBooking.pickupKm)} km`
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-
-                  <p className="mt-2 truncate text-xs text-muted-foreground">
-                    {selectedBooking.vehicle.brand} {selectedBooking.vehicle.model}
-                    {selectedBooking.vehicle.site?.name ? ` · ${selectedBooking.vehicle.site.name}` : ""}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold ${toBadgeClass(selectedBooking.status)}`}>
-                      {BOOKING_STATUS_LABELS[selectedBooking.status]}
-                    </span>
-                    <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold ${toBadgeClass(selectedBooking.contractStatus)}`}>
-                      {CONTRACT_STATUS_LABELS[selectedBooking.contractStatus]}
-                    </span>
-                    {contract ? (
-                      <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold ${toBadgeClass(contract.status)}`}>
-                        Contratto doc: {BOOKING_CONTRACT_STATUS_LABELS[contract.status]}
-                      </span>
-                    ) : null}
-                    <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold ${toBadgeClass(selectedBooking.cargosStatus)}`}>
-                      {CARGOS_STATUS_LABELS[selectedBooking.cargosStatus]}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={openEditModal} disabled={saving}>
-                      Modifica prenotazione
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={() => void runDeleteBooking()} disabled={saving}>
-                      Elimina
-                    </Button>
+                  <dl className="booking-detail-facts" aria-label="Riepilogo prenotazione">
+                    <div><dt>Uscita</dt><dd>{new Date(selectedBooking.pickupAt).toLocaleString(language === "en" ? "en-GB" : "it-IT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</dd><dd className="booking-detail-secondary">{selectedBooking.pickupLocation || "Luogo non indicato"}</dd></div>
+                    <div><dt>Rientro</dt><dd>{new Date(selectedBooking.returnAt).toLocaleString(language === "en" ? "en-GB" : "it-IT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</dd><dd className="booking-detail-secondary">{selectedBooking.returnLocation || "Luogo non indicato"}</dd></div>
+                    <div><dt>Totale previsto</dt><dd>{selectedBooking.expectedTotal == null ? "Da definire" : new Intl.NumberFormat(language === "en" ? "en-GB" : "it-IT", { style: "currency", currency: "EUR" }).format(selectedBooking.expectedTotal)}</dd><dt>Totale finale</dt><dd className="booking-detail-secondary">{selectedBooking.finalTotal == null ? "Da definire" : new Intl.NumberFormat(language === "en" ? "en-GB" : "it-IT", { style: "currency", currency: "EUR" }).format(selectedBooking.finalTotal)}</dd></div>
+                  </dl>
+                  <div className="booking-detail-meta">
+                    <span>Km uscita: <strong>{selectedBooking.pickupKm ?? "—"}</strong></span>
+                    <span>Km rientro: <strong>{selectedBooking.returnKm ?? "—"}</strong>{selectedBooking.pickupKm != null && selectedBooking.returnKm != null ? ` · Δ ${Math.max(0, selectedBooking.returnKm - selectedBooking.pickupKm)} km` : ""}</span>
+                    <span className={`booking-detail-badge ${toBadgeClass(selectedBooking.contractStatus)}`}>Workflow: {CONTRACT_STATUS_LABELS[selectedBooking.contractStatus]}</span>
+                    {contract ? <span className={`booking-detail-badge ${toBadgeClass(contract.status)}`}>Documento: {BOOKING_CONTRACT_STATUS_LABELS[contract.status]}</span> : null}
+                    <span className={`booking-detail-badge ${toBadgeClass(selectedBooking.cargosStatus==="SENT"?"READY":selectedBooking.cargosStatus)}`}>CARGOS: {CARGOS_STATUS_LABELS[selectedBooking.cargosStatus]}</span>
                   </div>
                 </div>
 
-                <RentalPaymentGuaranteePanel booking={selectedBooking} paymentSetupStatus={paymentSetupStatus} />
-
-                <div className="space-y-2 rounded-lg border p-3">
-                  <Label>Transizione stato</Label>
+                <div className="booking-detail-sections" key={selectedBooking.id}>
+                  <BookingDetailSection title="Operazioni prenotazione" description="Stato del noleggio e operazioni disponibili." icon={<CalendarCheck2 />} initiallyOpen>
+                    <div className="space-y-2 rounded-lg border p-3">
+                  <Label htmlFor="booking-transition-to">Transizione stato</Label>
                   <div className="flex items-center gap-2">
-                    <Select value={transitionTo} onChange={(e) => setTransitionTo(e.target.value as RentalBookingStatus | "")}>
+                    <Select id="booking-transition-to" value={transitionTo} onChange={(e) => setTransitionTo(e.target.value as RentalBookingStatus | "")}>
                       <option value="">Seleziona stato</option>
-                      {availableTransitions.map((status) => (
+                      {availableTransitions.filter(status=>status!=="CONTRACT_SIGNED").map((status) => (
                         <option key={status} value={status}>
                           {BOOKING_STATUS_LABELS[status]}
                         </option>
                       ))}
                     </Select>
-                    <Button onClick={() => void runTransition()} disabled={!transitionTo || saving}>
+                    <Button onClick={() => void runTransition()} disabled={!transitionTo || saving || !canManageBookings}>
                       Applica
                     </Button>
                   </div>
                 </div>
-
-                <div className="space-y-2 rounded-lg border p-3">
+                  <details className="booking-detail-danger">
+                    <summary>Eliminazione prenotazione</summary>
+                    <p>Ti verrà chiesta conferma prima di eliminare questa prenotazione.</p>
+                    <Button size="sm" variant="destructive" onClick={() => void runDeleteBooking()} disabled={saving || !canManageBookings}>Elimina</Button>
+                  </details>
+                  </BookingDetailSection>
+                  <BookingInvoiceSection key={`invoice-${selectedBooking.id}`} bookingId={selectedBooking.id} bookingCode={selectedBooking.code} canRead={permissions.includes("vehicles:read") || permissions.includes("*")} />
+                  <BookingDetailSection title="Contratto" description="Preparazione, documento, firma e invio." icon={<FileText />}>
+                    {contract?<ContractIssuancePanel key={`issue-${selectedBooking.id}-${contractWorkflowRevision}`} bookingId={selectedBooking.id} canManage={canManageBookings} canAgreePrice={permissions.includes("rental-payments:charge")||permissions.includes("*")} hasUnsavedChanges={contractHasUnsavedChanges()} onIssued={()=>setCargosPromptBookingId(selectedBooking.id)} onChanged={kind=>{setContractWorkflowRevision(v=>v+1);if(kind==="issuance"){void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}else void loadSelectedBooking(selectedBooking.id);}}/>:null}
+                    {contract?<ContractRentalDetailsPanel key={`terms-${selectedBooking.id}-${contract.documentRevision??0}`} bookingId={selectedBooking.id} canManage={canManageBookings} onDirtyChange={dirty=>setTermsDirty({id:selectedBooking.id,dirty})} freeze={signingFreeze?.id===selectedBooking.id?signingFreeze.locked:true} onSaved={()=>setContractWorkflowRevision(v=>v+1)}/>:null}
+                    {contract?<ContractSigningPanel key={`${selectedBooking.id}-${contractWorkflowRevision}`} bookingId={selectedBooking.id} canManage={canManageBookings} hasUnsavedChanges={contractHasUnsavedChanges()} onRevision={()=>{setContractWorkflowRevision(v=>v+1);void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}} onFreeze={locked=>setSigningFreeze({id:selectedBooking.id,locked})} onSigned={()=>{void loadContract(selectedBooking.id);setRefreshKey(v=>v+1);}}/>:null}
+                    {/* Workflow readiness remains distinct from the document's status. */}
+                    <div className="space-y-2 rounded-lg border p-3">
+                    <Label htmlFor="booking-field-7">Workflow contratto noleggio</Label>
+                    <Select id="booking-field-7" value={contractTo} onChange={(e) => setContractTo(e.target.value as RentalContractStatus)}>
+                      {(Object.keys(CONTRACT_STATUS_LABELS) as RentalContractStatus[]).map((status) => (
+                        <option key={status} value={status} disabled={status==="SIGNED"}>
+                          {CONTRACT_STATUS_LABELS[status]}
+                        </option>
+                      ))}
+                    </Select>
+                    <Button variant="outline" onClick={() => void runContractUpdate()} disabled={saving || !canManageBookings || (signingFreeze?.id===selectedBooking.id&&signingFreeze.locked)}>
+                      Salva stato workflow
+                    </Button>
+                  </div>
+                    <div className="space-y-2 rounded-lg border p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Label>Contratto operativo</Label>
+                    <p className="font-semibold">Documento e invio</p>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <Button size="sm" variant="outline" onClick={() => void openTemplateModal()} disabled={saving}>
+                      <Button size="sm" variant="outline" onClick={() => void openTemplateModal()} disabled={saving || !canManageBookings}>
                         Template default
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => void runGenerateContract()} disabled={saving}>
-                        Rigenera
+                      <Button size="sm" variant="outline" onClick={() => void runGenerateContract()} disabled={saving || !canManageBookings || (signingFreeze?.id===selectedBooking.id&&signingFreeze.locked)}>
+                        {contract ? "Rigenera bozza" : "Prepara bozza contratto"}
                       </Button>
                     </div>
                   </div>
 
                   {contractLoading ? (
                     <FleetumInlineLoader label="Caricamento contratto" />
+                  ) : contractError ? (
+                    <div className="booking-detail-error" role="alert"><p>{contractError}</p><Button variant="outline" onClick={() => void loadContract(selectedBooking.id)}>Riprova caricamento contratto</Button></div>
                   ) : !contract ? (
                     <div className="rounded-md border border-dashed bg-muted/15 p-3 text-xs text-muted-foreground">
                       Contratto non ancora generato per questa prenotazione.
                     </div>
                   ) : (
                     <>
-                      <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-1">
+                      <fieldset disabled={(signingFreeze?.id===selectedBooking.id&&signingFreeze.locked)} className="grid gap-2 md:grid-cols-2">
                         <div className="space-y-1">
-                          <Label>Stato documento</Label>
-                          <Select
+                          <Label htmlFor="booking-field-1">Stato documento</Label>
+                          <Select id="booking-field-1"
                             value={contractEditor.status}
                             onChange={(e) =>
                               setContractEditor((state) => ({ ...state, status: e.target.value as BookingContractStatus }))
                             }
                           >
                             {(Object.keys(BOOKING_CONTRACT_STATUS_LABELS) as BookingContractStatus[]).map((status) => (
-                              <option key={status} value={status}>
+                              <option key={status} value={status} disabled={status==="SIGNED"}>
                                 {BOOKING_CONTRACT_STATUS_LABELS[status]}
                               </option>
                             ))}
                           </Select>
                         </div>
                         <div className="space-y-1">
-                          <Label>Email cliente</Label>
-                          <Input
+                          <Label htmlFor="booking-field-2">Email cliente</Label>
+                          <Input id="booking-field-2"
                             type="email"
                             value={contractEditor.emailTo}
                             onChange={(e) => setContractEditor((state) => ({ ...state, emailTo: e.target.value }))}
@@ -2463,39 +2411,39 @@ export const RentalBookingsPage = () => {
                           />
                         </div>
                         <div className="space-y-1 md:col-span-2">
-                          <Label>Titolo contratto</Label>
-                          <Input
+                          <Label htmlFor="booking-field-3">Titolo contratto</Label>
+                          <Input id="booking-field-3"
                             value={contractEditor.title}
                             onChange={(e) => setContractEditor((state) => ({ ...state, title: e.target.value }))}
                           />
                         </div>
                         <div className="space-y-1 md:col-span-2">
-                          <Label>Oggetto email</Label>
-                          <Input
+                          <Label htmlFor="booking-field-4">Oggetto email</Label>
+                          <Input id="booking-field-4"
                             value={contractEditor.emailSubject}
                             onChange={(e) => setContractEditor((state) => ({ ...state, emailSubject: e.target.value }))}
                           />
                         </div>
                         <div className="space-y-1 md:col-span-2">
-                          <Label>Corpo email</Label>
-                          <Textarea
+                          <Label htmlFor="booking-field-5">Corpo email</Label>
+                          <Textarea id="booking-field-5"
                             rows={3}
                             value={contractEditor.emailBody}
                             onChange={(e) => setContractEditor((state) => ({ ...state, emailBody: e.target.value }))}
                           />
                         </div>
                         <div className="space-y-1 md:col-span-2">
-                          <Label>Contenuto contratto</Label>
-                          <Textarea
+                          <Label htmlFor="booking-field-6">Contenuto contratto</Label>
+                          <Textarea id="booking-field-6"
                             rows={7}
                             value={contractEditor.content}
                             onChange={(e) => setContractEditor((state) => ({ ...state, content: e.target.value }))}
                           />
                         </div>
-                      </div>
+                      </fieldset>
 
                       <div className="flex flex-wrap gap-1.5">
-                        <Button size="sm" variant="outline" onClick={() => void runSaveContractDocument()} disabled={saving}>
+                        <Button size="sm" variant="outline" onClick={() => void runSaveContractDocument()} disabled={saving || !canManageBookings || (signingFreeze?.id===selectedBooking.id&&signingFreeze.locked)}>
                           Salva
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => void runDownloadContractPdf()} disabled={saving}>
@@ -2504,21 +2452,19 @@ export const RentalBookingsPage = () => {
                         <Button size="sm" variant="outline" onClick={() => void runPrintContractPdf()} disabled={saving}>
                           Stampa
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => void runSendContractEmail()} disabled={saving}>
+                        <Button size="sm" variant="outline" onClick={() => void runSendContractEmail()} disabled={saving || !canManageBookings || (!contract.issuedAt&&!contract.signedAt&&contract.status!=="SIGNED")}>
                           Invia email
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => void runSendContractWhatsapp()} disabled={saving}>
+                        <Button size="sm" variant="outline" onClick={() => void runSendContractWhatsapp()} disabled={saving || !canManageBookings || (!contract.issuedAt&&!contract.signedAt&&contract.status!=="SIGNED")}>
                           Invia WhatsApp
                         </Button>
-                        <Button size="sm" onClick={() => void runMarkContractSigned()} disabled={saving}>
-                          Marca firmato
-                        </Button>
+
                       </div>
 
-                      <div className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-1">
+                      <div className="grid gap-2 lg:grid-cols-2">
                         <div className="rounded-md border bg-muted/10 p-2">
                           <p className="text-[11px] font-semibold text-muted-foreground">Ultime consegne email</p>
-                          <div className="mt-1.5 max-h-[110px] space-y-1 overflow-auto pr-1">
+                          <div role="region" aria-label="Ultime consegne email" tabIndex={0} className="mt-1.5 max-h-[110px] space-y-1 overflow-auto rounded-sm pr-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2">
                             {(contract.deliveries ?? []).length === 0 ? (
                               <p className="text-[11px] text-muted-foreground">Nessuna consegna.</p>
                             ) : (
@@ -2537,7 +2483,7 @@ export const RentalBookingsPage = () => {
 
                         <div className="rounded-md border bg-muted/10 p-2">
                           <p className="text-[11px] font-semibold text-muted-foreground">Audit contratto</p>
-                          <div className="mt-1.5 max-h-[110px] space-y-1 overflow-auto pr-1">
+                          <div role="region" aria-label="Audit contratto" tabIndex={0} className="mt-1.5 max-h-[110px] space-y-1 overflow-auto rounded-sm pr-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2">
                             {(contract.events ?? []).length === 0 ? (
                               <p className="text-[11px] text-muted-foreground">Nessun evento.</p>
                             ) : (
@@ -2557,135 +2503,9 @@ export const RentalBookingsPage = () => {
                     </>
                   )}
                 </div>
-
-                <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-1">
-                  <div className="space-y-2 rounded-lg border p-3">
-                    <Label>Workflow contratto noleggio</Label>
-                    <Select value={contractTo} onChange={(e) => setContractTo(e.target.value as RentalContractStatus)}>
-                      {(Object.keys(CONTRACT_STATUS_LABELS) as RentalContractStatus[]).map((status) => (
-                        <option key={status} value={status}>
-                          {CONTRACT_STATUS_LABELS[status]}
-                        </option>
-                      ))}
-                    </Select>
-                    <Button variant="outline" onClick={() => void runContractUpdate()} disabled={saving}>
-                      Salva stato workflow
-                    </Button>
-                  </div>
-
-                  <div className="space-y-2 rounded-lg border p-3">
-                    <Label>CARGOS</Label>
-                    <Select value={cargosTo} onChange={(e) => setCargosTo(e.target.value as RentalCargosStatus)}>
-                      {(Object.keys(CARGOS_STATUS_LABELS) as RentalCargosStatus[]).map((status) => (
-                        <option key={status} value={status}>
-                          {CARGOS_STATUS_LABELS[status]}
-                        </option>
-                      ))}
-                    </Select>
-                    <Input
-                      value={cargosTransmissionId}
-                      onChange={(e) => setCargosTransmissionId(e.target.value)}
-                      placeholder="Transmission ID"
-                    />
-                    <Textarea
-                      value={cargosMessage}
-                      onChange={(e) => setCargosMessage(e.target.value)}
-                      placeholder="Messaggio CARGOS"
-                      rows={2}
-                    />
-                    <Button variant="outline" onClick={() => void runCargosUpdate()} disabled={saving}>
-                      Salva CARGOS
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-lg border p-3">
-                  <Label>Aggiornamento operativo</Label>
-                  <Textarea
-                    value={noteInput}
-                    onChange={(e) => setNoteInput(e.target.value)}
-                    rows={2}
-                    placeholder="Inserisci nota operativa..."
-                  />
-                  <Button variant="outline" onClick={() => void runAddNote()} disabled={!noteInput.trim() || saving}>
-                    Aggiungi nota
-                  </Button>
-                </div>
-
-                <div className="space-y-2 rounded-lg border p-3">
-                  <Label>Timeline</Label>
-                  <div className="max-h-[180px] space-y-2 overflow-auto pr-1">
-                    {(selectedBooking.notes ?? []).length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Nessuna nota disponibile.</p>
-                    ) : (
-                      (selectedBooking.notes ?? []).map((note) => (
-                        <div key={note.id} className="rounded-md border bg-muted/20 px-2 py-1.5">
-                          <p className="text-[11px] font-medium">{note.type}</p>
-                          <p className="text-xs">{note.message}</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {new Date(note.createdAt).toLocaleString("it-IT", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit"
-                            })}
-                          </p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-        </aside>
-      </div>
-
-        <Card className="saas-surface">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Anagrafica Cliente & Documenti</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <Input
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                placeholder="Cerca cliente per nome, documento, email..."
-              />
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setCustomerForm(defaultCustomerForm());
-                  setCustomerScanFiles([]);
-                  setCustomerScanInfo(null);
-                  setCustomerModalOpen(true);
-                }}
-              >
-                Nuovo cliente
-              </Button>
-            </div>
-
-            <div className="max-h-[150px] space-y-1 overflow-auto rounded-md border p-2">
-              {customers.slice(0, 20).map((customer) => (
-                <button
-                  key={customer.id}
-                  type="button"
-                  className={`w-full rounded-md border px-2 py-1 text-left text-[12px] hover:bg-muted/30 ${
-                    bookingForm.customerId === customer.id ? "border-primary/60 bg-primary/5" : ""
-                  }`}
-                  onClick={() => {
-                    setBookingForm((current) => ({ ...current, customerId: customer.id }));
-                    setCustomerInput(customerDisplayName(customer));
-                  }}
-                >
-                  <p className="font-medium">{customerDisplayName(customer)}</p>
-                  <p className="text-[10px] text-muted-foreground">{customerSearchSubtitle(customer)}</p>
-                </button>
-              ))}
-            </div>
-
+                  </BookingDetailSection>
+                  <RentalPaymentSummaryLink key={selectedBooking.id} booking={selectedBooking} paymentSetupStatus={paymentSetupStatus} />
+<BookingDetailSection title="Cliente e documenti" description="Anagrafica associata, allegati e collegamenti al cliente." icon={<UserRound />} >
             {!selectedBooking?.customer ? (
               <p className="text-xs text-muted-foreground">Seleziona una prenotazione con cliente associato per gestire i documenti.</p>
             ) : (
@@ -2718,6 +2538,7 @@ export const RentalBookingsPage = () => {
                       <Button
                         variant="outline"
                         size="sm"
+                        disabled={saving || !canManageBookings}
                         onClick={() => {
                           const customer = selectedBooking.customer!;
                           setCustomerForm({
@@ -2799,8 +2620,8 @@ export const RentalBookingsPage = () => {
                 </div>
 
                 <div className="space-y-2 rounded-md border p-2">
-                  <Label>Carica documenti cliente (PDF/JPG/PNG)</Label>
-                  <Input
+                  <Label htmlFor="booking-field-10">Carica documenti cliente (PDF/JPG/PNG)</Label>
+                  <Input id="booking-field-10"
                     type="file"
                     multiple
                     accept=".pdf,.jpg,.jpeg,.png,.webp"
@@ -2809,19 +2630,19 @@ export const RentalBookingsPage = () => {
                   <Button
                     variant="outline"
                     onClick={() => void uploadCustomerDocs()}
-                    disabled={customerUploadFiles.length === 0 || saving}
+                    disabled={customerUploadFiles.length === 0 || saving || !canManageBookings}
                   >
                     Salva documenti
                   </Button>
                 </div>
 
                 <div className="space-y-1 rounded-md border p-2">
-                  <Label>Documenti salvati</Label>
+                  <h4 className="font-semibold">Documenti salvati</h4>
                   {(selectedBooking.customer.attachments ?? []).length === 0 ? (
                     <p className="text-xs text-muted-foreground">Nessun documento.</p>
                   ) : (
                     (selectedBooking.customer.attachments ?? []).map((attachment) => (
-                      <div key={attachment.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-[12px]">
+                      <div key={attachment.id} className="booking-detail-document-row">
                         <div className="min-w-0">
                           <p className="truncate font-medium">{attachment.fileName}</p>
                           <p className="text-[10px] text-muted-foreground">{attachment.mimeType}</p>
@@ -2830,7 +2651,7 @@ export const RentalBookingsPage = () => {
                           <Button size="sm" variant="outline" onClick={() => void openCustomerAttachment(attachment.id)}>
                             Apri
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => void removeCustomerAttachment(attachment.id)}>
+                          <Button size="sm" variant="destructive" onClick={() => void removeCustomerAttachment(attachment.id)} disabled={saving || !canManageBookings}>
                             Elimina
                           </Button>
                         </div>
@@ -2840,8 +2661,96 @@ export const RentalBookingsPage = () => {
                 </div>
               </>
             )}
+            <details className="booking-detail-customer-search"><summary>Cerca o crea un’altra anagrafica</summary><p className="text-sm text-muted-foreground">Seleziona un risultato per aprire la scheda cliente.</p>            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <Input
+                aria-label="Cerca anagrafica cliente"
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                placeholder="Cerca cliente per nome, documento, email..."
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCustomerForm(defaultCustomerForm());
+                  setCustomerScanFiles([]);
+                  setCustomerScanInfo(null);
+                  setCustomerModalOpen(true);
+                }}
+              >
+                Nuovo cliente
+              </Button>
+            </div>
+
+            <div className="max-h-[150px] space-y-1 overflow-auto rounded-md border p-2">
+              {customers.slice(0, 20).map((customer) => (
+                <button
+                  key={customer.id}
+                  type="button"
+                  className={`w-full rounded-md border px-2 py-1 text-left text-[12px] hover:bg-muted/30 ${
+                    bookingForm.customerId === customer.id ? "border-primary/60 bg-primary/5" : ""
+                  }`}
+                  onClick={() => navigate(`/anagrafiche/clienti?customerId=${customer.id}`)}
+                >
+                  <p className="font-medium" translate="no">{customerDisplayName(customer)}</p>
+                  <p className="text-[10px] text-muted-foreground">{customerSearchSubtitle(customer)}</p>
+                </button>
+              ))}
+            </div>
+
+
+            </details>
+        </BookingDetailSection>
+                  <BookingDetailSection title="CARGOS" description="Trasmetti i dati e verifica l'esito del servizio." icon={<Radio />}>
+                    <p className="text-sm">{selectedBooking.cargosStatus==="SENT"?"Trasmissione registrata: consulta l'esito verificato.":"Da trasmettere a CARGOS"}</p>
+                    <Button className="mt-3" variant="outline" onClick={()=>setCargosPromptBookingId(selectedBooking.id)} disabled={saving||!canManageBookings}>Trasmetti contratto a CARGOS</Button>
+                  </BookingDetailSection>
+                  <BookingDetailSection title="Note e attività" description="Aggiornamenti operativi e cronologia della prenotazione." icon={<MessageSquare />}>
+                    <div className="space-y-2 rounded-lg border p-3">
+                  <Label htmlFor="booking-field-9">Aggiornamento operativo</Label>
+                  <Textarea id="booking-field-9"
+                    value={noteInput}
+                    onChange={(e) => setNoteInput(e.target.value)}
+                    rows={2}
+                    placeholder="Inserisci nota operativa..."
+                  />
+                  <Button variant="outline" onClick={() => void runAddNote()} disabled={!noteInput.trim() || saving || !canManageBookings}>
+                    Aggiungi nota
+                  </Button>
+                </div>
+
+                <div className="space-y-2 rounded-lg border p-3">
+                  <h4 className="font-semibold">Timeline</h4>
+                  <div className="max-h-[180px] space-y-2 overflow-auto pr-1">
+                    {(selectedBooking.notes ?? []).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Nessuna nota disponibile.</p>
+                    ) : (
+                      (selectedBooking.notes ?? []).map((note) => (
+                        <div key={note.id} className="rounded-md border bg-muted/20 px-2 py-1.5">
+                          <p className="text-[11px] font-medium">{note.type}</p>
+                          <p className="text-xs">{note.message}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {new Date(note.createdAt).toLocaleString(language === "en" ? "en-GB" : "it-IT", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit"
+                            })}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+                  </BookingDetailSection>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
+        </aside>
+      </div>
+
 
       {ctxMenu.open && ctxMenu.booking ? (
         <div
@@ -2855,7 +2764,7 @@ export const RentalBookingsPage = () => {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Prenotazione</p>
-                <p className="mt-1 truncate text-sm font-semibold">{ctxMenu.booking.customerName}</p>
+                <p className="mt-1 truncate text-sm font-semibold" translate="no">{ctxMenu.booking.customerName}</p>
                 <p className="truncate text-xs text-muted-foreground">{ctxMenu.booking.code}</p>
               </div>
               <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${toBadgeClass(ctxMenu.booking.status)}`}>
@@ -2868,13 +2777,13 @@ export const RentalBookingsPage = () => {
               <div className="rounded-xl border bg-card/80 p-2">
                 <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Uscita</p>
                 <p className="mt-1 font-semibold">
-                  {new Date(ctxMenu.booking.pickupAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {new Date(ctxMenu.booking.pickupAt).toLocaleString(language === "en" ? "en-GB" : "it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
               <div className="rounded-xl border bg-card/80 p-2">
                 <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Rientro</p>
                 <p className="mt-1 font-semibold">
-                  {new Date(ctxMenu.booking.returnAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {new Date(ctxMenu.booking.returnAt).toLocaleString(language === "en" ? "en-GB" : "it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
             </div>
@@ -2905,362 +2814,413 @@ export const RentalBookingsPage = () => {
             onClick={requestCloseBookingModal}
             aria-hidden="true"
           />
-          <div className="fixed inset-0 z-[101] overflow-y-auto p-4">
-            <div className="mx-auto flex min-h-full w-full max-w-4xl items-center py-4">
-            <Card className="w-full saas-surface" onClick={(event) => event.stopPropagation()}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  {bookingForm.mode === "create" ? "Nuova prenotazione da calendario" : "Modifica prenotazione"}
-                </CardTitle>
+          <div ref={bookingDialogRef} role="dialog" aria-modal="true" aria-label={bookingForm.mode === "create" ? "Nuova prenotazione" : "Modifica prenotazione"} aria-describedby="booking-editor-description" tabIndex={-1} className="booking-editor-dialog fixed inset-0 z-[101]">
+            <Card ref={bookingCardRef} className="booking-editor-card saas-surface" onClick={(event) => event.stopPropagation()}>
+              <CardHeader className="booking-editor-header">
+                <div>
+                  <p className="workspace-eyebrow">Prenotazioni</p>
+                  <CardTitle className="booking-editor-title">{bookingForm.mode === "create" ? "Nuova prenotazione" : "Modifica prenotazione"}</CardTitle>
+                  <p id="booking-editor-description" className="booking-editor-description">Cliente, veicolo, uscita e rientro sono obbligatori.</p>
+                </div>
+                <Button type="button" variant="ghost" size="icon" aria-label="Chiudi modulo prenotazione" onClick={requestCloseBookingModal} disabled={saving}><X aria-hidden="true" className="h-5 w-5" /></Button>
               </CardHeader>
-              <CardContent>
-                <form className="space-y-3" onChangeCapture={markBookingFormDirty} onSubmit={onBookingSubmit}>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="relative space-y-1" ref={vehicleSuggestRef}>
-                      <Label>Veicolo (targa/modello/sede)</Label>
-                      <Input
-                        value={vehicleInput}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setVehicleInput(next);
-                          setBookingForm((state) => ({ ...state, vehicleId: "" }));
-                          setVehicleSuggestOpen(true);
-                          setVehicleActiveIdx(-1);
-                        }}
-                        onFocus={() => setVehicleSuggestOpen(true)}
-                        onKeyDown={handleVehicleAutocompleteKey}
-                        placeholder="Scrivi targa o modello..."
-                        aria-label="Ricerca veicolo"
-                      />
-                      {vehicleSuggestOpen ? (
-                        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-card p-1 shadow-lg">
-                          {vehicleSuggestions.length === 0 ? (
-                            <p className="px-2 py-1 text-xs text-muted-foreground">Nessun veicolo trovato.</p>
-                          ) : (
-                            vehicleSuggestions.map((vehicle, idx) => (
-                              <button
-                                key={vehicle.id}
-                                type="button"
-                                className={`w-full rounded px-2 py-1.5 text-left text-xs transition ${
-                                  idx === vehicleActiveIdx ? "bg-primary/10" : "hover:bg-muted/35"
-                                }`}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => pickVehicle(vehicle)}
-                              >
-                                <p className="font-semibold">{vehicle.plate}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  {vehicle.brand} {vehicle.model}
-                                  {vehicle.site ? ` · ${vehicle.site.name}` : ""}
-                                </p>
-                              </button>
-                            ))
-                          )}
+              <CardContent className="booking-editor-content">
+                <form className="booking-editor-form" onChangeCapture={(event) => {
+                  markBookingFormDirty();
+                  const name = (event?.target as HTMLInputElement | undefined)?.name;
+                  if (name) clearBookingFieldError(name as keyof BookingFormState);
+                }} onSubmit={onBookingSubmit}>
+                  <div className="booking-editor-scroll">
+                    <div className="booking-editor-sections">
+                      {error ? <div ref={bookingErrorRef} tabIndex={-1} role="alert" className="booking-editor-error"><AlertTriangle aria-hidden="true" className="h-4 w-4" /><p>{error}</p></div> : null}
+                      <fieldset className="booking-editor-section">
+                        <legend><span aria-hidden="true">01</span> Cliente e veicolo</legend>
+                        <p className="booking-editor-section-help">Cerca e seleziona un risultato per associare il cliente e il veicolo.</p>
+                        <div className="booking-editor-grid">
+                          <div className="relative space-y-1" ref={customerSuggestRef}>
+                            <Label htmlFor="booking-field-12">Cliente</Label>
+                            <Input id="booking-field-12" {...bookingFieldProps("customerId", "booking-field-12", true)}
+                              value={customerInput}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                setCustomerInput(next);
+                                setBookingForm((state) => ({ ...state, customerId: "" }));
+                                setCustomerSuggestOpen(true);
+                                setCustomerActiveIdx(-1);
+                              }}
+                              onFocus={() => setCustomerSuggestOpen(true)}
+                              onKeyDown={handleCustomerAutocompleteKey}
+                              placeholder="Cerca nome, ragione sociale, email, documento..."
+                              aria-label="Ricerca cliente"
+                            />
+                            {bookingFieldError("customerId", "booking-field-12")}
+                            {customerSuggestOpen ? (
+                              <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-card p-1 shadow-lg">
+                                {customerSuggestions.length === 0 ? (
+                                  <div className="space-y-1 px-2 py-1">
+                                    <p className="text-xs text-muted-foreground">Cliente non trovato.</p>
+                                    {customerInput.trim().length >= 2 ? (
+                                      <Button size="sm" variant="outline" onClick={openInlineNewCustomer} type="button">
+                                        <span>Nuovo cliente</span> <span translate="no">“{customerInput.trim()}”</span>
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  customerSuggestions.map((customer, idx) => (
+                                    <button
+                                      key={customer.id}
+                                      type="button"
+                                      className={`w-full rounded px-2 py-1.5 text-left text-xs transition ${
+                                        idx === customerActiveIdx ? "bg-primary/10" : "hover:bg-muted/35"
+                                      }`}
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => pickCustomer(customer)}
+                                    >
+                                      <p className="font-semibold" translate="no">{customerDisplayName(customer)}</p>
+                                      <p className="text-[10px] text-muted-foreground">
+                                        {customer.customerType === "PERSONA_GIURIDICA"
+                                          ? `P.IVA ${customer.companyVatNumber || "-"}`
+                                          : `CF ${customer.taxCode || "-"} · ${customer.email || customer.phone || customer.documentNumber || "-"}`}
+                                      </p>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="relative space-y-1" ref={vehicleSuggestRef}>
+                            <Label htmlFor="booking-field-11">Veicolo (targa/modello/sede)</Label>
+                            <Input id="booking-field-11" {...bookingFieldProps("vehicleId", "booking-field-11", true)}
+                              value={vehicleInput}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                setVehicleInput(next);
+                                setBookingForm((state) => ({ ...state, vehicleId: "" }));
+                                setVehicleSuggestOpen(true);
+                                setVehicleActiveIdx(-1);
+                              }}
+                              onFocus={() => setVehicleSuggestOpen(true)}
+                              onKeyDown={handleVehicleAutocompleteKey}
+                              placeholder="Scrivi targa o modello..."
+                              aria-label="Ricerca veicolo"
+                            />
+                            {bookingFieldError("vehicleId", "booking-field-11")}
+                            {vehicleSuggestOpen ? (
+                              <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-card p-1 shadow-lg">
+                                {vehicleSuggestions.length === 0 ? (
+                                  <p className="px-2 py-1 text-xs text-muted-foreground">Nessun veicolo trovato.</p>
+                                ) : (
+                                  vehicleSuggestions.map((vehicle, idx) => (
+                                    <button
+                                      key={vehicle.id}
+                                      type="button"
+                                      className={`w-full rounded px-2 py-1.5 text-left text-xs transition ${
+                                        idx === vehicleActiveIdx ? "bg-primary/10" : "hover:bg-muted/35"
+                                      }`}
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => pickVehicle(vehicle)}
+                                    >
+                                      <p className="font-semibold">{vehicle.plate}</p>
+                                      <p className="text-[10px] text-muted-foreground">
+                                        {vehicle.brand} {vehicle.model}
+                                        {vehicle.site ? ` · ${vehicle.site.name}` : ""}
+                                      </p>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
-                      ) : null}
-                    </div>
-
-                    <div className="relative space-y-1" ref={customerSuggestRef}>
-                      <Label>Cliente</Label>
-                      <Input
-                        value={customerInput}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setCustomerInput(next);
-                          setBookingForm((state) => ({ ...state, customerId: "" }));
-                          setCustomerSuggestOpen(true);
-                          setCustomerActiveIdx(-1);
-                        }}
-                        onFocus={() => setCustomerSuggestOpen(true)}
-                        onKeyDown={handleCustomerAutocompleteKey}
-                        placeholder="Cerca nome, ragione sociale, email, documento..."
-                        aria-label="Ricerca cliente"
-                      />
-                      {customerSuggestOpen ? (
-                        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-card p-1 shadow-lg">
-                          {customerSuggestions.length === 0 ? (
-                            <div className="space-y-1 px-2 py-1">
-                              <p className="text-xs text-muted-foreground">Cliente non trovato.</p>
-                              {customerInput.trim().length >= 2 ? (
-                                <Button size="sm" variant="outline" onClick={openInlineNewCustomer} type="button">
-                                  Nuovo cliente “{customerInput.trim()}”
-                                </Button>
-                              ) : null}
+                      </fieldset>
+                      <fieldset className="booking-editor-section">
+                        <legend><span aria-hidden="true">02</span> Date e luoghi</legend>
+                        <div className="booking-editor-grid">
+                          <div className="booking-editor-trip"><h4>Uscita</h4>
+                            <div className="space-y-1">
+                              <Label htmlFor="booking-field-19">Data/ora uscita</Label>
+                              <Input id="booking-field-19" {...bookingFieldProps("pickupAt", "booking-field-19", true)}
+                                type="datetime-local"
+                                value={bookingForm.pickupAt}
+                                onChange={(e) => setBookingForm((s) => ({ ...s, pickupAt: e.target.value }))}
+                              />
+                              {bookingFieldError("pickupAt", "booking-field-19")}
                             </div>
-                          ) : (
-                            customerSuggestions.map((customer, idx) => (
-                              <button
-                                key={customer.id}
-                                type="button"
-                                className={`w-full rounded px-2 py-1.5 text-left text-xs transition ${
-                                  idx === customerActiveIdx ? "bg-primary/10" : "hover:bg-muted/35"
-                                }`}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => pickCustomer(customer)}
-                              >
-                                <p className="font-semibold">{customerDisplayName(customer)}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  {customer.customerType === "PERSONA_GIURIDICA"
-                                    ? `P.IVA ${customer.companyVatNumber || "-"}`
-                                    : `CF ${customer.taxCode || "-"} · ${customer.email || customer.phone || customer.documentNumber || "-"}`}
-                                </p>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Listino noleggio</Label>
-                      <Select
-                        value={bookingForm.priceListId}
-                        onChange={(e) => {
-                          setPricingQuote(null);
-                          setBookingForm((s) => ({ ...s, priceListId: e.target.value, pricingTermsChanged: true }));
-                        }}
-                      >
-                        <option value="">Seleziona listino...</option>
-                        {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.priceListId ? (
-                          <option value={bookingForm.priceListId}>Listino concordato · condizioni salvate</option>
-                        ) : null}
-                        {priceLists.filter((list) => bookingForm.mode !== "edit" || bookingForm.pricingTermsChanged || list.id !== bookingForm.priceListId).map((list) => (
-                          <option key={list.id} value={list.id}>
-                            {list.name} · {list.baseRateAmount.toFixed(2)}€/{list.baseRateUnit.toLowerCase()}
-                          </option>
-                        ))}
-                      </Select>
-                      {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? (
-                        <Button type="button" size="sm" variant="outline" onClick={() => {
-                          markBookingFormDirty();
-                          setBookingForm((s) => ({ ...s, pricingTermsChanged: true }));
-                        }}>Modifica condizioni economiche</Button>
-                      ) : null}
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Pacchetto km</Label>
-                      <Select
-                        value={bookingForm.pricePackageId}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pricePackageId: e.target.value, pricingTermsChanged: true }))}
-                        disabled={!bookingForm.priceListId || pricePackages.length === 0}
-                      >
-                        <option value="">Nessun pacchetto</option>
-                        {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.pricePackageId ? (
-                          <option value={bookingForm.pricePackageId}>Pacchetto concordato · condizioni salvate</option>
-                        ) : null}
-                        {pricePackages.map((pkg) => (
-                          <option key={pkg.id} value={pkg.id}>
-                            {pkg.name} · {pkg.type === "UNLIMITED" ? "illimitati" : `${pkg.kmIncluded ?? 0}km`}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Tariffario km extra</Label>
-                      <Select
-                        value={bookingForm.extraKmPolicyId}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, extraKmPolicyId: e.target.value, pricingTermsChanged: true }))}
-                        disabled={!bookingForm.priceListId || compatiblePolicyOptions.length === 0}
-                      >
-                        <option value="">Nessuna policy</option>
-                        {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.extraKmPolicyId ? (
-                          <option value={bookingForm.extraKmPolicyId}>Tariffario concordato · condizioni salvate</option>
-                        ) : null}
-                        {compatiblePolicyOptions.map((policy) => (
-                          <option key={policy.id} value={policy.id}>
-                            {policy.name}
-                            {policy.type === "FLAT"
-                              ? ` · ${policy.flatRatePerKm ?? 0}€/km`
-                              : ` · ${(policy.tiers ?? []).length} scaglioni`}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Km stimati</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={bookingForm.estimatedKm}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, estimatedKm: e.target.value,
-                          pricingSnapshotChanged: { ...s.pricingSnapshotChanged, estimatedKm: true } }))}
-                        placeholder="Es. 320"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Km reali (consuntivo)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={bookingForm.actualKm}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, actualKm: e.target.value,
-                          pricingSnapshotChanged: { ...s.pricingSnapshotChanged, actualKm: true } }))}
-                        placeholder="Compila in chiusura"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Totale previsto (EUR)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={bookingForm.expectedTotal}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, expectedTotal: e.target.value, expectedTotalChanged: true }))}
-                        readOnly={Boolean(pricingQuote)}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Data/ora uscita</Label>
-                      <Input
-                        type="datetime-local"
-                        value={bookingForm.pickupAt}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pickupAt: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Data/ora rientro</Label>
-                      <Input
-                        type="datetime-local"
-                        value={bookingForm.returnAt}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, returnAt: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Km all'uscita</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={bookingForm.pickupKm}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pickupKm: e.target.value }))}
-                        placeholder="Es. 120340"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Km al rientro</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={bookingForm.returnKm}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, returnKm: e.target.value }))}
-                        placeholder="Compila in chiusura"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Luogo uscita</Label>
-                      <Input
-                        value={bookingForm.pickupLocation}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pickupLocation: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Luogo rientro</Label>
-                      <Input
-                        value={bookingForm.returnLocation}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, returnLocation: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1 md:col-span-2">
-                      <Label>Motivo noleggio</Label>
-                      <Input
-                        value={bookingForm.reason}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, reason: e.target.value }))}
-                        placeholder="Es. sostitutiva, lungo termine..."
-                      />
-                    </div>
-                    <div className="space-y-1 md:col-span-3">
-                      <Label>Note pricing</Label>
-                      <Input
-                        value={bookingForm.pricingNotes}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, pricingNotes: e.target.value,
-                          pricingSnapshotChanged: { ...s.pricingSnapshotChanged, notes: true } }))}
-                        placeholder="Annotazioni economiche (sconti manuali, accordi, ecc.)"
-                      />
-                    </div>
-                    <div className="space-y-1 md:col-span-3">
-                      <div className="rounded-lg border bg-muted/20 p-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                            {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? "Condizioni economiche salvate" : "Preview pricing live"}
-                          </p>
-                          {pricingLoading ? <FleetumInlineLoader label="Calcolo" /> : null}
-                        </div>
-                        {!pricingQuote ? (
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged
-                              ? "Le modifiche operative mantengono i prezzi concordati. Per applicare il listino corrente, scegli Modifica condizioni economiche."
-                              : "Seleziona listino/pacchetto e inserisci date per vedere il totale previsto e il consuntivo km extra."}
-                          </p>
-                        ) : (
-                          <div className="mt-2 grid gap-2 md:grid-cols-3">
-                            <div className="rounded-md border bg-background/80 p-2">
-                              <p className="text-[11px] text-muted-foreground">Durata addebitata</p>
-                              <p className="text-sm font-semibold">
-                                {pricingQuote.duration.daysCharged} gg · {pricingQuote.duration.chargedUnits} {pricingQuote.duration.unit.toLowerCase()}
-                              </p>
+                            <div className="space-y-1">
+                              <Label htmlFor="booking-field-23">Luogo uscita</Label>
+                              <Input id="booking-field-23"
+                                value={bookingForm.pickupLocation}
+                                onChange={(e) => setBookingForm((s) => ({ ...s, pickupLocation: e.target.value }))}
+                              />
                             </div>
-                            <div className="rounded-md border bg-background/80 p-2">
-                              <p className="text-[11px] text-muted-foreground">Km inclusi</p>
-                              <p className="text-sm font-semibold">
-                                {pricingQuote.km.includedKmTotal == null ? "Illimitati" : `${pricingQuote.km.includedKmTotal} km`}
-                              </p>
-                            </div>
-                            <div className="rounded-md border bg-background/80 p-2">
-                              <p className="text-[11px] text-muted-foreground">Extra km stimati</p>
-                              <p className="text-sm font-semibold">
-                                {pricingQuote.km.extraKmEstimated} km · {pricingQuote.pricing.extraKmEstimatedCost.toFixed(2)} €
-                              </p>
-                            </div>
-                            <div className="rounded-md border bg-background/80 p-2 md:col-span-2">
-                              <p className="text-[11px] text-muted-foreground">Totale previsto</p>
-                              <p className="text-base font-semibold text-emerald-700">{pricingQuote.pricing.expectedTotal.toFixed(2)} €</p>
-                            </div>
-                            <div className="rounded-md border bg-background/80 p-2">
-                              <p className="text-[11px] text-muted-foreground">Totale finale (se km reali)</p>
-                              <p className="text-base font-semibold">{pricingQuote.pricing.finalTotal.toFixed(2)} €</p>
+                            <div className="space-y-1">
+                              <Label htmlFor="booking-field-21">Km all'uscita</Label>
+                              <Input id="booking-field-21" {...bookingFieldProps("pickupKm", "booking-field-21", false)}
+                                type="number"
+                                min="0"
+                                value={bookingForm.pickupKm}
+                                onChange={(e) => setBookingForm((s) => ({ ...s, pickupKm: e.target.value }))}
+                                placeholder="Es. 120340"
+                              />
+                              {bookingFieldError("pickupKm", "booking-field-21")}
                             </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-1 md:col-span-3">
-                      <Label>Note interne</Label>
-                      <Textarea
-                        rows={3}
-                        value={bookingForm.internalNotes}
-                        onChange={(e) => setBookingForm((s) => ({ ...s, internalNotes: e.target.value }))}
-                      />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-4 md:col-span-3">
-                      <label className="inline-flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={bookingForm.contractRequired}
-                          onChange={(e) => setBookingForm((state) => ({ ...state, contractRequired: e.target.checked }))}
-                        />
-                        Contratto richiesto
-                      </label>
-                      {bookingForm.mode === "create" ? (
-                        <label className="inline-flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={bookingForm.generateContract}
-                            onChange={(e) => setBookingForm((state) => ({ ...state, generateContract: e.target.checked }))}
+                          <div className="booking-editor-trip"><h4>Rientro</h4>
+                            <div className="space-y-1">
+                              <Label htmlFor="booking-field-20">Data/ora rientro</Label>
+                              <Input id="booking-field-20" {...bookingFieldProps("returnAt", "booking-field-20", true)}
+                                type="datetime-local"
+                                value={bookingForm.returnAt}
+                                onChange={(e) => setBookingForm((s) => ({ ...s, returnAt: e.target.value }))}
+                              />
+                              {bookingFieldError("returnAt", "booking-field-20")}
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="booking-field-24">Luogo rientro</Label>
+                              <Input id="booking-field-24"
+                                value={bookingForm.returnLocation}
+                                onChange={(e) => setBookingForm((s) => ({ ...s, returnLocation: e.target.value }))}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="booking-field-22">Km al rientro</Label>
+                              <Input id="booking-field-22" {...bookingFieldProps("returnKm", "booking-field-22", false)}
+                                type="number"
+                                min="0"
+                                value={bookingForm.returnKm}
+                                onChange={(e) => setBookingForm((s) => ({ ...s, returnKm: e.target.value }))}
+                                placeholder="Compila in chiusura"
+                              />
+                              {bookingFieldError("returnKm", "booking-field-22")}
+                            </div>
+                          </div>
+                        </div>
+                      </fieldset>
+                      <fieldset className="booking-editor-section">
+                        <legend><span aria-hidden="true">03</span> Condizioni economiche</legend>
+                        <p className="booking-editor-section-help">Km stimati e km reali indicano la percorrenza del noleggio, non il contachilometri del veicolo.</p>
+                        <div className="booking-editor-grid">
+                          <div className="space-y-1">
+                            <Label htmlFor="booking-field-13">Listino noleggio</Label>
+                            <Select id="booking-field-13" {...bookingFieldProps("priceListId", "booking-field-13", false)}
+                              value={bookingForm.priceListId}
+                              onChange={(e) => {
+                                setPricingQuote(null);
+                                setBookingForm((s) => ({ ...s, priceListId: e.target.value, pricingTermsChanged: true }));
+                              }}
+                            >
+                              <option value="">Seleziona listino...</option>
+                              {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.priceListId ? (
+                                <option value={bookingForm.priceListId}>Listino concordato · condizioni salvate</option>
+                              ) : null}
+                              {priceLists.filter((list) => bookingForm.mode !== "edit" || bookingForm.pricingTermsChanged || list.id !== bookingForm.priceListId).map((list) => (
+                                <option translate="no" key={list.id} value={list.id}>
+                                  {list.name} · {list.baseRateAmount.toFixed(2)}€/{({DAILY:language === "en" ? "day" : "giorno",WEEKLY:language === "en" ? "week" : "settimana",MONTHLY:language === "en" ? "month" : "mese"})[list.baseRateUnit]}
+                                </option>
+                              ))}
+                            </Select>
+                            {bookingFieldError("priceListId", "booking-field-13")}
+                            {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => {
+                                markBookingFormDirty();
+                                setBookingForm((s) => ({ ...s, pricingTermsChanged: true }));
+                              }}>Modifica condizioni economiche</Button>
+                            ) : null}
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="booking-field-14">Pacchetto km</Label>
+                            <Select id="booking-field-14"
+                              value={bookingForm.pricePackageId}
+                              onChange={(e) => setBookingForm((s) => ({ ...s, pricePackageId: e.target.value, pricingTermsChanged: true }))}
+                              disabled={!bookingForm.priceListId || pricePackages.length === 0}
+                            >
+                              <option value="">Nessun pacchetto</option>
+                              {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.pricePackageId ? (
+                                <option value={bookingForm.pricePackageId}>Pacchetto concordato · condizioni salvate</option>
+                              ) : null}
+                              {pricePackages.map((pkg) => (
+                                <option translate="no" key={pkg.id} value={pkg.id}>
+                                  {pkg.name} · {pkg.type === "UNLIMITED" ? (language === "en" ? "unlimited" : "illimitati") : `${pkg.kmIncluded ?? 0}km`}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="booking-field-15">Tariffario km extra</Label>
+                            <Select id="booking-field-15"
+                              value={bookingForm.extraKmPolicyId}
+                              onChange={(e) => setBookingForm((s) => ({ ...s, extraKmPolicyId: e.target.value, pricingTermsChanged: true }))}
+                              disabled={!bookingForm.priceListId || compatiblePolicyOptions.length === 0}
+                            >
+                              <option value="">Nessuna policy</option>
+                              {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged && bookingForm.extraKmPolicyId ? (
+                                <option value={bookingForm.extraKmPolicyId}>Tariffario concordato · condizioni salvate</option>
+                              ) : null}
+                              {compatiblePolicyOptions.map((policy) => (
+                                <option translate="no" key={policy.id} value={policy.id}>
+                                  {policy.name}
+                                  {policy.type === "FLAT"
+                                    ? ` · ${policy.flatRatePerKm ?? 0}€/km`
+                                    : ` · ${(policy.tiers ?? []).length} scaglioni`}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="booking-field-16">Km stimati</Label>
+                            <Input id="booking-field-16" {...bookingFieldProps("estimatedKm", "booking-field-16", false)}
+                              type="number"
+                              min="0"
+                              value={bookingForm.estimatedKm}
+                              onChange={(e) => setBookingForm((s) => ({ ...s, estimatedKm: e.target.value,
+                                pricingSnapshotChanged: { ...s.pricingSnapshotChanged, estimatedKm: true } }))}
+                              placeholder="Es. 320"
+                            />
+                            {bookingFieldError("estimatedKm", "booking-field-16")}
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="booking-field-17">Km reali (consuntivo)</Label>
+                            <Input id="booking-field-17" {...bookingFieldProps("actualKm", "booking-field-17", false)}
+                              type="number"
+                              min="0"
+                              value={bookingForm.actualKm}
+                              onChange={(e) => setBookingForm((s) => ({ ...s, actualKm: e.target.value,
+                                pricingSnapshotChanged: { ...s.pricingSnapshotChanged, actualKm: true } }))}
+                              placeholder="Compila in chiusura"
+                            />
+                            {bookingFieldError("actualKm", "booking-field-17")}
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="booking-field-18">Totale previsto (EUR)</Label>
+                            <Input id="booking-field-18" {...bookingFieldProps("expectedTotal", "booking-field-18", false)}
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={bookingForm.expectedTotal}
+                              onChange={(e) => setBookingForm((s) => ({ ...s, expectedTotal: e.target.value, expectedTotalChanged: true }))}
+                              readOnly={Boolean(pricingQuote)}
+                            />
+                            {bookingFieldError("expectedTotal", "booking-field-18")}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="booking-field-26">Note economiche</Label>
+                          <Input id="booking-field-26"
+                            value={bookingForm.pricingNotes}
+                            onChange={(e) => setBookingForm((s) => ({ ...s, pricingNotes: e.target.value,
+                              pricingSnapshotChanged: { ...s.pricingSnapshotChanged, notes: true } }))}
+                            placeholder="Annotazioni economiche (sconti manuali, accordi, ecc.)"
                           />
-                          Genera contratto automatico (DRAFT)
-                        </label>
-                      ) : null}
+                        </div>
+                        <div className="booking-editor-quote">
+                          <div className="rounded-lg border bg-muted/20 p-3">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? "Condizioni economiche salvate" : "Preventivo aggiornato"}
+                              </p>
+                              {pricingLoading ? <FleetumInlineLoader label="Calcolo" /> : null}
+                            </div>
+                            {!pricingQuote ? (
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged
+                                  ? "Le modifiche operative mantengono i prezzi concordati. Per applicare il listino corrente, scegli Modifica condizioni economiche."
+                                  : "Seleziona listino/pacchetto e inserisci date per vedere il totale previsto e il consuntivo km extra."}
+                              </p>
+                            ) : (
+                              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                                <div className="rounded-md border bg-background/80 p-2">
+                                  <p className="text-[11px] text-muted-foreground">Durata addebitata</p>
+                                  <p className="text-sm font-semibold">
+                                    {pricingQuote.duration.daysCharged} gg · {pricingQuote.duration.chargedUnits} {pricingQuote.duration.unit.toLowerCase()}
+                                  </p>
+                                </div>
+                                <div className="rounded-md border bg-background/80 p-2">
+                                  <p className="text-[11px] text-muted-foreground">Km inclusi</p>
+                                  <p className="text-sm font-semibold">
+                                    {pricingQuote.km.includedKmTotal == null ? "Illimitati" : `${pricingQuote.km.includedKmTotal} km`}
+                                  </p>
+                                </div>
+                                <div className="rounded-md border bg-background/80 p-2">
+                                  <p className="text-[11px] text-muted-foreground">Extra km stimati</p>
+                                  <p className="text-sm font-semibold">
+                                    {pricingQuote.km.extraKmEstimated} km · {pricingQuote.pricing.extraKmEstimatedCost.toFixed(2)} €
+                                  </p>
+                                </div>
+                                <div className="rounded-md border bg-background/80 p-2 md:col-span-2">
+                                  <p className="text-[11px] text-muted-foreground">Totale previsto</p>
+                                  <p className="text-base font-semibold text-foreground">{pricingQuote.pricing.expectedTotal.toFixed(2)} €</p>
+                                </div>
+                                <div className="rounded-md border bg-background/80 p-2">
+                                  <p className="text-[11px] text-muted-foreground">Totale finale (se km reali)</p>
+                                  <p className="text-base font-semibold">{pricingQuote.pricing.finalTotal.toFixed(2)} €</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </fieldset>
+                      <fieldset className="booking-editor-section">
+                        <legend><span aria-hidden="true">04</span> Note e contratto</legend>
+                        <div className="space-y-1">
+                          <Label htmlFor="booking-field-25">Motivo noleggio</Label>
+                          <Input id="booking-field-25"
+                            value={bookingForm.reason}
+                            onChange={(e) => setBookingForm((s) => ({ ...s, reason: e.target.value }))}
+                            placeholder="Es. sostitutiva, lungo termine..."
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="booking-field-27">Note interne</Label>
+                          <Textarea id="booking-field-27"
+                            rows={3}
+                            value={bookingForm.internalNotes}
+                            onChange={(e) => setBookingForm((s) => ({ ...s, internalNotes: e.target.value }))}
+                          />
+                        </div>
+                        <div className="booking-editor-options">
+                          <label className="inline-flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={bookingForm.contractRequired}
+                              onChange={(e) => setBookingForm((state) => ({ ...state, contractRequired: e.target.checked }))}
+                            />
+                            Contratto richiesto
+                          </label>
+                          {bookingForm.mode === "create" ? (
+                            <label className="inline-flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={bookingForm.generateContract}
+                                onChange={(e) => setBookingForm((state) => ({ ...state, generateContract: e.target.checked }))}
+                              />
+                              Genera contratto automatico (DRAFT)
+                            </label>
+                          ) : null}
+                        </div>
+                      </fieldset>
                     </div>
+                    <aside className="booking-editor-summary" aria-label="Riepilogo prenotazione">
+                      <h3>Riepilogo prenotazione</h3>
+                      <dl>
+                        <div><dt>Cliente</dt><dd translate={bookingForm.customerId ? "no" : "yes"}>{bookingForm.customerId ? customerInput : "Da selezionare"}</dd></div>
+                        <div><dt>Veicolo</dt><dd translate={bookingForm.vehicleId ? "no" : "yes"}>{bookingForm.vehicleId ? vehicleInput : "Da selezionare"}</dd></div>
+                        <div><dt>Uscita</dt><dd>{formatBookingDate(bookingForm.pickupAt)}</dd></div>
+                        <div><dt>Rientro</dt><dd>{formatBookingDate(bookingForm.returnAt)}</dd></div>
+                        <div className="booking-editor-summary-total"><dt>Totale previsto</dt><dd>{bookingForm.expectedTotal !== "" && Number.isFinite(Number(bookingForm.expectedTotal)) ? new Intl.NumberFormat(language === "en" ? "en-GB" : "it-IT", { style: "currency", currency: "EUR" }).format(Number(bookingForm.expectedTotal)) : "Da definire"}</dd></div>
+                      </dl>
+                      <p>{bookingForm.mode === "edit" && !bookingForm.pricingTermsChanged ? "Le modifiche operative mantengono i prezzi concordati." : "Il totale previsto segue le condizioni economiche selezionate."}</p>
+                    </aside>
                   </div>
-                  <div className="flex items-center justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={requestCloseBookingModal}>
-                      Annulla
-                    </Button>
-                    <Button type="submit" disabled={saving}>
-                      {saving ? "Salvataggio..." : "Salva prenotazione"}
-                    </Button>
-                  </div>
+                  <footer className="booking-editor-footer">
+                    <span>Controlla i dati prima di salvare.</span>
+                    <div>
+                      <Button type="button" variant="outline" onClick={requestCloseBookingModal} disabled={saving}>Annulla</Button>
+                      <Button type="submit" disabled={saving}>{saving ? "Salvataggio..." : "Salva prenotazione"}</Button>
+                    </div>
+                  </footer>
                 </form>
               </CardContent>
             </Card>
-            </div>
           </div>
           {bookingCloseConfirmOpen ? (
             <>
@@ -3269,7 +3229,7 @@ export const RentalBookingsPage = () => {
                 onClick={() => setBookingCloseConfirmOpen(false)}
                 aria-hidden="true"
               />
-              <div className="fixed inset-0 z-[113] flex items-center justify-center p-4">
+              <div ref={closeDialogRef} role="dialog" aria-modal="true" aria-label="Modifiche non salvate" tabIndex={-1} className="fixed inset-0 z-[113] flex items-center justify-center p-4">
                 <Card className="w-full max-w-md border-border/70 bg-card shadow-[0_28px_90px_-42px_rgba(15,23,42,0.9)]">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">Modifiche non salvate</CardTitle>
@@ -3298,13 +3258,9 @@ export const RentalBookingsPage = () => {
         <>
           <div
             className="fixed inset-0 z-[102] bg-black/55 backdrop-blur-sm"
-            onClick={() => {
-              setCustomerModalOpen(false);
-              setCustomerScanFiles([]);
-              setCustomerScanInfo(null);
-            }}
+            onClick={requestCloseCustomer}
           />
-          <div className="fixed inset-0 z-[103] overflow-y-auto p-4">
+          <div ref={customerDialogRef} role="dialog" aria-modal="true" aria-label="Anagrafica cliente" tabIndex={-1} className="fixed inset-0 z-[103] overflow-y-auto p-4">
             <div className="mx-auto flex min-h-full w-full max-w-5xl items-start py-4">
             <Card className="w-full saas-surface">
               <CardHeader className="pb-2">
@@ -3313,7 +3269,9 @@ export const RentalBookingsPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pr-2">
-                <form className="space-y-3" onSubmit={onCustomerSubmit}>
+                <form className="space-y-3" onSubmit={onCustomerSubmit} onChangeCapture={() => setCustomerFormDirty(true)}>
+                  {error ? <CommerceNotice>{error}</CommerceNotice> : null}
+                  {success ? <CommerceNotice tone="success">{success}</CommerceNotice> : null}
                   <div className="rounded-lg border bg-muted/15 p-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                       Precompilazione da scansione documento
@@ -3344,8 +3302,8 @@ export const RentalBookingsPage = () => {
 
                   <div className="grid gap-3 md:grid-cols-4">
                     <div className="space-y-1 md:col-span-2">
-                      <Label>Tipo intestatario</Label>
-                      <Select
+                      <Label htmlFor="booking-field-28">Tipo intestatario</Label>
+                      <Select id="booking-field-28"
                         value={customerForm.customerType}
                         onChange={(event) =>
                           setCustomerForm((state) => ({
@@ -3362,32 +3320,32 @@ export const RentalBookingsPage = () => {
                     {customerForm.customerType === "PERSONA_GIURIDICA" ? (
                       <>
                         <div className="space-y-1 md:col-span-2">
-                          <Label>Ragione sociale *</Label>
-                          <Input
+                          <Label htmlFor="booking-field-29">Ragione sociale *</Label>
+                          <Input id="booking-field-29"
                             value={customerForm.companyName}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyName: e.target.value }))}
                             required
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Forma giuridica</Label>
-                          <Input
+                          <Label htmlFor="booking-field-30">Forma giuridica</Label>
+                          <Input id="booking-field-30"
                             value={customerForm.companyLegalForm}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyLegalForm: e.target.value }))}
                             placeholder="Es. SRL, SPA, SNC"
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Partita IVA *</Label>
-                          <Input
+                          <Label htmlFor="booking-field-31">Partita IVA *</Label>
+                          <Input id="booking-field-31"
                             value={customerForm.companyVatNumber}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyVatNumber: e.target.value }))}
                             required
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Codice fiscale società</Label>
-                          <Input
+                          <Label htmlFor="booking-field-32">Codice fiscale società</Label>
+                          <Input id="booking-field-32"
                             value={customerForm.companyTaxCode}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyTaxCode: e.target.value }))}
                           />
@@ -3411,59 +3369,59 @@ export const RentalBookingsPage = () => {
                           }
                         />
                         <div className="space-y-1">
-                          <Label>Email</Label>
-                          <Input
+                          <Label htmlFor="booking-field-33">Email</Label>
+                          <Input id="booking-field-33"
                             type="email"
                             value={customerForm.email}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, email: e.target.value }))}
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Telefono</Label>
-                          <Input value={customerForm.phone} onChange={(e) => setCustomerForm((s) => ({ ...s, phone: e.target.value }))} />
+                          <Label htmlFor="booking-field-34">Telefono</Label>
+                          <Input id="booking-field-34" value={customerForm.phone} onChange={(e) => setCustomerForm((s) => ({ ...s, phone: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <Label>PEC</Label>
-                          <Input
+                          <Label htmlFor="booking-field-35">PEC</Label>
+                          <Input id="booking-field-35"
                             type="email"
                             value={customerForm.companyPec}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyPec: e.target.value }))}
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Codice SDI</Label>
-                          <Input
+                          <Label htmlFor="booking-field-36">Codice SDI</Label>
+                          <Input id="booking-field-36"
                             value={customerForm.companySdi}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companySdi: e.target.value.toUpperCase() }))}
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>REA</Label>
-                          <Input
+                          <Label htmlFor="booking-field-37">REA</Label>
+                          <Input id="booking-field-37"
                             value={customerForm.companyRea}
                             onChange={(e) => setCustomerForm((s) => ({ ...s, companyRea: e.target.value }))}
                           />
                         </div>
-                        <div className="space-y-1"><Label>Nome legale rappresentante</Label><Input value={customerForm.legalRepFirstName} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepFirstName: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Cognome legale rappresentante</Label><Input value={customerForm.legalRepLastName} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepLastName: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>CF legale rappresentante</Label><Input value={customerForm.legalRepTaxCode} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepTaxCode: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Ruolo legale rappresentante</Label><Input value={customerForm.legalRepRole} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepRole: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Email legale rappresentante</Label><Input type="email" value={customerForm.legalRepEmail} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepEmail: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Telefono legale rappresentante</Label><Input value={customerForm.legalRepPhone} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepPhone: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-38">Nome legale rappresentante</Label><Input id="booking-field-38" value={customerForm.legalRepFirstName} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepFirstName: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-39">Cognome legale rappresentante</Label><Input id="booking-field-39" value={customerForm.legalRepLastName} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepLastName: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-40">CF legale rappresentante</Label><Input id="booking-field-40" value={customerForm.legalRepTaxCode} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepTaxCode: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-41">Ruolo legale rappresentante</Label><Input id="booking-field-41" value={customerForm.legalRepRole} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepRole: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-42">Email legale rappresentante</Label><Input id="booking-field-42" type="email" value={customerForm.legalRepEmail} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepEmail: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-43">Telefono legale rappresentante</Label><Input id="booking-field-43" value={customerForm.legalRepPhone} onChange={(e) => setCustomerForm((s) => ({ ...s, legalRepPhone: e.target.value }))} /></div>
                       </>
                     ) : (
                       <>
-                        <div className="space-y-1"><Label>Nome</Label><Input value={customerForm.firstName} onChange={(e) => setCustomerForm((s) => ({ ...s, firstName: e.target.value }))} required /></div>
-                        <div className="space-y-1"><Label>Cognome</Label><Input value={customerForm.lastName} onChange={(e) => setCustomerForm((s) => ({ ...s, lastName: e.target.value }))} required /></div>
-                        <div className="space-y-1"><Label>Patente numero *</Label><Input value={customerForm.drivingLicenseNumber} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseNumber: e.target.value }))} required /></div>
-                        <div className="space-y-1"><Label>Categoria patente</Label><Input value={customerForm.drivingLicenseCategory} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseCategory: e.target.value }))} placeholder="Es. B, C, C1E" /></div>
-                        <div className="space-y-1"><Label>Rilascio patente</Label><Input type="date" value={customerForm.drivingLicenseIssuedAt} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseIssuedAt: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Scadenza patente</Label><Input type="date" value={customerForm.drivingLicenseExpiresAt} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseExpiresAt: e.target.value }))} /></div>
-                        <div className="space-y-1 md:col-span-2"><Label>Autorità patente</Label><Input value={customerForm.drivingLicenseAuthority} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseAuthority: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Email</Label><Input type="email" value={customerForm.email} onChange={(e) => setCustomerForm((s) => ({ ...s, email: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Telefono</Label><Input value={customerForm.phone} onChange={(e) => setCustomerForm((s) => ({ ...s, phone: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Data nascita</Label><Input type="date" value={customerForm.dateOfBirth} onChange={(e) => setCustomerForm((s) => ({ ...s, dateOfBirth: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Luogo nascita</Label><Input value={customerForm.placeOfBirth} onChange={(e) => setCustomerForm((s) => ({ ...s, placeOfBirth: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-44">Nome</Label><Input id="booking-field-44" value={customerForm.firstName} onChange={(e) => setCustomerForm((s) => ({ ...s, firstName: e.target.value }))} required /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-45">Cognome</Label><Input id="booking-field-45" value={customerForm.lastName} onChange={(e) => setCustomerForm((s) => ({ ...s, lastName: e.target.value }))} required /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-46">Patente numero *</Label><Input id="booking-field-46" value={customerForm.drivingLicenseNumber} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseNumber: e.target.value }))} required /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-47">Categoria patente</Label><Input id="booking-field-47" value={customerForm.drivingLicenseCategory} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseCategory: e.target.value }))} placeholder="Es. B, C, C1E" /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-48">Rilascio patente</Label><Input id="booking-field-48" type="date" value={customerForm.drivingLicenseIssuedAt} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseIssuedAt: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-49">Scadenza patente</Label><Input id="booking-field-49" type="date" value={customerForm.drivingLicenseExpiresAt} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseExpiresAt: e.target.value }))} /></div>
+                        <div className="space-y-1 md:col-span-2"><Label htmlFor="booking-field-50">Autorità patente</Label><Input id="booking-field-50" value={customerForm.drivingLicenseAuthority} onChange={(e) => setCustomerForm((s) => ({ ...s, drivingLicenseAuthority: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-51">Email</Label><Input id="booking-field-51" type="email" value={customerForm.email} onChange={(e) => setCustomerForm((s) => ({ ...s, email: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-52">Telefono</Label><Input id="booking-field-52" value={customerForm.phone} onChange={(e) => setCustomerForm((s) => ({ ...s, phone: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-53">Data nascita</Label><Input id="booking-field-53" type="date" value={customerForm.dateOfBirth} onChange={(e) => setCustomerForm((s) => ({ ...s, dateOfBirth: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-54">Luogo nascita</Label><Input id="booking-field-54" value={customerForm.placeOfBirth} onChange={(e) => setCustomerForm((s) => ({ ...s, placeOfBirth: e.target.value }))} /></div>
                         <div className="space-y-1">
                           <Label>Nazionalità</Label>
                           <CountrySelect
@@ -3477,7 +3435,7 @@ export const RentalBookingsPage = () => {
                             }
                           />
                         </div>
-                        <div className="space-y-1"><Label>Codice fiscale</Label><Input value={customerForm.taxCode} onChange={(e) => setCustomerForm((s) => ({ ...s, taxCode: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-55">Codice fiscale</Label><Input id="booking-field-55" value={customerForm.taxCode} onChange={(e) => setCustomerForm((s) => ({ ...s, taxCode: e.target.value }))} /></div>
                         <CustomerAddressFields
                           idPrefix="booking-customer-residence-address"
                           title="Residenza"
@@ -3496,25 +3454,22 @@ export const RentalBookingsPage = () => {
                             }))
                           }
                         />
-                        <div className="space-y-1"><Label>Documento tipo</Label><Input value={customerForm.documentType} onChange={(e) => setCustomerForm((s) => ({ ...s, documentType: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Documento numero</Label><Input value={customerForm.documentNumber} onChange={(e) => setCustomerForm((s) => ({ ...s, documentNumber: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Rilascio documento</Label><Input type="date" value={customerForm.documentIssuedAt} onChange={(e) => setCustomerForm((s) => ({ ...s, documentIssuedAt: e.target.value }))} /></div>
-                        <div className="space-y-1"><Label>Scadenza documento</Label><Input type="date" value={customerForm.documentExpiresAt} onChange={(e) => setCustomerForm((s) => ({ ...s, documentExpiresAt: e.target.value }))} /></div>
-                        <div className="space-y-1 md:col-span-2"><Label>Autorità rilascio</Label><Input value={customerForm.documentAuthority} onChange={(e) => setCustomerForm((s) => ({ ...s, documentAuthority: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-56">Documento tipo</Label><Input id="booking-field-56" value={customerForm.documentType} onChange={(e) => setCustomerForm((s) => ({ ...s, documentType: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-57">Documento numero</Label><Input id="booking-field-57" value={customerForm.documentNumber} onChange={(e) => setCustomerForm((s) => ({ ...s, documentNumber: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-58">Rilascio documento</Label><Input id="booking-field-58" type="date" value={customerForm.documentIssuedAt} onChange={(e) => setCustomerForm((s) => ({ ...s, documentIssuedAt: e.target.value }))} /></div>
+                        <div className="space-y-1"><Label htmlFor="booking-field-59">Scadenza documento</Label><Input id="booking-field-59" type="date" value={customerForm.documentExpiresAt} onChange={(e) => setCustomerForm((s) => ({ ...s, documentExpiresAt: e.target.value }))} /></div>
+                        <div className="space-y-1 md:col-span-2"><Label htmlFor="booking-field-60">Autorità rilascio</Label><Input id="booking-field-60" value={customerForm.documentAuthority} onChange={(e) => setCustomerForm((s) => ({ ...s, documentAuthority: e.target.value }))} /></div>
                       </>
                     )}
 
-                    <div className="space-y-1 md:col-span-4"><Label>Note</Label><Textarea rows={3} value={customerForm.notes} onChange={(e) => setCustomerForm((s) => ({ ...s, notes: e.target.value }))} /></div>
+                    <div className="space-y-1 md:col-span-4"><Label htmlFor="booking-field-61">Note</Label><Textarea id="booking-field-61" rows={3} value={customerForm.notes} onChange={(e) => setCustomerForm((s) => ({ ...s, notes: e.target.value }))} /></div>
                   </div>
                   <div className="flex items-center justify-end gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => {
-                        setCustomerModalOpen(false);
-                        setCustomerScanFiles([]);
-                        setCustomerScanInfo(null);
-                      }}
+                      disabled={saving}
+                      onClick={requestCloseCustomer}
                     >
                       Annulla
                     </Button>
@@ -3528,215 +3483,12 @@ export const RentalBookingsPage = () => {
         </>
       ) : null}
 
-      {templateModalOpen ? (
-        <>
-          <div className="fixed inset-0 z-[104] bg-black/55 backdrop-blur-sm" onClick={() => setTemplateModalOpen(false)} />
-          <div className="fixed inset-0 z-[105] overflow-y-auto p-4">
-            <div className="mx-auto flex min-h-full w-full max-w-6xl items-center py-4">
-            <Card className="w-full saas-surface">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Template Contratto Default Tenant</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="rounded-lg border bg-muted/10 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Branding documento PDF</p>
-                      <div className="mt-2 grid gap-2 md:grid-cols-2">
-                        <div className="space-y-1 md:col-span-2">
-                          <Label>Logo intestazione</Label>
-                          <Input
-                            type="file"
-                            accept=".png,.jpg,.jpeg,.webp"
-                            disabled={templateLogoUploading}
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (file) void uploadTemplateLogo(file);
-                              event.target.value = "";
-                            }}
-                          />
-                          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>{templateLogoFileName || "Nessun logo caricato"}</span>
-                            {templateLogoPreviewUrl ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="h-7 px-2 text-[11px]"
-                                disabled={templateLogoUploading}
-                                onClick={() => void removeTemplateLogo()}
-                              >
-                                Rimuovi logo
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                        {templateLogoPreviewUrl ? (
-                          <div className="md:col-span-2 rounded-md border bg-white p-2">
-                            <img
-                              src={templateLogoPreviewUrl}
-                              alt="Logo contratto"
-                              className="max-h-16 w-auto object-contain"
-                            />
-                          </div>
-                        ) : null}
-                        <div className="space-y-1">
-                          <Label>Colore primario</Label>
-                          <Input
-                            value={templateEditor.brandPrimary}
-                            onChange={(e) => setTemplateEditor((state) => ({ ...state, brandPrimary: e.target.value }))}
-                            placeholder="#21375d"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Colore accento</Label>
-                          <Input
-                            value={templateEditor.brandAccent}
-                            onChange={(e) => setTemplateEditor((state) => ({ ...state, brandAccent: e.target.value }))}
-                            placeholder="#5d82c2"
-                          />
-                        </div>
-                        <div className="space-y-1 md:col-span-2">
-                          <Label>Font documento</Label>
-                          <Select
-                            value={templateEditor.brandFont}
-                            onChange={(event) => setTemplateEditor((state) => ({ ...state, brandFont: event.target.value }))}
-                          >
-                            <option value="helvetica">Helvetica Modern</option>
-                            <option value="times">Times Classic</option>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label>Nome template</Label>
-                      <Input
-                        value={templateEditor.name}
-                        onChange={(e) => setTemplateEditor((state) => ({ ...state, name: e.target.value }))}
-                      />
-                    </div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <Label>Azienda</Label>
-                        <Input
-                          value={templateEditor.companyName}
-                          onChange={(e) => setTemplateEditor((state) => ({ ...state, companyName: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Partita IVA</Label>
-                        <Input
-                          value={templateEditor.companyVat}
-                          onChange={(e) => setTemplateEditor((state) => ({ ...state, companyVat: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-1 md:col-span-2">
-                        <Label>Indirizzo azienda</Label>
-                        <Input
-                          value={templateEditor.companyAddress}
-                          onChange={(e) => setTemplateEditor((state) => ({ ...state, companyAddress: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Email azienda</Label>
-                        <Input
-                          value={templateEditor.companyEmail}
-                          onChange={(e) => setTemplateEditor((state) => ({ ...state, companyEmail: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Telefono azienda</Label>
-                        <Input
-                          value={templateEditor.companyPhone}
-                          onChange={(e) => setTemplateEditor((state) => ({ ...state, companyPhone: e.target.value }))}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Oggetto email default</Label>
-                      <Input
-                        value={templateEditor.emailSubject}
-                        onChange={(e) => setTemplateEditor((state) => ({ ...state, emailSubject: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Body email default</Label>
-                      <Textarea
-                        rows={5}
-                        value={templateEditor.emailBody}
-                        onChange={(e) => setTemplateEditor((state) => ({ ...state, emailBody: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Contenuto contratto</Label>
-                      <Textarea
-                        rows={12}
-                        value={templateEditor.content}
-                        onChange={(e) => setTemplateEditor((state) => ({ ...state, content: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 rounded-lg border bg-muted/15 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Placeholder supportati</p>
-                    <div className="grid gap-1 text-xs text-muted-foreground">
-                      <code>{`{{booking.code}}`}</code>
-                      <code>{`{{booking.pickupAt}}`}</code>
-                      <code>{`{{booking.returnAt}}`}</code>
-                      <code>{`{{booking.pickupKm}}`}</code>
-                      <code>{`{{booking.returnKm}}`}</code>
-                      <code>{`{{booking.kmDriven}}`}</code>
-                      <code>{`{{customer.firstName}}`}</code>
-                      <code>{`{{customer.lastName}}`}</code>
-                      <code>{`{{customer.type}}`}</code>
-                      <code>{`{{customer.email}}`}</code>
-                      <code>{`{{company.name}}`}</code>
-                      <code>{`{{company.vat}}`}</code>
-                      <code>{`{{company.taxCode}}`}</code>
-                      <code>{`{{company.address}}`}</code>
-                      <code>{`{{company.pec}}`}</code>
-                      <code>{`{{company.sdi}}`}</code>
-                      <code>{`{{company.rea}}`}</code>
-                      <code>{`{{company.legalRepFullName}}`}</code>
-                      <code>{`{{company.legalRepTaxCode}}`}</code>
-                      <code>{`{{vehicle.plate}}`}</code>
-                      <code>{`{{vehicle.brand}}`}</code>
-                      <code>{`{{vehicle.model}}`}</code>
-                      <code>{`{{pricing.expectedTotal}}`}</code>
-                    </div>
-
-                    {templatePreview ? (
-                      <div className="space-y-2 rounded-md border bg-card p-2">
-                        <p className="text-xs font-semibold">Preview render</p>
-                        <p className="text-[11px]"><strong>Subject:</strong> {templatePreview.emailSubject}</p>
-                        <p className="text-[11px] whitespace-pre-wrap">{templatePreview.emailBody}</p>
-                        <p className="text-[11px] whitespace-pre-wrap">{templatePreview.content}</p>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Seleziona una prenotazione e usa “Preview render” per vedere la versione compilata.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setTemplateModalOpen(false)}>
-                    Chiudi
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => void runPreviewTemplate()} disabled={templateSaving || templateLogoUploading}>
-                    Preview render
-                  </Button>
-                  <Button type="button" onClick={() => void runSaveTemplate()} disabled={templateSaving || templateLogoUploading}>
-                    {templateSaving ? "Salvataggio..." : "Salva template"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-            </div>
-          </div>
-        </>
-      ) : null}
+      {cargosPromptBookingId&&!saving?<ContractCargosDialog bookingId={cargosPromptBookingId} onClose={()=>setCargosPromptBookingId(null)} onUpdated={()=>setRefreshKey(value=>value+1)}/>:null}
+      {templateModalOpen?<CommerceDrawer title="Modello contratto aziendale" description="Intestazione, clausole ed email del documento." onClose={requestCloseTemplate} motionRef={templateMotion} busy={templateSaving||templateLogoUploading} level={105} footer={<><Button variant="outline" disabled={templateSaving||templateLogoUploading} onClick={requestCloseTemplate}>Chiudi</Button><Button variant="outline" onClick={()=>void runPreviewTemplate()} disabled={templateLoading||!templateLoaded||!selectedBooking||templateSaving||templateLogoUploading}>Anteprima compilata</Button><Button onClick={()=>void runSaveTemplate()} disabled={templateLoading||!templateLoaded||templateSaving||templateLogoUploading}>{templateSaving?'Salvataggio...':'Salva template'}</Button></>}>
+       {error?<CommerceNotice>{error}</CommerceNotice>:null}{templateLoading?<p role="status">Caricamento modello...</p>:null}{!templateLoading&&!templateLoaded?<Button variant="outline" onClick={()=>void openTemplateModal()}>Riprova caricamento modello</Button>:null}
+       <ContractTemplateEditor value={templateEditor} onChange={patch=>{setTemplateEditor(current=>({...current,...patch}));setTemplateDirty(true)}} busy={templateLoading||!templateLoaded||templateSaving||templateLogoUploading} logoUrl={templateLogoPreviewUrl} logoName={templateLogoFileName} onUpload={file=>void uploadTemplateLogo(file)} onRemove={()=>void removeTemplateLogo()} preview={templatePreview}/>
+      </CommerceDrawer>:null}
+      {templateDiscardOpen?<CommerceDrawer compact level={135} title="Modifiche non salvate" onClose={()=>setTemplateDiscardOpen(false)} footer={<><Button variant="outline" onClick={()=>setTemplateDiscardOpen(false)}>Continua modifica</Button><Button onClick={closeTemplateNow}>Esci senza salvare</Button></>}><p>Le modifiche al testo del modello non sono state salvate. Il logo eventualmente caricato resta salvato.</p></CommerceDrawer>:null}
     </section>
   );
 };

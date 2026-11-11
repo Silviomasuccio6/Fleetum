@@ -1,4 +1,7 @@
-import { useParams } from "react-router-dom";
+import {WorkspacePageHeader} from "../../components/ui/workspace-ui";
+import {CommerceNotice} from "../../components/ui/commerce-workspace";
+import {OperationsGroup,useOperationsAccess,useOperationsTask,OperationFeedback,priorityLabel} from "../../components/operations/operations-workspace";
+import { useParams,useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { stoppageStatusOptions } from "../../../domain/constants/stoppage-status";
 import { Button } from "../../components/ui/button";
@@ -18,21 +21,22 @@ import { FleetumBlockLoader } from "../../components/brand/fleetum-logo-loader";
 export const StoppageDetailPage = () => {
   const { id = "" } = useParams();
   const safeId = id.trim();
+  const {canRead,canWrite}=useOperationsAccess();const task=useOperationsTask();const navigate=useNavigate();const[refreshTick,setRefreshTick]=useState(0);
   const { data, loading, error } = useAsync(
-    () => (safeId ? stoppagesUseCases.getById(safeId) : Promise.reject(new Error("Fermo non valido"))),
-    [safeId]
+    () => (safeId&&canRead ? stoppagesUseCases.getById(safeId) : Promise.reject(new Error("Fermo non valido"))),
+    [safeId,refreshTick,canRead]
   );
-  const events = useAsync(() => (safeId ? stoppagesUseCases.events(safeId) : Promise.resolve({ data: [] } as any)), [safeId]);
+  const events = useAsync(() => (safeId&&canRead ? stoppagesUseCases.events(safeId) : Promise.resolve({ data: [] } as any)), [safeId,refreshTick,canRead]);
   const partsOrders = useAsync(
-    () => (safeId ? stoppagesUseCases.listPartsOrders(safeId) : Promise.resolve({ data: [] } as any)),
-    [safeId]
+    () => (safeId&&canRead ? stoppagesUseCases.listPartsOrders(safeId) : Promise.resolve({ data: [] } as any)),
+    [safeId,refreshTick,canRead]
   );
   const approvals = useAsync(
-    () => (safeId ? stoppagesUseCases.listCostApprovals(safeId) : Promise.resolve({ requests: [], decisions: [] } as any)),
-    [safeId]
+    () => (safeId&&canRead ? stoppagesUseCases.listCostApprovals(safeId) : Promise.resolve({ requests: [], decisions: [] } as any)),
+    [safeId,refreshTick,canRead]
   );
-  const costsVariance = useAsync(() => stoppagesUseCases.costsVariance(), [safeId]);
-  const escalations = useAsync(() => stoppagesUseCases.slaEscalations(), [safeId]);
+  const costsVariance = useAsync(() => canRead?stoppagesUseCases.costsVariance():Promise.resolve({data:[]}), [safeId,refreshTick,canRead]);
+  const escalations = useAsync(() => canRead?stoppagesUseCases.slaEscalations():Promise.resolve({data:[],kpis:{}}), [safeId,refreshTick,canRead]);
   const [nextStatus, setNextStatus] = useState("IN_PROGRESS");
   const [template, setTemplate] = useState<any>(null);
   const [partsForm, setPartsForm] = useState({ description: "", supplier: "", etaDate: "", estimatedCost: "" });
@@ -42,21 +46,19 @@ export const StoppageDetailPage = () => {
   const escalation = (escalations.data?.data ?? []).find((x: any) => x.id === id);
   const variance = (costsVariance.data?.data ?? []).find((x: any) => x.stoppageId === id);
 
+  if(!canRead)return <section className="operations-workspace"><h1>Fermo</h1><p>Il tuo ruolo non consente l’accesso ai fermi.</p></section>;
   if (loading) return <FleetumBlockLoader label="Caricamento fermo" />;
-  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if(error||!data)return <section className="operations-workspace"><CommerceNotice>{error||"Fermo non disponibile."}</CommerceNotice><Button variant="outline" onClick={()=>setRefreshTick(x=>x+1)}>Riprova fermo</Button></section>;
 
   return (
-    <section className="space-y-4">
-      <PageHeader
+    <section className="operations-workspace operations-detail">
+      <WorkspacePageHeader eyebrow="SCHEDA INTERVENTO"
         title={`Dettaglio fermo ${data.vehicle.plate}`}
-        subtitle="Storico completo: stato, timeline eventi, reminder inviati e documentazione foto."
+        description="Stato, costi, ricambi e storico. Il percorso del veicolo fino al ritorno in servizio." actions={<><Button variant="outline" onClick={()=>navigate("/fermi")}>Elenco fermi</Button>{canWrite?<Button onClick={()=>navigate("/fermi/"+encodeURIComponent(safeId)+"/modifica")}>Modifica fermo</Button>:null}</>}
       />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Workflow rapido</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-2 md:grid-cols-[220px_1fr]">
-          <Select value={nextStatus} onChange={(e) => setNextStatus(e.target.value)}>
+      <OperationFeedback error={task.error} success={task.success}/>
+      <OperationsGroup title="Workflow rapido" open={true}><div className="grid gap-2 md:grid-cols-[220px_1fr]">
+          <Select aria-label="Nuovo stato del fermo" disabled={!canWrite||task.busy} value={nextStatus} onChange={(e) => setNextStatus(e.target.value)}>
             {stoppageStatusOptions.map((status) => (
               <option key={status.value} value={status.value}>{status.label}</option>
             ))}
@@ -64,30 +66,30 @@ export const StoppageDetailPage = () => {
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              onClick={async () => {
+              disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{if(!canWrite)return;
                   await stoppagesUseCases.workflowTransition(safeId, { toStatus: nextStatus as any });
-                window.location.reload();
-              }}
+                setRefreshTick(x=>x+1);
+              })}
             >
               Applica transizione
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={async () => {
+              disabled={task.busy||!canRead} onClick={()=>void task.run(async()=>{if(!canRead)return;
                 const res = await stoppagesUseCases.reminderTemplatePreview(safeId, "EMAIL");
                 setTemplate(res.email);
-              }}
+              })}
             >
               Preview template email
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={async () => {
+              disabled={task.busy||!canRead} onClick={()=>void task.run(async()=>{if(!canRead)return;
                 const res = await stoppagesUseCases.reminderTemplatePreview(safeId, "WHATSAPP");
                 setTemplate({ subject: "WhatsApp", body: res.whatsapp.message });
-              }}
+              })}
             >
               Preview template WhatsApp
             </Button>
@@ -98,8 +100,7 @@ export const StoppageDetailPage = () => {
               <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{template.body}</pre>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+        </div></OperationsGroup>
 
       <Card>
         <CardContent className="grid gap-3 pt-6 md:grid-cols-2">
@@ -108,24 +109,21 @@ export const StoppageDetailPage = () => {
           <p><b>Sede:</b> {data.site.name}</p>
           <p><b>Officina:</b> {data.workshop.name}</p>
           <p><b>Stato:</b> <StoppageStatusBadge status={data.status} /></p>
-          <p><b>Priorita:</b> {data.priority || "-"}</p>
-          <p><b>Assegnato a:</b> {data.assignedToUserId || "-"}</p>
+          <p><b>Priorita:</b> {priorityLabel[data.priority]||data.priority||"—"}</p>
+          <p><b>Assegnato a:</b> {data.assignedToUser?`${data.assignedToUser.firstName} ${data.assignedToUser.lastName}`:data.assignedToUserId||"Non assegnato"}</p>
           <p><b>Motivo:</b> {data.reason}</p>
-          <p><b>Costo stimato/giorno:</b> {data.estimatedCostPerDay ? `€ ${data.estimatedCostPerDay}` : "-"}</p>
+          <p><b>Costo stimato/giorno:</b> {data.estimatedCostPerDay!=null ? `€ ${data.estimatedCostPerDay}` : "-"}</p>
           <p className="md:col-span-2"><b>Note:</b> {data.notes || "-"}</p>
         </CardContent>
       </Card>
 
+      {[events.error,partsOrders.error,approvals.error,costsVariance.error,escalations.error].filter(Boolean).map((message,index)=><CommerceNotice key={index}>{message}</CommerceNotice>)}
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Approvazioni costo</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <OperationsGroup title="Approvazioni costo" open={false}><div className="space-y-3">
             <div className="grid gap-2 md:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label>Importo da approvare (€)</Label>
-                <Input
+                <Label htmlFor="stoppage-detail-1">Importo da approvare (€)</Label>
+                <Input id="stoppage-detail-1"
                   type="number"
                   min={0}
                   value={approvalForm.estimatedTotalCost}
@@ -133,55 +131,58 @@ export const StoppageDetailPage = () => {
                 />
               </div>
               <div className="grid gap-1.5 md:col-span-2">
-                <Label>Motivo</Label>
-                <Textarea value={approvalForm.reason} onChange={(e) => setApprovalForm((s) => ({ ...s, reason: e.target.value }))} />
+                <Label htmlFor="stoppage-detail-2">Motivo</Label>
+                <Textarea id="stoppage-detail-2" value={approvalForm.reason} onChange={(e) => setApprovalForm((s) => ({ ...s, reason: e.target.value }))} />
               </div>
               <div className="grid gap-1.5 md:col-span-2">
-                <Label>Note</Label>
-                <Textarea value={approvalForm.note} onChange={(e) => setApprovalForm((s) => ({ ...s, note: e.target.value }))} />
+                <Label htmlFor="stoppage-detail-3">Note</Label>
+                <Textarea id="stoppage-detail-3" value={approvalForm.note} onChange={(e) => setApprovalForm((s) => ({ ...s, note: e.target.value }))} />
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                onClick={async () => {
+                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                  const notificationScope = snackbar.capture();if(!canWrite)return;
                   await stoppagesUseCases.requestCostApproval(safeId, {
                     estimatedTotalCost: Number(approvalForm.estimatedTotalCost || 0),
                     reason: approvalForm.reason,
                     note: approvalForm.note || undefined
                   });
-                  snackbar.success("Richiesta approvazione inviata.");
-                  window.location.reload();
-                }}
+                  snackbar.success("Richiesta approvazione inviata.", {scope: notificationScope});
+                  setRefreshTick(x=>x+1);
+                })}
               >
                 Richiedi approvazione
               </Button>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={async () => {
+                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                  const notificationScope = snackbar.capture();if(!canWrite)return;
                   await stoppagesUseCases.decideCostApproval(safeId, {
                     approved: true,
                     approvedCost: Number(approvalForm.estimatedTotalCost || 0),
                     reason: approvalForm.note || "Approvato"
                   });
-                  snackbar.success("Costo approvato.");
-                  window.location.reload();
-                }}
+                  snackbar.success("Costo approvato.", {scope: notificationScope});
+                  setRefreshTick(x=>x+1);
+                })}
               >
                 Approva
               </Button>
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={async () => {
+                disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                  const notificationScope = snackbar.capture();if(!canWrite)return;
                   await stoppagesUseCases.decideCostApproval(safeId, {
                     approved: false,
                     reason: approvalForm.note || "Rifiutato"
                   });
-                  snackbar.success("Approvazione rifiutata.");
-                  window.location.reload();
-                }}
+                  snackbar.success("Approvazione rifiutata.", {scope: notificationScope});
+                  setRefreshTick(x=>x+1);
+                })}
               >
                 Rifiuta
               </Button>
@@ -200,14 +201,9 @@ export const StoppageDetailPage = () => {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div></OperationsGroup>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Costi e scostamento</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <OperationsGroup title="Costi e scostamento" open={false}><div className="space-y-3">
             <div className="grid grid-cols-2 gap-2 text-sm">
               <p><b>Stimato:</b> {variance ? `€ ${variance.estimated}` : "-"}</p>
               <p><b>Consuntivo:</b> {variance ? `€ ${variance.actual}` : "-"}</p>
@@ -215,16 +211,17 @@ export const StoppageDetailPage = () => {
               <p><b>Scost. %:</b> {variance ? `${variance.varianceRate}%` : "-"}</p>
             </div>
             <div className="grid gap-1.5">
-              <Label>Imposta costo consuntivo (€)</Label>
-              <Input type="number" min={0} value={finalCost} onChange={(e) => setFinalCost(e.target.value)} />
+              <Label htmlFor="stoppage-detail-4">Imposta costo consuntivo (€)</Label>
+              <Input id="stoppage-detail-4" type="number" min={0} value={finalCost} onChange={(e) => setFinalCost(e.target.value)} />
             </div>
             <Button
               size="sm"
-              onClick={async () => {
+              disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+                const notificationScope = snackbar.capture();if(!canWrite)return;
                 await stoppagesUseCases.setFinalCost(safeId, Number(finalCost || 0));
-                snackbar.success("Costo consuntivo salvato.");
-                window.location.reload();
-              }}
+                snackbar.success("Costo consuntivo salvato.", {scope: notificationScope});
+                setRefreshTick(x=>x+1);
+              })}
             >
               Salva consuntivo
             </Button>
@@ -235,15 +232,10 @@ export const StoppageDetailPage = () => {
             ) : (
               <p className="text-xs text-muted-foreground">Nessuna escalation SLA attiva su questo fermo.</p>
             )}
-          </CardContent>
-        </Card>
+          </div></OperationsGroup>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Timeline eventi</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <OperationsGroup title="Timeline eventi" open={false}><div className="">
           <ul className="space-y-2 text-sm">
             {(events.data?.data ?? []).map((event: any) => (
               <li key={event.id} className="rounded-md border p-2">
@@ -252,44 +244,40 @@ export const StoppageDetailPage = () => {
               </li>
             ))}
           </ul>
-        </CardContent>
-      </Card>
+        </div></OperationsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Ordini ricambi</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <OperationsGroup title="Ordini ricambi" open={false}><div className="space-y-3">
           <div className="grid gap-2 md:grid-cols-2">
             <div className="grid gap-1.5 md:col-span-2">
-              <Label>Descrizione</Label>
-              <Input value={partsForm.description} onChange={(e) => setPartsForm((s) => ({ ...s, description: e.target.value }))} />
+              <Label htmlFor="stoppage-detail-5">Descrizione</Label>
+              <Input id="stoppage-detail-5" value={partsForm.description} onChange={(e) => setPartsForm((s) => ({ ...s, description: e.target.value }))} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Fornitore</Label>
-              <Input value={partsForm.supplier} onChange={(e) => setPartsForm((s) => ({ ...s, supplier: e.target.value }))} />
+              <Label htmlFor="stoppage-detail-6">Fornitore</Label>
+              <Input id="stoppage-detail-6" value={partsForm.supplier} onChange={(e) => setPartsForm((s) => ({ ...s, supplier: e.target.value }))} />
             </div>
             <div className="grid gap-1.5">
-              <Label>ETA</Label>
-              <Input type="date" value={partsForm.etaDate} onChange={(e) => setPartsForm((s) => ({ ...s, etaDate: e.target.value }))} />
+              <Label htmlFor="stoppage-detail-7">ETA</Label>
+              <Input id="stoppage-detail-7" type="date" value={partsForm.etaDate} onChange={(e) => setPartsForm((s) => ({ ...s, etaDate: e.target.value }))} />
             </div>
             <div className="grid gap-1.5">
-              <Label>Costo stimato (€)</Label>
-              <Input type="number" min={0} value={partsForm.estimatedCost} onChange={(e) => setPartsForm((s) => ({ ...s, estimatedCost: e.target.value }))} />
+              <Label htmlFor="stoppage-detail-8">Costo stimato (€)</Label>
+              <Input id="stoppage-detail-8" type="number" min={0} value={partsForm.estimatedCost} onChange={(e) => setPartsForm((s) => ({ ...s, estimatedCost: e.target.value }))} />
             </div>
           </div>
           <Button
             size="sm"
-            onClick={async () => {
+            disabled={task.busy||!canWrite} onClick={()=>void task.run(async()=>{
+              const notificationScope = snackbar.capture();if(!canWrite)return;
               await stoppagesUseCases.addPartsOrder(safeId, {
                 description: partsForm.description,
                 supplier: partsForm.supplier || undefined,
                 etaDate: partsForm.etaDate || undefined,
                 estimatedCost: Number(partsForm.estimatedCost || 0) || undefined
               });
-              snackbar.success("Ordine ricambio registrato.");
-              window.location.reload();
-            }}
+              snackbar.success("Ordine ricambio registrato.", {scope: notificationScope});
+              setRefreshTick(x=>x+1);
+            })}
           >
             Aggiungi ordine ricambio
           </Button>
@@ -306,14 +294,9 @@ export const StoppageDetailPage = () => {
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div></OperationsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Storico reminder</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <OperationsGroup title="Storico reminder" open={false}><div className="">
           <ul className="space-y-2 text-sm">
             {(data.reminders || []).map((r: any) => (
               <li key={r.id} className="rounded-md border p-2">
@@ -321,14 +304,9 @@ export const StoppageDetailPage = () => {
               </li>
             ))}
           </ul>
-        </CardContent>
-      </Card>
+        </div></OperationsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Foto</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <OperationsGroup title="Foto" open={false}><div className="">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {(data.photos || []).map((p: any) => (
               <AuthenticatedPhoto
@@ -340,8 +318,7 @@ export const StoppageDetailPage = () => {
               />
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div></OperationsGroup>
     </section>
   );
 };

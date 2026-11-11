@@ -1,0 +1,6 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {assertSyntheticDatabase} from "./helpers/synthetic-database.js";
+const env={NODE_ENV:"test",RUN_TENANT_ISOLATION_TESTS:"1",DOTENV_CONFIG_PATH:"/dev/null",DATABASE_URL:"postgresql://fleetum:synthetic@127.0.0.1:5433/fleetum_ci",UPLOAD_DIR:"/tmp/fleetum-ci-uploads.ABCDef12"};
+test("persistent test guard allows a named disposable CI target and a dedicated laboratory",()=>{assert.equal(assertSyntheticDatabase(undefined,env).ci,true);assert.equal(assertSyntheticDatabase({user:"fleetum_e02",database:"fleetum_e02_test",port:"61520"},{...env,DATABASE_URL:"postgresql://fleetum_e02:synthetic@127.0.0.1:61520/fleetum_e02_test"}).ci,false);});
+test("persistent test guard rejects remote, ordinary, unopted and unsafe storage targets",()=>{for(const change of [{NODE_ENV:"production"},{RUN_TENANT_ISOLATION_TESTS:"0"},{DOTENV_CONFIG_PATH:".env"},{DATABASE_URL:"postgresql://fleetum:synthetic@db.example.invalid:5433/fleetum_ci"},{DATABASE_URL:"postgresql://fleetum:synthetic@127.0.0.1:5433/fleetum"},{DATABASE_URL:"postgresql://fleetum:synthetic@127.0.0.1:5433/fleetum_ci?host=elsewhere"},{UPLOAD_DIR:"/Users/silvio/Documents"}])assert.throws(()=>assertSyntheticDatabase(undefined,{...env,...change}));});

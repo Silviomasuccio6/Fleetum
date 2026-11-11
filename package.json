@@ -32,21 +32,24 @@
     "test:operations": "node --test --test-concurrency=1 ops/tests/*.test.mjs",
     "verify:migration-compatibility": "bash ops/verify-migration-compatibility.sh",
     "verify:restore-recovery": "node ops/verify-restore-recovery.mjs",
-    "verify:staging-bootstrap": "bash ops/verify-staging-bootstrap.sh"
+    "verify:staging-bootstrap": "bash ops/verify-staging-bootstrap.sh",
+    "dev:ui-preview": "node ops/ui-preview.mjs",
+    "verify:ui-booking": "node ops/verify-ui-booking.mjs"
   },
   "overrides": {
-    "body-parser": "1.20.8",
+    "body-parser": "1.20.9",
     "deepmerge-ts": "8.0.2",
     "esbuild": "0.28.1",
-    "follow-redirects": "^1.16.0",
+    "follow-redirects": "1.16.2",
     "proxy-addr": "2.0.8",
-    "qs": "6.16.0",
+    "qs": "6.16.1",
     "uuid": "11.1.1",
     "sharp": "0.35.5",
     "postcss-selector-parser": "7.1.6",
     "source-map-js": "1.2.2",
     "shell-quote": "1.11.0",
-    "braces": "$braces"
+    "braces": "$braces",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

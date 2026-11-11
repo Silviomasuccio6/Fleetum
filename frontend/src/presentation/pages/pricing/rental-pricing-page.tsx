@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   RentalExtraKmPolicy,
   RentalPriceList,
@@ -8,6 +9,11 @@ import {
 } from "../../../application/usecases/rental-bookings-usecases";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
+import { parseTiers, validatePricing } from "../../components/pricing/pricing-validation";
+import { useAuthStore } from "../../../application/stores/auth-store";
+import { CommerceDrawer,CommerceCollection,CommerceField,CommerceNotice } from "../../components/ui/commerce-workspace";
+import { WorkspacePageHeader } from "../../components/ui/workspace-ui";
+import type { PanelMotionHandle } from "../../components/ui/panel-motion";
 import { PageHeader } from "../../components/layout/page-header";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -108,36 +114,7 @@ const toDateInput = (value?: string | null) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
-};
-
-const parseTiers = (raw: string) => {
-  const rows = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  return rows.map((row, idx) => {
-    const cleaned = row.replace(/\s+/g, "");
-    const [range, ratePart] = cleaned.includes(":") ? cleaned.split(":") : cleaned.split("=");
-    if (!range || !ratePart) throw new Error(`Formato scaglione non valido alla riga ${idx + 1}. Usa 1-100:0.40`);
-
-    const [fromRaw, toRaw] = range.split("-");
-    const fromKm = Number(fromRaw);
-    if (!Number.isFinite(fromKm) || fromKm < 1) throw new Error(`fromKm non valido alla riga ${idx + 1}`);
-
-    const toKm = toRaw === "*" || toRaw === undefined ? null : Number(toRaw);
-    if (toKm !== null && (!Number.isFinite(toKm) || toKm < fromKm)) {
-      throw new Error(`toKm non valido alla riga ${idx + 1}`);
-    }
-
-    const ratePerKm = Number(ratePart.replace(",", "."));
-    if (!Number.isFinite(ratePerKm) || ratePerKm < 0) {
-      throw new Error(`ratePerKm non valido alla riga ${idx + 1}`);
-    }
-
-    return { fromKm, toKm, ratePerKm, sortOrder: idx };
-  });
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 };
 
 const scopeLabel: Record<RentalPricingScope, string> = {
@@ -164,9 +141,28 @@ export const RentalPricingPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const permissions=useAuthStore(state=>state.user?.permissions)??[];
+  const has=(permission:string)=>permissions.includes('*')||permissions.includes(permission);
+  const canRead=has('vehicles:read'),canWrite=has('vehicles:write'),canReadSites=has('sites:read');
+  const listSequence=useRef(0),detailsSequence=useRef(0),selectedRef=useRef<string|null>(null),panelMotion=useRef<PanelMotionHandle|null>(null),panelOrigin=useRef<HTMLElement|null>(null),errorRef=useRef<HTMLDivElement>(null),pendingOperation=useRef<()=>void>(()=>{});
+  selectedRef.current=selectedListId;
+  const [editorOpen,setEditorOpen]=useState(false),[editorTab,setEditorTab]=useState<'list'|'package'|'policy'>('list');
+  const [detailsLoading,setDetailsLoading]=useState(false),[detailsError,setDetailsError]=useState<string|null>(null),[masterError,setMasterError]=useState<string|null>(null);
+  const [dirty,setDirty]=useState({list:false,package:false,policy:false}),[discardOpen,setDiscardOpen]=useState(false),[validation,setValidation]=useState<Record<string,string>>({});
+  const [deletion,setDeletion]=useState<{kind:'list'|'package'|'policy';item:any}|null>(null);
+  const guardChange=(action:()=>void,kind?:'list'|'package'|'policy')=>{if(saving)return;if(kind?dirty[kind]:Object.values(dirty).some(Boolean)){pendingOperation.current=action;setDiscardOpen(true)}else action()};
+  const validate=(kind:'list'|'package'|'policy',form:object)=>{const errors=validatePricing(kind,form);setValidation(old=>({...Object.fromEntries(Object.entries(old).filter(([key])=>!key.startsWith(kind+'.'))),...Object.fromEntries(Object.entries(errors).map(([key,value])=>[kind+'.'+key,value]))}));if(Object.keys(errors).length){setError('Controlla i campi indicati prima di salvare.');return false}return true};
+  const markChanged=(kind:'list'|'package'|'policy')=>setDirty(old=>({...old,[kind]:true}));
+  const clearDirty=(kind:'list'|'package'|'policy')=>setDirty(old=>({...old,[kind]:false}));
+  useEffect(()=>{if(editorOpen&&(error||Object.keys(validation).length))errorRef.current?.focus()},[editorOpen,error,validation]);
+  useEffect(()=>{if(!Object.values(dirty).some(Boolean))return;const protect=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',protect);return()=>window.removeEventListener('beforeunload',protect)},[dirty]);
+  const closeEditor=()=>{if(saving)return;guardChange(()=>{setDirty({list:false,package:false,policy:false});const done=()=>{setEditorOpen(false);setError(null);setValidation({})};if(panelMotion.current)panelMotion.current.dismiss(done);else done()})};
+  const newList=()=>{if(!canWrite||saving)return;selectedRef.current=null;detailsSequence.current++;setSelectedListId(null);setListForm(defaultListForm());setPackageForm(defaultPackageForm());setPolicyForm(defaultPolicyForm());setPackages([]);setPolicies([]);setValidation({});setError(null);setDetailsError(null);setDirty({list:false,package:false,policy:false});panelOrigin.current=null;setEditorTab('list');setEditorOpen(true)};
+
   const selectedList = useMemo(() => lists.find((list) => list.id === selectedListId) ?? null, [lists, selectedListId]);
 
   const loadLists = async () => {
+    if(!canRead)return;const sequence=++listSequence.current;
     setLoading(true);
     setError(null);
     try {
@@ -176,51 +172,48 @@ export const RentalPricingPage = () => {
         search: search || undefined,
         isActive: statusFilter === "all" ? undefined : statusFilter === "active" ? "true" : "false"
       });
+      if(sequence!==listSequence.current)return;
       setLists(response.data ?? []);
     } catch (e) {
-      setError((e as Error).message);
+      if(sequence===listSequence.current)setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if(sequence===listSequence.current)setLoading(false);
     }
   };
 
   const loadMasterData = async () => {
-    const [sitesRes, vehiclesRes] = await Promise.all([
-      masterDataUseCases.listSites({ page: 1, pageSize: 300 }),
-      masterDataUseCases.listVehicles({ page: 1, pageSize: 800 })
-    ]);
-    setSites((sitesRes.data as Site[]) ?? []);
-    setVehicles((vehiclesRes.data as Vehicle[]) ?? []);
+    if(!canRead)return;setMasterError(null);
+    try{const [sitesRes,vehiclesRes]=await Promise.all([canReadSites?masterDataUseCases.listSites({page:1,pageSize:300}):Promise.resolve({data:[]}),masterDataUseCases.listVehicles({page:1,pageSize:800})]);setSites((sitesRes.data as Site[])??[]);setVehicles((vehiclesRes.data as Vehicle[])??[])}catch(e){setMasterError((e as Error).message)}
   };
-
-  const loadListDetails = async (listId: string) => {
-    const [pkgRes, policyRes] = await Promise.all([
-      rentalBookingsUseCases.listPricePackages(listId),
-      rentalBookingsUseCases.listExtraKmPolicies({ priceListId: listId })
-    ]);
-    setPackages(pkgRes.data ?? []);
-    setPolicies(policyRes.data ?? []);
+  const loadListDetails = async (listId:string) => {
+    if(!canRead)return;const sequence=++detailsSequence.current;setDetailsLoading(true);setDetailsError(null);
+    try{const [pkgRes,policyRes]=await Promise.all([rentalBookingsUseCases.listPricePackages(listId),rentalBookingsUseCases.listExtraKmPolicies({priceListId:listId})]);if(sequence!==detailsSequence.current||selectedRef.current!==listId)return;setPackages(pkgRes.data??[]);setPolicies(policyRes.data??[]);setLists(current=>current.map(list=>list.id===listId?{...list,_count:list._count?{...list._count,packages:(pkgRes.data??[]).length,extraKmPolicies:(policyRes.data??[]).length}:undefined}:list))}catch(e){if(sequence===detailsSequence.current&&selectedRef.current===listId)setDetailsError((e as Error).message)}finally{if(sequence===detailsSequence.current)setDetailsLoading(false)}
   };
 
   useEffect(() => {
     void loadMasterData();
-  }, []);
+  }, [canRead,canReadSites]);
 
   useEffect(() => {
     void loadLists();
-  }, [search, statusFilter]);
+    return()=>{listSequence.current++};
+  }, [search, statusFilter,canRead]);
 
   useEffect(() => {
     if (!selectedListId) {
+      detailsSequence.current++;
       setPackages([]);
       setPolicies([]);
       return;
     }
     void loadListDetails(selectedListId);
-  }, [selectedListId]);
+    return()=>{detailsSequence.current++};
+  }, [selectedListId,canRead]);
 
-  const selectList = (list: RentalPriceList) => {
+  const selectList = (list: RentalPriceList,origin?:HTMLElement) => {
+    if(saving)return;selectedRef.current=list.id;detailsSequence.current++;panelOrigin.current=origin??null;setPackages([]);setPolicies([]);setDetailsError(null);setError(null);setValidation({});setDirty({list:false,package:false,policy:false});setEditorTab("list");setEditorOpen(true);
     setSelectedListId(list.id);
+    if(selectedListId===list.id)void loadListDetails(list.id);
     setListForm({
       id: list.id,
       name: list.name,
@@ -244,7 +237,9 @@ export const RentalPricingPage = () => {
   };
 
   const saveList = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
+    if(!canWrite||saving||!validate("list",listForm))return;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -274,13 +269,14 @@ export const RentalPricingPage = () => {
 
       if (listForm.id) {
         await rentalBookingsUseCases.updatePriceList(listForm.id, payload);
-        setSuccess("Listino aggiornato.");
+        publishOperationFeedback(setSuccess, "Listino aggiornato.", notificationScope);
       } else {
         const created = await rentalBookingsUseCases.createPriceList(payload);
-        setSuccess("Listino creato.");
-        setSelectedListId(created.id);
+        publishOperationFeedback(setSuccess, "Listino creato.", notificationScope);
+        setSelectedListId(created.id);selectedRef.current=created.id;setListForm(previous=>({...previous,id:created.id}));
       }
 
+      clearDirty("list");
       await loadLists();
       if (selectedListId) await loadListDetails(selectedListId);
     } catch (e) {
@@ -291,6 +287,8 @@ export const RentalPricingPage = () => {
   };
 
   const duplicateList = async (list: RentalPriceList) => {
+    const notificationScope=captureOperationContext();
+    if(!canWrite||saving)return false;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -353,55 +351,64 @@ export const RentalPricingPage = () => {
       }
 
       await loadLists();
-      setSelectedListId(created.id);
+      setStatusFilter("all");selectList(created);
       await loadListDetails(created.id);
-      setSuccess("Listino duplicato.");
+      publishOperationFeedback(setSuccess, "Listino duplicato.", notificationScope);
+      return true;
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message);return false;
     } finally {
       setSaving(false);
     }
   };
 
   const toggleListStatus = async (list: RentalPriceList) => {
+    const notificationScope=captureOperationContext();
+    if(!canWrite||saving)return false;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.updatePriceList(list.id, { isActive: !list.isActive });
       await loadLists();
-      setSuccess(`Listino ${list.isActive ? "disattivato" : "attivato"}.`);
+      publishOperationFeedback(setSuccess, `Listino ${list.isActive ? "disattivato" : "attivato"}.`, notificationScope);
+      return true;
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message);return false;
     } finally {
       setSaving(false);
     }
   };
 
   const removeList = async (list: RentalPriceList) => {
-    if (!window.confirm(`Eliminare il listino ${list.name}?`)) return;
+    const notificationScope=captureOperationContext();
+    if(!canWrite||saving)return false;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.deletePriceList(list.id);
       if (selectedListId === list.id) {
+        selectedRef.current=null;detailsSequence.current++;setEditorOpen(false);setDirty({list:false,package:false,policy:false});
         setSelectedListId(null);
         setListForm(defaultListForm());
         setPackages([]);
         setPolicies([]);
       }
       await loadLists();
-      setSuccess("Listino eliminato.");
+      publishOperationFeedback(setSuccess, "Listino eliminato.", notificationScope);
+      return true;
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message);return false;
     } finally {
       setSaving(false);
     }
   };
 
   const savePackage = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
+    if(!canWrite||saving||detailsLoading||detailsError||!validate("package",packageForm))return;
     if (!selectedListId) return;
     setSaving(true);
     setError(null);
@@ -425,12 +432,13 @@ export const RentalPricingPage = () => {
 
       if (packageForm.id) {
         await rentalBookingsUseCases.updatePricePackage(packageForm.id, payload);
-        setSuccess("Pacchetto aggiornato.");
+        publishOperationFeedback(setSuccess, "Pacchetto aggiornato.", notificationScope);
       } else {
         await rentalBookingsUseCases.createPricePackage(selectedListId, payload);
-        setSuccess("Pacchetto creato.");
+        publishOperationFeedback(setSuccess, "Pacchetto creato.", notificationScope);
       }
 
+      clearDirty("package");
       await loadListDetails(selectedListId);
       setPackageForm(defaultPackageForm());
     } catch (e) {
@@ -441,7 +449,9 @@ export const RentalPricingPage = () => {
   };
 
   const savePolicy = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
+    if(!canWrite||saving||detailsLoading||detailsError||!validate("policy",policyForm))return;
     if (!selectedListId) return;
     setSaving(true);
     setError(null);
@@ -469,12 +479,13 @@ export const RentalPricingPage = () => {
 
       if (policyForm.id) {
         await rentalBookingsUseCases.updateExtraKmPolicy(policyForm.id, payload);
-        setSuccess("Tariffario km extra aggiornato.");
+        publishOperationFeedback(setSuccess, "Tariffario km extra aggiornato.", notificationScope);
       } else {
         await rentalBookingsUseCases.createExtraKmPolicy({ priceListId: selectedListId, ...payload });
-        setSuccess("Tariffario km extra creato.");
+        publishOperationFeedback(setSuccess, "Tariffario km extra creato.", notificationScope);
       }
 
+      clearDirty("policy");
       await loadListDetails(selectedListId);
       setPolicyForm(defaultPolicyForm());
     } catch (e) {
@@ -515,230 +526,171 @@ export const RentalPricingPage = () => {
   };
 
   const deletePackage = async (pkg: RentalPricePackage) => {
-    if (!window.confirm(`Eliminare il pacchetto ${pkg.name}?`)) return;
+    const notificationScope=captureOperationContext();
+    if(!canWrite||saving)return false;
     if (!selectedListId) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.deletePricePackage(pkg.id);
+      if(packageForm.id===pkg.id){setPackageForm(defaultPackageForm());clearDirty("package");}
       await loadListDetails(selectedListId);
-      setSuccess("Pacchetto eliminato.");
+      publishOperationFeedback(setSuccess, "Pacchetto eliminato.", notificationScope);
+      return true;
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message);return false;
     } finally {
       setSaving(false);
     }
   };
 
   const deletePolicy = async (policy: RentalExtraKmPolicy) => {
-    if (!window.confirm(`Eliminare il tariffario ${policy.name}?`)) return;
+    const notificationScope=captureOperationContext();
+    if(!canWrite||saving)return false;
     if (!selectedListId) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await rentalBookingsUseCases.deleteExtraKmPolicy(policy.id);
+      if(policyForm.id===policy.id){setPolicyForm(defaultPolicyForm());clearDirty("policy");}
       await loadListDetails(selectedListId);
-      setSuccess("Tariffario km extra eliminato.");
+      publishOperationFeedback(setSuccess, "Tariffario km extra eliminato.", notificationScope);
+      return true;
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message);return false;
     } finally {
       setSaving(false);
     }
   };
 
+  const fieldErrors=Object.entries(validation).filter(([key])=>key.startsWith(editorTab+'.'));
+  const submitLabel=editorTab==='list'?(listForm.id?'Aggiorna listino':'Crea listino'):editorTab==='package'?(packageForm.id?'Aggiorna pacchetto':'Aggiungi pacchetto'):(policyForm.id?'Aggiorna tariffario':'Aggiungi tariffario');
+  const actions=(list:RentalPriceList)=><div className="commerce-row-actions"><Button variant="outline" onClick={event=>selectList(list,event.currentTarget)} disabled={saving} aria-label={`Apri listino ${list.name}`} aria-haspopup="dialog">Dettagli</Button>{canWrite?<><Button variant="ghost" onClick={()=>void duplicateList(list)} disabled={saving}>Duplica</Button><Button variant="ghost" onClick={()=>void toggleListStatus(list)} disabled={saving}>{list.isActive?'Disattiva':'Attiva'}</Button><Button variant="ghost" className="commerce-remove" onClick={()=>{setError(null);setDeletion({kind:'list',item:list})}} disabled={saving}>Elimina</Button></>:null}</div>;
+  const columns=[
+   {key:'name',label:'Listino',render:(list:RentalPriceList)=><><button className="commerce-name" onClick={event=>selectList(list,event.currentTarget)} aria-haspopup="dialog" aria-expanded={editorOpen&&selectedListId===list.id}><strong data-panel-origin-title translate="no">{list.name}</strong></button><small translate="no">{list.description||'—'}</small></>},
+   {key:'scope',label:'Ambito',render:(list:RentalPriceList)=><>{scopeLabel[list.scope]}<small>{list.scope==='SITE'?list.site?.name:list.scope==='VEHICLE'?list.vehicle?.plate:list.scope==='VEHICLE_CATEGORY'?list.vehicleCategory:null}</small></>},
+   {key:'rate',label:'Tariffa base',render:(list:RentalPriceList)=><><strong>{list.baseRateAmount.toFixed(2)} €</strong><small>{{DAILY:'Giornaliera',WEEKLY:'Settimanale',MONTHLY:'Mensile'}[list.baseRateUnit]}</small></>},
+   {key:'tax',label:'IVA e sconto',render:(list:RentalPriceList)=><>{list.vatRate}% IVA<small>Sconto {list.discountPercent}%</small></>},
+   {key:'status',label:'Stato',render:(list:RentalPriceList)=><span className="commerce-status">{list.isActive?'Attivo':'Non attivo'}</span>},
+   {key:'setup',label:'Configurazione',render:(list:RentalPriceList)=><><span>Pacchetti: {list._count?.packages??'—'}</span><small>Tariffe extra: {list._count?.extraKmPolicies??'—'}</small></>},
+   {key:'actions',label:'Azioni',render:actions}
+  ];
+  const confirmDelete=async()=>{if(!deletion||saving||!canWrite)return;const ok=deletion.kind==='list'?await removeList(deletion.item):deletion.kind==='package'?await deletePackage(deletion.item):await deletePolicy(deletion.item);if(ok)setDeletion(null)};
+  if(!canRead)return <section className="pricing-workspace commerce-workspace"><h1>Listini</h1><p>Il tuo ruolo non consente l’accesso ai listini.</p></section>;
   return (
-    <section className="space-y-3">
-      <PageHeader
-        title="Listini Noleggi"
-        subtitle="Configura tariffa base, pacchetti km (100km, illimitati) e tariffari km extra per booking e contratti."
-      />
+   <section className="pricing-workspace commerce-workspace" aria-label="Gestione listini">
+    <WorkspacePageHeader eyebrow="LE TUE TARIFFE" title="Listini" description="Tariffe, pacchetti e chilometri extra. Le condizioni del noleggio, organizzate insieme." actions={canWrite?<Button onClick={()=>guardChange(newList)}>Nuovo listino</Button>:undefined}/>
+    {!editorOpen&&error?<CommerceNotice>{error}</CommerceNotice>:null}{success?<CommerceNotice tone="success">{success}</CommerceNotice>:null}
+    <section className="commerce-panel" aria-labelledby="pricing-list-title"><header className="commerce-panel-header"><div><h2 id="pricing-list-title">I tuoi listini <span>{loading?'—':lists.length}</span></h2><p>Fino a 200 listini per ricerca · condizioni separate dalle prenotazioni già concordate</p></div><Button variant="ghost" aria-label="Aggiorna listini" disabled={loading||saving} onClick={()=>void loadLists()}>Aggiorna</Button></header>
+     <div className="commerce-filters pricing-filters"><div><Label htmlFor="pricing-search">Cerca un listino</Label><Input id="pricing-search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Nome o descrizione"/></div><div><Label htmlFor="pricing-status">Stato listino</Label><Select id="pricing-status" value={statusFilter} onChange={event=>setStatusFilter(event.target.value as typeof statusFilter)}><option value="active">Solo attivi</option><option value="inactive">Solo non attivi</option><option value="all">Tutti</option></Select></div></div>
+     <div aria-busy={loading}>{loading?<div className="commerce-empty"><FleetumInlineLoader label="Caricamento listini"/></div>:error&&!lists.length?<div className="commerce-empty"><p>Listini non disponibili.</p><Button variant="outline" onClick={()=>void loadLists()}>Riprova elenco listini</Button></div>:!lists.length?<div className="commerce-empty"><h3>Nessun listino trovato.</h3><p>Modifica la ricerca o lo stato selezionato.</p>{canWrite?<Button variant="outline" onClick={newList}>Crea il primo listino</Button>:null}</div>:<CommerceCollection rows={lists} columns={columns} caption="Listini e condizioni tariffarie" selectedId={selectedListId}/>}</div>
+    </section>
+    {editorOpen?<CommerceDrawer translateTitle={!listForm.id} title={listForm.id?listForm.name||'Dettaglio listino':'Nuovo listino'} description="Le modifiche ai listini non riscrivono le condizioni già concordate nelle prenotazioni." origin={panelOrigin.current} motionRef={panelMotion} onClose={closeEditor} busy={saving} footer={<><Button variant="outline" disabled={saving} onClick={closeEditor}>Chiudi</Button>{canWrite?<Button type="submit" form={`pricing-${editorTab}-form`} aria-busy={saving} disabled={saving||(editorTab!=='list'&&(!selectedListId||detailsLoading||!!detailsError))}>{saving?'Salvataggio...':submitLabel}</Button>:null}</>}>
+     {!canWrite?<p className="commerce-hint">Modalità sola lettura.</p>:null}
+     <nav className="commerce-section-nav" aria-label="Sezioni listino">{([['list','Listino'],['package','Pacchetti km'],['policy','Km extra']] as const).map(([key,label])=><Button key={key} variant="ghost" aria-pressed={editorTab===key} disabled={saving||(key!=='list'&&!selectedListId)} onClick={()=>setEditorTab(key)}>{label}{dirty[key]?<span aria-label="Modifiche non salvate"> ·</span>:null}</Button>)}</nav>
+     {error?<div ref={errorRef} tabIndex={-1} className="commerce-notice commerce-error" role="alert"><p>{error}</p>{fieldErrors.length?<ul>{fieldErrors.map(([key,message])=><li key={key}><a href={`#pricing-${key.replace('.','-')}`} onClick={event=>{event.preventDefault();document.getElementById('pricing-'+key.replace('.','-'))?.focus()}}>{message}</a></li>)}</ul>:null}</div>:null}
+     {masterError?<CommerceNotice>{masterError}<Button variant="outline" onClick={()=>void loadMasterData()}>Riprova sedi e veicoli</Button></CommerceNotice>:null}
+     {detailsLoading?<p role="status">Caricamento pacchetti e tariffe extra...</p>:null}{detailsError?<CommerceNotice>{detailsError}<Button variant="outline" onClick={()=>selectedListId&&void loadListDetails(selectedListId)}>Riprova dettagli listino</Button></CommerceNotice>:null}
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
-
-      <Card className="saas-surface">
-        <CardContent className="space-y-3 py-4">
-          <div className="grid gap-2 md:grid-cols-[1fr_180px_auto]">
-            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cerca listino..." />
-            <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
-              <option value="active">Solo attivi</option>
-              <option value="inactive">Solo non attivi</option>
-              <option value="all">Tutti</option>
-            </Select>
-            <Button variant="outline" onClick={() => void loadLists()} disabled={loading}>Aggiorna</Button>
-          </div>
-
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Listino</TableHead>
-                <TableHead>Scope</TableHead>
-                <TableHead>Tariffa base</TableHead>
-                <TableHead>IVA / sconto</TableHead>
-                <TableHead>Pacchetti</TableHead>
-                <TableHead>Policy extra</TableHead>
-                <TableHead className="text-right">Azioni</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center">
-                    <FleetumInlineLoader label="Caricamento listini" />
-                  </TableCell>
-                </TableRow>
-              ) : lists.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-xs text-muted-foreground">Nessun listino trovato.</TableCell>
-                </TableRow>
-              ) : (
-                lists.map((list) => (
-                  <TableRow key={list.id} className={selectedListId === list.id ? "bg-primary/5" : ""}>
-                    <TableCell>
-                      <p className="font-medium">{list.name}</p>
-                      <p className="text-[11px] text-muted-foreground">{list.description || "-"}</p>
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <Badge variant="secondary">{scopeLabel[list.scope]}</Badge>
-                        {list.scope === "SITE" && list.site ? <p className="text-[11px] text-muted-foreground">{list.site.name}</p> : null}
-                        {list.scope === "VEHICLE" && list.vehicle ? <p className="text-[11px] text-muted-foreground">{list.vehicle.plate}</p> : null}
-                        {list.scope === "VEHICLE_CATEGORY" ? <p className="text-[11px] text-muted-foreground">{list.vehicleCategory || "-"}</p> : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <p className="font-medium">{list.baseRateAmount.toFixed(2)} €</p>
-                      <p className="text-[11px] text-muted-foreground">{list.baseRateUnit}</p>
-                    </TableCell>
-                    <TableCell>
-                      <p>{list.vatRate}% IVA</p>
-                      <p className="text-[11px] text-muted-foreground">Sconto {list.discountPercent}%</p>
-                    </TableCell>
-                    <TableCell>{list._count?.packages ?? 0}</TableCell>
-                    <TableCell>{list._count?.extraKmPolicies ?? 0}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="outline" onClick={() => selectList(list)}>Seleziona</Button>
-                        <Button size="sm" variant="outline" onClick={() => void duplicateList(list)} disabled={saving}>Duplica</Button>
-                        <Button size="sm" variant="outline" onClick={() => void toggleListStatus(list)} disabled={saving}>
-                          {list.isActive ? "Disattiva" : "Attiva"}
-                        </Button>
-                        <Button size="sm" variant="destructive" onClick={() => void removeList(list)} disabled={saving}>Elimina</Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="saas-surface xl:col-span-1">
+        <Card className="commerce-editor-section" hidden={editorTab!=="list"}>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">{listForm.id ? "Modifica listino" : "Nuovo listino"}</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="space-y-2" onSubmit={saveList}>
-              <div className="space-y-1"><Label>Nome listino</Label><Input value={listForm.name} onChange={(e) => setListForm((s) => ({ ...s, name: e.target.value }))} required /></div>
-              <div className="space-y-1"><Label>Descrizione</Label><Input value={listForm.description} onChange={(e) => setListForm((s) => ({ ...s, description: e.target.value }))} /></div>
+            <form id="pricing-list-form" className="space-y-2" noValidate onChangeCapture={()=>markChanged("list")} onSubmit={saveList}><fieldset className="commerce-form-fields" disabled={saving||!canWrite}>
+              <div className="space-y-1"><CommerceField label="Nome listino" id="pricing-list-name" error={validation["list.name"]}><Input value={listForm.name} onChange={(e) => setListForm((s) => ({ ...s, name: e.target.value }))} required /></CommerceField></div>
+              <div className="space-y-1"><CommerceField label="Descrizione" id="pricing-list-description" error={validation["list.description"]}><Input value={listForm.description} onChange={(e) => setListForm((s) => ({ ...s, description: e.target.value }))} /></CommerceField></div>
               <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-1">
-                  <Label>Scope</Label>
-                  <Select value={listForm.scope} onChange={(e) => setListForm((s) => ({ ...s, scope: e.target.value as RentalPricingScope }))}>
+                  <CommerceField label="Ambito" id="pricing-list-scope" error={validation["list.scope"]}><Select value={listForm.scope} onChange={(e) => setListForm((s) => ({ ...s, scope: e.target.value as RentalPricingScope }))}>
                     <option value="GLOBAL">Globale</option>
                     <option value="SITE">Per sede</option>
                     <option value="VEHICLE">Per veicolo</option>
                     <option value="VEHICLE_CATEGORY">Per categoria</option>
-                  </Select>
+                  </Select></CommerceField>
                 </div>
                 <div className="space-y-1">
-                  <Label>Stato</Label>
-                  <Select value={listForm.isActive ? "active" : "inactive"} onChange={(e) => setListForm((s) => ({ ...s, isActive: e.target.value === "active" }))}>
+                  <CommerceField label="Stato" id="pricing-list-isActive" error={validation["list.isActive"]}><Select value={listForm.isActive ? "active" : "inactive"} onChange={(e) => setListForm((s) => ({ ...s, isActive: e.target.value === "active" }))}>
                     <option value="active">Attivo</option>
                     <option value="inactive">Non attivo</option>
-                  </Select>
+                  </Select></CommerceField>
                 </div>
               </div>
 
               {listForm.scope === "SITE" ? (
                 <div className="space-y-1">
-                  <Label>Sede</Label>
-                  <Select value={listForm.siteId} onChange={(e) => setListForm((s) => ({ ...s, siteId: e.target.value }))}>
+                  <CommerceField label="Sede" id="pricing-list-siteId" error={validation["list.siteId"]}><Select value={listForm.siteId} onChange={(e) => setListForm((s) => ({ ...s, siteId: e.target.value }))}>
                     <option value="">Seleziona sede</option>
-                    {sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
-                  </Select>
+                    {sites.map((site) => <option translate="no" key={site.id} value={site.id}>{site.name}</option>)}
+                  </Select></CommerceField>
                 </div>
               ) : null}
 
               {listForm.scope === "VEHICLE" ? (
                 <div className="space-y-1">
-                  <Label>Veicolo</Label>
-                  <Select value={listForm.vehicleId} onChange={(e) => setListForm((s) => ({ ...s, vehicleId: e.target.value }))}>
+                  <CommerceField label="Veicolo" id="pricing-list-vehicleId" error={validation["list.vehicleId"]}><Select value={listForm.vehicleId} onChange={(e) => setListForm((s) => ({ ...s, vehicleId: e.target.value }))}>
                     <option value="">Seleziona veicolo</option>
-                    {vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.brand} {vehicle.model}</option>)}
-                  </Select>
+                    {vehicles.map((vehicle) => <option translate="no" key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.brand} {vehicle.model}</option>)}
+                  </Select></CommerceField>
                 </div>
               ) : null}
 
               {listForm.scope === "VEHICLE_CATEGORY" ? (
                 <div className="space-y-1">
-                  <Label>Categoria veicolo</Label>
-                  <Input value={listForm.vehicleCategory} onChange={(e) => setListForm((s) => ({ ...s, vehicleCategory: e.target.value }))} placeholder="Es. utilitaria, van, premium" />
+                  <CommerceField label="Categoria veicolo" id="pricing-list-vehicleCategory" error={validation["list.vehicleCategory"]}><Input value={listForm.vehicleCategory} onChange={(e) => setListForm((s) => ({ ...s, vehicleCategory: e.target.value }))} placeholder="Es. utilitaria, van, premium" /></CommerceField>
                 </div>
               ) : null}
 
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="space-y-1"><Label>Unita tariffa</Label><Select value={listForm.baseRateUnit} onChange={(e) => setListForm((s) => ({ ...s, baseRateUnit: e.target.value as PriceListForm["baseRateUnit"] }))}><option value="DAILY">Giornaliera</option><option value="WEEKLY">Settimanale</option><option value="MONTHLY">Mensile</option></Select></div>
-                <div className="space-y-1"><Label>Tariffa base €</Label><Input type="number" min="0" step="0.01" value={listForm.baseRateAmount} onChange={(e) => setListForm((s) => ({ ...s, baseRateAmount: e.target.value }))} required /></div>
+                <div className="space-y-1"><CommerceField label="Unita tariffa" id="pricing-list-baseRateUnit" error={validation["list.baseRateUnit"]}><Select value={listForm.baseRateUnit} onChange={(e) => setListForm((s) => ({ ...s, baseRateUnit: e.target.value as PriceListForm["baseRateUnit"] }))}><option value="DAILY">Giornaliera</option><option value="WEEKLY">Settimanale</option><option value="MONTHLY">Mensile</option></Select></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Tariffa base €" id="pricing-list-baseRateAmount" error={validation["list.baseRateAmount"]}><Input type="number" min="0" step="0.01" value={listForm.baseRateAmount} onChange={(e) => setListForm((s) => ({ ...s, baseRateAmount: e.target.value }))} required /></CommerceField></div>
               </div>
               <div className="grid gap-2 md:grid-cols-3">
-                <div className="space-y-1"><Label>IVA %</Label><Input type="number" min="0" max="100" step="0.01" value={listForm.vatRate} onChange={(e) => setListForm((s) => ({ ...s, vatRate: e.target.value }))} /></div>
-                <div className="space-y-1"><Label>Sconto %</Label><Input type="number" min="0" max="100" step="0.01" value={listForm.discountPercent} onChange={(e) => setListForm((s) => ({ ...s, discountPercent: e.target.value }))} /></div>
-                <div className="space-y-1"><Label>Priorita</Label><Input type="number" min="0" value={listForm.priority} onChange={(e) => setListForm((s) => ({ ...s, priority: e.target.value }))} /></div>
+                <div className="space-y-1"><CommerceField label="IVA %" id="pricing-list-vatRate" error={validation["list.vatRate"]}><Input type="number" min="0" max="100" step="0.01" value={listForm.vatRate} onChange={(e) => setListForm((s) => ({ ...s, vatRate: e.target.value }))} /></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Sconto %" id="pricing-list-discountPercent" error={validation["list.discountPercent"]}><Input type="number" min="0" max="100" step="0.01" value={listForm.discountPercent} onChange={(e) => setListForm((s) => ({ ...s, discountPercent: e.target.value }))} /></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Priorita" id="pricing-list-priority" error={validation["list.priority"]}><Input type="number" min="0" value={listForm.priority} onChange={(e) => setListForm((s) => ({ ...s, priority: e.target.value }))} /></CommerceField></div>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="space-y-1"><Label>Eccedenza oraria</Label><Select value={listForm.hourOverflowRule} onChange={(e) => setListForm((s) => ({ ...s, hourOverflowRule: e.target.value as PriceListForm["hourOverflowRule"] }))}><option value="NONE">Nessun addebito extra</option><option value="HALF_DAY">Mezza giornata</option><option value="FULL_DAY">Giornata intera</option></Select></div>
-                <div className="space-y-1"><Label>Validita da</Label><Input type="date" value={listForm.validFrom} onChange={(e) => setListForm((s) => ({ ...s, validFrom: e.target.value }))} /></div>
+                <div className="space-y-1"><CommerceField label="Eccedenza oraria" id="pricing-list-hourOverflowRule" error={validation["list.hourOverflowRule"]}><Select value={listForm.hourOverflowRule} onChange={(e) => setListForm((s) => ({ ...s, hourOverflowRule: e.target.value as PriceListForm["hourOverflowRule"] }))}><option value="NONE">Nessun addebito extra</option><option value="HALF_DAY">Mezza giornata</option><option value="FULL_DAY">Giornata intera</option></Select></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Validita da" id="pricing-list-validFrom" error={validation["list.validFrom"]}><Input type="date" value={listForm.validFrom} onChange={(e) => setListForm((s) => ({ ...s, validFrom: e.target.value }))} /></CommerceField></div>
               </div>
-              <div className="space-y-1"><Label>Validita fino a</Label><Input type="date" value={listForm.validTo} onChange={(e) => setListForm((s) => ({ ...s, validTo: e.target.value }))} /></div>
+              <div className="space-y-1"><CommerceField label="Validita fino a" id="pricing-list-validTo" error={validation["list.validTo"]}><Input type="date" value={listForm.validTo} onChange={(e) => setListForm((s) => ({ ...s, validTo: e.target.value }))} /></CommerceField></div>
 
               <div className="flex gap-2 pt-1">
-                <Button type="submit" disabled={saving}>{saving ? "Salvataggio..." : listForm.id ? "Aggiorna listino" : "Crea listino"}</Button>
-                <Button type="button" variant="outline" onClick={() => setListForm(defaultListForm())}>Reset</Button>
+
+                <Button type="button" variant="outline" onClick={() => guardChange(newList,"list")}>Reset</Button>
               </div>
-            </form>
+            </fieldset></form>
           </CardContent>
         </Card>
 
-        <Card className="saas-surface xl:col-span-1">
+        <Card className="commerce-editor-section" hidden={editorTab!=="package"}>
           <CardHeader className="pb-2"><CardTitle className="text-base">Pacchetti km inclusi</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <form className="space-y-2" onSubmit={savePackage}>
-              <div className="space-y-1"><Label>Nome pacchetto</Label><Input value={packageForm.name} onChange={(e) => setPackageForm((s) => ({ ...s, name: e.target.value }))} required /></div>
+            <form id="pricing-package-form" className="space-y-2" noValidate onChangeCapture={()=>markChanged("package")} onSubmit={savePackage}><fieldset className="commerce-form-fields" disabled={saving||!canWrite}>
+              <div className="space-y-1"><CommerceField label="Nome pacchetto" id="pricing-package-name" error={validation["package.name"]}><Input value={packageForm.name} onChange={(e) => setPackageForm((s) => ({ ...s, name: e.target.value }))} required /></CommerceField></div>
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="space-y-1"><Label>Tipo</Label><Select value={packageForm.type} onChange={(e) => setPackageForm((s) => ({ ...s, type: e.target.value as PackageForm["type"] }))}><option value="LIMITED">LIMITED</option><option value="UNLIMITED">UNLIMITED</option></Select></div>
-                <div className="space-y-1"><Label>Codice</Label><Input value={packageForm.code} onChange={(e) => setPackageForm((s) => ({ ...s, code: e.target.value }))} /></div>
+                <div className="space-y-1"><CommerceField label="Tipo" id="pricing-package-type" error={validation["package.type"]}><Select value={packageForm.type} onChange={(e) => setPackageForm((s) => ({ ...s, type: e.target.value as PackageForm["type"] }))}><option value="LIMITED">Km limitati</option><option value="UNLIMITED">Km illimitati</option></Select></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Codice" id="pricing-package-code" error={validation["package.code"]}><Input value={packageForm.code} onChange={(e) => setPackageForm((s) => ({ ...s, code: e.target.value }))} /></CommerceField></div>
               </div>
               {packageForm.type === "LIMITED" ? (
                 <div className="grid gap-2 md:grid-cols-2">
-                  <div className="space-y-1"><Label>Km inclusi</Label><Input type="number" min="1" value={packageForm.kmIncluded} onChange={(e) => setPackageForm((s) => ({ ...s, kmIncluded: e.target.value }))} /></div>
-                  <div className="space-y-1"><Label>Scope km</Label><Select value={packageForm.kmScope} onChange={(e) => setPackageForm((s) => ({ ...s, kmScope: e.target.value as PackageForm["kmScope"] }))}><option value="PER_DAY">Per giorno</option><option value="PER_RENTAL">Per noleggio</option></Select></div>
+                  <div className="space-y-1"><CommerceField label="Km inclusi" id="pricing-package-kmIncluded" error={validation["package.kmIncluded"]}><Input type="number" min="1" value={packageForm.kmIncluded} onChange={(e) => setPackageForm((s) => ({ ...s, kmIncluded: e.target.value }))} /></CommerceField></div>
+                  <div className="space-y-1"><CommerceField label="Validità km inclusi" id="pricing-package-kmScope" error={validation["package.kmScope"]}><Select value={packageForm.kmScope} onChange={(e) => setPackageForm((s) => ({ ...s, kmScope: e.target.value as PackageForm["kmScope"] }))}><option value="PER_DAY">Per giorno</option><option value="PER_RENTAL">Per noleggio</option></Select></CommerceField></div>
                 </div>
               ) : null}
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="space-y-1"><Label>Ordine</Label><Input type="number" min="0" value={packageForm.sortOrder} onChange={(e) => setPackageForm((s) => ({ ...s, sortOrder: e.target.value }))} /></div>
-                <div className="space-y-1"><Label>Stato</Label><Select value={packageForm.isActive ? "active" : "inactive"} onChange={(e) => setPackageForm((s) => ({ ...s, isActive: e.target.value === "active" }))}><option value="active">Attivo</option><option value="inactive">Non attivo</option></Select></div>
+                <div className="space-y-1"><CommerceField label="Ordine" id="pricing-package-sortOrder" error={validation["package.sortOrder"]}><Input type="number" min="0" value={packageForm.sortOrder} onChange={(e) => setPackageForm((s) => ({ ...s, sortOrder: e.target.value }))} /></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Stato" id="pricing-package-isActive" error={validation["package.isActive"]}><Select value={packageForm.isActive ? "active" : "inactive"} onChange={(e) => setPackageForm((s) => ({ ...s, isActive: e.target.value === "active" }))}><option value="active">Attivo</option><option value="inactive">Non attivo</option></Select></CommerceField></div>
               </div>
               <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={packageForm.isDefault} onChange={(e) => setPackageForm((s) => ({ ...s, isDefault: e.target.checked }))} /> Pacchetto predefinito</label>
               <div className="flex gap-2">
-                <Button type="submit" disabled={saving || !selectedList}>{packageForm.id ? "Aggiorna" : "Aggiungi"}</Button>
-                <Button type="button" variant="outline" onClick={() => setPackageForm(defaultPackageForm())}>Reset</Button>
+
+                <Button type="button" variant="outline" onClick={() => guardChange(()=>{setPackageForm(defaultPackageForm());clearDirty("package")},"package")}>Reset</Button>
               </div>
-            </form>
+            </fieldset></form>
 
             <div className="max-h-72 overflow-auto rounded-md border">
               <Table>
@@ -751,13 +703,13 @@ export const RentalPricingPage = () => {
                       <TableRow key={pkg.id}>
                         <TableCell>
                           <p className="font-medium">{pkg.name}</p>
-                          <p className="text-[11px] text-muted-foreground">{pkg.type}{pkg.isDefault ? " · default" : ""}</p>
+                          <p className="text-[11px] text-muted-foreground">{pkg.type==='UNLIMITED'?'Illimitati':'Km limitati'}{pkg.isDefault ? ' · predefinito' : ''}</p>
                         </TableCell>
-                        <TableCell>{pkg.type === "UNLIMITED" ? "Illimitati" : `${pkg.kmIncluded ?? 0} (${pkg.kmScope})`}</TableCell>
+                        <TableCell>{pkg.type === "UNLIMITED" ? "Illimitati" : `${pkg.kmIncluded ?? 0} (${pkg.kmScope==='PER_DAY'?'al giorno':'per noleggio'})`}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            <Button size="sm" variant="outline" onClick={() => editPackage(pkg)}>Modifica</Button>
-                            <Button size="sm" variant="destructive" onClick={() => void deletePackage(pkg)}>Elimina</Button>
+                            <Button size="sm" variant="outline" onClick={() => guardChange(()=>{editPackage(pkg);clearDirty("package")},"package")} disabled={!canWrite||saving}>Modifica</Button>
+                            {canWrite?<Button size="sm" variant="destructive" onClick={() => {setError(null);setDeletion({kind:"package",item:pkg})}} disabled={saving}>Elimina</Button>:null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -769,33 +721,33 @@ export const RentalPricingPage = () => {
           </CardContent>
         </Card>
 
-        <Card className="saas-surface xl:col-span-1">
+        <Card className="commerce-editor-section" hidden={editorTab!=="policy"}>
           <CardHeader className="pb-2"><CardTitle className="text-base">Tariffario km extra</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <form className="space-y-2" onSubmit={savePolicy}>
-              <div className="space-y-1"><Label>Nome tariffario</Label><Input value={policyForm.name} onChange={(e) => setPolicyForm((s) => ({ ...s, name: e.target.value }))} required /></div>
+            <form id="pricing-policy-form" className="space-y-2" noValidate onChangeCapture={()=>markChanged("policy")} onSubmit={savePolicy}><fieldset className="commerce-form-fields" disabled={saving||!canWrite}>
+              <div className="space-y-1"><CommerceField label="Nome tariffario" id="pricing-policy-name" error={validation["policy.name"]}><Input value={policyForm.name} onChange={(e) => setPolicyForm((s) => ({ ...s, name: e.target.value }))} required /></CommerceField></div>
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="space-y-1"><Label>Tipo</Label><Select value={policyForm.type} onChange={(e) => setPolicyForm((s) => ({ ...s, type: e.target.value as PolicyForm["type"] }))}><option value="FLAT">FLAT</option><option value="TIERED">TIERED</option></Select></div>
-                <div className="space-y-1"><Label>Pacchetto (opz.)</Label><Select value={policyForm.packageId} onChange={(e) => setPolicyForm((s) => ({ ...s, packageId: e.target.value }))}><option value="">Tutti i pacchetti</option>{packages.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}</Select></div>
+                <div className="space-y-1"><CommerceField label="Tipo" id="pricing-policy-type" error={validation["policy.type"]}><Select value={policyForm.type} onChange={(e) => setPolicyForm((s) => ({ ...s, type: e.target.value as PolicyForm["type"] }))}><option value="FLAT">Tariffa unica</option><option value="TIERED">A scaglioni</option></Select></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Pacchetto (opz.)" id="pricing-policy-packageId" error={validation["policy.packageId"]}><Select value={policyForm.packageId} onChange={(e) => setPolicyForm((s) => ({ ...s, packageId: e.target.value }))}><option value="">Tutti i pacchetti</option>{packages.map((pkg) => <option translate="no" key={pkg.id} value={pkg.id}>{pkg.name}</option>)}</Select></CommerceField></div>
               </div>
 
               {policyForm.type === "FLAT" ? (
-                <div className="space-y-1"><Label>Prezzo €/km extra</Label><Input type="number" step="0.01" min="0" value={policyForm.flatRatePerKm} onChange={(e) => setPolicyForm((s) => ({ ...s, flatRatePerKm: e.target.value }))} /></div>
+                <div className="space-y-1"><CommerceField label="Prezzo €/km extra" id="pricing-policy-flatRatePerKm" error={validation["policy.flatRatePerKm"]}><Input type="number" step="0.01" min="0" value={policyForm.flatRatePerKm} onChange={(e) => setPolicyForm((s) => ({ ...s, flatRatePerKm: e.target.value }))} /></CommerceField></div>
               ) : (
-                <div className="space-y-1"><Label>Scaglioni (uno per riga)</Label><Textarea rows={4} value={policyForm.tiersText} onChange={(e) => setPolicyForm((s) => ({ ...s, tiersText: e.target.value }))} placeholder="1-100:0.40\n101-300:0.30\n301-*:0.25" /></div>
+                <div className="space-y-1"><CommerceField label="Scaglioni (uno per riga)" id="pricing-policy-tiersText" error={validation["policy.tiersText"]}><Textarea rows={4} value={policyForm.tiersText} onChange={(e) => setPolicyForm((s) => ({ ...s, tiersText: e.target.value }))} placeholder="1-100:0.40\n101-300:0.30\n301-*:0.25" /></CommerceField></div>
               )}
 
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="space-y-1"><Label>Ordine</Label><Input type="number" min="0" value={policyForm.sortOrder} onChange={(e) => setPolicyForm((s) => ({ ...s, sortOrder: e.target.value }))} /></div>
-                <div className="space-y-1"><Label>Stato</Label><Select value={policyForm.isActive ? "active" : "inactive"} onChange={(e) => setPolicyForm((s) => ({ ...s, isActive: e.target.value === "active" }))}><option value="active">Attivo</option><option value="inactive">Non attivo</option></Select></div>
+                <div className="space-y-1"><CommerceField label="Ordine" id="pricing-policy-sortOrder" error={validation["policy.sortOrder"]}><Input type="number" min="0" value={policyForm.sortOrder} onChange={(e) => setPolicyForm((s) => ({ ...s, sortOrder: e.target.value }))} /></CommerceField></div>
+                <div className="space-y-1"><CommerceField label="Stato" id="pricing-policy-isActive" error={validation["policy.isActive"]}><Select value={policyForm.isActive ? "active" : "inactive"} onChange={(e) => setPolicyForm((s) => ({ ...s, isActive: e.target.value === "active" }))}><option value="active">Attivo</option><option value="inactive">Non attivo</option></Select></CommerceField></div>
               </div>
 
               <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={policyForm.isDefault} onChange={(e) => setPolicyForm((s) => ({ ...s, isDefault: e.target.checked }))} /> Tariffario predefinito</label>
               <div className="flex gap-2">
-                <Button type="submit" disabled={saving || !selectedList}>{policyForm.id ? "Aggiorna" : "Aggiungi"}</Button>
-                <Button type="button" variant="outline" onClick={() => setPolicyForm(defaultPolicyForm())}>Reset</Button>
+
+                <Button type="button" variant="outline" onClick={() => guardChange(()=>{setPolicyForm(defaultPolicyForm());clearDirty("policy")},"policy")}>Reset</Button>
               </div>
-            </form>
+            </fieldset></form>
 
             <div className="max-h-72 overflow-auto rounded-md border">
               <Table>
@@ -808,7 +760,7 @@ export const RentalPricingPage = () => {
                       <TableRow key={policy.id}>
                         <TableCell>
                           <p className="font-medium">{policy.name}</p>
-                          <p className="text-[11px] text-muted-foreground">{policy.type}{policy.isDefault ? " · default" : ""}</p>
+                          <p className="text-[11px] text-muted-foreground">{policy.type==='FLAT'?'Tariffa unica':'A scaglioni'}{policy.isDefault ? ' · predefinito' : ''}</p>
                         </TableCell>
                         <TableCell>
                           {policy.type === "FLAT"
@@ -817,8 +769,8 @@ export const RentalPricingPage = () => {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            <Button size="sm" variant="outline" onClick={() => editPolicy(policy)}>Modifica</Button>
-                            <Button size="sm" variant="destructive" onClick={() => void deletePolicy(policy)}>Elimina</Button>
+                            <Button size="sm" variant="outline" onClick={() => guardChange(()=>{editPolicy(policy);clearDirty("policy")},"policy")} disabled={!canWrite||saving}>Modifica</Button>
+                            {canWrite?<Button size="sm" variant="destructive" onClick={() => {setError(null);setDeletion({kind:"policy",item:policy})}} disabled={saving}>Elimina</Button>:null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -829,7 +781,10 @@ export const RentalPricingPage = () => {
             </div>
           </CardContent>
         </Card>
-      </div>
-    </section>
+
+    </CommerceDrawer>:null}
+    {discardOpen?<CommerceDrawer compact level={130} title="Modifiche non salvate" onClose={()=>setDiscardOpen(false)} footer={<><Button variant="outline" onClick={()=>setDiscardOpen(false)}>Continua modifica</Button><Button onClick={()=>{setDiscardOpen(false);pendingOperation.current()}}>Esci senza salvare</Button></>}><p>Le modifiche non salvate verranno perse. Vuoi proseguire?</p></CommerceDrawer>:null}
+    {deletion?<CommerceDrawer compact level={135} title="Conferma eliminazione" busy={saving} onClose={()=>setDeletion(null)} footer={<><Button variant="outline" disabled={saving} onClick={()=>setDeletion(null)}>Annulla</Button><Button variant="destructive" disabled={saving} onClick={()=>void confirmDelete()}>{saving?'Rimozione...':'Conferma eliminazione'}</Button></>}><p>Confermi l’eliminazione di <strong translate="no">{deletion.item.name}</strong>?</p>{error?<CommerceNotice>{error}</CommerceNotice>:null}</CommerceDrawer>:null}
+   </section>
   );
 };

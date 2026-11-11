@@ -3,9 +3,8 @@ import { e2eEnv, hasTenantCredentials } from "./helpers/env";
 import { createAuthenticatedApi, csrfHeaders, saveStorageStateFromApi } from "./helpers/auth";
 import { createDemoDataset } from "./helpers/demo-data";
 import { openBookingMonth } from "./helpers/calendar.mjs";
+import { vehiclePaginationStatus, vehiclePaginationTextPattern, bookingDetailsPanel, bookingCalendarButtonNamePattern, bookingCodeTextPattern } from "./helpers/workspace-locators.mjs";
 
-const tinySignaturePng =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lZr0xQAAAABJRU5ErkJggg==";
 
 test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
   test.skip(!hasTenantCredentials(), "Set E2E_TENANT_EMAIL and E2E_TENANT_PASSWORD to run tenant E2E tests.");
@@ -69,9 +68,10 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
     await page.evaluate(() => new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     }));
-    const vehiclePagination = page.locator("main p").filter({ hasText: /Totale record|Total records/ }).filter({ visible: true });
+    const vehiclePagination = vehiclePaginationStatus(page);
     await expect(vehiclePagination).toBeVisible();
-    await expect(vehiclePagination.locator("span").last(), "visible vehicle total must match the real API total").toHaveText(String(vehiclesPayload.total));
+    await expect(vehiclePagination, "visible page, page count and vehicle total must match the real API")
+      .toHaveText(vehiclePaginationTextPattern(vehiclesPayload));
     const consentDialog = page.getByRole("dialog", { name: "Preferenze cookie Fleetum" });
     const consentVisible = await consentDialog.waitFor({ state: "visible", timeout: 2000 }).then(
       () => true,
@@ -109,19 +109,20 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
       return response.request().method() === "GET"
         && new URL(response.url()).pathname === "/api/rental-bookings/availability/month";
     });
+    const selectedPanel = bookingDetailsPanel(page);
     await page.goto(`/booking?bookingId=${dataset.booking.id}`);
-    await expect(page.getByText(dataset.booking.code, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL((url) => url.searchParams.get("bookingId") === dataset.booking.id);
+    await expect(selectedPanel.getByText(bookingCodeTextPattern(dataset.booking))).toBeVisible({ timeout: 20_000 });
     const initialAvailability = await initialAvailabilityPromise;
     expect(initialAvailability.ok()).toBeTruthy();
     await openBookingMonth(page, dataset.booking.pickupAt, (await initialAvailability.json()).month);
 
-    const selectedPanel = page.locator("aside").filter({ hasText: "Control Booking" });
     const expectSelectedBooking = async (booking: { id: string; code: string }) => {
       await expect(page).toHaveURL((url) => url.searchParams.get("bookingId") === booking.id);
-      await expect(selectedPanel.getByText(booking.code, { exact: true })).toBeVisible();
+      await expect(selectedPanel.getByText(bookingCodeTextPattern(booking))).toBeVisible();
     };
     const selectBooking = async (booking: { code: string; customerName: string }) => {
-      await page.getByRole("button", { name: `Prenotazione ${booking.code} - ${booking.customerName}`, exact: true }).last().click();
+      await page.getByRole("button", { name: bookingCalendarButtonNamePattern(booking) }).last().click();
     };
 
     await selectBooking(dataset.booking);
@@ -143,16 +144,23 @@ test.describe("Fleetum critical flow: vehicle, booking, contract", () => {
     expect(pdf.headers()["content-type"]).toContain("application/pdf");
     expect((await pdf.body()).byteLength).toBeGreaterThan(1000);
 
-    const sign = await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/mark-signed`), {
-      headers: await browserCsrfHeaders(),
-      data: {
-        signedAt: new Date().toISOString(),
-        signatureDataUrl: tinySignaturePng
-      }
-    });
-    expect(sign.ok()).toBeTruthy();
-    const signedContract = await sign.json();
-    expect(signedContract.status).toBe("SIGNED");
+    // Exercise the real manual issuance and document-bound in-person flow.
+    // No fake receipt or status-only signature is used to satisfy the workflow.
+    for (const toStatus of ["QUOTED", "CONFIRMED"]) {
+      const transitioned=await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/transition`),{headers:await browserCsrfHeaders(),data:{toStatus}});
+      expect(transitioned.ok(),await transitioned.text()).toBe(true);
+    }
+    const terms={version:1,primaryDriverId:dataset.customer.id,additionalDriverIds:[],depositCents:0,damageDeductibleCents:0,theftDeductibleCents:0,paymentTerms:"[E2E] Saldo aperto, nessun pagamento reale",insuranceSummary:"[E2E] Condizioni sintetiche",fuelPolicy:"[E2E] Pieno/pieno",territory:"[E2E] Italia",assistance:"[E2E] Contatto sintetico",cancellation:"[E2E] Condizioni sintetiche",lateReturn:"[E2E] Contattare il locatore",damageProcedure:"[E2E] Verbale e foto sintetici",annexes:[]};
+    const savedTerms=await browserApi.patch(apiUrl(`rental-bookings/${dataset.booking.id}/contract/rental-details`),{headers:await browserCsrfHeaders(),data:{revision:0,terms}});
+    expect(savedTerms.ok(),await savedTerms.text()).toBe(true);
+    const review=await browserApi.get(apiUrl(`rental-bookings/${dataset.booking.id}/contract/conversion`));expect(review.ok()).toBe(true);
+    const reviewData=await review.json();expect(reviewData.balance.receivedCents).toBe(0);
+    const issued=await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/convert`),{headers:await browserCsrfHeaders(),data:{reviewHash:reviewData.reviewHash}});expect(issued.ok(),await issued.text()).toBe(true);
+    const signing=await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/signing/in-person`),{headers:{...await browserCsrfHeaders(),"X-Idempotency-Key":`e2e-presence:${dataset.booking.id}`},data:{}});expect(signing.ok(),await signing.text()).toBe(true);
+    const request=await signing.json();
+    const document=await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/signing/in-person/document`),{headers:await browserCsrfHeaders(),data:{requestId:request.id}});expect(document.ok()).toBe(true);
+    const signatureDataUrl=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=800;canvas.height=200;const ctx=canvas.getContext('2d')!;ctx.strokeStyle='#182438';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(40,130);ctx.bezierCurveTo(90,20,150,160,250,80);ctx.lineTo(380,120);ctx.stroke();return canvas.toDataURL('image/png');});
+    const sign=await browserApi.post(apiUrl(`rental-bookings/${dataset.booking.id}/contract/signing/in-person/confirm`),{headers:await browserCsrfHeaders(),data:{requestId:request.id,documentHash:request.documentSha256,confirmationId:crypto.randomUUID(),signatureDataUrl,consent:true,consentVersion:"in-person-v1"}});expect(sign.ok(),await sign.text()).toBe(true);expect((await sign.json()).status).toBe("SIGNED");
 
     const contract = await browserApi.get(apiUrl(`rental-bookings/${dataset.booking.id}/contract`));
     expect(contract.ok()).toBeTruthy();

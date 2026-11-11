@@ -1,7 +1,18 @@
+import {assertContractIssued} from "../../../application/services/contract-issuance-service.js";
+import {resolveContractDrivers} from "../../../application/services/contract-rental-drivers.js";
+import { contractSigningService } from "../../../application/services/contract-signing-service.js";
+import { assertNoSigningFreeze } from "../../../application/services/contract-signing-source.js";
+import { ContractCargosService } from "../../../application/services/contract-cargos-service.js";
+import { assertCompanyResourceView, assertSharedCompanyResourceView } from "../../../infrastructure/auth/company-resource-access.js";
+import { visiblePriceListWhere } from "../../../infrastructure/repositories/pricing-site-scope.js";
 import crypto from "node:crypto";
+import { BookingInvoiceService } from "../../../application/services/booking-invoice-service.js";
+import { captureBookingSites, validateBookingSiteChanges } from "../../../application/services/booking-site-service.js";
 import { Prisma, RentalBookingStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { EmailQueueService } from "../../../infrastructure/email/email-queue-service.js";
+import { captureContractSiteAuthorization, contractSiteAuthorizationReason } from "../../../infrastructure/email/contract-site-authorization.js";
+import { currentSiteAccess } from "../../../infrastructure/auth/site-access-context.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { exactMoneyReader } from "../../../infrastructure/database/exact-money-reader.js";
 import { lockOwnedVehicle, ownedVehicleWhere } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
@@ -23,11 +34,11 @@ import { AppError } from "../../../shared/errors/app-error.js";
 import { env } from "../../../shared/config/env.js";
 import {
   buildContractTemplateMap,
-  buildSimplePdfBuffer,
   defaultContractTemplate,
   renderContractTemplate,
   sanitizeTemplateInput
 } from "../../../application/services/booking-contract-service.js";
+import {loadSigningSource} from "../../../application/services/contract-signing-source.js";
 import { buildEnterpriseContractPdf } from "../../../application/services/enterprise-contract-pdf-service.js";
 import {
   parseCustomerDocumentDraft,
@@ -70,15 +81,10 @@ import {
   rentalCustomerUpdateSchema
 } from "../validators/rental-bookings-validators.js";
 
-// Keep historical bookings readable while excluding a broken Vehicle -> Site tenant link.
-const ownedBookingWhere = (tenantId: string): Prisma.RentalBookingWhereInput => ({
-  tenantId,
-  vehicle: { is: ownedVehicleWhere(tenantId, true) }
-});
+import { visibleBookingWhere as ownedBookingWhere, visibleVehicleWhere, visibleCustomerAttachmentWhere, lockVisibleVehicle } from "../../../infrastructure/repositories/resource-site-scope.js";
+import { siteAccessForTenant } from "../../../infrastructure/auth/site-access-context.js";
 
-const ownedPricingVehicleWhere = (tenantId: string): Prisma.RentalPriceListWhereInput => ({
-  OR: [{ vehicleId: null }, { vehicle: { is: ownedVehicleWhere(tenantId, true) } }]
-});
+const ownedPricingVehicleWhere = visiblePriceListWhere;
 
 const ACTIVE_BOOKING_STATUSES = [
   "DRAFT",
@@ -137,6 +143,14 @@ export const buildCustomerBookingStatsQuery = (tenantId: string, customerIds: st
       ? Prisma.sql`FALSE`
       : Prisma.sql`booking."customerId" IN (${Prisma.join(customerIds)})`;
 
+  const scope = siteAccessForTenant(tenantId);
+  const scopedSites = scope && !scope.allSites ? scope.siteIds : undefined;
+  const scopeFilter = scopedSites === undefined ? Prisma.empty : scopedSites.length === 0 ? Prisma.sql`AND FALSE` : Prisma.sql`AND (
+    booking."siteId" IN (${Prisma.join(scopedSites)}) OR booking."pickupSiteId" IN (${Prisma.join(scopedSites)}) OR booking."returnSiteId" IN (${Prisma.join(scopedSites)})
+  )`;
+  const latestScopeFilter = scopedSites === undefined ? Prisma.empty : scopedSites.length === 0 ? Prisma.sql`AND FALSE` : Prisma.sql`AND (
+    latest_booking."siteId" IN (${Prisma.join(scopedSites)}) OR latest_booking."pickupSiteId" IN (${Prisma.join(scopedSites)}) OR latest_booking."returnSiteId" IN (${Prisma.join(scopedSites)})
+  )`;
   return Prisma.sql`
     SELECT
       aggregate."customerId",
@@ -159,6 +173,7 @@ export const buildCustomerBookingStatsQuery = (tenantId: string, customerIds: st
        AND contract."tenantId" = ${tenantId}
       WHERE booking."tenantId" = ${tenantId}
         AND ${customerFilter}
+        ${scopeFilter}
         AND EXISTS (
           SELECT 1 FROM "Vehicle" AS vehicle
           JOIN "Site" AS site ON site."id" = vehicle."siteId"
@@ -178,6 +193,7 @@ export const buildCustomerBookingStatsQuery = (tenantId: string, customerIds: st
       WHERE latest_booking."tenantId" = ${tenantId}
         AND latest_booking."customerId" = aggregate."customerId"
         AND latest_booking."deletedAt" IS NULL
+        ${latestScopeFilter}
         AND EXISTS (
           SELECT 1 FROM "Vehicle" AS vehicle
           JOIN "Site" AS site ON site."id" = vehicle."siteId"
@@ -914,7 +930,10 @@ export class RentalBookingsController {
       reason: payload.reason ?? null,
       internalNotes: payload.internalNotes ?? null,
       contractStatus: payload.contractStatus ?? "NOT_READY",
-      cargosStatus: payload.cargosStatus ?? "NOT_REQUIRED"
+      cargosStatus: payload.cargosStatus ?? "PENDING",
+      // Preserve hashes for commands from clients that predate site fields.
+      ...(payload.pickupSiteId !== undefined ? { pickupSiteId: payload.pickupSiteId } : {}),
+      ...(payload.returnSiteId !== undefined ? { returnSiteId: payload.returnSiteId } : {})
     };
     return crypto.createHash("sha256").update(JSON.stringify(canonicalPayload)).digest("hex");
   }
@@ -1100,6 +1119,12 @@ export class RentalBookingsController {
     }
   }
 
+  private async lockMutableContract(tx: Prisma.TransactionClient, tenantId: string, bookingId: string) {
+    await tx.$queryRaw`SELECT "id" FROM "RentalBooking" WHERE "id"=${bookingId} AND "tenantId"=${tenantId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT "id" FROM "BookingContract" WHERE "bookingId"=${bookingId} AND "tenantId"=${tenantId} FOR UPDATE`;
+    await assertNoSigningFreeze(tx, tenantId, bookingId);
+  }
+
   private async upsertBookingContractFromTemplate(input: {
     tenantId: string;
     bookingId: string;
@@ -1115,12 +1140,15 @@ export class RentalBookingsController {
     const emailTo = booking.customer?.email ?? booking.customerEmail ?? null;
     const title = `Contratto ${booking.code}`;
 
-    const existing = await prisma.bookingContract.findFirst({
+    return prisma.$transaction(async tx => {
+      await this.lockMutableContract(tx,input.tenantId,input.bookingId);
+    const existing = await tx.bookingContract.findFirst({
       where: { tenantId: input.tenantId, bookingId: input.bookingId, deletedAt: null }
     });
 
+    if (existing?.signedAt || existing?.status === "SIGNED") throw new AppError("Il contratto firmato non può essere rigenerato",409,"CONTRACT_ALREADY_SIGNED");
     const contract = existing
-      ? await prisma.bookingContract.update({
+      ? await tx.bookingContract.update({
           where: { id: existing.id },
           data: {
             templateId: template.id,
@@ -1135,7 +1163,7 @@ export class RentalBookingsController {
             errorMessage: null
           }
         })
-      : await prisma.bookingContract.create({
+      : await tx.bookingContract.create({
           data: {
             tenantId: input.tenantId,
             bookingId: input.bookingId,
@@ -1158,11 +1186,13 @@ export class RentalBookingsController {
       contractId: contract.id,
       actorUserId: input.actorUserId,
       type: existing ? "REGENERATED" : "GENERATED",
-      message: existing ? "Contratto rigenerato da template" : "Contratto generato da template",
+      message: existing ? "Bozza contratto rigenerata da template" : "Bozza tecnica contratto predisposta",
       details: { templateVersion: template.version }
-    });
+    }, tx);
+    await tx.rentalBooking.update({where:{id:booking.id},data:{contractStatus:"READY",cargosStatus:"PENDING"}});
 
     return contract;
+    });
   }
 
   private async getContractOrThrow(tenantId: string, bookingId: string) {
@@ -1185,85 +1215,25 @@ export class RentalBookingsController {
     return contract;
   }
 
+  private async frozenContractPdf(tenantId:string,bookingId:string) {
+    return contractSigningService.frozen(tenantId,bookingId);
+  }
+
   private async buildContractPdf(contract: Awaited<ReturnType<RentalBookingsController["getContractOrThrow"]>>) {
-    const events = Array.isArray(contract.events) ? contract.events : [];
-    const deliveries = Array.isArray(contract.deliveries) ? contract.deliveries : [];
-    const latestDelivery = deliveries[0] ?? null;
-
-    const signedEventWithSignature = events.find((entry) => {
-      if (entry.type !== "SIGNED") return false;
-      return Boolean(this.extractContractSignatureDetails(entry.details));
-    });
-    const signatureDetails = signedEventWithSignature
-      ? this.extractContractSignatureDetails(signedEventWithSignature.details)
-      : null;
-
-    try {
-      const tenantBranding = await this.tenantProfileService.contractBranding(contract.tenantId);
-      const templateBranding = contract.template
-        ? {
-            companyName: contract.template.companyName,
-            companyAddress: contract.template.companyAddress,
-            companyVat: contract.template.companyVat,
-            companyEmail: contract.template.companyEmail,
-            companyPhone: contract.template.companyPhone,
-            logoFilePath: contract.template.logoFilePath,
-            logoFileName: contract.template.logoFileName,
-            brandPrimary: contract.template.brandPrimary,
-            brandAccent: contract.template.brandAccent,
-            brandFont: contract.template.brandFont
-          }
-        : {};
-      return await buildEnterpriseContractPdf({
-        contract: {
-          title: contract.title,
-          content: contract.content,
-          status: contract.status,
-          templateVersion: contract.templateVersion,
-          emailTo: contract.emailTo,
-          createdAt: contract.createdAt,
-          updatedAt: contract.updatedAt,
-          lastSentAt: contract.lastSentAt,
-          signedAt: contract.signedAt,
-          latestDelivery: latestDelivery
-            ? {
-                channel: latestDelivery.channel,
-                recipient: latestDelivery.recipient,
-                status: latestDelivery.status,
-                sentAt: latestDelivery.sentAt,
-                createdAt: latestDelivery.createdAt,
-                errorMessage: latestDelivery.errorMessage
-              }
-            : null,
-          signatureFilePath: signatureDetails?.signatureFilePath ?? null,
-          signatureMimeType: signatureDetails?.signatureMimeType ?? null,
-          signatureSizeBytes: signatureDetails?.signatureSizeBytes ?? null
-        },
-        booking: {
-          code: contract.booking.code,
-          status: contract.booking.status,
-          contractStatus: contract.booking.contractStatus,
-          customerName: contract.booking.customerName,
-          customerEmail: contract.booking.customerEmail,
-          customerPhone: contract.booking.customerPhone,
-          customerDocument: contract.booking.customerDocument,
-          pickupAt: contract.booking.pickupAt,
-          returnAt: contract.booking.returnAt,
-          pickupLocation: contract.booking.pickupLocation,
-          returnLocation: contract.booking.returnLocation,
-          pickupKm: contract.booking.pickupKm,
-          returnKm: contract.booking.returnKm,
-          expectedTotal: contract.booking.expectedTotal,
-          finalTotal: contract.booking.finalTotal,
-          vehicle: contract.booking.vehicle,
-          customer: contract.booking.customer,
-          contractSignedAt: contract.booking.contractSignedAt,
-          pricingSnapshot: contract.booking.pricingSnapshot
-        },
-        branding: { ...templateBranding, ...tenantBranding }
+    const frozen = await this.frozenContractPdf(contract.tenantId,contract.bookingId);
+    if(frozen)return frozen.bytes;
+    if(contract.signedAt||contract.status==="SIGNED")throw new AppError("Recupera il PDF storico originale: un contratto già firmato non può essere ricostruito con il nuovo modello.",409,"CONTRACT_LEGACY_ORIGINAL_REQUIRED");
+    try{
+      // Preview, download and new signing requests use the same complete business content.
+      const source=await loadSigningSource(contract.tenantId,contract.bookingId);
+      return await buildEnterpriseContractPdf({...source.input,
+        contract:{...source.input.contract,status:contract.status,signedAt:contract.signedAt},
+        booking:{...source.input.booking,status:contract.booking.status,contractStatus:contract.booking.contractStatus,
+          returnKm:contract.booking.returnKm,contractSignedAt:contract.booking.contractSignedAt}
       });
-    } catch {
-      return buildSimplePdfBuffer(contract.title, contract.content);
+    }catch(error){
+      if(error instanceof AppError)throw error;
+      throw new AppError("Impossibile preparare il contratto completo. Riprova prima dell’invio.",503,"CONTRACT_PDF_UNAVAILABLE");
     }
   }
 
@@ -1348,6 +1318,8 @@ export class RentalBookingsController {
     });
 
     if (overlap) {
+      const visible = await db.rentalBooking.findFirst({ where: { ...ownedBookingWhere(input.tenantId), id: overlap.id }, select: { id: true } });
+      if (!visible) throw new AppError("Veicolo non disponibile nello stesso intervallo.", 409, "BOOKING_VEHICLE_OVERLAP");
       throw new AppError(
         `Veicolo già impegnato dalla prenotazione ${overlap.code} nello stesso intervallo.`,
         409,
@@ -1391,7 +1363,7 @@ export class RentalBookingsController {
     db: Prisma.TransactionClient = prisma
   ) {
     try {
-      const vehicle = await lockOwnedVehicle(db, tenantId, vehicleId);
+      const vehicle = await lockVisibleVehicle(db, tenantId, vehicleId);
       if (!vehicle.isActive) throw new AppError("Veicolo non valido o non attivo", 404, "VEHICLE_NOT_FOUND");
       return vehicle;
     } catch (error) {
@@ -1470,7 +1442,8 @@ export class RentalBookingsController {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
         },
         extraKmPolicies: {
-          where: { tenantId: input.tenantId, deletedAt: null, isActive: true },
+          where: { tenantId: input.tenantId, deletedAt: null, isActive: true,
+            OR: [{ packageId: null }, { package: { is: { tenantId: input.tenantId, priceListId: input.priceListId, deletedAt: null } } }] },
           include: {
             tiers: {
               where: { tenantId: input.tenantId },
@@ -1705,10 +1678,9 @@ export class RentalBookingsController {
     });
 
     const bookingWhere: Prisma.RentalBookingWhereInput = {
-      ...ownedBookingWhere(tenantId),
+      ...ownedBookingWhere(tenantId, query.siteId),
       deletedAt: null,
       ...(query.bookingStatus ? { status: query.bookingStatus } : {}),
-      ...(query.siteId ? { AND: [{ vehicle: { is: { siteId: query.siteId } } }] } : {}),
       ...(period ? { pickupAt: { gte: period.from, lte: period.to } } : {}),
       ...(query.search
         ? {
@@ -1738,15 +1710,14 @@ export class RentalBookingsController {
     tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
     const baseBookingDayFilter: Prisma.RentalBookingWhereInput = {
-      ...ownedBookingWhere(tenantId),
-      deletedAt: null,
-      ...(query.siteId ? { AND: [{ vehicle: { is: { siteId: query.siteId } } }] } : {})
+      ...ownedBookingWhere(tenantId, query.siteId),
+      deletedAt: null
     };
 
     // Delivery history previously included deleted bookings unless a Site was requested.
     const deliveryBookingFilter: Prisma.RentalBookingWhereInput = {
-      ...ownedBookingWhere(tenantId),
-      ...(query.siteId ? { deletedAt: null, AND: [{ vehicle: { is: { siteId: query.siteId } } }] } : {})
+      ...ownedBookingWhere(tenantId, query.siteId),
+      ...(query.siteId ? { deletedAt: null } : {})
     };
 
     const [total, rows, contractsToSend, sentToday, signedCount, errorCount, exitsToday, returnsToday, latestPickups, latestReturns, latestDeliveries] =
@@ -1793,7 +1764,7 @@ export class RentalBookingsController {
             tenantId,
             deletedAt: null,
             status: { in: ["DRAFT", "READY"] },
-            booking: { is: { ...ownedBookingWhere(tenantId), deletedAt: null } }
+            booking: { is: { ...ownedBookingWhere(tenantId, query.siteId), deletedAt: null } }
           }
         }),
         prisma.bookingContractDelivery.count({
@@ -2009,6 +1980,7 @@ export class RentalBookingsController {
           select: {
             ...customerSelect,
             attachments: {
+              where: visibleCustomerAttachmentWhere(tenantId),
               orderBy: [{ createdAt: "desc" }],
               select: {
                 id: true,
@@ -2060,7 +2032,7 @@ export class RentalBookingsController {
         pickupKm: true,
         returnKm: true,
         customerName: true,
-        customer: { select: { id: true, firstName: true, lastName: true } }
+        customer: { select: { id: true, customerType: true, firstName: true, lastName: true, companyName: true } }
       }
     });
     if (!booking) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
@@ -2072,8 +2044,18 @@ export class RentalBookingsController {
       returnAt: booking.returnAt,
       pickupKm: booking.pickupKm,
       returnKm: booking.returnKm,
-      customerName: booking.customer ? fullCustomerName({ firstName: booking.customer.firstName, lastName: booking.customer.lastName }) : booking.customerName
+      customerName: booking.customer ? customerDisplayName(booking.customer) : booking.customerName
     });
+  };
+
+  downloadInvoiceDraft = async (req: Request, res: Response) => {
+    const result = await new BookingInvoiceService().preview(req.auth!.tenantId, req.auth!.userId, req.params.id);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
+    res.send(result.buffer);
   };
 
   getPricing = async (req: Request, res: Response) => {
@@ -2236,10 +2218,16 @@ export class RentalBookingsController {
         where: { ...ownedBookingWhere(tenantId), id: booking.id, deletedAt: null }
       });
       if (!locked) throw new AppError("Prenotazione non trovata", 404, "BOOKING_NOT_FOUND");
+      const issued=await tx.bookingContract.findFirst({where:{tenantId,bookingId:booking.id,issuedAt:{not:null}}});
+      if(issued||locked.priceAgreement)throw new AppError("Il prezzo concordato va modificato dal riepilogo prima dell’emissione.",409,"CONTRACT_PRICE_FROZEN");
+
       if (locked.vehicleId !== booking.vehicleId || locked.updatedAt.getTime() !== booking.updatedAt.getTime()) {
         throw new AppError("La prenotazione e' cambiata. Riprova.", 409, "BOOKING_CHANGED");
       }
 
+      if (currentSiteAccess() && !await tx.rentalPriceList.findFirst({where:{...visiblePriceListWhere(tenantId),id:setup.list.id,deletedAt:null},select:{id:true}})) {
+        throw new AppError("Listino noleggio non disponibile",404,"RENTAL_PRICE_LIST_NOT_FOUND");
+      }
       // Read after the booking fence so two legitimate requests cannot both
       // decide to create the same first pricing snapshot from a stale lookup.
       const existingSnapshot = await tx.rentalBookingPricingSnapshot.findFirst({
@@ -2288,7 +2276,7 @@ export class RentalBookingsController {
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
-        ...ownedVehicleWhere(tenantId),
+        ...visibleVehicleWhere(tenantId),
         isActive: true,
         ...(query.siteId ? { siteId: query.siteId } : {}),
         OR: [
@@ -2363,10 +2351,6 @@ export class RentalBookingsController {
       bookingId: booking.id,
       actorUserId
     });
-    await prisma.rentalBooking.update({
-      where: { id: booking.id },
-      data: { contractStatus: "READY" }
-    });
     res.status(201).json(contract);
   };
 
@@ -2374,9 +2358,15 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
     const payload = bookingContractUpdateSchema.parse(req.body);
+    if (payload.status === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
 
-    const updated = await prisma.bookingContract.update({
+    const updated = await prisma.$transaction(async tx => {
+      await this.lockMutableContract(tx,tenantId,contract.bookingId);
+      const current=await tx.bookingContract.findFirst({where:{id:contract.id,tenantId,deletedAt:null}});
+      if(!current)throw new AppError("Contratto non trovato",404,"BOOKING_CONTRACT_NOT_FOUND");
+      if(current.signedAt||current.status==="SIGNED")throw new AppError("Il contratto firmato non può essere modificato",409,"CONTRACT_ALREADY_SIGNED");
+    const result = await tx.bookingContract.update({
       where: { id: contract.id },
       data: withDefined({
         title: payload.title ? sanitizeTemplateInput(payload.title) : undefined,
@@ -2396,6 +2386,9 @@ export class RentalBookingsController {
       actorUserId,
       type: "UPDATED",
       message: "Contratto aggiornato manualmente"
+    }, tx);
+    return result;
+
     });
 
     res.json(updated);
@@ -2441,6 +2434,7 @@ export class RentalBookingsController {
     const idempotencyKey = this.extractRequiredIdempotencyKey(req, "inviare un contratto via email");
     const payload = bookingContractEmailSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
+    assertContractIssued(contract);
     const dictionary = this.buildContractContext(contract.booking as Awaited<ReturnType<RentalBookingsController["getBookingOrThrow"]>>);
     const tenantBranding = await this.tenantProfileService.contractBranding(tenantId);
     const senderName = tenantBranding.companyName ?? undefined;
@@ -2465,8 +2459,12 @@ export class RentalBookingsController {
 
     const filename = this.contractFileName(contract.booking.code, contract.booking.customerName);
     const pdfBuffer = await this.buildContractPdf(contract);
+    const siteAuthorization = captureContractSiteAuthorization(currentSiteAccess(),actorUserId);
     const enqueueResult = await prisma.$transaction(async (tx) => {
       await this.lockTransactionScope(tx, `fleetum:contract-email:${tenantId}:${idempotencyKey}`);
+      if (siteAuthorization && await contractSiteAuthorizationReason(tx,tenantId,contract.bookingId,contract.id,actorUserId,siteAuthorization)) {
+        throw new AppError("Invio contratto non consentito",403,"FORBIDDEN");
+      }
       const priorRequest = await tx.bookingContractEmailRequest.findUnique({
         where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } },
         include: { delivery: true }
@@ -2508,7 +2506,9 @@ export class RentalBookingsController {
           bookingId: contract.bookingId,
           contractId: contract.id,
           contractDeliveryId: delivery.id,
+          contractRevision: contract.documentRevision,
           actorUserId,
+          ...(siteAuthorization ? {siteAuthorization} : {}),
           fromName: senderName,
           replyTo,
           attachments: [
@@ -2590,6 +2590,7 @@ export class RentalBookingsController {
     const idempotencyKey = this.extractIdempotencyKey(req);
     const payload = bookingContractWhatsappSchema.parse(req.body);
     const contract = await this.getContractOrThrow(tenantId, req.params.id);
+    assertContractIssued(contract);
 
     const rawPhone = payload.phone ?? contract.booking.customer?.phone ?? contract.booking.customerPhone;
     const normalizedPhone = this.normalizeWhatsAppPhone(rawPhone);
@@ -2719,108 +2720,9 @@ export class RentalBookingsController {
     });
   };
 
-  markContractSigned = async (req: Request, res: Response) => {
-    const tenantId = req.auth!.tenantId;
-    const actorUserId = req.auth?.userId;
-    const idempotencyKey = this.extractIdempotencyKey(req);
-    const payload = bookingContractMarkSignedSchema.parse(req.body);
-    const contract = await this.getContractOrThrow(tenantId, req.params.id);
-    const events = Array.isArray(contract.events) ? contract.events : [];
-
-    if (idempotencyKey) {
-      const alreadySignedByKey = events.find(
-        (entry) => entry.type === "SIGNED" && this.extractIdempotencyKeyFromDetails(entry.details) === idempotencyKey
-      );
-      if (alreadySignedByKey) {
-        const signatureDetails = this.extractContractSignatureDetails(alreadySignedByKey.details);
-        res.status(200).json({
-          ...contract,
-          signatureSaved: Boolean(signatureDetails),
-          signatureFilePath: signatureDetails?.signatureFilePath ?? null,
-          duplicate: true,
-          idempotent: true
-        });
-        return;
-      }
-    }
-
-    if (contract.status === "SIGNED" && !payload.signatureDataUrl) {
-      const latestSignedEvent = events.find((entry) => entry.type === "SIGNED");
-      const signatureDetails = latestSignedEvent ? this.extractContractSignatureDetails(latestSignedEvent.details) : null;
-      res.status(200).json({
-        ...contract,
-        signatureSaved: Boolean(signatureDetails),
-        signatureFilePath: signatureDetails?.signatureFilePath ?? null,
-        duplicate: true,
-        idempotent: true
-      });
-      return;
-    }
-
-    const signedAt = payload.signedAt ?? new Date();
-    const signature = payload.signatureDataUrl
-      ? await this.persistContractSignature({
-          tenantId,
-          contractId: contract.id,
-          signatureDataUrl: payload.signatureDataUrl
-        })
-      : null;
-
-    let updated;
-    try {
-      updated = await prisma.$transaction(async (tx) => {
-        const nextContract = await tx.bookingContract.update({
-          where: { id: contract.id },
-          data: {
-            status: "SIGNED",
-            signedAt,
-            errorMessage: null,
-            updatedByUserId: actorUserId
-          }
-        });
-
-        await tx.rentalBooking.update({
-          where: { id: contract.bookingId },
-          data: {
-            contractStatus: "SIGNED",
-            contractSignedAt: signedAt,
-            ...(contract.booking.status === "CONFIRMED" ? { status: "CONTRACT_SIGNED" } : {})
-          }
-        });
-
-        await this.logContractEvent({
-          tenantId,
-          bookingId: contract.bookingId,
-          contractId: contract.id,
-          actorUserId,
-          type: "SIGNED",
-          message: signature ? "Contratto firmato con acquisizione grafica" : "Contratto marcato come firmato",
-          details: withDefined({
-            signedAt: signedAt.toISOString(),
-            signatureFilePath: signature?.filePath,
-            signatureMimeType: signature?.mimeType,
-            signatureSizeBytes: signature?.sizeBytes,
-            idempotencyKey: idempotencyKey ?? undefined
-          })
-        }, tx);
-        return nextContract;
-      });
-    } catch (error) {
-      if (signature) {
-        await compensateCommittedUpload({
-          tenantId,
-          key: signature.filePath,
-          resourceType: "BookingContractSignature"
-        });
-      }
-      throw error;
-    }
-
-    res.json({
-      ...updated,
-      signatureSaved: Boolean(signature),
-      signatureFilePath: signature?.filePath ?? null
-    });
+  markContractSigned = async (req: Request, _res: Response) => {
+    await this.getContractOrThrow(req.auth!.tenantId,req.params.id);
+    throw new AppError("Apri il documento e usa la firma email o la firma in loco con consenso.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
   };
 
   downloadContractPdfPublic = async (req: Request, res: Response) => {
@@ -2922,12 +2824,14 @@ export class RentalBookingsController {
   };
 
   getDefaultContractTemplate = async (req: Request, res: Response) => {
+    assertSharedCompanyResourceView(req.auth!.tenantId);
     const tenantId = req.auth!.tenantId;
     const template = await this.getOrCreateDefaultTemplate(tenantId, req.auth?.userId);
     res.json(template);
   };
 
   updateDefaultContractTemplate = async (req: Request, res: Response) => {
+    assertCompanyResourceView(req.auth!.tenantId);
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
     const payload = contractTemplateUpdateSchema.parse(req.body);
@@ -2962,6 +2866,7 @@ export class RentalBookingsController {
 
   uploadDefaultContractLogo = async (req: Request, res: Response) => {
     await withRequestUploadCleanup(req, async () => {
+      assertCompanyResourceView(req.auth!.tenantId);
       const tenantId = req.auth!.tenantId;
       const actorUserId = req.auth?.userId;
       const file = req.file as Express.Multer.File | undefined;
@@ -3026,6 +2931,7 @@ export class RentalBookingsController {
   };
 
   removeDefaultContractLogo = async (req: Request, res: Response) => {
+    assertCompanyResourceView(req.auth!.tenantId);
     const tenantId = req.auth!.tenantId;
     const actorUserId = req.auth?.userId;
     const template = await this.getOrCreateDefaultTemplate(tenantId, actorUserId);
@@ -3070,6 +2976,7 @@ export class RentalBookingsController {
   };
 
   getDefaultContractLogoFile = async (req: Request, res: Response) => {
+    assertSharedCompanyResourceView(req.auth!.tenantId);
     const tenantId = req.auth!.tenantId;
     const template = await this.getOrCreateDefaultTemplate(tenantId, req.auth?.userId);
     if (!template.logoFilePath) throw new AppError("Logo template non configurato", 404, "NOT_FOUND");
@@ -3079,7 +2986,7 @@ export class RentalBookingsController {
     }
 
     const payload = await storageProvider.read(template.logoFilePath);
-    res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("Cache-Control", "private, no-store");
     res.type(template.logoMimeType || "application/octet-stream");
     res.send(payload);
   };
@@ -3315,7 +3222,7 @@ export class RentalBookingsController {
           _count: {
             select: {
               bookings: { where: ownedBookingWhere(tenantId) },
-              attachments: { where: { tenantId } }
+              attachments: { where: visibleCustomerAttachmentWhere(tenantId) }
             }
           }
         }
@@ -3353,7 +3260,7 @@ export class RentalBookingsController {
       where: { tenantId, id: customerId, deletedAt: null },
       include: {
         attachments: {
-          where: { tenantId },
+          where: visibleCustomerAttachmentWhere(tenantId),
           orderBy: [{ createdAt: "desc" }],
           select: {
             id: true,
@@ -3368,7 +3275,7 @@ export class RentalBookingsController {
         _count: {
           select: {
             bookings: { where: ownedBookingWhere(tenantId) },
-            attachments: { where: { tenantId } }
+            attachments: { where: visibleCustomerAttachmentWhere(tenantId) }
           }
         }
       }
@@ -3753,6 +3660,8 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingCreateSchema.parse(req.body);
+    if (payload.contractStatus === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
+    if (payload.cargosStatus && payload.cargosStatus !== "PENDING") throw new AppError("Lo stato CARGOS è gestito dal servizio di trasmissione", 422, "CARGOS_STATUS_SERVER_MANAGED");
     const idempotencyKey = this.extractRequiredIdempotencyKey(req);
     const requestHash = this.bookingCreateRequestHash(payload);
     const shouldGenerateContract = (payload.generateContract ?? true) && (payload.contractRequired ?? true);
@@ -3796,10 +3705,11 @@ export class RentalBookingsController {
       }
 
       await this.lockBookingSchedule(tx, tenantId, payload.vehicleId);
-      const [, customer] = await Promise.all([
+      const [vehicle, customer] = await Promise.all([
         this.getAssignableVehicleOrThrow(tenantId, payload.vehicleId, tx),
         this.getCustomerOrThrow(tenantId, payload.customerId, tx)
       ]);
+      const bookingSites = await captureBookingSites(tx, tenantId, vehicle.siteId, payload);
       await this.assertVehicleAvailability({
         tenantId,
         vehicleId: payload.vehicleId,
@@ -3824,6 +3734,7 @@ export class RentalBookingsController {
         data: {
           tenantId,
           createdByUserId: userId,
+          ...bookingSites,
           vehicleId: payload.vehicleId,
           customerId: customer.id,
           contractRequired: payload.contractRequired ?? true,
@@ -3843,7 +3754,7 @@ export class RentalBookingsController {
           reason: payload.reason,
           internalNotes: payload.internalNotes,
           contractStatus: payload.contractStatus ?? "NOT_READY",
-          cargosStatus: payload.cargosStatus ?? "NOT_REQUIRED"
+          cargosStatus: payload.cargosStatus ?? "PENDING"
         },
         include: {
           vehicle: { select: vehicleSelect },
@@ -3896,7 +3807,7 @@ export class RentalBookingsController {
         }, tx);
         responseBooking = await tx.rentalBooking.update({
           where: { id: created.id },
-          data: { contractStatus: "READY" },
+          data: { contractStatus: "READY", cargosStatus: "PENDING" },
           include: {
             vehicle: { select: vehicleSelect },
             customer: { select: customerSelect }
@@ -3917,13 +3828,15 @@ export class RentalBookingsController {
     }, { timeout: 10_000 });
 
     if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
-    res.status(201).json(result.booking);
+    res.status(201).json({ ...result.booking, contractCreated: !result.replayed && shouldGenerateContract && result.booking.contractStatus === "READY" });
   };
 
   update = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingUpdateSchema.parse(req.body);
+    if (payload.contractStatus === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
+    if (payload.cargosStatus !== undefined) throw new AppError("Lo stato CARGOS è gestito dal servizio di trasmissione", 422, "CARGOS_STATUS_SERVER_MANAGED");
     const updated = await prisma.$transaction(async (tx) => {
       await this.lockBookingMutation(tx, tenantId, req.params.id);
       const current = await tx.rentalBooking.findFirst({
@@ -3969,6 +3882,11 @@ export class RentalBookingsController {
 
       if (!nextCustomerId) throw new AppError("Cliente obbligatorio", 400, "CUSTOMER_REQUIRED");
       const nextCustomer = await this.getCustomerOrThrow(tenantId, nextCustomerId, tx);
+      if ((payload.expectedTotal !== undefined && payload.expectedTotal !== lockedBooking.expectedTotal) || (payload.finalTotal !== undefined && payload.finalTotal !== lockedBooking.finalTotal)) {
+        const issued=await tx.bookingContract.findFirst({where:{tenantId,bookingId:current.id,issuedAt:{not:null}}});
+        if (issued || lockedBooking.priceAgreement) throw new AppError("Modifica il prezzo dal riepilogo del contratto prima dell’emissione.",409,"CONTRACT_PRICE_FROZEN");
+      }
+
 
       if (nextReturnAt.getTime() <= nextPickupAt.getTime()) {
         throw new AppError("La data/ora di rientro deve essere successiva al ritiro", 400, "BOOKING_DATE_RANGE_INVALID");
@@ -3987,9 +3905,12 @@ export class RentalBookingsController {
         }, tx);
       }
 
+      if(payload.contractStatus!==undefined&&payload.contractStatus!==lockedBooking.contractStatus)await this.lockMutableContract(tx,tenantId,current.id);
+      const bookingSites = await validateBookingSiteChanges(tx, tenantId, payload, lockedBooking);
       return tx.rentalBooking.update({
         where: { id: current.id },
         data: {
+          ...bookingSites,
           ...(payload.vehicleId !== undefined ? { vehicleId: payload.vehicleId } : {}),
           ...(payload.customerId !== undefined ? { customerId: payload.customerId } : {}),
           ...(payload.contractRequired !== undefined ? { contractRequired: payload.contractRequired } : {}),
@@ -4066,6 +3987,7 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingTransitionSchema.parse(req.body);
+    if (payload.toStatus === "CONTRACT_SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     const current = await this.getBookingOrThrow(tenantId, req.params.id);
 
     if (!this.canTransition(current.status, payload.toStatus)) {
@@ -4211,6 +4133,11 @@ export class RentalBookingsController {
       if (!locked || locked.vehicleId !== current.vehicleId || locked.updatedAt.getTime() !== current.updatedAt.getTime()) {
         throw new AppError("La prenotazione e' cambiata. Riprova.", 409, "BOOKING_CHANGED");
       }
+      if (["READY_FOR_HANDOVER", "IN_RENT"].includes(payload.toStatus) &&
+          !(await new ContractCargosService().hasAccepted(tenantId,current.id,req.auth!.userId,tx))) {
+        throw new AppError("Trasmetti i dati a CARGOS e verifica l'esito prima della consegna.",409,"BOOKING_CARGOS_EVIDENCE_REQUIRED");
+      }
+      if(payload.toStatus==="CONTRACT_SIGNED")await this.lockMutableContract(tx,tenantId,current.id);
       const changed = await tx.rentalBooking.update({
         where: { id: current.id },
         data: {
@@ -4273,12 +4200,15 @@ export class RentalBookingsController {
     const tenantId = req.auth!.tenantId;
     const userId = req.auth?.userId;
     const payload = rentalBookingContractSchema.parse(req.body);
+    if (payload.status === "SIGNED") throw new AppError("La firma richiede la lettura e la conferma del documento esatto.",409,"CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");
     const current = await this.getBookingOrThrow(tenantId, req.params.id);
 
-    const signedAt = payload.status === "SIGNED" ? payload.signedAt ?? current.contractSignedAt ?? new Date() : null;
-    const shouldPromoteToContractSigned = payload.status === "SIGNED" && ["DRAFT", "QUOTED", "HOLD", "CONFIRMED"].includes(current.status);
+    const signedAt = null;
+    const shouldPromoteToContractSigned = false;
 
-    const updated = await prisma.rentalBooking.update({
+    const updated = await prisma.$transaction(async tx=>{
+      await this.lockMutableContract(tx,tenantId,current.id);
+    const result = await tx.rentalBooking.update({
       where: { id: current.id },
       data: {
         contractStatus: payload.status,
@@ -4287,45 +4217,15 @@ export class RentalBookingsController {
       }
     });
 
-    await this.logNote({
-      tenantId,
-      bookingId: updated.id,
-      userId,
-      type: "SYSTEM",
-      message: `Contratto aggiornato: ${payload.status}${payload.note ? ` (${payload.note})` : ""}`
+    await tx.rentalBookingNote.create({data:{tenantId,bookingId:result.id,userId,type:"SYSTEM",message:`Contratto aggiornato: ${payload.status}${payload.note?` (${payload.note})`:""}`}});
+    return result;
     });
 
     res.json(updated);
   };
 
-  setCargosStatus = async (req: Request, res: Response) => {
-    const tenantId = req.auth!.tenantId;
-    const userId = req.auth?.userId;
-    const payload = rentalBookingCargosSchema.parse(req.body);
-    const current = await this.getBookingOrThrow(tenantId, req.params.id);
-
-    const shouldPromoteToReady = payload.status === "SENT" && current.status === "CONTRACT_SIGNED";
-
-    const updated = await prisma.rentalBooking.update({
-      where: { id: current.id },
-      data: {
-        cargosStatus: payload.status,
-        cargosTransmissionId: payload.transmissionId ?? current.cargosTransmissionId,
-        cargosOutcomeMessage: payload.message ?? null,
-        cargosSentAt: payload.status === "SENT" ? new Date() : current.cargosSentAt,
-        ...(shouldPromoteToReady ? { status: "READY_FOR_HANDOVER" } : {})
-      }
-    });
-
-    await this.logNote({
-      tenantId,
-      bookingId: updated.id,
-      userId,
-      type: "CARGOS",
-      message: `CARGOS: ${payload.status}${payload.transmissionId ? ` · id ${payload.transmissionId}` : ""}${payload.message ? ` · ${payload.message}` : ""}`
-    });
-
-    res.json(updated);
+  setCargosStatus = async (_req: Request, _res: Response) => {
+    throw new AppError("Usa Trasmetti contratto a CARGOS: lo stato dipende dall'esito del servizio.", 410, "CARGOS_USE_TRANSMIT");
   };
 
   addNote = async (req: Request, res: Response) => {
@@ -4347,6 +4247,16 @@ export class RentalBookingsController {
     res.status(201).json(note);
   };
 
+  private async unavailableIntervals(tenantId: string, vehicleIds: string[], visibleIds: string[], from: Date, to: Date, statuses: RentalBookingStatus[]) {
+    const scope = siteAccessForTenant(tenantId);
+    if (!scope || scope.allSites || vehicleIds.length === 0) return [];
+    return prisma.rentalBooking.findMany({
+      where: { tenantId, vehicle: { is: ownedVehicleWhere(tenantId, true) }, vehicleId: { in: vehicleIds }, deletedAt: null,
+        id: { notIn: visibleIds }, status: { in: statuses }, pickupAt: { lt: to }, returnAt: { gt: from } },
+      select: { vehicleId: true, pickupAt: true, returnAt: true }, orderBy: [{ pickupAt: "asc" }, { returnAt: "asc" }]
+    });
+  }
+
   dayAvailability = async (req: Request, res: Response) => {
     const tenantId = req.auth!.tenantId;
     const parsed = rentalBookingDayAvailabilityQuerySchema.parse(req.query);
@@ -4355,7 +4265,7 @@ export class RentalBookingsController {
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
-        ...ownedVehicleWhere(tenantId),
+        ...visibleVehicleWhere(tenantId),
         isActive: true,
         ...(parsed.siteId ? { siteId: parsed.siteId } : {})
       },
@@ -4389,10 +4299,12 @@ export class RentalBookingsController {
             pickupLocation: true,
             returnLocation: true,
             vehicleId: true,
-            customer: { select: { id: true, firstName: true, lastName: true } }
+            customer: { select: { id: true, customerType: true, firstName: true, lastName: true, companyName: true } }
           }
         })
       : [];
+
+    const hiddenBlocks = await this.unavailableIntervals(tenantId, vehicleIds, bookings.map(row => row.id), dayStart, dayEnd, [...ACTIVE_BOOKING_STATUSES]);
 
     const byVehicle = new Map<string, typeof bookings>();
     bookings.forEach((booking) => {
@@ -4407,9 +4319,9 @@ export class RentalBookingsController {
         vehicle,
         bookings: slots.map((booking) => ({
           ...booking,
-          customerName: booking.customer ? fullCustomerName({ firstName: booking.customer.firstName, lastName: booking.customer.lastName }) : booking.customerName
+          customerName: booking.customer ? customerDisplayName(booking.customer) : booking.customerName
         })),
-        isAvailable: slots.length === 0
+        isAvailable: slots.length === 0 && !hiddenBlocks.some(block => block.vehicleId === vehicle.id)
       };
     });
 
@@ -4440,7 +4352,7 @@ export class RentalBookingsController {
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
-        ...ownedVehicleWhere(tenantId),
+        ...visibleVehicleWhere(tenantId),
         isActive: true,
         ...(parsed.siteId ? { siteId: parsed.siteId } : {})
       },
@@ -4474,10 +4386,12 @@ export class RentalBookingsController {
             pickupLocation: true,
             returnLocation: true,
             vehicleId: true,
-            customer: { select: { id: true, firstName: true, lastName: true } }
+            customer: { select: { id: true, customerType: true, firstName: true, lastName: true, companyName: true } }
           }
         })
       : [];
+
+    const hiddenBlocks = await this.unavailableIntervals(tenantId, vehicleIds, bookings.map(row => row.id), monthStart, monthEnd, [...MONTHLY_VISIBLE_STATUSES]);
 
     const byVehicle = new Map<string, typeof bookings>();
     bookings.forEach((booking) => {
@@ -4498,9 +4412,10 @@ export class RentalBookingsController {
         },
         bookings: rows.map((booking) => ({
           ...booking,
-          customerName: booking.customer ? fullCustomerName({ firstName: booking.customer.firstName, lastName: booking.customer.lastName }) : booking.customerName
+          customerName: booking.customer ? customerDisplayName(booking.customer) : booking.customerName
         })),
-        hasBookings: rows.length > 0
+        unavailableIntervals: hiddenBlocks.filter(block => block.vehicleId === vehicle.id).map(block => ({ from: block.pickupAt, to: block.returnAt })),
+        hasBookings: rows.length > 0 || hiddenBlocks.some(block => block.vehicleId === vehicle.id)
       };
     });
 
@@ -4522,7 +4437,7 @@ export class RentalBookingsController {
             return {
               ...row,
               bookings: vehicleMatch ? row.bookings : bookingMatches,
-              hasBookings: (vehicleMatch ? row.bookings : bookingMatches).length > 0
+              hasBookings: (vehicleMatch ? row.bookings : bookingMatches).length > 0 || row.unavailableIntervals.length > 0
             };
           })
           .filter((row): row is (typeof data)[number] => row !== null)

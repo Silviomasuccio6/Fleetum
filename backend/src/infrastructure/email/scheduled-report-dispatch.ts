@@ -5,10 +5,13 @@ import { snapshotFromRow } from "../../application/services/tenant-subscription-
 import { prisma } from "../database/prisma/client.js";
 import type { emailSender } from "./email-sender.js";
 import { logger } from "../logging/logger.js";
+import { legacySiteCommandReason } from "./site-access-legacy.js";
+
+import { companyReportAuthorizationReason, parseCompanyReportAuthorization } from "../../application/services/company-report-authorization.js";
 
 type Receipt = Awaited<ReturnType<typeof emailSender.send>>;
 type Outcome = { receipt: Receipt } | { error: unknown };
-type QueuedReport = Pick<EmailQueue, "id" | "tenantId" | "createdAt" | "meta">;
+type QueuedReport = Pick<EmailQueue, "id" | "tenantId" | "createdAt" | "meta" | "recipient">;
 
 export const dispatchScheduledReport = async (
   item: QueuedReport,
@@ -28,7 +31,7 @@ export const dispatchScheduledReport = async (
 
   try {
     await prisma.$transaction(async (tx) => {
-      let reason: string | null = null;
+      let reason: string | null = legacySiteCommandReason("SCHEDULED_REPORT",item.meta);
       if (!item.tenantId) {
         reason = "TENANT_MISSING";
       } else {
@@ -96,6 +99,22 @@ export const dispatchScheduledReport = async (
             reason = `LICENSE_${entitlements.license.status}`;
           } else if (!hasFeature(entitlements.plan, "scheduled_reports")) {
             reason = "FEATURE_UNAVAILABLE";
+          }
+        }
+      }
+
+      const meta = (item.meta ?? {}) as Record<string, unknown>;
+      if (!reason && item.tenantId && Object.hasOwn(meta, "companyReportAuthorization")) {
+        reason = await companyReportAuthorizationReason(tx, item.tenantId, meta.companyReportAuthorization);
+        if (!reason) {
+          const latest = await tx.auditLog.findFirst({ where: { tenantId: item.tenantId, resource: "reports", action: "SETTINGS_REPORTS" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, details: true } });
+          const details = latest?.details as Record<string, unknown> | undefined;
+          const expected = parseCompanyReportAuthorization(meta.companyReportAuthorization);
+          const current = parseCompanyReportAuthorization(details?.__siteAuthorization);
+          if (!latest || typeof meta.settingsAuditLogId !== "string" || latest.id !== meta.settingsAuditLogId ||
+              !expected || !current || current.userId !== expected.userId || details?.enabled !== true ||
+              !Array.isArray(details.recipients) || !details.recipients.some(recipient => typeof recipient === "string" && recipient.trim().toLowerCase() === item.recipient.toLowerCase())) {
+            reason = "REPORT_CONFIGURATION_CHANGED";
           }
         }
       }

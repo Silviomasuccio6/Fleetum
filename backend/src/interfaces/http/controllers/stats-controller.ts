@@ -139,7 +139,7 @@ export class StatsController {
       if (Array.isArray(value)) return value;
       if (typeof value === "string" && value.trim()) return value.split(",").map((item) => item.trim()).filter(Boolean);
       return undefined;
-    }, z.array(z.enum(["DRAFT", "QUOTED", "HOLD", "CONFIRMED", "CONTRACT_SIGNED", "READY_FOR_HANDOVER", "IN_RENT", "CLOSED", "CANCELED", "NO_SHOW"])).optional())
+    }, z.array(z.enum(["DRAFT", "QUOTED", "HOLD", "CONFIRMED", "CONTRACT_SIGNED", "READY_FOR_HANDOVER", "IN_RENT", "CLOSED", "CANCELED", "NO_SHOW"])).max(1000).optional())
   });
 
   private parseVehicleProfitabilityQuery(query: unknown) {

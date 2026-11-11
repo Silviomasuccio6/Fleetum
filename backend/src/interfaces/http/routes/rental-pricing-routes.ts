@@ -5,6 +5,7 @@ import { asyncHandler } from "./async-handler.js";
 
 export const rentalPricingRoutes = (controller: RentalPricingController) => {
   const router = Router();
+  router.use((_req,res,next)=>{res.setHeader("Cache-Control","private, no-store");next();});
 
   router.get("/lists", requirePermissions("vehicles:read"), asyncHandler(controller.listLists));
   router.post("/lists", requirePermissions("vehicles:write"), asyncHandler(controller.createList));

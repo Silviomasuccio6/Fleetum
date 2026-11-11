@@ -205,3 +205,8 @@
     opacity: 0;
   }
 }
+
+/* Only operational loaders follow the workspace theme; fixed variants (including login) stay intact. */
+.fleetum-loader__mark--workspace-dark { display: none; }
+html.dark[data-fleetum-workspace] .fleetum-loader__mark--workspace-light { display: none; }
+html.dark[data-fleetum-workspace] .fleetum-loader__mark--workspace-dark { display: block; }

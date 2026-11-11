@@ -3,7 +3,10 @@ import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { ParsedImportRow, normalizeImportHeader, parseImportFile } from "../../services/import-file-parser-service.js";
 import { computeVehicleRevisionDueAt } from "../../services/vehicle-revision-schedule-service.js";
-import { lockVehicleSite, lockVehicleTenant } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+import { lockVehicleTenant } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
+
+import { lockVisibleVehicleSite as lockVehicleSite } from "../../../infrastructure/repositories/resource-site-scope.js";
+import { siteAccessForTenant } from "../../../infrastructure/auth/site-access-context.js";
 
 type ImportEntity = "vehicles" | "workshops";
 
@@ -197,8 +200,9 @@ export class ImportMasterDataUseCase {
 
     const normalizedRows = normalizeRowsWithAliases(parsed.rows, VEHICLE_HEADERS);
 
+    const scope = siteAccessForTenant(tenantId);
     const [sites, workshops, vehicles] = await Promise.all([
-      prisma.site.findMany({ where: { tenantId, deletedAt: null }, select: { id: true, name: true } }),
+      prisma.site.findMany({ where: { tenantId, deletedAt: null, ...(scope && !scope.allSites ? { id: { in: scope.siteIds } } : {}) }, select: { id: true, name: true } }),
       prisma.workshop.findMany({ where: { tenantId, deletedAt: null }, select: { name: true } }),
       prisma.vehicle.findMany({ where: { tenantId, deletedAt: null }, select: { plate: true } })
     ]);

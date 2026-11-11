@@ -1,4 +1,6 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import {captureOperationContext,publishOperationFeedback} from "../../../application/stores/operation-feedback";
+import { scopedFetch } from "../../../infrastructure/api/scoped-fetch";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Download, ExternalLink, FileImage, FileText, Trash2, X } from "lucide-react";
 import { masterDataUseCases } from "../../../application/usecases/master-data-usecases";
 import { FleetumBlockLoader, FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
@@ -13,6 +15,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Textarea } from "../../components/ui/textarea";
 import { useEntitlements } from "../../hooks/use-entitlements";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
+
+import {DiscardDialog,useOperationsTask,useOperationsAccess} from "../../components/operations/operations-workspace";
+
+import {WorkspacePageHeader} from "../../components/ui/workspace-ui";
+import {CommerceDrawer,CommerceNotice} from "../../components/ui/commerce-workspace";
+import type {PanelMotionHandle} from "../../components/ui/panel-motion";
 
 type Vehicle = {
   id: string;
@@ -110,6 +118,9 @@ const getDescriptionPreview = (maintenanceType?: string | null, description?: st
 };
 
 export const VehicleMaintenancesPage = () => {
+  const {canRead,canWrite,identity}=useOperationsAccess("vehicles");
+  const requestSequence=useRef(0);
+  useEffect(()=>{requestSequence.current++;return()=>{requestSequence.current++}},[identity,canRead]);
   const { can } = useEntitlements();
   const canExportCsv = can("export_csv");
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -143,6 +154,16 @@ export const VehicleMaintenancesPage = () => {
   const [exportDateTo, setExportDateTo] = useState(toDateInputValue(new Date()));
   const [exportLoading, setExportLoading] = useState<"csv" | "xlsx" | null>(null);
 
+  const [dirty,setDirty]=useState(false),[discard,setDiscard]=useState(false);
+  const [confirm,setConfirm]=useState<{title:string;name:string;run:()=>Promise<void>}|null>(null);
+  const task=useOperationsTask();
+  const submitLock=useRef(false),savedId=useRef<string|null>(null),previewSequence=useRef(0);
+  const previewRequest=useRef<AbortController|null>(null),previewUrl=useRef<string|null>(null);
+  const origin=useRef<HTMLElement|null>(null),motion=useRef<PanelMotionHandle|null>(null);
+  const closePanel=()=>{if(submitLock.current)return;if(dirty){setDiscard(true);return}motion.current?motion.current.dismiss(()=>setPanelOpen(false)):setPanelOpen(false)};
+  useEffect(()=>{if(!panelOpen||!dirty)return;const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=""};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn)},[panelOpen,dirty]);
+  useEffect(()=>()=>{previewSequence.current++;previewRequest.current?.abort();if(previewUrl.current)URL.revokeObjectURL(previewUrl.current)},[]);
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
   const rowsWithoutAttachments = useMemo(
     () => rows.filter((item) => (item.attachments?.length ?? 0) === 0),
@@ -169,11 +190,14 @@ export const VehicleMaintenancesPage = () => {
   }, [vehicleQuery, vehicles]);
 
   const loadVehicles = async () => {
+    if(!canRead)return;
     const result = await masterDataUseCases.listVehicles({ page: 1, pageSize: 200 });
     setVehicles(result.data);
   };
 
   const loadMaintenances = async (targetPage: number, targetSearch: string, targetVehicleId: string) => {
+    const sequence=++requestSequence.current;
+    if(!canRead)return;
     setLoading(true);
     setError(null);
     try {
@@ -183,6 +207,7 @@ export const VehicleMaintenancesPage = () => {
         search: targetSearch || undefined,
         vehicleId: targetVehicleId || undefined
       });
+      if(sequence!==requestSequence.current)return;
       const initialTotal = typeof initialResult.total === "number" ? initialResult.total : initialResult.data.length;
       const nextTotalPages = Math.max(1, Math.ceil(initialTotal / PAGE_SIZE));
       const effectivePage = Math.min(Math.max(1, targetPage), nextTotalPages);
@@ -194,6 +219,7 @@ export const VehicleMaintenancesPage = () => {
           search: targetSearch || undefined,
           vehicleId: targetVehicleId || undefined
         });
+        if(sequence!==requestSequence.current)return;
         const correctedTotal =
           typeof correctedResult.total === "number" ? correctedResult.total : correctedResult.data.length;
         setRows(correctedResult.data as VehicleMaintenance[]);
@@ -205,9 +231,9 @@ export const VehicleMaintenancesPage = () => {
       setRows(initialResult.data as VehicleMaintenance[]);
       setTotal(initialTotal);
     } catch (e) {
-      setError((e as Error).message);
+      if(sequence===requestSequence.current)setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if(sequence===requestSequence.current)setLoading(false);
     }
   };
 
@@ -217,7 +243,7 @@ export const VehicleMaintenancesPage = () => {
 
   useEffect(() => {
     loadVehicles().catch((e: Error) => setError(e.message));
-  }, []);
+  }, [canRead,identity]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -229,7 +255,7 @@ export const VehicleMaintenancesPage = () => {
 
   useEffect(() => {
     void loadMaintenances(page, searchQuery, vehicleFilter);
-  }, [page, searchQuery, vehicleFilter]);
+  }, [page, searchQuery, vehicleFilter,canRead,identity]);
 
   useEffect(() => {
     return () => {
@@ -237,7 +263,8 @@ export const VehicleMaintenancesPage = () => {
     };
   }, [previewObjectUrl]);
 
-  const openCreatePanel = () => {
+  const openCreatePanel = (element?:HTMLElement) => {
+    if(!canWrite)return;origin.current=element||null;savedId.current=null;setDirty(false);setError(null);
     setMode("create");
     setEditingItem(null);
     setWarning(null);
@@ -248,7 +275,8 @@ export const VehicleMaintenancesPage = () => {
     setPanelOpen(true);
   };
 
-  const openEditPanel = (item: VehicleMaintenance) => {
+  const openEditPanel = (item: VehicleMaintenance,element?:HTMLElement) => {
+    if(!canWrite)return;origin.current=element||null;savedId.current=null;setDirty(false);setError(null);
     setMode("edit");
     setEditingItem(item);
     setWarning(null);
@@ -271,8 +299,9 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const notificationScope=captureOperationContext();
     event.preventDefault();
-    if (submitting) return;
+    if (!canWrite||submitLock.current) return;
     setError(null);
     setSuccess(null);
     setWarning(null);
@@ -295,7 +324,7 @@ export const VehicleMaintenancesPage = () => {
     const normalizedWorkshop = workshopName;
     const normalizedDescription = description;
 
-    setSubmitting(true);
+    submitLock.current=true;setSubmitting(true);
     try {
       let maintenanceId = editingItem?.id ?? "";
       if (mode === "create") {
@@ -311,6 +340,7 @@ export const VehicleMaintenancesPage = () => {
 
         const created = (await masterDataUseCases.createVehicleMaintenance(createPayload)) as { id?: string };
         maintenanceId = String(created?.id ?? "");
+        if(maintenanceId){savedId.current=maintenanceId;setMode("edit");setEditingItem({...createPayload,...created,id:maintenanceId,vehicle:vehicles.find(v=>v.id===selectedVehicleId)} as VehicleMaintenance)}
       } else if (editingItem) {
         const updatePayload: Record<string, unknown> = {};
 
@@ -336,6 +366,7 @@ export const VehicleMaintenancesPage = () => {
       let invoiceAnalysisQueued = 0;
       if (attachmentFiles.length > 0) {
         const uploadResult = await masterDataUseCases.uploadVehicleMaintenanceAttachments(maintenanceId, attachmentFiles);
+        setAttachmentFiles([]);
         uploaded = Number(uploadResult.uploaded ?? 0);
         invoiceAnalysisQueued = Number(uploadResult.invoiceAnalysisQueued ?? 0);
         const invoiceTotalsMissing = Number(uploadResult.invoiceTotalsMissing ?? 0);
@@ -370,7 +401,7 @@ export const VehicleMaintenancesPage = () => {
         }
       }
 
-      setPanelOpen(false);
+      setDirty(false);savedId.current=null;setPanelOpen(false);
       setEditingItem(null);
       setAttachmentFiles([]);
       setSelectedVehicleId("");
@@ -384,30 +415,33 @@ export const VehicleMaintenancesPage = () => {
           void reload();
         }, 9000);
       }
-      setSuccess(
-        mode === "create"
+      publishOperationFeedback(setSuccess, mode === "create"
           ? `Manutenzione registrata${uploaded ? ` con ${uploaded} allegato/i` : ""}${invoiceAnalysisQueued > 0 ? " · analisi fatture in background" : ""}.`
-          : `Manutenzione aggiornata${uploaded ? ` con ${uploaded} nuovo/i allegato/i` : ""}${invoiceAnalysisQueued > 0 ? " · analisi fatture in background" : ""}.`
-      );
+          : `Manutenzione aggiornata${uploaded ? ` con ${uploaded} nuovo/i allegato/i` : ""}${invoiceAnalysisQueued > 0 ? " · analisi fatture in background" : ""}.`, notificationScope);
     } catch (e) {
-      setError((e as Error).message);
+      setError((savedId.current?"L’intervento è già registrato. Riprova per completare gli allegati senza creare un duplicato. ":"")+(e as Error).message);
     } finally {
-      setSubmitting(false);
+      submitLock.current=false;setSubmitting(false);
     }
   };
 
-  const onDelete = async (id: string) => {
+  const deleteRecord = async (id: string) => {
+    const notificationScope=captureOperationContext();
+    if(!canWrite)return;
     setError(null);
     setSuccess(null);
     setWarning(null);
     try {
       await masterDataUseCases.deleteVehicleMaintenance(id);
-      setSuccess("Manutenzione eliminata.");
+      publishOperationFeedback(setSuccess, "Manutenzione eliminata.", notificationScope);
       await reload();
     } catch (e) {
       setError((e as Error).message);
+      throw e;
     }
   };
+
+  const onDelete=(id:string)=>{if(canWrite)setConfirm({title:"Elimina manutenzione",name:"l’intervento selezionato e i suoi allegati",run:()=>deleteRecord(id)})};
 
   const isPdfAttachment = (attachment: VehicleMaintenanceAttachment) =>
     attachment.mimeType === "application/pdf" || attachment.fileName.toLowerCase().endsWith(".pdf");
@@ -420,6 +454,7 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const closePreview = () => {
+    previewSequence.current++;previewRequest.current?.abort();previewUrl.current=null;
     setPreviewAttachment(null);
     setPreviewLoading(false);
     setPreviewError(null);
@@ -430,7 +465,8 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const openPreview = async (attachment: VehicleMaintenanceAttachment) => {
-    if (!canPreviewAttachment(attachment)) return;
+    if (!canRead||!canPreviewAttachment(attachment)) return;
+    const current=++previewSequence.current;previewRequest.current?.abort();const controller=new AbortController();previewRequest.current=controller;
 
     setPreviewAttachment(attachment);
     setPreviewLoading(true);
@@ -442,24 +478,28 @@ export const VehicleMaintenancesPage = () => {
         setPreviewObjectUrl(null);
       }
 
-      const response = await fetch(attachmentUrl(attachment.id), {
+      const response = await scopedFetch(attachmentUrl(attachment.id), {
         method: "GET",
-        credentials: "include"
+        credentials: "include",signal:controller.signal
       });
       if (!response.ok) {
         throw new Error(`PREVIEW_FETCH_FAILED_${response.status}`);
       }
       const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
+      if(current!==previewSequence.current)return;
+      const objectUrl = URL.createObjectURL(blob);previewUrl.current=objectUrl;
       setPreviewObjectUrl(objectUrl);
     } catch {
+      if(current!==previewSequence.current)return;
       setPreviewError("Impossibile caricare l'anteprima del file.");
     } finally {
-      setPreviewLoading(false);
+      if(current===previewSequence.current)setPreviewLoading(false);
     }
   };
 
-  const onDeleteAttachment = async (maintenanceId: string, attachment: VehicleMaintenanceAttachment) => {
+  const deleteAttachment = async (maintenanceId: string, attachment: VehicleMaintenanceAttachment) => {
+    const notificationScope=captureOperationContext();
+    if(!canWrite)return;
     if (deletingAttachmentId) return;
     setError(null);
     setWarning(null);
@@ -479,13 +519,16 @@ export const VehicleMaintenancesPage = () => {
       if (previewAttachment?.id === attachment.id) {
         closePreview();
       }
-      setSuccess(`Allegato "${attachment.fileName}" eliminato.`);
+      publishOperationFeedback(setSuccess, `Allegato "${attachment.fileName}" eliminato.`, notificationScope);
     } catch (e) {
       setError((e as Error).message);
+      throw e;
     } finally {
       setDeletingAttachmentId(null);
     }
   };
+
+  const onDeleteAttachment=(id:string,attachment:VehicleMaintenanceAttachment)=>{if(canWrite)setConfirm({title:"Elimina allegato",name:attachment.fileName,run:()=>deleteAttachment(id,attachment)})};
 
   const buildExportParams = () => {
     const dateFromValue = new Date(`${exportDateFrom}T00:00:00`);
@@ -508,6 +551,8 @@ export const VehicleMaintenancesPage = () => {
   };
 
   const runMaintenanceExport = async (format: "csv" | "xlsx") => {
+    const notificationScope=captureOperationContext();
+    if(!canRead||!canExportCsv||exportLoading)return;
     setError(null);
     setSuccess(null);
     try {
@@ -526,7 +571,7 @@ export const VehicleMaintenancesPage = () => {
       link.download = `manutenzioni-${vehiclePlateLabel}-${fromTag}-${toTag}.${ext}`;
       link.click();
       URL.revokeObjectURL(url);
-      setSuccess(`Export ${format.toUpperCase()} manutenzioni generato con successo.`);
+      publishOperationFeedback(setSuccess, `Export ${format.toUpperCase()} manutenzioni generato con successo.`, notificationScope);
       setExportDialogOpen(false);
     } catch (e) {
       setError((e as Error).message);
@@ -535,11 +580,12 @@ export const VehicleMaintenancesPage = () => {
     }
   };
 
+  if(!canRead)return <section className="operations-workspace"><h1>Manutenzioni veicoli</h1><p>Il tuo ruolo non consente l’accesso ai veicoli.</p></section>;
   return (
-    <section className="space-y-3">
-      <PageHeader
-        title="Manutenzioni Veicoli"
-        subtitle="Registro interventi effettuati su ogni mezzo con storico consultabile e filtro rapido."
+    <section className="operations-workspace operations-maintenance">
+      <WorkspacePageHeader eyebrow="CURA DELLA FLOTTA"
+        title="Manutenzioni veicoli"
+        description="Registro interventi effettuati su ogni mezzo con storico consultabile e filtro rapido."
         actions={
           <>
             {canExportCsv ? (
@@ -547,30 +593,31 @@ export const VehicleMaintenancesPage = () => {
                 Export Manutenzioni
               </Button>
             ) : null}
-            <Button onClick={openCreatePanel}>Nuova manutenzione</Button>
+            {canWrite?<Button onClick={e=>openCreatePanel(e.currentTarget)}>Nuova manutenzione</Button>:null}
           </>
         }
       />
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
+      {error&&!panelOpen ? <CommerceNotice>{error}</CommerceNotice> : null}
+      {success ? <CommerceNotice tone="success">{success}</CommerceNotice> : null}
       {warning ? <p className="text-sm text-amber-700">{warning}</p> : null}
 
-      <Card className="saas-surface shadow-sm">
+      <Card className="commerce-panel">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Registro manutenzioni</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-2 md:grid-cols-[1fr_minmax(220px,320px)]">
             <Input
+              aria-label="Cerca manutenzioni"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Cerca per targa, tipo manutenzione o officina..."
             />
-            <Select value={vehicleFilter} onChange={(e) => { setPage(1); setVehicleFilter(e.target.value); }}>
+            <Select aria-label="Filtra manutenzioni per veicolo" value={vehicleFilter} onChange={(e) => { setPage(1); setVehicleFilter(e.target.value); }}>
               <option value="">Tutti i veicoli</option>
               {vehicles.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
+                <option translate="no" key={vehicle.id} value={vehicle.id}>
                   {vehicle.plate} · {vehicle.brand} {vehicle.model}
                 </option>
               ))}
@@ -578,7 +625,7 @@ export const VehicleMaintenancesPage = () => {
           </div>
 
           {loading ? <FleetumInlineLoader label="Caricamento manutenzioni" /> : null}
-          {rowsWithoutAttachments.length > 0 ? (
+          {!loading&&!error&&rowsWithoutAttachments.length > 0 ? (
             <Alert className="border-amber-300/70 bg-amber-50/75 text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -654,7 +701,7 @@ export const VehicleMaintenancesPage = () => {
                           <button
                             type="button"
                             className="text-destructive disabled:opacity-50"
-                            disabled={deletingAttachmentId === attachment.id}
+                            disabled={!canWrite||task.busy||deletingAttachmentId === attachment.id}
                             onClick={() => void onDeleteAttachment(item.id, attachment)}
                           >
                             Elimina
@@ -685,8 +732,8 @@ export const VehicleMaintenancesPage = () => {
                     })()}
                   </div>
                   <div className="flex items-center justify-end gap-2">
-                    <Button size="sm" variant="outline" onClick={() => openEditPanel(item)}>Modifica</Button>
-                    <Button size="sm" variant="destructive" onClick={() => onDelete(item.id)}>Elimina</Button>
+                    <Button size="sm" variant="outline" disabled={!canWrite||task.busy} onClick={e => openEditPanel(item,e.currentTarget)}>Modifica</Button>
+                    <Button size="sm" variant="destructive" disabled={!canWrite||task.busy} onClick={() => onDelete(item.id)}>Elimina</Button>
                   </div>
                       </>
                     );
@@ -787,7 +834,7 @@ export const VehicleMaintenancesPage = () => {
                                 type="button"
                                 className="rounded p-0.5 text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
                                 onClick={() => void onDeleteAttachment(item.id, attachment)}
-                                disabled={deletingAttachmentId === attachment.id}
+                                disabled={!canWrite||task.busy||deletingAttachmentId === attachment.id}
                                 title="Elimina allegato"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -819,10 +866,10 @@ export const VehicleMaintenancesPage = () => {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1.5">
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => openEditPanel(item)}>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" disabled={!canWrite||task.busy} onClick={e => openEditPanel(item,e.currentTarget)}>
                           Modifica
                         </Button>
-                        <Button size="sm" variant="destructive" className="h-7 px-2 text-[11px]" onClick={() => onDelete(item.id)}>
+                        <Button size="sm" variant="destructive" className="h-7 px-2 text-[11px]" disabled={!canWrite||task.busy} onClick={() => onDelete(item.id)}>
                           Elimina
                         </Button>
                       </div>
@@ -862,45 +909,39 @@ export const VehicleMaintenancesPage = () => {
         </CardContent>
       </Card>
 
-      {exportDialogOpen ? (
-        <>
-          <div className="fixed inset-0 z-[90] bg-black/55 backdrop-blur-sm" onClick={() => (exportLoading ? null : setExportDialogOpen(false))} />
-          <div className="fixed inset-0 z-[91] overflow-y-auto p-4">
-            <div className="mx-auto flex min-h-full w-full max-w-2xl items-center py-4">
-            <div className="w-full rounded-2xl border border-border/80 bg-card shadow-2xl">
-              <div className="flex items-center justify-between border-b px-5 py-4">
-                <div>
-                  <p className="text-sm font-semibold">Export Manutenzioni</p>
-                  <p className="text-xs text-muted-foreground">Seleziona targa e periodo per confrontare costi manutenzione e fatture.</p>
-                </div>
-                <Button variant="outline" size="icon" onClick={() => setExportDialogOpen(false)} disabled={Boolean(exportLoading)}>
-                  <X className="h-4 w-4" />
+      {exportDialogOpen?<CommerceDrawer compact title="Export manutenzioni" description="Scegli veicolo e periodo per il registro degli interventi" busy={!!exportLoading} onClose={()=>setExportDialogOpen(false)} footer={<>
+                <Button variant="outline" onClick={() => setExportDialogOpen(false)} disabled={Boolean(exportLoading)}>
+                  Annulla
                 </Button>
-              </div>
-
-              <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
+                <Button variant="outline" onClick={() => void runMaintenanceExport("csv")} disabled={Boolean(exportLoading)}>
+                  {exportLoading === "csv" ? "Export CSV..." : "Export CSV"}
+                </Button>
+                <Button onClick={() => void runMaintenanceExport("xlsx")} disabled={Boolean(exportLoading)}>
+                  {exportLoading === "xlsx" ? "Export XLSX..." : "Export Enterprise XLSX"}
+                </Button>
+</>}>{error?<CommerceNotice>{error}</CommerceNotice>:null}              <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
                 <div className="grid gap-1.5 sm:col-span-3">
-                  <Label>Targa</Label>
-                  <Select value={exportVehicleId} onChange={(event) => setExportVehicleId(event.target.value)}>
+                  <Label htmlFor="maintenance-field-1">Targa</Label>
+                  <Select id="maintenance-field-1" value={exportVehicleId} onChange={(event) => setExportVehicleId(event.target.value)}>
                     <option value="">Tutte le targhe</option>
                     {vehicles.map((vehicle) => (
-                      <option key={vehicle.id} value={vehicle.id}>
+                      <option translate="no" key={vehicle.id} value={vehicle.id}>
                         {vehicle.plate} · {vehicle.brand} {vehicle.model}
                       </option>
                     ))}
                   </Select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Data da</Label>
-                  <Input type="date" value={exportDateFrom} onChange={(event) => setExportDateFrom(event.target.value)} />
+                  <Label htmlFor="maintenance-field-2">Data da</Label>
+                  <Input id="maintenance-field-2" type="date" value={exportDateFrom} onChange={(event) => setExportDateFrom(event.target.value)} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Data a</Label>
-                  <Input type="date" value={exportDateTo} onChange={(event) => setExportDateTo(event.target.value)} />
+                  <Label htmlFor="maintenance-field-3">Data a</Label>
+                  <Input id="maintenance-field-3" type="date" value={exportDateTo} onChange={(event) => setExportDateTo(event.target.value)} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Preset rapido</Label>
-                  <Select
+                  <Label htmlFor="maintenance-field-4">Preset rapido</Label>
+                  <Select id="maintenance-field-4"
                     defaultValue=""
                     onChange={(event) => {
                       const value = event.target.value;
@@ -925,50 +966,9 @@ export const VehicleMaintenancesPage = () => {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-2 border-t px-5 py-4">
-                <Button variant="outline" onClick={() => setExportDialogOpen(false)} disabled={Boolean(exportLoading)}>
-                  Annulla
-                </Button>
-                <Button variant="outline" onClick={() => void runMaintenanceExport("csv")} disabled={Boolean(exportLoading)}>
-                  {exportLoading === "csv" ? "Export CSV..." : "Export CSV"}
-                </Button>
-                <Button onClick={() => void runMaintenanceExport("xlsx")} disabled={Boolean(exportLoading)}>
-                  {exportLoading === "xlsx" ? "Export XLSX..." : "Export Enterprise XLSX"}
-                </Button>
-              </div>
-            </div>
-            </div>
-          </div>
-        </>
-      ) : null}
+</CommerceDrawer>:null}
 
-      {previewAttachment ? (
-        <>
-          <div className="fixed inset-0 z-[92] bg-black/60 backdrop-blur-sm" onClick={closePreview} />
-          <div className="fixed inset-0 z-[93] overflow-y-auto p-4">
-            <div className="mx-auto flex min-h-full w-full max-w-5xl items-center py-4">
-            <div className="w-full overflow-hidden rounded-2xl border border-border/80 bg-card shadow-2xl">
-              <div className="flex items-center justify-between border-b px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{previewAttachment.fileName}</p>
-                  <p className="text-xs text-muted-foreground">{formatFileSize(previewAttachment.sizeBytes)}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <a
-                    href={attachmentUrl(previewAttachment.id)}
-                    download={previewAttachment.fileName}
-                    className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Scarica
-                  </a>
-                  <Button variant="outline" size="icon" onClick={closePreview}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-              <div className="bg-muted/20 p-3">
-                {previewLoading ? (
+      {previewAttachment?<CommerceDrawer title={previewAttachment.fileName} description={formatFileSize(previewAttachment.sizeBytes)} level={110} onClose={closePreview} footer={<a className="operations-file-link" href={attachmentUrl(previewAttachment.id)} download={previewAttachment.fileName}>Scarica allegato</a>}>                {previewLoading ? (
                   <div className="grid h-[36vh] place-items-center rounded-lg border bg-card">
                     <FleetumBlockLoader label="Caricamento anteprima" className="min-h-0" />
                   </div>
@@ -994,29 +994,12 @@ export const VehicleMaintenancesPage = () => {
                   <div className="grid h-[36vh] place-items-center rounded-lg border bg-card">
                     <p className="text-sm text-muted-foreground">Anteprima non disponibile per questo tipo di file.</p>
                   </div>
-                )}
-              </div>
-            </div>
-            </div>
-          </div>
-        </>
-      ) : null}
+                )}</CommerceDrawer>:null}
 
-      {panelOpen ? (
-        <>
-          <div className="fixed inset-0 z-[70] bg-black/55 backdrop-blur-sm" onClick={() => setPanelOpen(false)} />
-          <aside className="fixed right-0 top-0 z-[80] h-full w-full max-w-xl border-l bg-card shadow-2xl max-sm:bottom-0 max-sm:top-auto max-sm:max-h-[88vh] max-sm:rounded-t-2xl max-sm:border-l-0 max-sm:border-t">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="text-sm font-semibold">{mode === "create" ? "Nuova manutenzione" : "Modifica manutenzione"}</p>
-              <Button variant="outline" size="icon" onClick={() => setPanelOpen(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="h-[calc(100%-64px)] overflow-auto px-4 py-4">
-              <form className="grid gap-3 sm:grid-cols-2" onSubmit={onSubmit}>
+      {panelOpen?<CommerceDrawer title={mode==="create"?"Nuova manutenzione":"Modifica manutenzione"} description="Intervento, costi e documenti del veicolo" origin={origin.current} motionRef={motion} busy={submitting} onClose={closePanel}>{error?<CommerceNotice>{error}</CommerceNotice>:null}{savedId.current?<p role="status" className="operations-hint">Intervento registrato: gli allegati ancora selezionati verranno completati con il prossimo salvataggio.</p>:null}              <form id="maintenance-form" className="operations-form" onChangeCapture={()=>setDirty(true)} onSubmit={onSubmit}><fieldset disabled={submitting||!canWrite} className="grid gap-4 sm:grid-cols-2">
                 <div className="relative grid gap-1.5 sm:col-span-2">
-                  <Label>Targa veicolo</Label>
-                  <Input
+                  <Label htmlFor="maintenance-field-5">Targa veicolo</Label>
+                  <Input id="maintenance-field-5"
                     value={vehicleQuery}
                     onChange={(event) => {
                       const value = event.target.value;
@@ -1027,12 +1010,12 @@ export const VehicleMaintenancesPage = () => {
                       }
                     }}
                     onFocus={() => setVehicleSuggestionsOpen(true)}
-                    onBlur={() => window.setTimeout(() => setVehicleSuggestionsOpen(false), 120)}
+                    onKeyDown={e=>{if(e.key==="Escape")setVehicleSuggestionsOpen(false);if(e.key==="ArrowDown"){e.preventDefault();document.getElementById("maintenance-vehicle-options")?.querySelector<HTMLButtonElement>("button")?.focus()}}}
                     placeholder="Scrivi targa (es. AB123CD)"
                     required
                   />
                   {vehicleSuggestionsOpen ? (
-                    <div className="absolute left-0 right-0 top-[72px] z-20 max-h-56 overflow-auto rounded-xl border bg-card shadow-xl">
+                    <div id="maintenance-vehicle-options" className="absolute left-0 right-0 top-[72px] z-20 max-h-56 overflow-auto rounded-xl border bg-card shadow-xl">
                       {vehicleSuggestions.length === 0 ? (
                         <p className="px-3 py-2 text-sm text-muted-foreground">Nessun veicolo trovato.</p>
                       ) : (
@@ -1042,7 +1025,7 @@ export const VehicleMaintenancesPage = () => {
                             type="button"
                             className="flex w-full flex-col items-start gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/50"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => selectVehicle(vehicle)}
+                            onClick={() => {selectVehicle(vehicle);setDirty(true)}}
                           >
                             <span className="text-sm font-semibold">{vehicle.plate}</span>
                             <span className="text-xs text-muted-foreground">
@@ -1063,8 +1046,8 @@ export const VehicleMaintenancesPage = () => {
                 </div>
 
                 <div className="grid gap-1.5">
-                  <Label>Data intervento</Label>
-                  <Input
+                  <Label htmlFor="maintenance-field-6">Data intervento</Label>
+                  <Input id="maintenance-field-6"
                     name="performedAt"
                     type="date"
                     defaultValue={toDateInputValue(editingItem?.performedAt)}
@@ -1072,8 +1055,8 @@ export const VehicleMaintenancesPage = () => {
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Tipo manutenzione</Label>
-                  <Input
+                  <Label htmlFor="maintenance-field-7">Tipo manutenzione</Label>
+                  <Input id="maintenance-field-7"
                     name="maintenanceType"
                     defaultValue={editingItem?.maintenanceType ?? ""}
                     placeholder="Tagliando, freni, pneumatici..."
@@ -1081,8 +1064,8 @@ export const VehicleMaintenancesPage = () => {
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Km al servizio</Label>
-                  <Input
+                  <Label htmlFor="maintenance-field-8">Km al servizio</Label>
+                  <Input id="maintenance-field-8"
                     name="kmAtService"
                     type="number"
                     min={0}
@@ -1091,8 +1074,8 @@ export const VehicleMaintenancesPage = () => {
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Costo (EUR)</Label>
-                  <Input
+                  <Label htmlFor="maintenance-field-9">Costo (EUR)</Label>
+                  <Input id="maintenance-field-9"
                     name="cost"
                     type="number"
                     min={0}
@@ -1102,20 +1085,20 @@ export const VehicleMaintenancesPage = () => {
                   />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Officina / Fornitore</Label>
-                  <Input name="workshopName" defaultValue={editingItem?.workshopName ?? ""} placeholder="Nome officina o fornitore" />
+                  <Label htmlFor="maintenance-field-10">Officina / Fornitore</Label>
+                  <Input id="maintenance-field-10" name="workshopName" defaultValue={editingItem?.workshopName ?? ""} placeholder="Nome officina o fornitore" />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Descrizione intervento</Label>
-                  <Textarea
+                  <Label htmlFor="maintenance-field-11">Descrizione intervento</Label>
+                  <Textarea id="maintenance-field-11"
                     name="description"
                     defaultValue={editingItem?.description ?? ""}
                     placeholder="Dettaglio lavorazione effettuata"
                   />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Allegati (immagini, PDF, documenti)</Label>
-                  <Input
+                  <Label htmlFor="maintenance-field-12">Allegati (immagini, PDF, documenti)</Label>
+                  <Input id="maintenance-field-12"
                     type="file"
                     multiple
                     accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
@@ -1131,15 +1114,13 @@ export const VehicleMaintenancesPage = () => {
                   <Button type="submit" disabled={submitting}>
                     {submitting ? "Salvataggio..." : mode === "create" ? "Registra manutenzione" : "Salva modifiche"}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => setPanelOpen(false)}>
+                  <Button type="button" variant="outline" onClick={closePanel}>
                     Annulla
                   </Button>
                 </div>
-              </form>
-            </div>
-          </aside>
-        </>
-      ) : null}
+              </fieldset></form></CommerceDrawer>:null}
+      {discard?<DiscardDialog onContinue={()=>setDiscard(false)} onDiscard={()=>{setDiscard(false);setDirty(false);setPanelOpen(false)}}/>:null}
+      {confirm?<CommerceDrawer compact level={150} title={confirm.title} onClose={()=>{if(!task.busy)setConfirm(null)}} busy={task.busy} footer={<><Button variant="outline" disabled={task.busy} onClick={()=>setConfirm(null)}>Annulla</Button><Button variant="destructive" disabled={task.busy} onClick={()=>void task.run(async()=>{await confirm.run();setConfirm(null)})}>{task.busy?"Eliminazione...":"Elimina"}</Button></>}><p>Confermi l’eliminazione di {confirm.name}?</p>{task.error?<CommerceNotice>{task.error}</CommerceNotice>:null}</CommerceDrawer>:null}
     </section>
   );
 };

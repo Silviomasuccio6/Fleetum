@@ -188,3 +188,17 @@ test("vehicle profitability exports produce usable csv, xlsx and pdf payloads", 
   assert.ok(Buffer.from(xlsx as any).length > 1000);
   assert.equal(Buffer.from(pdf).subarray(0, 4).toString(), "%PDF");
 });
+
+
+test("profitability CSV keeps user-supplied formula-like text literal and negative numeric amounts numeric", async () => {
+  const report = {
+    period: { from: "2035-01-01", to: "2035-01-02" },
+    summary: { totalRevenue: 100, totalCosts: 150, grossMargin: -50 },
+    vehicles: [],
+    rows: [{ bookingId: "+SYNTHETIC", contractId: null, plate: "SYN-01", customerName: " =SYNTHETIC_FORMULA()", startDate: "2035-01-01", endDate: "2035-01-02", days: 1, status: "CONFIRMED", source: "BOOKING", total: 100 }]
+  };
+  const csv = await new VehicleProfitabilityReportService().toCsv(report);
+  assert.ok(csv.includes("\"'+SYNTHETIC\""));
+  assert.ok(csv.includes("\"' =SYNTHETIC_FORMULA()\""));
+  assert.ok(csv.includes('"Margine";"-50"'));
+});

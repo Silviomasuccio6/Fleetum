@@ -1,3 +1,4 @@
+import {PDFDocument} from "pdf-lib";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RentalBookingsController } from "../src/interfaces/http/controllers/rental-bookings-controller.js";
@@ -38,8 +39,10 @@ const createMockResponse = (): MockResponse => {
   return res;
 };
 
-test("contracts smoke: generateContract sets booking contractStatus READY", async () => {
+test("contracts smoke: generateContract delegates the atomic contract and workflow write", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_1" },
@@ -61,9 +64,7 @@ test("contracts smoke: generateContract sets booking contractStatus READY", asyn
 
     assert.equal(response.statusCode, 201);
     assert.deepEqual(response.body, { id: "contract_1", bookingId: "booking_1" });
-    assert.ok(capturedUpdate);
-    assert.equal(capturedUpdate.where.id, "booking_1");
-    assert.equal(capturedUpdate.data.contractStatus, "READY");
+    assert.equal(capturedUpdate,null,"Workflow write belongs to the atomic generation transaction");
   } finally {
     (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
   }
@@ -71,6 +72,8 @@ test("contracts smoke: generateContract sets booking contractStatus READY", asyn
 
 test("contracts smoke: updateContractDocument sanitizes unsafe content", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_2" },
@@ -84,6 +87,8 @@ test("contracts smoke: updateContractDocument sanitizes unsafe content", async (
     }
   } as any;
 
+  const originalTransaction=prisma.$transaction;
+  (prisma as any).$transaction=async (callback:any)=>callback({bookingContract:{update:(input:unknown)=>(prisma.bookingContract as any).update(input),findFirst:async()=>({id:"contract_1",status:"READY"})}});
   const originalBookingContractUpdate = prisma.bookingContract.update;
   let capturedUpdate: any = null;
   (prisma.bookingContract as any).update = async (input: unknown) => {
@@ -110,6 +115,7 @@ test("contracts smoke: updateContractDocument sanitizes unsafe content", async (
     assert.equal(capturedUpdate.data.status, "READY");
     assert.equal(capturedEvent.type, "UPDATED");
   } finally {
+    (prisma as any).$transaction=originalTransaction;
     (prisma.bookingContract as any).update = originalBookingContractUpdate;
   }
 });
@@ -125,6 +131,8 @@ test("contracts smoke: sendContractEmail reports the queue SENT state without fi
     },
     processPending: async () => ({ processed: 1 })
   } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_3" },
@@ -134,10 +142,11 @@ test("contracts smoke: sendContractEmail reports the queue SENT state without fi
   } as any;
 
   (controller as any).tenantProfileService = {
-    contractBranding: async () => ({
-      companyName: "Fleetum Demo",
-      companyEmail: "noreply@fleetum.it"
-    })
+    contractBranding: async () => ({companyName:"Fleetum Demo",companyEmail:"noreply@example.invalid"})
+  };
+  // Queue ownership is tested here; actual PDF loading/rendering has its own unit and PostgreSQL coverage.
+  (controller as any).buildContractPdf = async () => {
+    const pdf=await PDFDocument.create();pdf.addPage();return Buffer.from(await pdf.save());
   };
 
   const originalTransaction = prisma.$transaction;
@@ -169,6 +178,7 @@ test("contracts smoke: sendContractEmail reports the queue SENT state without fi
     capturedEvent = input;
   };
   (controller as any).getContractOrThrow = async () => ({
+    issuedAt:new Date("2026-11-07T00:00:00Z"),
     id: "contract_1",
     bookingId: "booking_1",
     emailTo: null,
@@ -214,6 +224,8 @@ test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queu
     enqueue: async () => ({ id: "queue_pending" }),
     processPending: async () => ({ processed: 0 })
   } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_pending" },
@@ -223,12 +235,14 @@ test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queu
   } as any;
 
   (controller as any).tenantProfileService = {
-    contractBranding: async () => ({
-      companyName: "Fleetum Demo",
-      companyEmail: "noreply@fleetum.it"
-    })
+    contractBranding: async () => ({companyName:"Fleetum Demo",companyEmail:"noreply@example.invalid"})
+  };
+  // Queue ownership is tested here; actual PDF loading/rendering has its own unit and PostgreSQL coverage.
+  (controller as any).buildContractPdf = async () => {
+    const pdf=await PDFDocument.create();pdf.addPage();return Buffer.from(await pdf.save());
   };
   (controller as any).getContractOrThrow = async () => ({
+    issuedAt:new Date("2026-11-07T00:00:00Z"),
     id: "contract_1",
     bookingId: "booking_1",
     emailTo: null,
@@ -293,6 +307,8 @@ test("contracts smoke: sendContractEmail keeps an in-flight leased delivery queu
 
 test("contracts smoke: sendContractEmail requires a valid idempotency key", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
 
   for (const headers of [undefined, { "x-idempotency-key": "short" }, { "x-idempotency-key": "x".repeat(129) }]) {
@@ -317,6 +333,8 @@ test("contracts smoke: sendContractEmail requires a valid idempotency key", asyn
 
 test("contracts smoke: sendContractEmail fails when recipient is missing", async () => {
   const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
+  (controller as any).lockMutableContract = async () => undefined;
+  (controller as any).frozenContractPdf = async () => null;
   const response = createMockResponse();
   const request = {
     auth: { tenantId: "demo_tenant", userId: "user_4" },
@@ -333,6 +351,7 @@ test("contracts smoke: sendContractEmail fails when recipient is missing", async
   };
 
   (controller as any).getContractOrThrow = async () => ({
+    issuedAt:new Date("2026-11-07T00:00:00Z"),
     id: "contract_1",
     bookingId: "booking_1",
     emailTo: null,
@@ -360,118 +379,11 @@ test("contracts smoke: sendContractEmail fails when recipient is missing", async
   );
 });
 
-test("contracts smoke: markContractSigned updates contract and booking status", async () => {
-  const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
-  const response = createMockResponse();
-  const request = {
-    auth: { tenantId: "demo_tenant", userId: "user_5" },
-    params: { id: "booking_1" },
-    body: {}
-  } as any;
-
-  const originalBookingContractUpdate = prisma.bookingContract.update;
-  const originalRentalBookingUpdate = prisma.rentalBooking.update;
-  const originalTransaction = prisma.$transaction;
-
-  let capturedContractUpdate: any = null;
-  let capturedBookingUpdate: any = null;
-
-  (prisma.bookingContract as any).update = async (input: unknown) => {
-    capturedContractUpdate = input;
-    return { id: "contract_1", status: "SIGNED", signedAt: (input as any).data.signedAt };
-  };
-  (prisma.rentalBooking as any).update = async (input: unknown) => {
-    capturedBookingUpdate = input;
-    return { id: "booking_1" };
-  };
-  (prisma as any).$transaction = async (callback: any) => callback({
-    bookingContract: { update: (prisma.bookingContract as any).update },
-    rentalBooking: { update: (prisma.rentalBooking as any).update }
-  });
-
-  let capturedEvent: any = null;
-  (controller as any).logContractEvent = async (input: unknown) => {
-    capturedEvent = input;
-  };
-  (controller as any).getContractOrThrow = async () => ({
-    id: "contract_1",
-    bookingId: "booking_1",
-    booking: { id: "booking_1", status: "CONFIRMED" }
-  });
-
-  try {
-    await controller.markContractSigned(request, response as any);
-
-    assert.equal(response.statusCode, 200);
-    assert.equal((response.body as any).status, "SIGNED");
-    assert.equal(capturedContractUpdate.data.status, "SIGNED");
-    assert.ok(capturedContractUpdate.data.signedAt instanceof Date);
-    assert.equal(capturedBookingUpdate.data.contractStatus, "SIGNED");
-    assert.equal(capturedBookingUpdate.data.status, "CONTRACT_SIGNED");
-    assert.equal(capturedEvent.type, "SIGNED");
-  } finally {
-    (prisma.bookingContract as any).update = originalBookingContractUpdate;
-    (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
-    (prisma as any).$transaction = originalTransaction;
-  }
-});
-
-test("contracts smoke: markContractSigned persists graphical signature metadata", async () => {
-  const controller = new RentalBookingsController({ enqueue: async () => undefined } as any);
-  const response = createMockResponse();
-  const request = {
-    auth: { tenantId: "demo_tenant", userId: "user_6" },
-    params: { id: "booking_1" },
-    body: { signatureDataUrl: "data:image/png;base64,iVBORw0KGgo=" }
-  } as any;
-
-  const originalBookingContractUpdate = prisma.bookingContract.update;
-  const originalRentalBookingUpdate = prisma.rentalBooking.update;
-  const originalTransaction = prisma.$transaction;
-
-  (prisma.bookingContract as any).update = async (input: unknown) => ({
-    id: "contract_1",
-    status: "SIGNED",
-    signedAt: (input as any).data.signedAt
-  });
-  (prisma.rentalBooking as any).update = async () => ({ id: "booking_1" });
-  (prisma as any).$transaction = async (callback: any) => callback({
-    bookingContract: { update: (prisma.bookingContract as any).update },
-    rentalBooking: { update: (prisma.rentalBooking as any).update }
-  });
-
-  let capturedEvent: any = null;
-  (controller as any).persistContractSignature = async () => ({
-    filePath: "uploads/contract-signatures/demo_tenant/contract_1-test.png",
-    mimeType: "image/png",
-    sizeBytes: 128
-  });
-  (controller as any).logContractEvent = async (input: unknown) => {
-    capturedEvent = input;
-  };
-  (controller as any).getContractOrThrow = async () => ({
-    id: "contract_1",
-    bookingId: "booking_1",
-    status: "READY",
-    events: [],
-    booking: { id: "booking_1", status: "CONFIRMED" }
-  });
-
-  try {
-    await controller.markContractSigned(request, response as any);
-
-    assert.equal(response.statusCode, 200);
-    assert.equal((response.body as any).signatureSaved, true);
-    assert.equal((response.body as any).signatureFilePath, "uploads/contract-signatures/demo_tenant/contract_1-test.png");
-    assert.equal(capturedEvent.type, "SIGNED");
-    assert.equal(capturedEvent.details.signatureFilePath, "uploads/contract-signatures/demo_tenant/contract_1-test.png");
-    assert.equal(capturedEvent.details.signatureMimeType, "image/png");
-    assert.equal(capturedEvent.details.signatureSizeBytes, 128);
-  } finally {
-    (prisma.bookingContract as any).update = originalBookingContractUpdate;
-    (prisma.rentalBooking as any).update = originalRentalBookingUpdate;
-    (prisma as any).$transaction = originalTransaction;
-  }
+test("contracts smoke: old signature commands cannot mutate a contract without document proof",async()=>{
+ const controller=new RentalBookingsController({enqueue:async()=>undefined} as any);
+ (controller as any).getContractOrThrow=async()=>({id:"contract_1",status:"READY",issuedAt:new Date()});
+ let writes=0;const old=prisma.bookingContract.update;(prisma.bookingContract as any).update=async()=>{writes++;};
+ try{for(const body of [{},{signatureDataUrl:"data:image/png;base64,invalid"}])await assert.rejects(()=>controller.markContractSigned({auth:{tenantId:"demo_tenant"},params:{id:"booking_1"},body} as any,createMockResponse() as any),(error:any)=>error.code==="CONTRACT_DOCUMENT_SIGNATURE_REQUIRED");assert.equal(writes,0);}finally{(prisma.bookingContract as any).update=old;}
 });
 
 test("contracts smoke: signature data URLs must match the declared image format", () => {

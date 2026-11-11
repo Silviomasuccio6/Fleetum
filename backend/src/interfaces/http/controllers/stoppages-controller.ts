@@ -1,7 +1,7 @@
+import { readSafeExternalCalendarFeed } from "../../../infrastructure/calendar/safe-external-feed.js";
+import { CalendarCapabilityService, requestCalendarAuthority, refreshCalendarAuthority, inCalendarScope, assertCalendarRange, type CalendarAuthority } from "../../../application/services/calendar-authority-service.js";
+import { filterCalendarEvents, bindCalendarSource, calendarSource, assertCalendarUserText, cleanImportedCalendarText } from "../../../infrastructure/repositories/calendar-event-scope.js";
 import { Request, Response } from "express";
-import dns from "node:dns/promises";
-import net from "node:net";
-import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { ManageStoppagesUseCases } from "../../../application/usecases/stoppages/manage-stoppages-usecases.js";
 import { SendReminderUseCase } from "../../../application/usecases/reminders/send-reminder-usecase.js";
@@ -9,6 +9,7 @@ import { getSlaThresholdForPriority } from "../../../application/services/sla-po
 import { StoppageOpsRepository } from "../../../domain/repositories/stoppage-ops-repository.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { ownedStoppageEventsWhere, ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
+import { visibleVehicleWhere } from "../../../infrastructure/repositories/resource-site-scope.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { stoppageStatusLabel } from "../../../shared/utils/stoppage-status-label.js";
@@ -37,7 +38,7 @@ const calendarEventInputSchema = z
     end: z.string().datetime(),
     allDay: z.boolean().optional().default(false),
     location: z.string().trim().max(180).optional().nullable(),
-    attendees: z.array(z.string().trim().max(160)).optional().default([]),
+    attendees: z.array(z.string().trim().max(160)).max(1000).optional().default([]),
     reminder: z.number().int().min(0).max(10080).optional().default(30),
     visibility: calendarEventVisibilitySchema.optional().default("default"),
     availability: calendarEventAvailabilitySchema.optional().default("BUSY"),
@@ -64,7 +65,7 @@ const calendarEventPatchSchema = z.object({
   end: z.string().datetime().optional(),
   allDay: z.boolean().optional(),
   location: z.string().trim().max(180).optional().nullable(),
-  attendees: z.array(z.string().trim().max(160)).optional(),
+  attendees: z.array(z.string().trim().max(160)).max(1000).optional(),
   reminder: z.number().int().min(0).max(10080).optional(),
   visibility: calendarEventVisibilitySchema.optional(),
   availability: calendarEventAvailabilitySchema.optional(),
@@ -96,16 +97,11 @@ const appleCalendarImportSchema = z.object({
 });
 const listStatusFilterSchema = z.enum(["OPEN", "IN_PROGRESS", "WAITING_PARTS", "SOLICITED", "CLOSED", "CANCELED", "OPEN_ACTIVE"]);
 
-const CALENDAR_FEED_TOKEN_TYPE = "calendar_feed";
-const CALENDAR_FEED_EXPIRES_IN = "180d";
 const APPLE_CALENDAR_TIMEZONE = "Europe/Rome";
-const GOOGLE_CALENDAR_OAUTH_STATE_TYPE = "google_calendar_sync";
 const GOOGLE_CALENDAR_SETTINGS_ACTION = "SETTINGS_GOOGLE_CALENDAR";
 const GOOGLE_CALENDAR_OAUTH_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email";
 const GOOGLE_CALENDAR_OAUTH_TIMEOUT_MS = 12000;
 const GOOGLE_CALENDAR_APP_SOURCE = "gestione-fermi-google-calendar";
-const EXTERNAL_FEED_MAX_BYTES = 2 * 1024 * 1024;
-const EXTERNAL_FEED_ALLOWED_CONTENT_TYPES = ["text/calendar", "text/plain", "application/octet-stream"];
 const GOOGLE_SYNC_MARKER_PREFIX = "[GF_GCAL_ID:";
 const APPLE_SYNC_MARKER_PREFIX = "[GF_ACAL_UID:";
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -171,94 +167,6 @@ const asObject = <T extends Record<string, unknown>>(value: unknown): Partial<T>
 
 const isActiveStoppage = (item: StoppageListItem) => item.status !== "CLOSED" && item.status !== "CANCELED";
 
-const ipv4ToInt = (ip: string) => {
-  const parts = ip.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
-  return (((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3]) >>> 0;
-};
-
-const isPrivateIpv4 = (ip: string) => {
-  const value = ipv4ToInt(ip);
-  if (value === null) return true;
-  return (
-    value <= 0x00ffffff || // 0.0.0.0/8
-    (value >= 0x0a000000 && value <= 0x0affffff) || // 10.0.0.0/8
-    (value >= 0x64400000 && value <= 0x647fffff) || // 100.64.0.0/10
-    (value >= 0x7f000000 && value <= 0x7fffffff) || // 127.0.0.0/8
-    (value >= 0xa9fe0000 && value <= 0xa9feffff) || // 169.254.0.0/16
-    (value >= 0xac100000 && value <= 0xac1fffff) || // 172.16.0.0/12
-    (value >= 0xc0a80000 && value <= 0xc0a8ffff) || // 192.168.0.0/16
-    (value >= 0xc6120000 && value <= 0xc613ffff) || // 198.18.0.0/15
-    value >= 0xe0000000 // 224.0.0.0/4 multicast/reserved
-  );
-};
-
-const isPrivateIpv6 = (ip: string) => {
-  const normalized = ip.trim().toLowerCase();
-  if (!normalized) return true;
-  if (normalized === "::1" || normalized === "::") return true;
-  if (normalized.startsWith("fe80:")) return true; // link-local
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // unique-local
-  if (normalized.startsWith("::ffff:")) {
-    const mapped = normalized.slice("::ffff:".length);
-    if (net.isIP(mapped) === 4) return isPrivateIpv4(mapped);
-  }
-  return false;
-};
-
-const isPrivateOrReservedAddress = (ip: string) => {
-  const family = net.isIP(ip);
-  if (family === 4) return isPrivateIpv4(ip);
-  if (family === 6) return isPrivateIpv6(ip);
-  return true;
-};
-
-const resolveSafeExternalFeedUrl = async (rawUrl: string) => {
-  const normalizedInput = rawUrl.trim().replace(/^webcal:/i, "https:");
-  let parsed: URL;
-  try {
-    parsed = new URL(normalizedInput);
-  } catch {
-    throw new AppError("URL feed non valida", 400, "INVALID_FEED_URL");
-  }
-
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new AppError("Protocollo feed non supportato", 400, "INVALID_FEED_PROTOCOL");
-  }
-
-  if (parsed.username || parsed.password) {
-    throw new AppError("Credenziali nel feed URL non consentite", 400, "INVALID_FEED_URL");
-  }
-
-  const host = parsed.hostname.trim().toLowerCase();
-  if (!host || host === "localhost" || host.endsWith(".local")) {
-    throw new AppError("Host feed non consentito", 400, "INVALID_FEED_HOST");
-  }
-
-  if (net.isIP(host) && isPrivateOrReservedAddress(host)) {
-    throw new AppError("Feed URL punta a un indirizzo non consentito", 400, "EXTERNAL_FEED_FORBIDDEN_HOST");
-  }
-
-  try {
-    const resolved = await dns.lookup(host, { all: true, verbatim: true });
-    if (!resolved.length || resolved.some((entry) => isPrivateOrReservedAddress(entry.address))) {
-      throw new AppError("Feed URL punta a un indirizzo non consentito", 400, "EXTERNAL_FEED_FORBIDDEN_HOST");
-    }
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError("Host feed non risolvibile", 400, "EXTERNAL_FEED_UNRESOLVABLE_HOST");
-  }
-
-  return parsed.toString();
-};
-
-type CalendarFeedTokenPayload = {
-  tokenType: typeof CALENDAR_FEED_TOKEN_TYPE;
-  tenantId: string;
-  userId: string;
-  iat?: number;
-  exp?: number;
-};
 
 type AppleCalendarEvent = {
   id: string;
@@ -274,17 +182,6 @@ type AppleCalendarEvent = {
 };
 
 type AppleCalendarPrivacyMode = z.infer<typeof appleCalendarPrivacySchema>;
-type GoogleCalendarStatePayload = {
-  tokenType: typeof GOOGLE_CALENDAR_OAUTH_STATE_TYPE;
-  tenantId: string;
-  userId: string;
-  dateFrom: string;
-  dateTo: string;
-  privacy: AppleCalendarPrivacyMode;
-  iat?: number;
-  exp?: number;
-};
-
 type GoogleCalendarOAuthTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -636,7 +533,8 @@ export class StoppagesController {
       orderBy: [{ startAt: "asc" }, { createdAt: "asc" }]
     });
 
-    const customEvents: AppleCalendarEvent[] = customRows.map((row) => {
+    const allowedRows = await filterCalendarEvents(tenantId,userId,customRows);
+    const customEvents: AppleCalendarEvent[] = allowedRows.map((row) => {
       const meta = this.parseSyncMetadata(row.description ?? "");
       return {
         id: row.id,
@@ -702,41 +600,7 @@ export class StoppagesController {
     }
   }
 
-  private issueGoogleCalendarStateToken(payload: Omit<GoogleCalendarStatePayload, "tokenType">) {
-    return jwt.sign(
-      {
-        tokenType: GOOGLE_CALENDAR_OAUTH_STATE_TYPE,
-        tenantId: payload.tenantId,
-        userId: payload.userId,
-        dateFrom: payload.dateFrom,
-        dateTo: payload.dateTo,
-        privacy: payload.privacy
-      } satisfies GoogleCalendarStatePayload,
-      env.JWT_SECRET,
-      { expiresIn: "15m" }
-    );
-  }
-
-  private readGoogleCalendarStateToken(rawState: string) {
-    try {
-      const payload = jwt.verify(rawState, env.JWT_SECRET) as GoogleCalendarStatePayload;
-      if (
-        payload.tokenType !== GOOGLE_CALENDAR_OAUTH_STATE_TYPE ||
-        !payload.tenantId ||
-        !payload.userId ||
-        !payload.dateFrom ||
-        !payload.dateTo ||
-        !payload.privacy
-      ) {
-        throw new AppError("State Google Calendar non valido", 401, "GOOGLE_STATE_INVALID");
-      }
-      return payload;
-    } catch {
-      throw new AppError("State Google Calendar non valido", 401, "GOOGLE_STATE_INVALID");
-    }
-  }
-
-  private buildGoogleCalendarAuthUrl(stateToken: string) {
+  private buildGoogleCalendarAuthUrl(stateToken: string, challenge: string) {
     this.ensureGoogleOAuthConfigured();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", env.GOOGLE_CLIENT_ID!);
@@ -744,6 +608,8 @@ export class StoppagesController {
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", GOOGLE_CALENDAR_OAUTH_SCOPE);
     url.searchParams.set("state", stateToken);
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "S256");
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("include_granted_scopes", "true");
     url.searchParams.set("prompt", "consent select_account");
@@ -783,51 +649,18 @@ export class StoppagesController {
     }
   }
 
-  private async fetchText(url: string, init?: RequestInit): Promise<string> {
-    const safeUrl = await resolveSafeExternalFeedUrl(url);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), GOOGLE_CALENDAR_OAUTH_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(safeUrl, { ...init, signal: controller.signal, redirect: "error" });
-      if (!response.ok) {
-        throw new AppError(`Errore download feed (${response.status})`, 502, "EXTERNAL_FEED_ERROR");
-      }
-
-      const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
-      if (contentType && !EXTERNAL_FEED_ALLOWED_CONTENT_TYPES.some((allowed) => contentType.includes(allowed))) {
-        throw new AppError("Content-Type feed non supportato", 400, "EXTERNAL_FEED_CONTENT_TYPE_INVALID");
-      }
-
-      const contentLength = Number(response.headers.get("content-length") ?? "");
-      if (Number.isFinite(contentLength) && contentLength > EXTERNAL_FEED_MAX_BYTES) {
-        throw new AppError("Feed troppo grande", 413, "EXTERNAL_FEED_TOO_LARGE");
-      }
-
-      const raw = Buffer.from(await response.arrayBuffer());
-      if (raw.length > EXTERNAL_FEED_MAX_BYTES) {
-        throw new AppError("Feed troppo grande", 413, "EXTERNAL_FEED_TOO_LARGE");
-      }
-
-      return raw.toString("utf8");
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      if ((error as Error).name === "AbortError") {
-        throw new AppError("Timeout download feed esterno", 504, "EXTERNAL_FEED_TIMEOUT");
-      }
-      throw new AppError("Errore rete su feed esterno", 502, "EXTERNAL_FEED_NETWORK_ERROR");
-    } finally {
-      clearTimeout(timeout);
-    }
+  private async fetchText(url: string) {
+    return readSafeExternalCalendarFeed(url);
   }
 
-  private async exchangeGoogleCalendarCode(code: string) {
+  private async exchangeGoogleCalendarCode(code: string, codeVerifier: string) {
     this.ensureGoogleOAuthConfigured();
     const tokenResponse = await this.fetchGoogleJson<GoogleCalendarOAuthTokenResponse>("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code,
+        code_verifier: codeVerifier,
         client_id: env.GOOGLE_CLIENT_ID!,
         client_secret: env.GOOGLE_CLIENT_SECRET!,
         redirect_uri: env.GOOGLE_WORKSPACE_REDIRECT_URI,
@@ -1102,128 +935,46 @@ export class StoppagesController {
     };
   }
 
-  private async pullGoogleCalendarEventsToLocal(tenantId: string, userId: string, accessToken: string, dateFrom: Date, dateTo: Date) {
-    const remoteEvents = await this.listGoogleCalendarEventsInRange(accessToken, dateFrom, dateTo);
-    const existingRows = await prisma.calendarEvent.findMany({
-      where: {
-        tenantId,
-        userId,
-        startAt: { lte: dateTo },
-        endAt: { gte: dateFrom },
-        description: { contains: GOOGLE_SYNC_MARKER_PREFIX }
-      },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }]
-    });
-
-    const existingByGoogleId = new Map<string, (typeof existingRows)[number]>();
-    for (const row of existingRows) {
-      const marker = this.parseSyncMetadata(row.description ?? "").googleEventId;
-      if (!marker || existingByGoogleId.has(marker)) continue;
-      existingByGoogleId.set(marker, row);
-    }
-
-    let imported = 0;
-    let updated = 0;
-    let removed = 0;
-
-    for (const remoteEvent of remoteEvents) {
-      const googleEventId = remoteEvent.id?.trim();
-      if (!googleEventId) continue;
-
-      const managedByGestionale = remoteEvent.extendedProperties?.private?.gestioneFermiEventId;
-      if (managedByGestionale) continue;
-
-      const existing = existingByGoogleId.get(googleEventId);
-      if (remoteEvent.status === "cancelled") {
-        if (existing) {
-          await prisma.calendarEvent.delete({ where: { id: existing.id } });
-          removed += 1;
-        }
-        continue;
+  private async pullGoogleCalendarEventsToLocal(tenantId: string,userId: string,accessToken: string,dateFrom: Date,dateTo: Date,authority: CalendarAuthority) {
+    const remoteEvents=await this.listGoogleCalendarEventsInRange(accessToken,dateFrom,dateTo);
+    await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+    const rows=await prisma.calendarEvent.findMany({where:{tenantId,userId,description:{contains:GOOGLE_SYNC_MARKER_PREFIX}},orderBy:[{updatedAt:"desc"},{id:"desc"}]});
+    const allowed=await filterCalendarEvents(tenantId,userId,rows),allIds=new Set(rows.map(row=>this.parseSyncMetadata(row.description).googleEventId));
+    const byId=new Map(allowed.map(row=>[this.parseSyncMetadata(row.description).googleEventId,row]));
+    let imported=0,updated=0,removed=0;
+    for(const remote of remoteEvents){
+      const id=remote.id?.trim();if(!id||/[\r\n\[\]]/.test(id)||remote.extendedProperties?.private?.gestioneFermiEventId)continue;
+      const old=byId.get(id);if(!old&&allIds.has(id))continue;
+      await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+      if(old&&(await calendarSource(tenantId,userId,old.id))?.kind!=="personal")continue;
+      if(remote.status==="cancelled"){
+        if(old){await prisma.calendarEvent.deleteMany({where:{id:old.id,tenantId,userId}});removed++;}continue;
       }
-
-      const parsedRange = this.parseGoogleEventRange(remoteEvent);
-      if (!parsedRange) continue;
-      if (parsedRange.endAt < dateFrom || parsedRange.startAt > dateTo) continue;
-
-      const descriptionWithMarker = this.buildMarkedDescription(remoteEvent.description ?? "", {
-        googleEventId
-      });
-      const title = this.redactSensitiveText((remoteEvent.summary ?? "").trim() || "Evento Google");
-      const location = (remoteEvent.location ?? "").trim();
-
-      if (existing) {
-        await prisma.calendarEvent.update({
-          where: { id: existing.id },
-          data: {
-            title,
-            description: descriptionWithMarker,
-            location: location || null,
-            startAt: parsedRange.startAt,
-            endAt: parsedRange.endAt,
-            allDay: parsedRange.allDay
-          }
-        });
-        updated += 1;
-      } else {
-        await prisma.calendarEvent.create({
-          data: {
-            tenantId,
-            userId,
-            title,
-            description: descriptionWithMarker,
-            location: location || null,
-            startAt: parsedRange.startAt,
-            endAt: parsedRange.endAt,
-            allDay: parsedRange.allDay,
-            attendees: [] as any,
-            reminder: 30,
-            visibility: "default",
-            availability: "BUSY",
-            type: "EVENT",
-            color: "#1a73e8",
-            calendarId: "work"
-          }
-        });
-        imported += 1;
-      }
+      const range=this.parseGoogleEventRange(remote);if(!range||range.endAt<dateFrom||range.startAt>dateTo)continue;
+      const data={title:this.redactSensitiveText(cleanImportedCalendarText(remote.summary??"Evento Google")),description:this.buildMarkedDescription(cleanImportedCalendarText(remote.description??""),{googleEventId:id}),location:cleanImportedCalendarText(remote.location??"")||null,startAt:range.startAt,endAt:range.endAt,allDay:range.allDay};
+      await prisma.$transaction(async tx=>{
+        const row=old?await tx.calendarEvent.update({where:{id:old.id},data}):await tx.calendarEvent.create({data:{...data,tenantId,userId,attendees:[]as any,reminder:30,visibility:"default",availability:"BUSY",type:"EVENT",color:"#1a73e8",calendarId:"work"}});
+        await bindCalendarSource(tx,row,{version:1,kind:"personal",source:"google"});
+      });if(old)updated++;else imported++;
     }
-
-    return { imported, updated, removed };
+    return{imported,updated,removed};
   }
 
-  private async pushLocalCalendarEventsToGoogle(
-    tenantId: string,
-    userId: string,
-    accessToken: string,
-    dateFrom: Date,
-    dateTo: Date,
-    privacyMode: AppleCalendarPrivacyMode
-  ) {
-    const events = await this.loadAppleCalendarEvents(tenantId, userId, dateFrom, dateTo, privacyMode);
-    for (const event of events) {
-      await this.upsertGoogleCalendarEvent(accessToken, tenantId, userId, event);
+  private async pushLocalCalendarEventsToGoogle(tenantId:string,userId:string,accessToken:string,dateFrom:Date,dateTo:Date,privacy:AppleCalendarPrivacyMode,authority:CalendarAuthority){
+    const events=await this.loadAppleCalendarEvents(tenantId,userId,dateFrom,dateTo,privacy);
+    for(const event of events){
+      await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+      const row=await prisma.calendarEvent.findFirst({where:{id:event.id,tenantId,userId}});
+      if(!row||(await filterCalendarEvents(tenantId,userId,[row])).length!==1)throw new AppError("Evento calendario non disponibile",403,"FORBIDDEN");
+      await this.upsertGoogleCalendarEvent(accessToken,tenantId,userId,event);
     }
-    return { pushed: events.length };
+    await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);return{pushed:events.length};
   }
 
-  private async syncGoogleCalendarEvents(
-    tenantId: string,
-    userId: string,
-    accessToken: string,
-    dateFrom: Date,
-    dateTo: Date,
-    privacyMode: AppleCalendarPrivacyMode
-  ) {
-    const pushed = await this.pushLocalCalendarEventsToGoogle(tenantId, userId, accessToken, dateFrom, dateTo, privacyMode);
-    const pulled = await this.pullGoogleCalendarEventsToLocal(tenantId, userId, accessToken, dateFrom, dateTo);
-    return {
-      synced: pushed.pushed,
-      pushed: pushed.pushed,
-      imported: pulled.imported,
-      updated: pulled.updated,
-      removed: pulled.removed
-    };
+  private async syncGoogleCalendarEvents(tenantId:string,userId:string,accessToken:string,dateFrom:Date,dateTo:Date,privacy:AppleCalendarPrivacyMode,authority:CalendarAuthority){
+    const pushed=await this.pushLocalCalendarEventsToGoogle(tenantId,userId,accessToken,dateFrom,dateTo,privacy,authority);
+    const pulled=await this.pullGoogleCalendarEventsToLocal(tenantId,userId,accessToken,dateFrom,dateTo,authority);
+    await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);return{synced:pushed.pushed,pushed:pushed.pushed,...pulled};
   }
 
   private buildGoogleCalendarCallbackHtml(payload: {
@@ -1237,7 +988,7 @@ export class StoppagesController {
     accountEmail?: string | null;
   }) {
     const safePayload = JSON.stringify({ source: GOOGLE_CALENDAR_APP_SOURCE, ...payload }).replace(/</g, "\\u003c");
-    const safeOrigin = JSON.stringify("*");
+    const safeOrigin = JSON.stringify(new URL(env.APP_URL).origin);
 
     return `<!doctype html>
 <html lang="it">
@@ -1258,133 +1009,52 @@ export class StoppagesController {
 </html>`;
   }
 
-  private issueCalendarFeedToken(tenantId: string, userId: string) {
-    const token = jwt.sign({ tokenType: CALENDAR_FEED_TOKEN_TYPE, tenantId, userId }, env.JWT_SECRET, {
-      expiresIn: CALENDAR_FEED_EXPIRES_IN as jwt.SignOptions["expiresIn"]
-    });
-    const decoded = jwt.decode(token) as jwt.JwtPayload | null;
-    const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000).toISOString() : null;
-    return { token, expiresAt };
-  }
-
-  private readCalendarFeedToken(rawToken: string) {
-    try {
-      const payload = jwt.verify(rawToken, env.JWT_SECRET) as CalendarFeedTokenPayload;
-      if (payload.tokenType !== CALENDAR_FEED_TOKEN_TYPE || !payload.tenantId || !payload.userId) {
-        throw new AppError("Token feed calendario non valido", 401, "UNAUTHORIZED");
-      }
-      return payload;
-    } catch {
-      throw new AppError("Token feed calendario non valido", 401, "UNAUTHORIZED");
-    }
-  }
-
   listCustomCalendarEvents = async (req: Request, res: Response) => {
-    const query = z
-      .object({
-        dateFrom: optionalDateTimeQuery,
-        dateTo: optionalDateTimeQuery
-      })
-      .parse(req.query);
-
-    const dateFrom = query.dateFrom ? new Date(query.dateFrom) : new Date(Date.now() - 30 * 86400000);
-    const dateTo = query.dateTo ? new Date(query.dateTo) : new Date(Date.now() + 30 * 86400000);
-
-    const rows = await prisma.calendarEvent.findMany({
-      where: {
-        tenantId: req.auth!.tenantId,
-        userId: req.auth!.userId,
-        startAt: { lte: dateTo },
-        endAt: { gte: dateFrom }
-      },
-      orderBy: [{ startAt: "asc" }, { createdAt: "asc" }]
-    });
-
-    res.json({ data: rows.map((row) => this.mapCustomCalendarEvent(row)) });
+    const authority=await requestCalendarAuthority(req);
+    const {dateFrom,dateTo}=this.parseCalendarRange(req.query);assertCalendarRange(dateFrom,dateTo);
+    const rows=await prisma.calendarEvent.findMany({where:{tenantId:authority.tenantId,userId:authority.userId,startAt:{lte:dateTo},endAt:{gte:dateFrom}},orderBy:[{startAt:"asc"},{createdAt:"asc"}]});
+    const allowed=await inCalendarScope(authority,()=>filterCalendarEvents(authority.tenantId,authority.userId,rows));
+    await refreshCalendarAuthority(authority);res.json({data:allowed.map(row=>this.mapCustomCalendarEvent(row))});
   };
 
   createCustomCalendarEvent = async (req: Request, res: Response) => {
-    const input = calendarEventInputSchema.parse(req.body);
-
-    const created = await prisma.calendarEvent.create({
-      data: {
-        tenantId: req.auth!.tenantId,
-        userId: req.auth!.userId,
-        title: input.title,
-        description: input.description ?? null,
-        startAt: new Date(input.start),
-        endAt: new Date(input.end),
-        allDay: Boolean(input.allDay),
-        location: input.location ?? null,
-        attendees: input.attendees as any,
-        reminder: input.reminder,
-        visibility: input.visibility,
-        availability: input.availability,
-        type: input.type,
-        color: input.color,
-        calendarId: input.calendarId
-      }
+    const authority=await requestCalendarAuthority(req,["stoppages:write"]),input=calendarEventInputSchema.parse(req.body);
+    assertCalendarUserText(input.title,input.description,input.location,input.calendarId);
+    await refreshCalendarAuthority(authority,["stoppages:write"]);
+    const created=await prisma.$transaction(async tx=>{
+      const row=await tx.calendarEvent.create({data:{tenantId:authority.tenantId,userId:authority.userId,title:input.title,description:input.description??null,startAt:new Date(input.start),endAt:new Date(input.end),allDay:Boolean(input.allDay),location:input.location??null,attendees:input.attendees as any,reminder:input.reminder,visibility:input.visibility,availability:input.availability,type:input.type,color:input.color,calendarId:input.calendarId}});
+      await bindCalendarSource(tx,row,{version:1,kind:"personal",source:"manual"});return row;
     });
-
-    res.status(201).json({ data: this.mapCustomCalendarEvent(created) });
+    res.status(201).json({data:this.mapCustomCalendarEvent(created)});
   };
 
   updateCustomCalendarEvent = async (req: Request, res: Response) => {
-    const patch = calendarEventPatchSchema.parse(req.body);
-    const eventId = z.string().trim().min(1).parse(req.params.eventId);
-
-    const existing = await prisma.calendarEvent.findFirst({
-      where: { id: eventId, tenantId: req.auth!.tenantId, userId: req.auth!.userId }
-    });
-
-    if (!existing) throw new AppError("Evento calendario non trovato", 404, "NOT_FOUND");
-
-    const nextStart = patch.start ? new Date(patch.start) : existing.startAt;
-    const nextEnd = patch.end ? new Date(patch.end) : existing.endAt;
-
-    if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime()) || nextEnd <= nextStart) {
-      throw new AppError("Intervallo evento non valido", 400, "BAD_REQUEST");
-    }
-
-    const existingMeta = this.parseSyncMetadata(existing.description ?? "");
-    const nextDescription =
-      patch.description !== undefined
-        ? this.buildMarkedDescription(patch.description ?? "", {
-            googleEventId: existingMeta.googleEventId,
-            appleUid: existingMeta.appleUid
-          })
-        : undefined;
-
-    const updated = await prisma.calendarEvent.update({
-      where: { id: eventId },
-      data: {
-        ...(patch.title !== undefined ? { title: patch.title } : {}),
-        ...(patch.description !== undefined ? { description: nextDescription || null } : {}),
-        ...(patch.start !== undefined ? { startAt: nextStart } : {}),
-        ...(patch.end !== undefined ? { endAt: nextEnd } : {}),
-        ...(patch.allDay !== undefined ? { allDay: patch.allDay } : {}),
-        ...(patch.location !== undefined ? { location: patch.location ?? null } : {}),
-        ...(patch.attendees !== undefined ? { attendees: patch.attendees as any } : {}),
-        ...(patch.reminder !== undefined ? { reminder: patch.reminder } : {}),
-        ...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
-        ...(patch.availability !== undefined ? { availability: patch.availability } : {}),
-        ...(patch.type !== undefined ? { type: patch.type } : {}),
-        ...(patch.color !== undefined ? { color: patch.color } : {}),
-        ...(patch.calendarId !== undefined ? { calendarId: patch.calendarId } : {})
-      }
-    });
-
-    res.json({ data: this.mapCustomCalendarEvent(updated) });
+    const authority=await requestCalendarAuthority(req,["stoppages:write"]),patch=calendarEventPatchSchema.parse(req.body),eventId=z.string().trim().min(1).parse(req.params.eventId);
+    const existing=await prisma.calendarEvent.findFirst({where:{id:eventId,tenantId:authority.tenantId,userId:authority.userId}});
+    if(!existing||(await inCalendarScope(authority,()=>filterCalendarEvents(authority.tenantId,authority.userId,[existing]))).length!==1)throw new AppError("Evento calendario non trovato",404,"NOT_FOUND");
+    const source=await calendarSource(authority.tenantId,authority.userId,eventId);
+    if(source?.kind==="vehicle_deadline"||/\[\[AUTO_/.test(existing.description??""))throw new AppError("Evento gestito dalle scadenze: aggiorna il veicolo e sincronizza",409,"CALENDAR_MANAGED_EVENT");
+    assertCalendarUserText(patch.title,patch.description,patch.location,patch.calendarId);
+    const nextStart=patch.start?new Date(patch.start):existing.startAt,nextEnd=patch.end?new Date(patch.end):existing.endAt;
+    if(!Number.isFinite(nextStart.getTime())||!Number.isFinite(nextEnd.getTime())||nextEnd<=nextStart)throw new AppError("Intervallo evento non valido",400,"BAD_REQUEST");
+    const meta=this.parseSyncMetadata(existing.description??"");
+    await refreshCalendarAuthority(authority,["stoppages:write"]);
+    const changed=await prisma.calendarEvent.updateMany({where:{id:eventId,tenantId:authority.tenantId,userId:authority.userId,updatedAt:existing.updatedAt},data:{
+      ...(patch.title!==undefined?{title:patch.title}:{}),...(patch.description!==undefined?{description:this.buildMarkedDescription(patch.description??"",{googleEventId:meta.googleEventId,appleUid:meta.appleUid})||null}:{}),
+      ...(patch.start!==undefined?{startAt:nextStart}:{}),...(patch.end!==undefined?{endAt:nextEnd}:{}),...(patch.allDay!==undefined?{allDay:patch.allDay}:{}),...(patch.location!==undefined?{location:patch.location??null}:{}),
+      ...(patch.attendees!==undefined?{attendees:patch.attendees as any}:{}),...(patch.reminder!==undefined?{reminder:patch.reminder}:{}),...(patch.visibility!==undefined?{visibility:patch.visibility}:{}),...(patch.availability!==undefined?{availability:patch.availability}:{}),...(patch.type!==undefined?{type:patch.type}:{}),...(patch.color!==undefined?{color:patch.color}:{}),...(patch.calendarId!==undefined?{calendarId:patch.calendarId}:{})
+    }});
+    if(changed.count!==1)throw new AppError("Evento modificato, riprova",409,"CALENDAR_CONFLICT");
+    const updated=await prisma.calendarEvent.findFirstOrThrow({where:{id:eventId,tenantId:authority.tenantId,userId:authority.userId}});res.json({data:this.mapCustomCalendarEvent(updated)});
   };
 
   deleteCustomCalendarEvent = async (req: Request, res: Response) => {
-    const eventId = z.string().trim().min(1).parse(req.params.eventId);
-    const removed = await prisma.calendarEvent.deleteMany({
-      where: { id: eventId, tenantId: req.auth!.tenantId, userId: req.auth!.userId }
-    });
-
-    if (!removed.count) throw new AppError("Evento calendario non trovato", 404, "NOT_FOUND");
-    res.status(204).send();
+    const authority=await requestCalendarAuthority(req,["stoppages:write"]),id=z.string().trim().min(1).parse(req.params.eventId);
+    const row=await prisma.calendarEvent.findFirst({where:{id,tenantId:authority.tenantId,userId:authority.userId}});
+    if(!row||(await inCalendarScope(authority,()=>filterCalendarEvents(authority.tenantId,authority.userId,[row]))).length!==1)throw new AppError("Evento calendario non trovato",404,"NOT_FOUND");
+    await refreshCalendarAuthority(authority,["stoppages:write"]);
+    const removed=await prisma.calendarEvent.deleteMany({where:{id,tenantId:authority.tenantId,userId:authority.userId,updatedAt:row.updatedAt}});
+    if(!removed.count)throw new AppError("Evento modificato, riprova",409,"CALENDAR_CONFLICT");res.status(204).send();
   };
 
   list = async (req: Request, res: Response) => {
@@ -1471,7 +1141,7 @@ export class StoppagesController {
   };
 
   sendManualReminder = async (req: Request, res: Response) => {
-    const result = await this.reminderUseCase.manualEmail(req.auth!.tenantId, req.params.id);
+    const result = await this.reminderUseCase.manualEmail(req.auth!.tenantId, req.params.id, req.auth!.userId);
     await this.logEvent(req.auth!.tenantId, req.params.id, req.auth?.userId, "REMINDER_MANUAL", "Reminder manuale richiesto");
     res.json(result);
   };
@@ -1631,288 +1301,81 @@ export class StoppagesController {
   };
 
   appleCalendarFeedInfo = async (req: Request, res: Response) => {
-    const query = z
-      .object({
-        dateFrom: optionalDateTimeQuery,
-        dateTo: optionalDateTimeQuery,
-        privacy: appleCalendarPrivacySchema.optional()
-      })
-      .parse(req.query);
+    const query=z.object({dateFrom:optionalDateTimeQuery,dateTo:optionalDateTimeQuery,privacy:appleCalendarPrivacySchema.optional()}).parse(req.query);
+    const authority=await requestCalendarAuthority(req),{dateFrom,dateTo}=this.parseCalendarRange(req.query),privacy=query.privacy??"masked";
+    const {token,expiresAt}=await new CalendarCapabilityService().issueFeed(authority,dateFrom,dateTo,privacy);
+    const params=new URLSearchParams({token,dateFrom:dateFrom.toISOString(),dateTo:dateTo.toISOString(),privacy});
+    const httpUrl=`${env.BACKEND_PUBLIC_URL}/api/calendar/apple/feed.ics?${params}`;
+    res.json({data:{httpUrl,webcalUrl:httpUrl.replace(/^http/i,"webcal"),expiresAt,privacy}});
+  };
 
-    const dateFrom = query.dateFrom ? new Date(query.dateFrom) : new Date(Date.now() - 30 * 86400000);
-    const dateTo = query.dateTo ? new Date(query.dateTo) : new Date(Date.now() + 90 * 86400000);
-    const privacyMode = query.privacy ?? "masked";
-    const { token, expiresAt } = this.issueCalendarFeedToken(req.auth!.tenantId, req.auth!.userId);
-
-    const feedQuery = new URLSearchParams({
-      token,
-      dateFrom: dateFrom.toISOString(),
-      dateTo: dateTo.toISOString(),
-      privacy: privacyMode
-    });
-
-    const httpUrl = `${env.BACKEND_PUBLIC_URL}/api/calendar/apple/feed.ics?${feedQuery.toString()}`;
-    const webcalUrl = httpUrl.replace(/^http/i, "webcal");
-
-    res.json({
-      data: {
-        httpUrl,
-        webcalUrl,
-        expiresAt,
-        privacy: privacyMode
-      }
-    });
+  revokeAppleCalendarFeeds = async (req: Request, res: Response) => {
+    const authority=await requestCalendarAuthority(req);await new CalendarCapabilityService().revokeFeeds(authority.tenantId,authority.userId);res.status(204).send();
   };
 
   appleCalendarFeedPublic = async (req: Request, res: Response) => {
-    const query = z
-      .object({
-        token: z.string().trim().min(20),
-        dateFrom: optionalDateTimeQuery,
-        dateTo: optionalDateTimeQuery,
-        privacy: appleCalendarPrivacySchema.optional()
-      })
-      .parse(req.query);
-
-    const feedToken = this.readCalendarFeedToken(query.token);
-    const tenant = await prisma.tenant.findFirst({
-      where: { id: feedToken.tenantId, deletedAt: null, isActive: true },
-      select: { id: true }
-    });
-    if (!tenant) throw new AppError("Feed calendario non disponibile", 403, "FORBIDDEN");
-
-    const user = await prisma.user.findFirst({
-      where: { id: feedToken.userId, tenantId: feedToken.tenantId, deletedAt: null, status: "ACTIVE" },
-      select: { id: true }
-    });
-    if (!user) throw new AppError("Feed calendario non disponibile", 403, "FORBIDDEN");
-
-    const dateFrom = query.dateFrom ? new Date(query.dateFrom) : new Date(Date.now() - 30 * 86400000);
-    const dateTo = query.dateTo ? new Date(query.dateTo) : new Date(Date.now() + 90 * 86400000);
-    const privacyMode = query.privacy ?? "masked";
-    const events = await this.loadAppleCalendarEvents(feedToken.tenantId, feedToken.userId, dateFrom, dateTo, privacyMode);
-    const payload = this.buildAppleCalendarIcs(events, feedToken.tenantId, privacyMode);
-
-    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
-    res.setHeader("Cache-Control", "private, max-age=300");
-    res.setHeader("Content-Disposition", "inline; filename=\"gestionale-fermi-apple.ics\"");
-    res.send(payload);
+    res.setHeader("Cache-Control","private, no-store");
+    const query=z.object({token:z.string().trim().min(20),dateFrom:optionalDateTimeQuery,dateTo:optionalDateTimeQuery,privacy:appleCalendarPrivacySchema.optional()}).parse(req.query);
+    const capabilities=new CalendarCapabilityService(),grant=await capabilities.readFeed(query.token,query);
+    const events=await inCalendarScope(grant.authority,()=>this.loadAppleCalendarEvents(grant.authority.tenantId,grant.authority.userId,new Date(grant.dateFrom),new Date(grant.dateTo),grant.privacy));
+    await capabilities.readFeed(query.token,query);
+    res.setHeader("Content-Type","text/calendar; charset=utf-8");res.setHeader("Content-Disposition",'inline; filename="gestionale-fermi-apple.ics"');
+    res.send(this.buildAppleCalendarIcs(events,grant.authority.tenantId,grant.privacy));
   };
 
   appleCalendarImport = async (req: Request, res: Response) => {
-    const input = appleCalendarImportSchema.parse(req.body ?? {});
-    const dateFrom = input.dateFrom ? new Date(input.dateFrom) : new Date(Date.now() - 30 * 86400000);
-    const dateTo = input.dateTo ? new Date(input.dateTo) : new Date(Date.now() + 30 * 86400000);
-
-    const feedPayload = await this.fetchText(input.feedUrl);
-    const parsedEvents = this.parseIcsEvents(feedPayload).filter((event) => {
-      if (event.uid.includes("@gestionefermi.local")) return false;
-      return event.endAt >= dateFrom && event.startAt <= dateTo;
-    });
-
-    const existingRows = await prisma.calendarEvent.findMany({
-      where: {
-        tenantId: req.auth!.tenantId,
-        userId: req.auth!.userId,
-        startAt: { lte: dateTo },
-        endAt: { gte: dateFrom },
-        description: { contains: APPLE_SYNC_MARKER_PREFIX }
-      },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }]
-    });
-
-    const existingByAppleUid = new Map<string, (typeof existingRows)[number]>();
-    for (const row of existingRows) {
-      const appleUid = this.parseSyncMetadata(row.description ?? "").appleUid;
-      if (!appleUid || existingByAppleUid.has(appleUid)) continue;
-      existingByAppleUid.set(appleUid, row);
+    const authority=await requestCalendarAuthority(req,["stoppages:write"]),input=appleCalendarImportSchema.parse(req.body??{});
+    const dateFrom=input.dateFrom?new Date(input.dateFrom):new Date(Date.now()-30*86400000),dateTo=input.dateTo?new Date(input.dateTo):new Date(Date.now()+30*86400000);assertCalendarRange(dateFrom,dateTo);
+    const payload=await this.fetchText(input.feedUrl);await refreshCalendarAuthority(authority,["stoppages:write"]);
+    const parsed=this.parseIcsEvents(payload).filter(event=>!event.uid.includes("@gestionefermi.local")&&event.endAt>=dateFrom&&event.startAt<=dateTo);
+    const existingRows=await prisma.calendarEvent.findMany({where:{tenantId:authority.tenantId,userId:authority.userId,description:{contains:APPLE_SYNC_MARKER_PREFIX}},orderBy:[{updatedAt:"desc"},{id:"desc"}]});
+    const allowed=await inCalendarScope(authority,()=>filterCalendarEvents(authority.tenantId,authority.userId,existingRows));
+    const allIds=new Set(existingRows.map(row=>this.parseSyncMetadata(row.description).appleUid));
+    const byUid=new Map(allowed.map(row=>[this.parseSyncMetadata(row.description).appleUid,row]));let imported=0,updated=0;
+    for(const event of parsed){
+      if(/[\r\n\[\]]/.test(event.uid))continue;
+      const old=byUid.get(event.uid);if(!old&&allIds.has(event.uid))continue;
+      await refreshCalendarAuthority(authority,["stoppages:write"]);
+      if(old&&(await calendarSource(authority.tenantId,authority.userId,old.id))?.kind!=="personal")continue;
+      const data={title:this.redactSensitiveText(cleanImportedCalendarText(event.title)),description:this.buildMarkedDescription(cleanImportedCalendarText(event.description),{appleUid:event.uid}),location:cleanImportedCalendarText(event.location)||null,startAt:event.startAt,endAt:event.endAt,allDay:event.allDay};
+      await prisma.$transaction(async tx=>{
+        const row=old?await tx.calendarEvent.update({where:{id:old.id},data}):await tx.calendarEvent.create({data:{...data,tenantId:authority.tenantId,userId:authority.userId,attendees:[]as any,reminder:30,visibility:"default",availability:"BUSY",type:"EVENT",color:"#1a73e8",calendarId:"personal"}});
+        await bindCalendarSource(tx,row,{version:1,kind:"personal",source:"apple"});
+      });if(old)updated++;else imported++;
     }
-
-    let imported = 0;
-    let updated = 0;
-    for (const parsed of parsedEvents) {
-      const markedDescription = this.buildMarkedDescription(parsed.description, { appleUid: parsed.uid });
-      const existing = existingByAppleUid.get(parsed.uid);
-      if (existing) {
-        await prisma.calendarEvent.update({
-          where: { id: existing.id },
-          data: {
-            title: this.redactSensitiveText(parsed.title),
-            description: markedDescription,
-            location: parsed.location || null,
-            startAt: parsed.startAt,
-            endAt: parsed.endAt,
-            allDay: parsed.allDay
-          }
-        });
-        updated += 1;
-      } else {
-        await prisma.calendarEvent.create({
-          data: {
-            tenantId: req.auth!.tenantId,
-            userId: req.auth!.userId,
-            title: this.redactSensitiveText(parsed.title),
-            description: markedDescription,
-            location: parsed.location || null,
-            startAt: parsed.startAt,
-            endAt: parsed.endAt,
-            allDay: parsed.allDay,
-            attendees: [] as any,
-            reminder: 30,
-            visibility: "default",
-            availability: "BUSY",
-            type: "EVENT",
-            color: "#1a73e8",
-            calendarId: "personal"
-          }
-        });
-        imported += 1;
-      }
-    }
-
-    res.json({
-      data: {
-        imported,
-        updated,
-        scanned: parsedEvents.length
-      }
-    });
+    await refreshCalendarAuthority(authority,["stoppages:write"]);res.json({data:{imported,updated,scanned:parsed.length}});
   };
 
   googleCalendarSync = async (req: Request, res: Response) => {
-    const input = googleCalendarSyncInputSchema.parse(req.body ?? {});
-    const dateFrom = input.dateFrom ? new Date(input.dateFrom) : new Date(Date.now() - 30 * 86400000);
-    const dateTo = input.dateTo ? new Date(input.dateTo) : new Date(Date.now() + 30 * 86400000);
-    const privacyMode = input.privacy ?? "masked";
-
-    const stateToken = this.issueGoogleCalendarStateToken({
-      tenantId: req.auth!.tenantId,
-      userId: req.auth!.userId,
-      dateFrom: dateFrom.toISOString(),
-      dateTo: dateTo.toISOString(),
-      privacy: privacyMode
-    });
-    const authUrl = this.buildGoogleCalendarAuthUrl(stateToken);
-    const connection = await this.loadGoogleCalendarConnection(req.auth!.tenantId, req.auth!.userId);
-
-    if (!connection) {
-      return res.json({
-        data: {
-          requiresOAuth: true,
-          authUrl
-        }
-      });
-    }
-
-    try {
-      const refreshed = await this.refreshGoogleCalendarAccessToken(connection.refreshToken);
-      const sync = await this.syncGoogleCalendarEvents(
-        req.auth!.tenantId,
-        req.auth!.userId,
-        refreshed.accessToken,
-        dateFrom,
-        dateTo,
-        privacyMode
-      );
-
-      return res.json({
-        data: {
-          requiresOAuth: false,
-          synced: sync.synced,
-          pushed: sync.pushed,
-          imported: sync.imported,
-          updated: sync.updated,
-          removed: sync.removed,
-          accountEmail: connection.accountEmail,
-          calendarUrl: "https://calendar.google.com/calendar/u/0/r"
-        }
-      });
-    } catch (error) {
-      if (error instanceof AppError && error.code === "GOOGLE_TOKEN_REFRESH_FAILED") {
-        await this.clearGoogleCalendarConnection(req.auth!.tenantId, req.auth!.userId);
-        return res.json({
-          data: {
-            requiresOAuth: true,
-            authUrl
-          }
-        });
-      }
-      throw error;
-    }
+    const authority=await requestCalendarAuthority(req,["stoppages:read","stoppages:write"]),input=googleCalendarSyncInputSchema.parse(req.body??{});
+    const dateFrom=input.dateFrom?new Date(input.dateFrom):new Date(Date.now()-30*86400000),dateTo=input.dateTo?new Date(input.dateTo):new Date(Date.now()+30*86400000),privacy=input.privacy??"masked";assertCalendarRange(dateFrom,dateTo);
+    const requireOAuth=async()=>{const flow=await new CalendarCapabilityService().issueGoogle(authority,dateFrom,dateTo,privacy,res);return res.json({data:{requiresOAuth:true,authUrl:this.buildGoogleCalendarAuthUrl(flow.state,flow.challenge)}});};
+    const connection=await this.loadGoogleCalendarConnection(authority.tenantId,authority.userId);if(!connection)return requireOAuth();
+    try{
+      await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+      const refreshed=await this.refreshGoogleCalendarAccessToken(connection.refreshToken);
+      await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+      const sync=await inCalendarScope(authority,()=>this.syncGoogleCalendarEvents(authority.tenantId,authority.userId,refreshed.accessToken,dateFrom,dateTo,privacy,authority));
+      return res.json({data:{requiresOAuth:false,...sync,accountEmail:connection.accountEmail,calendarUrl:"https://calendar.google.com/calendar/u/0/r"}});
+    }catch(error){if(error instanceof AppError&&error.code==="GOOGLE_TOKEN_REFRESH_FAILED"){await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);await this.clearGoogleCalendarConnection(authority.tenantId,authority.userId);return requireOAuth();}throw error;}
   };
 
   googleCalendarCallback = async (req: Request, res: Response) => {
-    const query = googleCalendarCallbackQuerySchema.parse(req.query);
-    if (query.error) {
-      const html = this.buildGoogleCalendarCallbackHtml({
-        status: "error",
-        message: query.error_description || "Autorizzazione Google annullata"
-      });
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(html);
-    }
-
-    if (!query.code || !query.state) {
-      const html = this.buildGoogleCalendarCallbackHtml({
-        status: "error",
-        message: "Dati callback Google non validi"
-      });
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(html);
-    }
-
-    try {
-      const state = this.readGoogleCalendarStateToken(query.state);
-      const exchanged = await this.exchangeGoogleCalendarCode(query.code);
-      const existingConnection = await this.loadGoogleCalendarConnection(state.tenantId, state.userId);
-      const refreshToken = exchanged.refreshToken ?? existingConnection?.refreshToken ?? "";
-
-      if (!refreshToken) {
-        throw new AppError(
-          "Google non ha restituito un refresh token. Riprova forzando consenso account.",
-          400,
-          "GOOGLE_REFRESH_TOKEN_MISSING"
-        );
-      }
-
-      const accountEmail = await this.fetchGoogleCalendarAccountEmail(exchanged.accessToken).catch(
-        () => existingConnection?.accountEmail ?? null
-      );
-
-      await this.saveGoogleCalendarConnection(state.tenantId, state.userId, {
-        refreshToken,
-        accountEmail,
-        scope: exchanged.scope ?? existingConnection?.scope ?? null
-      });
-
-      const sync = await this.syncGoogleCalendarEvents(
-        state.tenantId,
-        state.userId,
-        exchanged.accessToken,
-        new Date(state.dateFrom),
-        new Date(state.dateTo),
-        state.privacy
-      );
-
-      const html = this.buildGoogleCalendarCallbackHtml({
-        status: "success",
-        synced: sync.synced,
-        pushed: sync.pushed,
-        imported: sync.imported,
-        updated: sync.updated,
-        removed: sync.removed,
-        accountEmail
-      });
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(html);
-    } catch (error) {
-      const html = this.buildGoogleCalendarCallbackHtml({
-        status: "error",
-        message: error instanceof Error ? error.message : "Connessione Google Calendar non riuscita"
-      });
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(html);
-    }
+    res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Type","text/html; charset=utf-8");
+    try{
+      const query=googleCalendarCallbackQuerySchema.parse(req.query);if(!query.state)throw new AppError("Callback non valido",400);
+      const grant=await new CalendarCapabilityService().consumeGoogle(query.state,req,res),authority=grant.authority;
+      if(query.error||!query.code)return res.status(200).send(this.buildGoogleCalendarCallbackHtml({status:"error",message:"Autorizzazione annullata o non valida"}));
+      const exchanged=await this.exchangeGoogleCalendarCode(query.code,grant.codeVerifier);
+      await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+      const existing=await this.loadGoogleCalendarConnection(authority.tenantId,authority.userId),refreshToken=exchanged.refreshToken??existing?.refreshToken??"";
+      if(!refreshToken)throw new AppError("Credenziale calendario mancante",400);
+      const accountEmail=await this.fetchGoogleCalendarAccountEmail(exchanged.accessToken).catch(()=>existing?.accountEmail??null);
+      await refreshCalendarAuthority(authority,["stoppages:read","stoppages:write"]);
+      await this.saveGoogleCalendarConnection(authority.tenantId,authority.userId,{refreshToken,accountEmail,scope:exchanged.scope??existing?.scope??null});
+      const sync=await inCalendarScope(authority,()=>this.syncGoogleCalendarEvents(authority.tenantId,authority.userId,exchanged.accessToken,new Date(grant.dateFrom),new Date(grant.dateTo),grant.privacy,authority));
+      return res.status(200).send(this.buildGoogleCalendarCallbackHtml({status:"success",...sync,accountEmail}));
+    }catch{return res.status(200).send(this.buildGoogleCalendarCallbackHtml({status:"error",message:"Connessione calendario non riuscita. Riavvia la sincronizzazione dal gestionale."}));}
   };
 
   reminderTemplatePreview = async (req: Request, res: Response) => {
@@ -2155,7 +1618,7 @@ export class StoppagesController {
   bulkUpdate = async (req: Request, res: Response) => {
     const payload = z
       .object({
-        ids: z.array(z.string().min(1)).min(1),
+        ids: z.array(z.string().min(1)).min(1).max(1000),
         action: z.enum(["SET_STATUS", "SET_PRIORITY", "SEND_REMINDER"]),
         status: stoppageSchema.shape.status.optional(),
         priority: stoppageSchema.shape.priority.optional()
@@ -2181,7 +1644,7 @@ export class StoppagesController {
           await this.logEvent(req.auth!.tenantId, id, req.auth?.userId, "BULK_PRIORITY", `Priorita bulk: ${payload.priority}`);
         }
         if (payload.action === "SEND_REMINDER") {
-          await this.reminderUseCase.manualEmail(req.auth!.tenantId, id);
+          await this.reminderUseCase.manualEmail(req.auth!.tenantId, id, req.auth!.userId);
           await this.logEvent(req.auth!.tenantId, id, req.auth?.userId, "BULK_REMINDER", "Reminder bulk inviato");
         }
         results.push({ id, ok: true });
@@ -2255,7 +1718,7 @@ export class StoppagesController {
     const intervalDays = Number(req.query.intervalDays ?? 180);
     const kmWarning = Number(req.query.kmWarning ?? 500);
     const vehicles = await prisma.vehicle.findMany({
-      where: { tenantId: req.auth!.tenantId, site: { tenantId: req.auth!.tenantId }, deletedAt: null, isActive: true },
+      where: { ...visibleVehicleWhere(req.auth!.tenantId), isActive: true },
       include: {
         site: { select: { name: true } },
         stoppages: { where: await ownedStoppageWhere(req.auth!.tenantId), orderBy: { openedAt: "desc" }, take: 1, select: { openedAt: true } }

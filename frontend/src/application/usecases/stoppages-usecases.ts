@@ -37,6 +37,7 @@ export const stoppagesUseCases = {
         calendarUrl?: string;
       };
     }>("/stoppages/calendar/google/sync", input ?? {}),
+  revokeCalendarFeeds:()=>httpClient.post<void>("/stoppages/calendar/apple/revoke",{},{suppressSuccessToast:true}),
   importAppleCalendarFeed: (input: { feedUrl: string; dateFrom?: string; dateTo?: string }) =>
     httpClient.post<{ data: { imported: number; updated: number; scanned: number } }>("/stoppages/calendar/apple/import", input),
   listCustomCalendarEvents: (params?: Record<string, string | number | undefined>) =>

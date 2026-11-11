@@ -1,3 +1,4 @@
-import { CalendarShell } from "../../components/calendar/CalendarShell";
-
-export const StoppagesCalendarPage = () => <CalendarShell />;
+import {CalendarShell} from "../../components/calendar/CalendarShell";
+import {WorkspacePageHeader} from "../../components/ui/workspace-ui";
+import {StoppageFilterBar,StoppageViewNav,useStoppageFilters,useOperationsAccess} from "../../components/operations/operations-workspace";
+export const StoppagesCalendarPage=()=>{const{filters,set,reset}=useStoppageFilters();const{canRead}=useOperationsAccess();if(!canRead)return <section className="operations-workspace"><h1>Calendario fermi</h1><p>Il tuo ruolo non consente l’accesso ai fermi.</p></section>;return <section className="operations-workspace operations-calendar"><WorkspacePageHeader eyebrow="LA FLOTTA NEL TEMPO" title="Calendario fermi" description="Interventi ed eventi operativi, nello stesso contesto della flotta."/><StoppageViewNav active="calendar" filters={filters}/><div className="commerce-panel"><StoppageFilterBar filters={filters} onChange={set} onReset={reset}/><p className="operations-hint">I filtri riguardano i fermi tecnici. Gli eventi del calendario restano visibili.</p></div><CalendarShell filters={filters}/></section>};

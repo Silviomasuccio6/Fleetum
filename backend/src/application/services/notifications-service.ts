@@ -37,7 +37,7 @@ export class NotificationsService {
       type: "REMINDER_FAILED",
       severity: "MEDIUM",
       title: "Reminder non inviato",
-      description: `${item.recipient} · ${item.errorMessage ?? "errore sconosciuto"}`,
+      description: `${item.recipient} · Invio non riuscito. Controlla il sollecito prima di riprovare.`,
       createdAt: item.sentAt
     }));
 

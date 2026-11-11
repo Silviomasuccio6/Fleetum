@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
+import { syncWorkspaceAppearance } from "../../infrastructure/theme/workspace-appearance";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "../components/layout/app-layout";
 import { PageLoader } from "../components/ui/page-loader";
@@ -16,6 +17,7 @@ import { getRequiredFeatureForAppPath } from "../../domain/policies/feature-visi
 import { FeatureProtectedRoute } from "./feature-protected-route";
 import { AppErrorBoundary } from "../components/errors/app-error-boundary";
 
+const ContractSigningPage = lazy(() => import("../pages/contracts/contract-signing-page").then(m=>({default:m.ContractSigningPage})));
 const DashboardPage = lazy(() => import("../pages/dashboard/dashboard-page").then((m) => ({ default: m.DashboardPage })));
 const StoppagesListPage = lazy(() => import("../pages/stoppages/stoppages-list-page").then((m) => ({ default: m.StoppagesListPage })));
 const StoppageDetailPage = lazy(() => import("../pages/stoppages/stoppage-detail-page").then((m) => ({ default: m.StoppageDetailPage })));
@@ -24,6 +26,7 @@ const StoppagesKanbanPage = lazy(() => import("../pages/stoppages/stoppages-kanb
 const StoppagesCalendarPage = lazy(() => import("../pages/stoppages/stoppages-calendar-page").then((m) => ({ default: m.StoppagesCalendarPage })));
 const RentalBookingsPage = lazy(() => import("../pages/bookings/rental-bookings-page").then((m) => ({ default: m.RentalBookingsPage })));
 const RentalContractsPage = lazy(() => import("../pages/contracts/rental-contracts-page").then((m) => ({ default: m.RentalContractsPage })));
+const RentalPaymentsPage = lazy(() => import("../pages/rental-payments/rental-payments-page").then(m=>({default:m.RentalPaymentsPage})));
 const RentalPricingPage = lazy(() => import("../pages/pricing/rental-pricing-page").then((m) => ({ default: m.RentalPricingPage })));
 const SitesPage = lazy(() => import("../pages/sites/sites-page").then((m) => ({ default: m.SitesPage })));
 const WorkshopsPage = lazy(() => import("../pages/workshops/workshops-page").then((m) => ({ default: m.WorkshopsPage })));
@@ -67,12 +70,16 @@ const ContinueOnPublicSite = () => {
   return <PageLoader />;
 };
 
-export const AppRoutes = () => (
+export const AppRoutes = () => {
+  const { pathname } = useLocation();
+  useLayoutEffect(() => { syncWorkspaceAppearance(pathname); }, [pathname]);
+  return (
   <>
     <GlobalTextTranslator />
     <CookieConsentBanner />
     <RouteErrorBoundary>
       <Routes>
+      <Route path="/firma-contratto" element={withPageLoader(<ContractSigningPage />)} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -124,6 +131,7 @@ export const AppRoutes = () => (
         <Route path="dashboard" element={withPageLoader(<DashboardPage />)} />
         <Route path="booking" element={withPageLoader(<RentalBookingsPage />)} />
         <Route path="rental-bookings/:bookingId" element={withPageLoader(<RentalBookingsPage />)} />
+        <Route path="pagamenti-garanzie" element={withPageLoader(<RentalPaymentsPage />)} />
         <Route path="booking/contratti" element={withPageLoader(<RentalContractsPage />)} />
         <Route path="booking/listini" element={withPageLoader(<RentalPricingPage />)} />
         <Route path="fermi" element={withPageLoader(<StoppagesListPage />)} />
@@ -149,3 +157,4 @@ export const AppRoutes = () => (
     </RouteErrorBoundary>
   </>
 );
+};

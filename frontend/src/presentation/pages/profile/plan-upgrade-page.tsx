@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { InvoiceDownloadButton } from "../../components/billing/invoice-download-button";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Check, CreditCard, Crown, Download, ExternalLink, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Check, CreditCard, Crown, ExternalLink, FileText, Lock, ShieldCheck, Sparkles } from "lucide-react";
 import { useAuthStore } from "../../../application/stores/auth-store";
 import { billingUseCases } from "../../../application/usecases/billing-usecases";
 import { getConsentedPublicAnalyticsContext, trackPublicEvent } from "../../../application/usecases/public-analytics-usecases";
@@ -23,9 +24,12 @@ import {
 import type { BillingCycle } from "../../../domain/policies/billing-access";
 import { cn } from "../../../lib/utils";
 import { useEntitlements } from "../../hooks/use-entitlements";
+import { WorkspacePageHeader } from "../../components/ui/workspace-ui";
+import { CommerceNotice } from "../../components/ui/commerce-workspace";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Card, CardContent, CardHeader } from "../../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { getAccessDestination } from "../auth/access-flow";
 import { getBillingStatusNotice } from "./billing-status-copy";
 
 type PlanUpgradeMode = "activation" | "upgrade" | "recovery";
@@ -137,39 +141,53 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   const hasManagedStripeSubscription = canUseStripeSelfService(provider, licenseStatus);
   const canReadBilling = canReadTenantBilling(user);
   const canManageBilling = canManageTenantBilling(user);
+  const billingLock = useRef(false);
+  const [invoiceOwner, setInvoiceOwner] = useState(`${user?.tenantId}:${user?.id}`);
+  const [invoiceState, setInvoiceState] = useState<"loading" | "ready" | "error">("loading");
+  const [invoiceReload, setInvoiceReload] = useState(0);
+  const identity = `${user?.tenantId}:${user?.id}`;
+  const activeIdentity = useRef(identity); activeIdentity.current = identity;
   const billingActionsUnavailableReason = !canManageBilling
     ? "Solo l'amministratore dell'azienda puo gestire abbonamento e metodo di pagamento."
     : !hasManagedStripeSubscription
-      ? "Il piano non risulta ancora collegato a una subscription Stripe gestibile."
+      ? "Il piano non risulta ancora collegato a una abbonamento Stripe gestibile."
       : null;
   const billingStatusNotice = getBillingStatusNotice(licenseStatus);
 
   const openPaymentMethodSession = async () => {
+    if (!canManageBilling || !hasManagedStripeSubscription || loading || billingLock.current) return;
+    billingLock.current = true;
     setCheckoutError(null);
     setBusyPaymentMethod(true);
     try {
       const session = await billingUseCases.createPaymentMethodSession();
+      if (activeIdentity.current !== identity) return;
       window.location.href = session.checkoutUrl;
     } catch (error) {
       setCheckoutError((error as Error).message);
+      billingLock.current = false;
       setBusyPaymentMethod(false);
     }
   };
 
   const openCustomerPortalSession = async () => {
+    if (!canManageBilling || !hasManagedStripeSubscription || loading || billingLock.current) return;
+    billingLock.current = true;
     setCheckoutError(null);
     setBusyPortal(true);
     try {
       const session = await billingUseCases.createCustomerPortalSession();
+      if (activeIdentity.current !== identity) return;
       window.location.href = session.portalUrl;
     } catch (error) {
       setCheckoutError((error as Error).message);
+      billingLock.current = false;
       setBusyPortal(false);
     }
   };
 
   const scrollToPlans = () => {
-    document.getElementById("billing-plans")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("billing-plans")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   };
 
   const handleBillingNoticeAction = () => {
@@ -211,14 +229,14 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   }, [activeBillingCycle, isActivationMode]);
 
   useEffect(() => {
-    if (!canReadBilling) {
-      setInvoices([]);
-      return;
-    }
-    billingUseCases.listInvoices()
-      .then((result) => setInvoices(result.data))
-      .catch(() => setInvoices([]));
-  }, [canReadBilling]);
+    let cancelled = false;
+    setInvoiceOwner(identity); setInvoices([]); setInvoiceState("loading");
+    if (!canReadBilling) return;
+    billingUseCases.listInvoices().then(result => {
+      if (!cancelled) { setInvoices(result.data); setInvoiceState("ready"); }
+    }).catch(() => { if (!cancelled) setInvoiceState("error"); });
+    return () => { cancelled = true; };
+  }, [canReadBilling, identity, invoiceReload]);
 
   useEffect(() => {
     if (checkoutStatus === "cancelled") {
@@ -243,10 +261,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
 
       try {
         const snapshot = await refresh({ force: true });
+        if (cancelled) return;
         if (isOperativeLicenseStatus(snapshot.licenseStatus)) {
           setActivationCheckStatus("ready");
           timeoutId = setTimeout(() => {
-            if (!cancelled) navigate("/dashboard", { replace: true });
+            if (!cancelled) navigate(getAccessDestination(window.location.search), { replace: true });
           }, 700);
           return;
         }
@@ -254,6 +273,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         // The webhook may still be processing; keep polling for a short window.
       }
 
+      if (cancelled) return;
       if (attempt >= maxAttempts) {
         setActivationCheckStatus("timeout");
         return;
@@ -273,56 +293,79 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
   }, [checkoutStatus, isActivationMode, navigate, refresh]);
 
   return (
-    <section className="space-y-5">
-      <Card
-        className="saas-hero-header g-card-lift overflow-hidden"
-        style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) both" }}
-      >
-        <CardContent className="py-8">
-          <div className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-400/30 bg-indigo-100/60 px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">
-              <Sparkles className="h-3.5 w-3.5" />
-              Premium growth
-            </div>
-
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground md:text-[2rem]">
-              {isActivationMode
-                ? "Scegli il piano e attiva Fleetum"
-                : isRecoveryMode
-                  ? "Aggiorna il metodo di pagamento"
-                  : "Piano e fatturazione"}
-            </h2>
-
-            <p className="mt-3 max-w-2xl text-sm text-muted-foreground md:text-base">
-              {isActivationMode
-                ? "Scegli un piano, inserisci la carta su Stripe e parti con 14 giorni di prova. L'addebito parte solo alla fine del trial, ma il metodo di pagamento resta necessario per mantenere attivo il gestionale."
-                : isRecoveryMode
-                  ? "Aggiorna la carta su Stripe per regolarizzare il servizio. Il gestionale resta protetto fino alla conferma del pagamento."
-                  : "Consulta il piano attuale, aggiorna la carta, scarica fatture e passa a un piano superiore senza perdere accesso ai dati."}
-            </p>
-
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-              {isActivationMode ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Carta richiesta prima del trial
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/70 bg-sky-50 px-3 py-1 font-semibold text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-200">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Gestione sicura con Stripe
-                </span>
-              )}
-              <span className="inline-flex items-center rounded-full border border-border/80 bg-card/80 px-3 py-1">
-                Sconto annuale {ANNUAL_DISCOUNT_PERCENT}%
-              </span>
-              {currentPlan ? (
-                <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
-                  Piano attuale: {planLabel(currentPlan)}
-                </span>
+    <section className="administration-workspace billing-workspace">
+      <WorkspacePageHeader eyebrow="ABBONAMENTO" title={isActivationMode ? "Scegli il piano Fleetum" : isRecoveryMode ? "Regolarizza il pagamento" : "Piano e fatturazione"} description={isActivationMode ? "14 giorni di prova con carta richiesta. L’addebito parte alla fine del trial." : isRecoveryMode ? "Aggiorna il metodo di pagamento. L’accesso viene ripristinato dopo la conferma verificata del server." : "Piano attuale, documenti e pagamenti della tua azienda."}/>
+      <p className="admin-context">{isActivationMode ? "Completa il pagamento su Stripe. L’accesso si attiva solo dopo la conferma verificata." : "Le modifiche all’abbonamento vengono confermate dal server."} Sconto annuale {ANNUAL_DISCOUNT_PERCENT}%.</p>
+      {checkoutStatus === "success" ? (
+        <Card className="admin-billing-notice" role="status">
+          <CardContent className="flex flex-col gap-2 py-4 text-sm font-semibold md:flex-row md:items-center md:justify-between">
+            <div>
+              <p>Ritorno dal pagamento. Verifica della conferma del server in corso.</p>
+              {activationCheckStatus === "checking" ? (
+                <p className="mt-1 text-xs font-medium text-emerald-700/80 dark:text-emerald-100/75">
+                  Verifico l’attivazione del tuo account. Appena il pagamento viene confermato ti porto alla dashboard.
+                </p>
+              ) : null}
+              {activationCheckStatus === "ready" ? (
+                <p className="mt-1 text-xs font-medium text-emerald-700/80 dark:text-emerald-100/75">
+                  Attivazione confermata. Reindirizzamento alla dashboard...
+                </p>
+              ) : null}
+              {activationCheckStatus === "timeout" ? (
+                <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-200">
+                  La conferma non è ancora disponibile. Il ritorno dal pagamento non attiva il piano: aggiorna la pagina tra qualche secondo o contatta l’assistenza.
+                </p>
               ) : null}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+            {activationCheckStatus === "ready" ? (
+              <Button type="button" size="sm" onClick={() => navigate(getAccessDestination(window.location.search), { replace: true })}>
+                Vai alla dashboard
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {checkoutStatus === "cancelled" ? (
+        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Pagamento annullato. Puoi scegliere un piano quando vuoi.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {paymentMethodStatus === "updated" ? (
+        <Card className="admin-billing-notice" role="status">
+          <CardContent className="py-4 text-sm font-semibold">
+            Sei tornato dalla gestione della carta. Verifica nel portale Stripe l’esito della modifica; questo ritorno non ne conferma il salvataggio.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {paymentMethodStatus === "cancelled" ? (
+        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <CardContent className="py-4 text-sm font-semibold">
+            Sei tornato senza completare l’aggiornamento della carta. Verifica il metodo attuale nel portale Stripe.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {portalStatus === "returned" || portalStatus === "plan-updated" ? (
+        <Card className="admin-billing-notice" role="status">
+          <CardContent className="py-4 text-sm font-semibold">
+            {portalStatus === "plan-updated"
+              ? "Sei tornato dal cambio piano. Fleetum aggiorna il piano solo dopo la conferma verificata del server."
+              : "Sei tornato dal portale Stripe. Le modifiche vengono applicate solo dopo la conferma verificata del server."}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {checkoutError ? (
+        <Card className="border-red-300/70 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+          <CardContent className="py-4 text-sm font-semibold" role="alert">{checkoutError}</CardContent>
+        </Card>
+      ) : null}
+
 
       {!isActivationMode ? (
         <Card className="overflow-hidden border-indigo-200/80 bg-white/90 shadow-[0_24px_70px_-48px_rgba(30,64,175,0.55)] dark:border-indigo-500/25 dark:bg-slate-950/60">
@@ -330,7 +373,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Piano corrente</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <h3 className="text-2xl font-semibold text-foreground">{currentPlan ? planLabel(currentPlan) : "Piano non attivo"}</h3>
+                <h2 className="text-2xl font-semibold text-foreground">{currentPlan ? planLabel(currentPlan) : "Piano non attivo"}</h2>
                 <span className={cn(
                   "rounded-full px-2.5 py-1 text-xs font-semibold",
                   licenseStatus === "ACTIVE" || licenseStatus === "TRIAL"
@@ -342,7 +385,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {hasManagedStripeSubscription
-                  ? "La subscription e' gestita da Stripe. Upgrade, fatture e carta passano dal portale sicuro."
+                  ? "L’abbonamento è gestito da Stripe. Upgrade, fatture e carta passano dal portale sicuro."
                   : "Se il piano non e' collegato a Stripe, la modifica va completata con checkout o assistenza Fleetum."}
               </p>
             </div>
@@ -361,7 +404,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
               <Button
                 type="button"
                 className="w-full"
-                disabled={!canManageBilling || !hasManagedStripeSubscription || busyPortal}
+                disabled={!canManageBilling || !hasManagedStripeSubscription || busyPortal || busyPaymentMethod || busyPlan !== null}
                 onClick={() => void openCustomerPortalSession()}
               >
                 <ExternalLink className="h-4 w-4" />
@@ -371,7 +414,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                 type="button"
                 variant="outline"
                 className="w-full"
-                disabled={!canManageBilling || !hasManagedStripeSubscription || busyPaymentMethod}
+                disabled={!canManageBilling || !hasManagedStripeSubscription || busyPaymentMethod || busyPortal || busyPlan !== null}
                 onClick={() => void openPaymentMethodSession()}
               >
                 <CreditCard className="h-4 w-4" />
@@ -391,7 +434,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         <Card className="border-indigo-300/70 bg-indigo-50/85 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
           <CardContent className="py-4 text-sm">
             <strong>Account creato.</strong> Scegli un piano e completa Stripe Checkout. La prova dura 14 giorni,
-            ma richiede subito una carta valida; Fleetum si abilita solo dopo la conferma del webhook Stripe.
+            ma richiede subito una carta valida; Fleetum si abilita solo dopo la conferma verificata del pagamento.
           </CardContent>
         </Card>
       ) : null}
@@ -399,7 +442,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       {!canManageBilling ? (
         <Card className="border-amber-300/70 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
           <CardContent className="py-4 text-sm">
-            Solo l'amministratore dell'azienda puo gestire abbonamento, fatture e metodo di pagamento.
+            Le modifiche all’abbonamento richiedono un ruolo autorizzato. Le fatture restano consultabili se il tuo ruolo lo consente.
           </CardContent>
         </Card>
       ) : null}
@@ -420,7 +463,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             </div>
             <button
               type="button"
-              disabled={!canManageBilling || busyPaymentMethod}
+              disabled={!canManageBilling || busyPaymentMethod || busyPortal || busyPlan !== null}
               onClick={handleBillingNoticeAction}
               className="inline-flex shrink-0 items-center justify-center rounded-full border border-current/20 bg-white/65 px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950/30 dark:hover:bg-slate-950/45"
             >
@@ -433,7 +476,6 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
       {!isRecoveryMode ? (
         <div
           className="flex justify-center"
-          style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .1s both" }}
         >
           <div className="flex items-center gap-1 rounded-full border border-indigo-200/80 bg-white/90 p-1 shadow-[0_12px_28px_-22px_rgba(79,70,229,0.7)] dark:border-indigo-500/30 dark:bg-slate-900/60">
             <Button
@@ -490,7 +532,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
           const planActionDisabled =
             loading ||
             !canManageBilling ||
-            busyPlan !== null ||
+            busyPlan !== null || busyPortal || busyPaymentMethod ||
             isCurrent ||
             isLockedLowerPlan ||
             (!canUsePortalForUpgrade && !canUseCheckoutForPlan);
@@ -499,22 +541,21 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
             <Card
               key={entry}
               className={cn(
-                "relative overflow-hidden",
+                "admin-plan-card relative overflow-hidden",
                 isCurrent && "border-primary/50 shadow-[0_22px_40px_-30px_rgba(79,70,229,0.5)]",
-                entry === "PRO" && !isCurrent && "border-violet-400/45"
+                entry === "PRO" && !isCurrent && "admin-plan-suggested"
               )}
-              style={{ animation: `gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) ${0.18 + index * 0.08}s both` }}
             >
-              <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", accent.gradient)} />
+
 
               <CardHeader className="space-y-3 pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <CardTitle className="text-lg">{entry}</CardTitle>
+                    <h2 className="text-lg">{entry}</h2>
                     <p className="mt-1 text-xs text-muted-foreground">{entry === "STARTER" ? "Per team in partenza" : entry === "PRO" ? "Per crescita operativa" : "Per controllo enterprise"}</p>
                   </div>
                   <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]", accent.chip)}>
-                    {isCurrent ? "Attuale" : entry === "PRO" ? "Consigliato" : "Premium"}
+                    {isCurrent ? "Attuale" : entry === "PRO" ? "Consigliato" : "Disponibile"}
                   </span>
                 </div>
 
@@ -527,7 +568,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                     </p>
                   ) : isCurrent ? (
                     <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
-                      Questo e' il piano attualmente assegnato al tuo tenant.
+                      Questo è il piano attualmente assegnato alla tua azienda.
                     </p>
                   ) : isLockedLowerPlan ? (
                     <p className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
@@ -567,7 +608,8 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                     type="button"
                     disabled={planActionDisabled}
                     onClick={async () => {
-                      if (planActionDisabled) return;
+                      if (planActionDisabled || billingLock.current) return;
+                      billingLock.current = true;
                       setCheckoutError(null);
                       setBusyPlan(entry);
                       try {
@@ -576,7 +618,8 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                             plan: entry,
                             billingCycle
                           });
-                          window.location.href = session.portalUrl;
+                          if (activeIdentity.current !== identity) return;
+      window.location.href = session.portalUrl;
                           return;
                         }
 
@@ -586,9 +629,11 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                           billingCycle,
                           analytics: getConsentedPublicAnalyticsContext()
                         });
-                        window.location.href = session.checkoutUrl;
+                        if (activeIdentity.current !== identity) return;
+      window.location.href = session.checkoutUrl;
                       } catch (error) {
                         setCheckoutError((error as Error).message);
+                        billingLock.current = false;
                         setBusyPlan(null);
                       }
                     }}
@@ -597,7 +642,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                       planActionDisabled
                         ? "cursor-not-allowed border border-input bg-muted text-muted-foreground opacity-70"
                         : !currentPlan || isUpgrade
-                          ? "bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_12px_24px_-14px_rgba(79,70,229,0.65)] hover:brightness-110"
+                          ? "admin-primary-action"
                           : "border border-input bg-background text-foreground hover:bg-muted"
                     )}
                   >
@@ -612,91 +657,21 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </div>
       ) : null}
 
-      {checkoutStatus === "success" ? (
-        <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-          <CardContent className="flex flex-col gap-2 py-4 text-sm font-semibold md:flex-row md:items-center md:justify-between">
-            <div>
-              <p>Checkout completato. Il piano, il trial e la carta vengono confermati dal webhook Stripe.</p>
-              {activationCheckStatus === "checking" ? (
-                <p className="mt-1 text-xs font-medium text-emerald-700/80 dark:text-emerald-100/75">
-                  Verifico l'attivazione del tuo account. Appena Stripe conferma il webhook ti porto automaticamente in dashboard.
-                </p>
-              ) : null}
-              {activationCheckStatus === "ready" ? (
-                <p className="mt-1 text-xs font-medium text-emerald-700/80 dark:text-emerald-100/75">
-                  Attivazione confermata. Reindirizzamento alla dashboard...
-                </p>
-              ) : null}
-              {activationCheckStatus === "timeout" ? (
-                <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-200">
-                  Il checkout e' completato, ma la conferma webhook sta impiegando piu' del previsto. Riprova tra qualche secondo o aggiorna la pagina.
-                </p>
-              ) : null}
-            </div>
-            {activationCheckStatus === "ready" ? (
-              <Button type="button" size="sm" onClick={() => navigate("/dashboard", { replace: true })}>
-                Vai alla dashboard
-              </Button>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {checkoutStatus === "cancelled" ? (
-        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          <CardContent className="py-4 text-sm font-semibold">
-            Pagamento annullato. Puoi scegliere un piano quando vuoi.
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {paymentMethodStatus === "updated" ? (
-        <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-          <CardContent className="py-4 text-sm font-semibold">
-            Carta aggiornata. Stripe la usera come metodo predefinito per i prossimi addebiti.
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {paymentMethodStatus === "cancelled" ? (
-        <Card className="border-amber-300/70 bg-amber-50/80 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          <CardContent className="py-4 text-sm font-semibold">
-            Aggiornamento carta annullato. Il metodo di pagamento precedente resta invariato.
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {portalStatus === "returned" || portalStatus === "plan-updated" ? (
-        <Card className="border-emerald-300/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-          <CardContent className="py-4 text-sm font-semibold">
-            {portalStatus === "plan-updated"
-              ? "Richiesta cambio piano completata. Fleetum aggiorna il piano appena riceve il webhook Stripe verificato."
-              : "Gestione Stripe completata. Le modifiche a piano e abbonamento vengono applicate quando arriva il webhook verificato."}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {checkoutError ? (
-        <Card className="border-red-300/70 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
-          <CardContent className="py-4 text-sm font-semibold">{checkoutError}</CardContent>
-        </Card>
-      ) : null}
-
-      <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .34s both" }}>
+      <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+          <h2 className="flex items-center gap-2 text-base">
             <FileText className="h-4 w-4 text-primary" />
             Fatture e documenti di cortesia
-          </CardTitle>
+          </h2>
         </CardHeader>
         <CardContent>
           {!canReadBilling ? (
             <div className="rounded-2xl border border-dashed border-border/80 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
               Le fatture sono visibili solo agli utenti autorizzati alla gestione billing.
             </div>
-          ) : invoices.length === 0 ? (
+          ) : invoiceOwner !== identity || invoiceState === "loading" ? <p role="status" className="admin-context">Caricamento delle fatture…</p> : invoiceState === "error" ? <CommerceNotice>Le fatture non sono disponibili. <Button variant="outline" onClick={() => setInvoiceReload(key => key + 1)}>Riprova</Button></CommerceNotice> : invoices.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/80 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-              Nessuna fattura disponibile. Quando Fleetum emette un documento per il tuo tenant, lo trovi qui.
+              Nessuna fattura disponibile. Quando Fleetum emette un documento per la tua azienda, lo trovi qui.
             </div>
           ) : (
             <div className="overflow-auto rounded-2xl border border-border/70">
@@ -720,15 +695,7 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
                       <TableCell>{formatMoney(invoice.total, invoice.currency)}</TableCell>
                       <TableCell>{invoice.status}</TableCell>
                       <TableCell>
-                        <a
-                          className="inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-input bg-background px-3 text-xs font-semibold hover:bg-muted"
-                          href={billingUseCases.invoicePdfUrl(invoice.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Scarica
-                        </a>
+                        <InvoiceDownloadButton invoiceId={invoice.id} invoiceNumber={invoice.invoiceNumber} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -739,9 +706,9 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </CardContent>
       </Card>
 
-      <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .4s both" }}>
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base">Confronto completo funzionalita</CardTitle>
+          <h2 className="text-base">Confronto completo funzionalita</h2>
         </CardHeader>
         <CardContent className="overflow-auto">
           <Table className="[&_th]:py-1.5 [&_td]:py-1.5 [&_td]:text-[12px]">
@@ -780,14 +747,14 @@ export const PlanUpgradePage = ({ mode = "upgrade" }: { mode?: PlanUpgradeMode }
         </CardContent>
       </Card>
 
-      {!isRecoveryMode ? <Card style={{ animation: "gCardIn .52s cubic-bezier(0.34,1.2,0.64,1) .5s both" }}>
+      {!isRecoveryMode ? <Card>
         <CardContent className="flex flex-col items-center gap-3 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-muted-foreground">
             Gli upgrade vengono gestiti dal Customer Portal Stripe per evitare abbonamenti duplicati. I downgrade restano bloccati da questa schermata e vanno valutati con il supporto Fleetum.
           </p>
           <button
             type="button"
-            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            onClick={() => window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/95"
           >
             Scegli un piano

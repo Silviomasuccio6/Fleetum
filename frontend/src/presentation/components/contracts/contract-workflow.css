@@ -1,0 +1,13 @@
+/* The private reader uses the same document controls as the public signing page. */
+.contract-in-person .signing-pdf-reader { border-radius: 10px; }
+.contract-in-person .signing-pdf-navigation button {
+  min-height: 40px; padding: 8px 12px; border: 1px solid #cbd4df;
+  border-radius: 8px; font: inherit; font-size: 14px; line-height: 1.35;
+}
+.contract-in-person .signing-pdf-navigation button:disabled { opacity: .5; cursor: default; }
+.contract-in-person .signing-pdf-navigation :is(button, select):focus-visible {
+  outline: 2px solid hsl(var(--primary)); outline-offset: 3px;
+}
+@media (max-width: 780px) {
+  .contract-in-person .signing-pdf-navigation button { min-height: 44px; }
+}

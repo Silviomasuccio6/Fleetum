@@ -1,6 +1,7 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { AuthController } from "../controllers/auth-controller.js";
+import { SiteAccessController } from "../controllers/site-access-controller.js";
 import { requireAuth } from "../middlewares/auth.js";
 import { authRateLimit } from "../middlewares/auth-rate-limit.js";
 import { requireCsrfProtection } from "../middlewares/csrf-protection.js";
@@ -33,6 +34,7 @@ export const authRoutes = (controller: AuthController) => {
   router.post("/refresh", requireJsonBody, refreshRateLimit, asyncHandler(controller.refresh));
   router.post("/logout", requireAuth, requireCsrfProtection, asyncHandler(controller.logout));
   router.get("/me", requireAuth, asyncHandler(controller.me));
+  router.get("/site-access", requireAuth, asyncHandler(new SiteAccessController().context));
   router.get("/me/entitlements", requireAuth, asyncHandler(controller.entitlements));
   router.get("/privacy/current", requireAuth, asyncHandler(controller.privacyCurrent));
   router.post("/privacy/accept", requireAuth, requireCsrfProtection, asyncHandler(controller.privacyAccept));
