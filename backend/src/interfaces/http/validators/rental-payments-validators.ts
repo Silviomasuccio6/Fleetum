@@ -4,7 +4,7 @@ export const rentalPaymentIdParamSchema = z.string().trim().min(1).max(128);
 
 export const rentalPaymentSetupSessionSchema = z.object({
   mandateAccepted: z.literal(true, {
-    errorMap: () => ({ message: "Devi accettare il mandato per registrare la carta del cliente." })
+    error: "Devi accettare il mandato per registrare la carta del cliente."
   }),
   termsVersion: z.string().trim().min(1).max(80)
 });
