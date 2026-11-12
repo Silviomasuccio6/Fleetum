@@ -227,6 +227,15 @@ test("report gate rejects removal of the authenticated cross-tenant case", () =>
   assert.match(result.errors.join("\n"), /another tenant cannot read or mutate this tenant booking/);
 });
 
+test("nightly browser installation stays on the supported Ubuntu 24.04 runner", () => {
+  const workflow = readFileSync(path.join(repositoryRoot, ".github/workflows/e2e-nightly.yml"), "utf8");
+  const browserJob = workflow.split(/^  playwright:\s*$/m)[1]?.split(/^  [a-zA-Z_-]+:\s*$/m)[0];
+  assert.ok(browserJob, "The critical browser job must exist.");
+  const runners = [...browserJob.matchAll(/^ {4}runs-on:\s*([^\r\n#]+)(?:#.*)?$/gm)]
+    .map((match) => match[1].trim());
+  assert.deepEqual(runners, ["ubuntu-24.04"], "A moving runner image can become unsupported by locked Playwright.");
+});
+
 test("nightly workflow fails closed and always verifies execution evidence", () => {
   const workflow = readFileSync(path.join(repositoryRoot, ".github/workflows/e2e-nightly.yml"), "utf8");
 
