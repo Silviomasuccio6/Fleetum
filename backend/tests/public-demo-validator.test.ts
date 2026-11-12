@@ -98,3 +98,31 @@ test("public analytics event defaults to no consent and rejects unsafe metadata"
     });
   });
 });
+
+test("analytics metadata keeps the existing twenty-field boundary", () => {
+  const metadata = Object.fromEntries(Array.from({ length: 20 }, (_, index) => ["field_" + index, index]));
+  const parsed = publicAnalyticsEventSchema.parse({
+    eventType: "PAGE_VIEW",
+    path: "/",
+    consentAnalytics: true,
+    metadata
+  });
+  assert.deepEqual(parsed.metadata, metadata);
+});
+
+test("oversized analytics metadata is rejected before its values are visited", () => {
+  const metadata = Object.fromEntries(Array.from({ length: 21 }, (_, index) => ["field_" + index, index]));
+  Object.defineProperty(metadata, "field_0", {
+    enumerable: true,
+    get() { throw new Error("Oversized metadata values must not be traversed."); }
+  });
+  const result = publicAnalyticsEventSchema.safeParse({
+    eventType: "PAGE_VIEW",
+    path: "/",
+    consentAnalytics: true,
+    metadata
+  });
+  assert.equal(result.success, false);
+  if (result.success) throw new Error("Oversized metadata must be rejected.");
+  assert.deepEqual(result.error.flatten().fieldErrors.metadata, ["Troppi campi metadata analytics"]);
+});
