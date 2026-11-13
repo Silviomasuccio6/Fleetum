@@ -1,0 +1,164 @@
+{
+  "sourceBase": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
+  "date": "2026-11-13",
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 2,
+    "high": 3,
+    "critical": 0,
+    "total": 5
+  },
+  "packageFilesChanged": false,
+  "findings": {
+    "axios": {
+      "severity": "high",
+      "via": [
+        {
+          "title": "Axios: Prototype pollution gadget in fetch adapter can alter outbound requests",
+          "url": "https://github.com/advisories/GHSA-vh66-26gq-q6x8",
+          "range": ">=1.7.0 <1.20.0",
+          "severity": "moderate"
+        },
+        {
+          "title": "Axios: Prototype-Pollution Gadget in the Default Instance Allows Inherited Object.prototype.method to Override HTTP Method",
+          "url": "https://github.com/advisories/GHSA-9fr6-4gfg-395g",
+          "range": ">=1.0.0 <1.20.0",
+          "severity": "moderate"
+        },
+        {
+          "title": "Axios: ReDoS in fromDataURI data: URL parser freezes the Node event loop (DoS)",
+          "url": "https://github.com/advisories/GHSA-c29m-xwm3-cm6r",
+          "range": ">=1.16.1 <1.20.0",
+          "severity": "high"
+        },
+        {
+          "title": "Axios: ReDoS (O(N\u00b2)) in shouldBypassProxy host normalization, reachable via untrusted redirect Location",
+          "url": "https://github.com/advisories/GHSA-mghh-pgcx-3jjj",
+          "range": ">=1.15.0 <1.20.0",
+          "severity": "high"
+        },
+        {
+          "title": "Axios: Prototype Pollution Gadget in axios toFormData Options",
+          "url": "https://github.com/advisories/GHSA-x97p-jq2g-jp4f",
+          "range": ">=1.15.1 <1.20.0",
+          "severity": "high"
+        },
+        {
+          "title": "Axios: HTTP/2 adapter bypasses configured DNS lookup and proxy controls",
+          "url": "https://github.com/advisories/GHSA-3pq3-5fj3-cg6v",
+          "range": ">=1.13.0 <1.20.0",
+          "severity": "high"
+        },
+        {
+          "title": "Axios: Denial of Service via Unhandled 'error' Event in HTTP/2 ClientHttp2Session Initialization",
+          "url": "https://github.com/advisories/GHSA-542g-h47m-68v8",
+          "range": ">=1.13.0 <1.20.0",
+          "severity": "high"
+        },
+        {
+          "title": "Axios: Header Injection via Inherited headers After Minimal Interceptor",
+          "url": "https://github.com/advisories/GHSA-j8rh-479h-cp32",
+          "range": ">=1.0.0 <1.20.0",
+          "severity": "moderate"
+        },
+        {
+          "title": "Axios: Fetch Adapter Header Injection via Inherited FormData getHeaders",
+          "url": "https://github.com/advisories/GHSA-4hqw-qxg8-jxx2",
+          "range": ">=1.12.0 <1.20.0",
+          "severity": "moderate"
+        },
+        {
+          "title": "Axios: Node HTTP adapter prototype-pollution gadget allows request socket hijack via inherited createConnection",
+          "url": "https://github.com/advisories/GHSA-m8m8-qj5v-23w3",
+          "range": ">=1.15.2 <1.20.0",
+          "severity": "high"
+        },
+        {
+          "title": "Axios: CIDR-form NO_PROXY entries are ignored, causing proxy exclusion bypass for internal IP ranges",
+          "url": "https://github.com/advisories/GHSA-44g4-m2mj-wpvx",
+          "range": ">=1.15.0 <1.20.0",
+          "severity": "moderate"
+        },
+        {
+          "title": "Axios: maxRedirects: 0 is not enforced by the fetch adapter, allowing redirect-based SSRF",
+          "url": "https://github.com/advisories/GHSA-r4gj-5m52-g5wh",
+          "range": ">=1.17.0 <1.20.0",
+          "severity": "high"
+        }
+      ],
+      "fixAvailable": true
+    },
+    "follow-redirects": {
+      "severity": "high",
+      "via": [
+        {
+          "title": "follow-redirects array-form headers bypass cross-origin credential stripping",
+          "url": "https://github.com/advisories/GHSA-q3jh-wrc6-jgq8",
+          "range": ">=1.16.0 <1.16.1",
+          "severity": "high"
+        },
+        {
+          "title": "follow-redirects sensitiveHeaders regex escaping can expose credential headers",
+          "url": "https://github.com/advisories/GHSA-8r9p-f939-6h3c",
+          "range": ">=1.16.0 <1.16.1",
+          "severity": "high"
+        },
+        {
+          "title": "follow-redirects: Cross-realm sensitiveHeaders arrays are discarded and custom credentials can follow redirects",
+          "url": "https://github.com/advisories/GHSA-mrwp-f3q8-3g9p",
+          "range": ">=1.16.0 <=1.16.1",
+          "severity": "high"
+        }
+      ],
+      "fixAvailable": true
+    },
+    "react-router": {
+      "severity": "moderate",
+      "via": [
+        {
+          "title": "React Router: Open redirect via backslash in <Link> and useNavigate (CVE-2025-68470 bypass)",
+          "url": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+          "range": ">=6.0.0 <7.18.0",
+          "severity": "moderate"
+        },
+        {
+          "title": "React Router: Arbitrary Constructor Injection via deserializeErrors() in React Router SSR Hydration",
+          "url": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+          "range": ">=6.4.0 <7.18.0",
+          "severity": "moderate"
+        }
+      ],
+      "fixAvailable": true
+    },
+    "react-router-dom": {
+      "severity": "moderate",
+      "via": [
+        {
+          "title": "React Router: Open redirect leading to XSS",
+          "url": "https://github.com/advisories/GHSA-jjmj-jmhj-qwj2",
+          "range": ">=6.30.2 <=6.30.5",
+          "severity": "moderate"
+        },
+        "react-router"
+      ],
+      "fixAvailable": true
+    },
+    "zod": {
+      "severity": "high",
+      "via": [
+        {
+          "title": "Zod can exhaust memory while validating oversized constrained collections",
+          "url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+          "range": "<4.6.6",
+          "severity": "high"
+        }
+      ],
+      "fixAvailable": {
+        "name": "zod",
+        "version": "4.6.7",
+        "isSemVerMajor": true
+      }
+    }
+  }
+}

@@ -1,10 +1,8 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   AlertTriangle,
   Archive,
   BarChart3,
-  Building2,
   CheckCircle2,
   Clock3,
   Database,
@@ -13,21 +11,17 @@ import {
   Globe2,
   HardDrive,
   KeyRound,
-  LayoutDashboard,
   Mail,
-  PanelLeftClose,
   RefreshCcw,
   Search,
   Send,
   Server,
   ShieldAlert,
   ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   UserRoundCheck,
   Users,
   X,
-  XCircle,
   Zap
 } from "lucide-react";
 import {
@@ -44,6 +38,9 @@ import {
   PlatformWebsiteAnalytics,
   QuickAction
 } from "../../../application/usecases/platform/platform-admin-usecases";
+import { upsertPlatformInvoice } from "./platform-invoice-state";
+import { PlatformDialog } from "../../components/platform/platform-dialog";
+import { isPlatformSectionId, PlatformSectionId, platformSectionLabel } from "../../components/platform/platform-navigation";
 import { snackbar } from "../../../application/stores/snackbar-store";
 import { FleetumInlineLoader } from "../../components/brand/fleetum-logo-loader";
 import { PlatformEventItem } from "../../components/platform/platform-event-item";
@@ -131,7 +128,6 @@ type PlanConfirmState = {
 
 type RowActionSelection = QuickAction | "";
 
-type PlatformSectionId = "overview" | "tenants" | "plans" | "billing" | "analytics" | "leads" | "users" | "audit" | "health" | "security" | "settings";
 type RevenueRange = "2W" | "1M" | "6M" | "1Y";
 type AnalyticsWindowDays = 7 | 30 | 90;
 
@@ -315,6 +311,7 @@ const useCountUp = (target: number, duration = 560) => {
   const [value, setValue] = useState(target);
 
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { setValue(target); return; }
     const start = performance.now();
     const from = value;
     const delta = target - from;
@@ -337,7 +334,13 @@ const useCountUp = (target: number, duration = 560) => {
 
 export const PlatformAdminPage = () => {
   const navigate = useNavigate();
-  const sidebarStorageKey = "platform_sidebar_hidden";
+  const operationLocks = useRef(new Set<string>());
+  const [pendingOperations, setPendingOperations] = useState<Record<string, boolean>>({});
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const initialRead = useRef(true);
+  const loadRequestId = useRef(0);
+  const [liveError, setLiveError] = useState<string | null>(null);
 
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [invoices, setInvoices] = useState<PlatformInvoice[]>([]);
@@ -372,11 +375,6 @@ export const PlatformAdminPage = () => {
   const [revenueReport, setRevenueReport] = useState<PlatformRevenueMetrics | null>(null);
   const [dashboardLive, setDashboardLive] = useState<PlatformDashboardLiveMetrics | null>(null);
   const [activeSection, setActiveSection] = useState<PlatformSectionId>("overview");
-  const [sidebarHidden, setSidebarHidden] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return localStorage.getItem(sidebarStorageKey) !== "0";
-  });
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const isMonthlyRevenueRange = revenueRange === "6M" || revenueRange === "1Y";
   const revenueMonths = revenueRange === "6M" ? 6 : 12;
   const revenueQuery = isMonthlyRevenueRange
@@ -387,15 +385,19 @@ export const PlatformAdminPage = () => {
     try {
       const metrics = await platformAdminUseCases.dashboardLiveMetrics({ windowMinutes: 15 });
       setDashboardLive(metrics);
+      setLiveError(null);
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
+      setLiveError((err as Error).message);
       if (!options?.silent) {
+        setOperationError((err as Error).message);
         snackbar.error((err as Error).message);
       }
     }
   };
 
   const load = async (options?: { silent?: boolean }) => {
+    const requestId = ++loadRequestId.current;
     setError(null);
     if (!options?.silent) setLoading(true);
     if (options?.silent) setRefreshing(true);
@@ -414,7 +416,9 @@ export const PlatformAdminPage = () => {
         platformAdminUseCases.securityOverview(),
         platformAdminUseCases.listTrustedDevices()
       ]);
+      if (requestId !== loadRequestId.current) return;
       setTenants(tenantData.data);
+      setSelectedTenant((current) => current ? tenantData.data.find((tenant: TenantRow) => tenant.id === current.id) ?? null : null);
       setInvoices(invoiceData.data);
       setUsers(userData.data);
       setEvents(eventData.data);
@@ -425,25 +429,22 @@ export const PlatformAdminPage = () => {
       setSystemHealth(healthData.data);
       setSecurityOverview(securityData.data);
       setTrustedDevices(trustedDeviceData.data);
+      setHasLoaded(true);
       void loadDashboardLive({ silent: true });
     } catch (err) {
       if (handlePlatformAuthError(err)) return;
+      if (requestId !== loadRequestId.current) return;
       const message = (err as Error).message;
       setError(message);
       snackbar.error(message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === loadRequestId.current) { setLoading(false); setRefreshing(false); }
     }
   };
 
   useEffect(() => {
-    void load();
-    void loadDashboardLive();
-  }, []);
-
-  useEffect(() => {
-    void load({ silent: true });
+    void load({ silent: !initialRead.current });
+    initialRead.current = false;
   }, [revenueRange, analyticsWindowDays]);
 
   useEffect(() => {
@@ -454,67 +455,22 @@ export const PlatformAdminPage = () => {
   }, []);
 
   useEffect(() => {
-    if (!confirmState && !planConfirmState) return;
-    const onEsc = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setConfirmState(null);
-        setPlanConfirmState(null);
-      }
-    };
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [confirmState, planConfirmState]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(sidebarStorageKey, sidebarHidden ? "1" : "0");
-  }, [sidebarHidden]);
-
-  useEffect(() => {
-    if (!mobileSidebarOpen) return;
-    const onEsc = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileSidebarOpen(false);
-    };
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [mobileSidebarOpen]);
-
-  useEffect(() => {
-    const isSectionId = (value: unknown): value is PlatformSectionId =>
-      value === "overview" ||
-      value === "tenants" ||
-      value === "plans" ||
-      value === "billing" ||
-      value === "analytics" ||
-      value === "leads" ||
-      value === "users" ||
-      value === "audit" ||
-      value === "health" ||
-      value === "security" ||
-      value === "settings";
-
     const onSetSection = (event: Event) => {
-      const payload = (event as CustomEvent<{ section?: unknown }>).detail;
-      if (isSectionId(payload?.section)) {
-        setActiveSection(payload.section);
+      const section = (event as CustomEvent<{ section?: unknown }>).detail?.section;
+      if (isPlatformSectionId(section)) setActiveSection(section);
+    };
+    const onSearch = (event: Event) => {
+      const query = (event as CustomEvent<{ query?: unknown }>).detail?.query;
+      if (typeof query === "string") {
+        setSearch(query); setPlanFilter("ALL"); setLicenseFilter("ALL"); setTenantStatusFilter("ALL");
+        setActiveSection("tenants");
       }
     };
-
-    const onToggleSidebar = () => {
-      setSidebarHidden((old) => !old);
-    };
-
-    const onOpenMobileSidebar = () => {
-      setMobileSidebarOpen(true);
-    };
-
-    window.addEventListener("platform-console:set-section", onSetSection as EventListener);
-    window.addEventListener("platform-console:toggle-sidebar", onToggleSidebar);
-    window.addEventListener("platform-console:open-mobile-sidebar", onOpenMobileSidebar);
+    window.addEventListener("platform-console:set-section", onSetSection);
+    window.addEventListener("platform-console:search", onSearch);
     return () => {
-      window.removeEventListener("platform-console:set-section", onSetSection as EventListener);
-      window.removeEventListener("platform-console:toggle-sidebar", onToggleSidebar);
-      window.removeEventListener("platform-console:open-mobile-sidebar", onOpenMobileSidebar);
+      window.removeEventListener("platform-console:set-section", onSetSection);
+      window.removeEventListener("platform-console:search", onSearch);
     };
   }, []);
 
@@ -557,7 +513,6 @@ export const PlatformAdminPage = () => {
   const activeTenantsCounter = useCountUp(kpis.activeTenants);
   const activeLicensesCounter = useCountUp(kpis.activeLicenses);
   const expiringCounter = useCountUp(kpis.expiringSoon);
-  const suspendedCounter = useCountUp(kpis.suspended);
   const liveUsersCounter = useCountUp(dashboardLive?.activeUsersLive ?? 0);
 
   const revenueBreakdown = revenueReport?.breakdown ?? [];
@@ -647,82 +602,115 @@ export const PlatformAdminPage = () => {
   };
 
   const runAction = async (tenantId: string, action: QuickAction) => {
-    setRowLoading((old) => ({ ...old, [tenantId]: true }));
-    setRowFeedback((old) => ({ ...old, [tenantId]: { type: "loading", message: "Operazione in corso..." } }));
-
+    const operationKey = `tenant:${tenantId}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      await platformAdminUseCases.quickAction(tenantId, action);
-      setRowFeedback((old) => ({ ...old, [tenantId]: { type: "success", message: `${actionLabels[action]} completata` } }));
-      snackbar.success(`${actionLabels[action]} eseguita`);
-      await load({ silent: true });
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      const message = (err as Error).message;
-      setRowFeedback((old) => ({ ...old, [tenantId]: { type: "error", message } }));
-      snackbar.error(message);
+      setRowLoading((old) => ({ ...old, [tenantId]: true }));
+      setRowFeedback((old) => ({ ...old, [tenantId]: { type: "loading", message: "Operazione in corso..." } }));
+
+      try {
+        await platformAdminUseCases.quickAction(tenantId, action);
+        setRowFeedback((old) => ({ ...old, [tenantId]: { type: "success", message: `${actionLabels[action]} completata` } }));
+        snackbar.success(`${actionLabels[action]} eseguita`);
+        await load({ silent: true });
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        const message = (err as Error).message;
+        setRowFeedback((old) => ({ ...old, [tenantId]: { type: "error", message } }));
+        setOperationError(message);
+        snackbar.error(message);
+      } finally {
+        setRowLoading((old) => ({ ...old, [tenantId]: false }));
+      }
     } finally {
-      setRowLoading((old) => ({ ...old, [tenantId]: false }));
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const revokeTrustedDevice = async (device: PlatformTrustedDevice) => {
+    const operationKey = `device:${device.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      await platformAdminUseCases.revokeTrustedDevice(device.id);
-      snackbar.success("Dispositivo fidato revocato");
-      await load({ silent: true });
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      try {
+        await platformAdminUseCases.revokeTrustedDevice(device.id);
+        snackbar.success("Dispositivo fidato revocato");
+        await load({ silent: true });
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
+      }
+    } finally {
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const updateTenantPlan = async (tenant: TenantRow, nextPlan: PlanTier, forceActivate: boolean) => {
-    const currentPlan = normalizePlanTier(tenant.license?.plan);
-    const licenseStatus = tenant.license?.status ?? "PENDING";
-    const planChanged = hasPlanChange(currentPlan, nextPlan);
-    const hasStatusChange = forceActivate && licenseStatus !== "ACTIVE";
-    if (!planChanged && !hasStatusChange) return;
-
-    setRowLoading((old) => ({ ...old, [tenant.id]: true }));
-    setRowFeedback((old) => ({ ...old, [tenant.id]: { type: "loading", message: "Aggiornamento piano in corso..." } }));
-
+    const operationKey = `tenant:${tenant.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const payload = buildPlanUpdatePayload({
-        nextPlan,
-        license: tenant.license,
-        forceActive: forceActivate
-      });
-      const result = await platformAdminUseCases.updateLicense(tenant.id, payload);
-      const savedPlan = normalizePlanTier(typeof result?.after?.plan === "string" ? result.after.plan : nextPlan);
-      setSelectedTenant((current) =>
-        current?.id === tenant.id
-          ? {
-              ...current,
-              license: {
-                ...current.license,
-                ...(typeof result?.after === "object" && result.after ? result.after : {})
+      const currentPlan = normalizePlanTier(tenant.license?.plan);
+      const licenseStatus = tenant.license?.status ?? "PENDING";
+      const planChanged = hasPlanChange(currentPlan, nextPlan);
+      const hasStatusChange = forceActivate && licenseStatus !== "ACTIVE";
+      if (!planChanged && !hasStatusChange) return;
+
+      setRowLoading((old) => ({ ...old, [tenant.id]: true }));
+      setRowFeedback((old) => ({ ...old, [tenant.id]: { type: "loading", message: "Aggiornamento piano in corso..." } }));
+
+      try {
+        const payload = buildPlanUpdatePayload({
+          nextPlan,
+          license: tenant.license,
+          forceActive: forceActivate
+        });
+        const result = await platformAdminUseCases.updateLicense(tenant.id, payload);
+        const savedPlan = normalizePlanTier(typeof result?.after?.plan === "string" ? result.after.plan : nextPlan);
+        setSelectedTenant((current) =>
+          current?.id === tenant.id
+            ? {
+                ...current,
+                license: {
+                  ...current.license,
+                  ...(typeof result?.after === "object" && result.after ? result.after : {})
+                }
               }
-            }
-          : current
-      );
-      setPlanDrafts((old) => clearPlanDraft(old, tenant.id));
-      setRowFeedback((old) => ({
-        ...old,
-        [tenant.id]: {
-          type: "success",
-          message: forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`
-        }
-      }));
-      snackbar.success(forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`);
-      await load({ silent: true });
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      const message = (err as Error).message;
-      setPlanDrafts((old) => rollbackPlanDraft(old, tenant.id, currentPlan));
-      setRowFeedback((old) => ({ ...old, [tenant.id]: { type: "error", message } }));
-      snackbar.error(message);
+            : current
+        );
+        setPlanDrafts((old) => clearPlanDraft(old, tenant.id));
+        setRowFeedback((old) => ({
+          ...old,
+          [tenant.id]: {
+            type: "success",
+            message: forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`
+          }
+        }));
+        snackbar.success(forceActivate ? `Piano ${savedPlan} salvato e licenza attivata` : `Piano ${savedPlan} applicato`);
+        await load({ silent: true });
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        const message = (err as Error).message;
+        setPlanDrafts((old) => rollbackPlanDraft(old, tenant.id, currentPlan));
+        setRowFeedback((old) => ({ ...old, [tenant.id]: { type: "error", message } }));
+        setOperationError(message);
+        snackbar.error(message);
+      } finally {
+        setRowLoading((old) => ({ ...old, [tenant.id]: false }));
+      }
     } finally {
-      setRowLoading((old) => ({ ...old, [tenant.id]: false }));
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
@@ -760,102 +748,168 @@ export const PlatformAdminPage = () => {
   };
 
   const generateInvoice = async (tenant: TenantRow) => {
-    setInvoiceLoading((old) => ({ ...old, [tenant.id]: true }));
+    const operationKey = `generate:${tenant.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const result = await platformAdminUseCases.generateInvoice(tenant.id);
-      snackbar.success(`Fattura ${result.data.invoiceNumber} generata`);
-      setInvoices((old) => [result.data, ...old]);
-      setActiveSection("billing");
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      setInvoiceLoading((old) => ({ ...old, [tenant.id]: true }));
+      try {
+        const result = await platformAdminUseCases.generateInvoice(tenant.id);
+        snackbar.success(`Fattura ${result.data.invoiceNumber} generata`);
+        setInvoices((old) => upsertPlatformInvoice(old, result.data));
+        setSelectedTenant(null);
+        setActiveSection("billing");
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
+      } finally {
+        setInvoiceLoading((old) => ({ ...old, [tenant.id]: false }));
+      }
     } finally {
-      setInvoiceLoading((old) => ({ ...old, [tenant.id]: false }));
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const sendInvoice = async (invoice: PlatformInvoice) => {
-    setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
-    const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
-    invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
+    const operationKey = `invoice:${invoice.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
-      invoiceEmailRequestKeys.current.delete(invoice.id);
-      snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
-      setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
-      void load({ silent: true });
+      setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+      try {
+        const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
+        invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
+        const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
+        invoiceEmailRequestKeys.current.delete(invoice.id);
+        snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
+        setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
+        void load({ silent: true });
+      } finally {
+        setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
+      }
     } finally {
-      setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const markInvoicePaid = async (invoice: PlatformInvoice) => {
-    setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+    const operationKey = `invoice:${invoice.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const result = await platformAdminUseCases.updateInvoiceStatus(invoice.id, "PAID");
-      snackbar.success(`Fattura ${result.data.invoiceNumber} marcata pagata`);
-      setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+      try {
+        const result = await platformAdminUseCases.updateInvoiceStatus(invoice.id, "PAID");
+        snackbar.success(`Fattura ${result.data.invoiceNumber} marcata pagata`);
+        setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
+      } finally {
+        setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
+      }
     } finally {
-      setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const downloadInvoice = async (invoice: PlatformInvoice) => {
+    const operationKey = `pdf:${invoice.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const blob = await platformAdminUseCases.downloadInvoicePdf(invoice.id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${invoice.invoiceNumber}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      try {
+        const blob = await platformAdminUseCases.downloadInvoicePdf(invoice.id);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${invoice.invoiceNumber}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
+      }
+    } finally {
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const updateDemoLeadStatus = async (lead: PlatformDemoLead, status: PlatformDemoLead["status"]) => {
+    const operationKey = `lead:${lead.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const result = await platformAdminUseCases.updateDemoLead(lead.id, status);
-      setDemoLeads((old) => old.map((item) => (item.id === lead.id ? result.data : item)));
-      snackbar.success(`Lead ${lead.companyName} aggiornato`);
-      void load({ silent: true });
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      snackbar.error((err as Error).message);
+      try {
+        const result = await platformAdminUseCases.updateDemoLead(lead.id, status);
+        setDemoLeads((old) => old.map((item) => (item.id === lead.id ? result.data : item)));
+        snackbar.success(`Lead ${lead.companyName} aggiornato`);
+        void load({ silent: true });
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
+      }
+    } finally {
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
   const onLicenseSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editingTenant) return;
-
-    const form = new FormData(event.currentTarget);
+    const operationKey = `tenant:${editingTenant?.id}`;
+    if (operationLocks.current.has(operationKey)) return;
+    operationLocks.current.add(operationKey);
+    setPendingOperations((old) => ({ ...old, [operationKey]: true }));
+    setOperationError(null);
     try {
-      const priceMonthlyRaw = String(form.get("priceMonthly") || "").trim();
-      await platformAdminUseCases.updateLicense(editingTenant.id, {
-        plan: String(form.get("plan") || "STARTER"),
-        seats: Number(form.get("seats") || 1),
-        status: String(form.get("status") || "ACTIVE") as LicenseStatus,
-        expiresAt: String(form.get("expiresAt") || "") ? new Date(String(form.get("expiresAt"))).toISOString() : null,
-        priceMonthly: priceMonthlyRaw ? Number(priceMonthlyRaw) : null,
-        billingCycle: String(form.get("billingCycle") || "monthly") as "monthly" | "yearly"
-      });
-      snackbar.success("Licenza aggiornata");
-      setEditingTenant(null);
-      await load({ silent: true });
-    } catch (err) {
-      if (handlePlatformAuthError(err)) return;
-      const message = (err as Error).message;
-      setError(message);
-      snackbar.error(message);
+      if (!editingTenant) return;
+
+      const form = new FormData(event.currentTarget);
+      try {
+        const priceMonthlyRaw = String(form.get("priceMonthly") || "").trim();
+        await platformAdminUseCases.updateLicense(editingTenant.id, {
+          plan: String(form.get("plan") || "STARTER"),
+          seats: Number(form.get("seats") || 1),
+          status: String(form.get("status") || "ACTIVE") as LicenseStatus,
+          expiresAt: String(form.get("expiresAt") || "") ? new Date(String(form.get("expiresAt"))).toISOString() : null,
+          priceMonthly: priceMonthlyRaw ? Number(priceMonthlyRaw) : null,
+          billingCycle: String(form.get("billingCycle") || "monthly") as "monthly" | "yearly"
+        });
+        snackbar.success("Licenza aggiornata");
+        setEditingTenant(null);
+        await load({ silent: true });
+      } catch (err) {
+        if (handlePlatformAuthError(err)) return;
+        const message = (err as Error).message;
+        setOperationError(message);
+        snackbar.error(message);
+      }
+    } finally {
+      operationLocks.current.delete(operationKey);
+      setPendingOperations((old) => ({ ...old, [operationKey]: false }));
     }
   };
 
@@ -867,8 +921,8 @@ export const PlatformAdminPage = () => {
   };
 
   const sectionDescription: Record<PlatformSectionId, string> = {
-    overview: "Control room platform con KPI, alert e priorita operative",
-    tenants: "Gestione tenant, piani, licenze e quick action",
+    overview: "Aziende, licenze e avvisi in un unico punto.",
+    tenants: "Anagrafiche, titolari e gestione delle licenze.",
     plans: "MRR, breakdown piani, trend e export finanziario",
     billing: "Fatture SaaS, PDF, invio email e stato delivery",
     analytics: "Visite sito, CTA, funnel onboarding, checkout e trial",
@@ -879,90 +933,6 @@ export const PlatformAdminPage = () => {
     security: "Controlli platform, OTP, IP allowlist e sessioni",
     settings: "Configurazioni globali platform e provider"
   };
-  const sidebarItems: Array<{
-    id: PlatformSectionId;
-    label: string;
-    description: string;
-    icon: any;
-    badge?: string;
-  }> = [
-    {
-      id: "overview",
-      label: "Overview",
-      description: "Control room globale",
-      icon: LayoutDashboard,
-      badge: String(overview?.kpis.emailErrors ?? 0)
-    },
-    {
-      id: "tenants",
-      label: "Tenants",
-      description: "Clienti, piani, licenze",
-      icon: Building2,
-      badge: String(tenants.length)
-    },
-    {
-      id: "plans",
-      label: "Licenze & Piani",
-      description: "MRR e pricing",
-      icon: BarChart3,
-      badge: String(revenueActiveTenants)
-    },
-    {
-      id: "billing",
-      label: "Billing",
-      description: "Fatture e invii email",
-      icon: FileText,
-      badge: String(invoices.length)
-    },
-    {
-      id: "analytics",
-      label: "Website Analytics",
-      description: "Funnel e sorgenti",
-      icon: Globe2,
-      badge: String(websiteAnalytics?.totals.pageViews ?? 0)
-    },
-    {
-      id: "leads",
-      label: "Demo Leads",
-      description: "CRM leggero",
-      icon: UserRoundCheck,
-      badge: String(demoLeads.filter((lead) => lead.status === "NEW").length)
-    },
-    {
-      id: "users",
-      label: "Utenti",
-      description: "Utenti globali",
-      icon: Users,
-      badge: String(users.length)
-    },
-    {
-      id: "audit",
-      label: "Eventi & Audit",
-      description: "Audit e watchlist operativa",
-      icon: Activity,
-      badge: String(events.length)
-    },
-    {
-      id: "health",
-      label: "System Health",
-      description: "API, DB, email",
-      icon: Server,
-      badge: systemHealth?.db.status ?? "DB"
-    },
-    {
-      id: "security",
-      label: "Security",
-      description: "OTP e controlli",
-      icon: ShieldCheck,
-      badge: String(securityOverview?.auth.blockedLoginStates ?? 0)
-    },
-    {
-      id: "settings",
-      label: "Impostazioni",
-      description: "Provider e config",
-      icon: SlidersHorizontal
-    }
-  ];
   const tenantPriorityList = useMemo(() => {
     const riskScore = (tenant: TenantRow) => {
       let score = 0;
@@ -994,129 +964,23 @@ export const PlatformAdminPage = () => {
   };
 
   return (
-    <section className="platform-console space-y-4">
-      <button
-        type="button"
-        className={`fixed inset-0 z-[105] hidden bg-slate-950/20 transition-opacity lg:block ${
-          sidebarHidden ? "pointer-events-none opacity-0" : "opacity-100"
-        }`}
-        aria-label="Chiudi sidebar"
-        onClick={() => setSidebarHidden(true)}
-      />
-
-      <aside
-        className={`fixed bottom-4 left-4 top-4 z-[108] hidden w-[272px] transition-transform duration-300 lg:block ${
-          sidebarHidden ? "-translate-x-[120%]" : "translate-x-0"
-        }`}
-      >
-        <div className="platform-admin-aside g-sidebar h-full space-y-4 rounded-2xl border border-border/70 bg-card/92 p-3 shadow-sm backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Navigation</p>
-              <p className="text-sm font-semibold text-foreground">Platform Workspace</p>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => setSidebarHidden(true)} aria-label="Chiudi sidebar">
-              <PanelLeftClose className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <nav className="space-y-1.5">
-            {sidebarItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeSection === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveSection(item.id)}
-                  className={`platform-admin-nav-item ${isActive ? "platform-admin-nav-item--active" : ""}`}
-                  title={item.label}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="min-w-0 flex-1 text-left">
-                    <span className="block text-sm font-semibold text-foreground">{item.label}</span>
-                    <span className="block truncate text-[11px] text-muted-foreground">{item.description}</span>
-                  </span>
-                  {item.badge ? (
-                    <span className="rounded-full border border-border/80 bg-background px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="space-y-3 rounded-xl border border-border/70 bg-background/65 p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Priorita Clienti</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-lg border border-border/70 bg-card/70 px-1.5 py-2">
-                <p className="text-[10px] uppercase text-muted-foreground">Attivi</p>
-                <p className="text-sm font-semibold text-foreground">{kpis.activeTenants}</p>
-              </div>
-              <div className="rounded-lg border border-amber-300/50 bg-amber-50/80 px-1.5 py-2 dark:border-amber-500/40 dark:bg-amber-500/10">
-                <p className="text-[10px] uppercase text-amber-700 dark:text-amber-300">Scadenza</p>
-                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">{kpis.expiringSoon}</p>
-              </div>
-              <div className="rounded-lg border border-rose-300/50 bg-rose-50/80 px-1.5 py-2 dark:border-rose-500/40 dark:bg-rose-500/10">
-                <p className="text-[10px] uppercase text-rose-700 dark:text-rose-300">Sospese</p>
-                <p className="text-sm font-semibold text-rose-800 dark:text-rose-200">{kpis.suspended}</p>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              {tenantPriorityList.slice(0, 5).map((tenant) => {
-                const licenseStatus = tenant.license?.status ?? "PENDING";
-                return (
-                  <button
-                    key={`priority-${tenant.id}`}
-                    type="button"
-                    onClick={() => {
-                      setSearch(tenant.name);
-                      setActiveSection("tenants");
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg border border-border/70 bg-card/75 px-2 py-1.5 text-left transition hover:border-border hover:bg-card"
-                  >
-                    <span className="truncate text-xs font-medium text-foreground">{tenant.name}</span>
-                    <span className="ml-auto">
-                      <Badge variant={statusBadgeVariant(licenseStatus)}>{licenseStatus}</Badge>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-                <Button variant="secondary" size="sm" className="w-full" onClick={() => setActiveSection("tenants")}>
-                  Apri Matrice Clienti
-                </Button>
-          </div>
-        </div>
-      </aside>
-
-      <div className="space-y-4">
+    <section className="platform-console">
+      <header className="satin-page-heading">
+        <div><h1>{platformSectionLabel(activeSection)}</h1><p>{sectionDescription[activeSection]}</p></div>
+        <Button variant="outline" size="sm" disabled={loading || refreshing} onClick={() => load({ silent: true })}>
+          <RefreshCcw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />{refreshing ? "Aggiornamento…" : "Aggiorna"}
+        </Button>
+      </header>
+      {error ? <div className="satin-error" role="alert"><p><strong>Impossibile aggiornare i dati.</strong> {error}</p>
+        {hasLoaded ? <p>Le informazioni mostrate sono quelle dell’ultimo caricamento riuscito.</p> : null}
+        <Button size="sm" variant="outline" disabled={loading || refreshing} onClick={() => load()}>Riprova</Button>
+      </div> : null}
+      {operationError && !selectedTenant ? <div className="satin-error" role="alert"><p>{operationError}</p><Button variant="outline" size="sm" onClick={() => setOperationError(null)}>Chiudi avviso</Button></div> : null}
+      {!hasLoaded && loading ? <div className="satin-loading" role="status">Caricamento della Console…</div> : null}
+      {hasLoaded ? <div className="space-y-4">
       {activeSection === "overview" ? (
-        <div className="space-y-4">
-          <Card className="platform-command-hero">
-            <CardContent className="platform-command-hero__content grid gap-5 py-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)]">
-              <div className="platform-command-copy mx-auto w-full max-w-2xl space-y-2 text-center">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300">Control Surface</p>
-                <p className="text-xl font-semibold text-foreground">Centro operativo licenze clienti</p>
-                <p className="text-sm text-muted-foreground">
-                  {sectionDescription[activeSection]}. Le aree operative sono divise per ridurre il rumore e velocizzare le decisioni.
-                </p>
-              </div>
-              <div className="platform-command-badges mx-auto grid w-full max-w-md gap-2.5 sm:grid-cols-2">
-                <div className="rounded-xl border border-cyan-300/45 bg-cyan-50 px-3 py-2.5 text-center text-sm text-cyan-900 dark:border-cyan-400/30 dark:bg-cyan-500/15 dark:text-cyan-100">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-cyan-700/80 dark:text-cyan-100/80">Scope</p>
-                  <p className="font-semibold">Platform-only</p>
-                </div>
-                <div className="rounded-xl border border-emerald-300/45 bg-emerald-50 px-3 py-2.5 text-center text-sm text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-100">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-emerald-700/80 dark:text-emerald-100/80">Security</p>
-                  <p className="font-semibold">IP Restricted</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <div>
+          <div className="satin-stat-strip">
             <PlatformKpiCard
               title="Clienti attivi"
               value={activeTenantsCounter}
@@ -1137,38 +1001,6 @@ export const PlatformAdminPage = () => {
               icon={<Clock3 className="h-5 w-5" />}
               valueClassName="text-amber-600 dark:text-amber-400"
             />
-            <PlatformKpiCard
-              title="Licenze sospese"
-              value={suspendedCounter}
-              subtitle="Da riattivare se necessario"
-              icon={<XCircle className="h-5 w-5" />}
-              valueClassName="text-rose-600 dark:text-rose-400"
-            />
-            <Card className="platform-stat-card xl:col-span-1">
-              <CardContent className="flex h-full flex-col justify-center gap-2 p-5 sm:p-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Utenti attivi LIVE</p>
-                <p className="platform-kpi-metric text-foreground">
-                  <span className="platform-kpi-icon" aria-hidden="true">
-                    <Activity className="h-5 w-5" />
-                  </span>
-                  <span>{liveUsersCounter}</span>
-                </p>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Finestra {dashboardLive?.liveWindowMinutes ?? 15} min ·{" "}
-                  <span
-                    className={
-                      (dashboardLive?.deltaFromPreviousWindow ?? 0) >= 0
-                        ? "font-semibold text-emerald-600 dark:text-emerald-300"
-                        : "font-semibold text-rose-600 dark:text-rose-300"
-                    }
-                  >
-                    {(dashboardLive?.deltaFromPreviousWindow ?? 0) >= 0 ? "+" : ""}
-                    {dashboardLive?.deltaFromPreviousWindow ?? 0}
-                  </span>{" "}
-                  vs finestra precedente
-                </p>
-              </CardContent>
-            </Card>
             <Card className="platform-stat-card xl:col-span-1">
               <CardContent className="flex h-full flex-col justify-center gap-2 p-5 sm:p-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">MRR abbonamenti mensili</p>
@@ -1194,62 +1026,59 @@ export const PlatformAdminPage = () => {
               </CardContent>
             </Card>
           </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <Card className="platform-main-card">
-              <CardHeader>
-                <CardTitle className="text-base text-foreground">Riepilogo operativo</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="platform-watch-item platform-watch-item--warning">
-                  <p className="platform-watch-item__text">
-                    <AlertTriangle className="h-4 w-4" />
-                    Licenze in scadenza: {kpis.expiringSoon}
-                  </p>
-                </div>
-                <div className="platform-watch-item platform-watch-item--danger">
-                  <p className="platform-watch-item__text">
-                    <ShieldAlert className="h-4 w-4" />
-                    Licenze sospese: {kpis.suspended}
-                  </p>
-                </div>
-                <div className="platform-watch-item platform-watch-item--info">
-                  <p className="platform-watch-item__text">
-                    <Zap className="h-4 w-4" />
-                    Controllo one-click attivo
-                  </p>
-                </div>
-                {revenueReport ? (
-                  <div className="mt-2 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-sm">
-                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">MRR snapshot</p>
-                    <p className="mt-1 font-semibold text-foreground">{formatCurrency(revenueReport.kpis.mrrTotal)}</p>
-                  </div>
-                ) : null}
-              </CardContent>
+          <div className="satin-overview-grid">
+            <Card>
+              <div className="satin-panel-heading"><h2>Aziende</h2><Button variant="ghost" size="sm" onClick={() => setActiveSection("tenants")}>Vedi tutte</Button></div>
+              <Table>
+                <TableHeader><TableRow><TableHead>Azienda</TableHead><TableHead>Piano</TableHead><TableHead>Licenza</TableHead><TableHead><span className="sr-only">Dettagli</span></TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {tenants.length === 0 ? <TableRow><TableCell colSpan={4}>Nessuna azienda presente.</TableCell></TableRow> : null}
+                  {tenants.slice(0, 6).map((tenant) => <TableRow key={`summary-${tenant.id}`}>
+                    <TableCell><p className="font-medium">{tenant.company?.legalName || tenant.name}</p><p className="text-xs text-muted-foreground">{tenant.owner?.email ?? "Titolare non configurato"}</p></TableCell>
+                    <TableCell>{normalizePlanTier(tenant.license?.plan)}</TableCell>
+                    <TableCell><Badge variant={statusBadgeVariant(tenant.license?.status)}>{licenseStatusLabel(tenant.license?.status)}</Badge></TableCell>
+                    <TableCell><Button size="sm" variant="ghost" onClick={() => setSelectedTenant(tenant)} aria-label={`Apri azienda ${tenant.name}`}>Apri</Button></TableCell>
+                  </TableRow>)}
+                </TableBody>
+              </Table>
+              <div className="satin-list-footer"><span>{tenants.length} aziende</span><span>{kpis.activeLicenses} licenze attive</span></div>
             </Card>
-
+            <Card>
+              <div className="satin-panel-heading"><h2>Da seguire</h2><Badge variant="secondary">{criticalTenantsCount}</Badge></div>
+              <div className="satin-queue">
+                <p>{kpis.expiringSoon} in scadenza · {kpis.suspended} licenze da verificare</p>
+                {tenantPriorityList.map((tenant) => <button type="button" key={`priority-${tenant.id}`} onClick={() => setSelectedTenant(tenant)}>
+                  <span>{tenant.company?.legalName || tenant.name}</span><Badge variant={statusBadgeVariant(tenant.license?.status)}>{licenseStatusLabel(tenant.license?.status)}</Badge>
+                </button>)}
+                {tenantPriorityList.length === 0 ? <p>Nessuna azienda da mostrare.</p> : null}
+                {overview?.alerts.map((alert, index) => <p key={`${alert.type}-${index}`}>{alert.label}</p>)}
+                <Button variant="ghost" size="sm" onClick={() => setActiveSection("audit")}>Apri eventi e audit</Button>
+              </div>
+            </Card>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
             <Card className="platform-main-card">
               <CardHeader className="space-y-2">
-                <CardTitle className="text-base text-foreground">Utenti Live</CardTitle>
+                <CardTitle className="text-base text-foreground">Utenti live</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Finestra live: ultimi {dashboardLive?.liveWindowMinutes ?? 15} minuti
+                  Finestra live: ultimi {dashboardLive?.liveWindowMinutes ?? 15} minuti{liveError ? " · aggiornamento non riuscito" : ""}
                 </p>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2">
                     <p className="text-[11px] uppercase tracking-[0.09em] text-muted-foreground">Utenti attivi</p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">{liveUsersCounter}</p>
+                    <p className="mt-1 text-lg font-semibold text-foreground">{dashboardLive ? liveUsersCounter : "—"}</p>
                   </div>
                   <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2">
                     <p className="text-[11px] uppercase tracking-[0.09em] text-muted-foreground">Clienti online</p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">{dashboardLive?.activeTenantsLive ?? 0}</p>
+                    <p className="mt-1 text-lg font-semibold text-foreground">{dashboardLive?.activeTenantsLive ?? "—"}</p>
                   </div>
                 </div>
 
                 <div className="space-y-1.5 rounded-xl border border-border/70 bg-background/70 p-2.5">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Top clienti live</p>
-                  {(dashboardLive?.topTenants.length ?? 0) === 0 ? (
+                  {!dashboardLive ? <p className="text-xs text-muted-foreground">Metriche live non disponibili.</p> : dashboardLive.topTenants.length === 0 ? (
                     <p className="text-xs text-muted-foreground">Nessun cliente attivo in questa finestra</p>
                   ) : null}
                   {dashboardLive?.topTenants.slice(0, 5).map((row) => (
@@ -1261,6 +1090,11 @@ export const PlatformAdminPage = () => {
                 </div>
               </CardContent>
             </Card>
+            <Card className="platform-main-card"><CardHeader><CardTitle className="text-base">Attività recente</CardTitle></CardHeader><CardContent className="space-y-3">
+              {events.slice(0, 4).map((event) => <PlatformEventItem key={event.id} action={event.action} tenantName={event.tenantName} createdAt={event.createdAt} {...parseEventDetails(event.details)} timeAgo={timeAgo(event.createdAt)} />)}
+              {events.length === 0 ? <p className="text-sm text-muted-foreground">Nessun evento recente.</p> : null}
+              <Button variant="ghost" size="sm" onClick={() => setActiveSection("audit")}>Tutti gli eventi</Button>
+            </CardContent></Card>
           </div>
         </div>
       ) : null}
@@ -1310,9 +1144,9 @@ export const PlatformAdminPage = () => {
               <div className="grid gap-2 md:grid-cols-[1.5fr_0.8fr_1fr_1fr_auto]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" placeholder="Cerca cliente o owner..." />
+                  <Input aria-label="Cerca cliente o titolare" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" placeholder="Cerca cliente o owner..." />
                 </div>
-                <Select value={planFilter} onChange={(e) => setPlanFilter(e.target.value as PlanTier | "ALL")}>
+                <Select aria-label="Filtra per piano" value={planFilter} onChange={(e) => setPlanFilter(e.target.value as PlanTier | "ALL")}>
                   <option value="ALL">Piano: tutti</option>
                   {PLAN_TIERS.map((plan) => (
                     <option key={`filter-${plan}`} value={plan}>
@@ -1320,7 +1154,7 @@ export const PlatformAdminPage = () => {
                     </option>
                   ))}
                 </Select>
-                <Select value={licenseFilter} onChange={(e) => setLicenseFilter(e.target.value as LicenseStatus | "ALL")}>
+                <Select aria-label="Filtra per licenza" value={licenseFilter} onChange={(e) => setLicenseFilter(e.target.value as LicenseStatus | "ALL")}>
                   <option value="ALL">Licenza: tutte</option>
                   <option value="PENDING">PENDING</option>
                   <option value="ACTIVE">ACTIVE</option>
@@ -1330,7 +1164,7 @@ export const PlatformAdminPage = () => {
                   <option value="PAST_DUE">PAST_DUE</option>
                   <option value="CANCELED">CANCELED</option>
                 </Select>
-                <Select value={tenantStatusFilter} onChange={(e) => setTenantStatusFilter(e.target.value as "ALL" | "ACTIVE" | "INACTIVE")}>
+                <Select aria-label="Filtra per stato azienda" value={tenantStatusFilter} onChange={(e) => setTenantStatusFilter(e.target.value as "ALL" | "ACTIVE" | "INACTIVE")}>
                   <option value="ALL">Clienti: tutti</option>
                   <option value="ACTIVE">Clienti attivi</option>
                   <option value="INACTIVE">Clienti inattivi</option>
@@ -1344,6 +1178,7 @@ export const PlatformAdminPage = () => {
                 {PLAN_TIERS.map((plan) => (
                   <button
                     key={`quick-filter-${plan}`}
+                    aria-pressed={planFilter === plan}
                     type="button"
                     onClick={() => setPlanFilter(planFilter === plan ? "ALL" : plan)}
                     className={`rounded-2xl border px-3 py-2 text-left transition ${
@@ -1363,16 +1198,6 @@ export const PlatformAdminPage = () => {
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {error ? (
-                <div className="rounded-2xl border border-red-300/60 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
-                  <p className="font-semibold">Errore caricamento pannello</p>
-                  <p>{error}</p>
-                  <Button className="mt-3" size="sm" onClick={() => load()}>
-                    Riprova
-                  </Button>
-                </div>
-              ) : null}
-
               <div className="platform-table-wrap overflow-x-hidden rounded-2xl border border-border/70">
                 <Table className="platform-tenant-table table-fixed [&_th]:py-1.5 [&_td]:py-1.5">
                   <TableHeader className="platform-table-header sticky top-0 z-20 backdrop-blur">
@@ -1547,7 +1372,7 @@ export const PlatformAdminPage = () => {
                                     onClick={() => generateInvoice(tenant)}
                                   >
                                     <FileText className="h-3.5 w-3.5" />
-                                    {invoiceLoading[tenant.id] ? "Genero..." : "Invia fattura"}
+                                    {invoiceLoading[tenant.id] ? "Genero..." : "Genera fattura"}
                                   </Button>
                                   <Button
                                     size="sm"
@@ -1555,7 +1380,7 @@ export const PlatformAdminPage = () => {
                                     className="h-7 w-full min-w-0 text-[11px]"
                                     onClick={() => setSelectedTenant(tenant)}
                                   >
-                                    Apri drawer
+                                    Apri azienda
                                   </Button>
                                 </div>
                                 {feedback ? (
@@ -1642,7 +1467,7 @@ export const PlatformAdminPage = () => {
                     </Select>
                   </div>
                   <div className="flex gap-2 md:col-span-2">
-                    <Button type="submit">Salva licenza</Button>
+                    <Button type="submit" disabled={!!pendingOperations[`tenant:${editingTenant?.id}`]}>Salva licenza</Button>
                     <Button type="button" variant="outline" onClick={() => setEditingTenant(null)}>
                       Annulla
                     </Button>
@@ -1832,7 +1657,8 @@ export const PlatformAdminPage = () => {
                       snackbar.success("Export ricavi completato");
                     } catch (err) {
                       if (handlePlatformAuthError(err)) return;
-                      snackbar.error((err as Error).message);
+                      setOperationError((err as Error).message);
+        snackbar.error((err as Error).message);
                     }
                   }}
                 >
@@ -2332,7 +2158,7 @@ export const PlatformAdminPage = () => {
                           <Select
                             value={lead.status}
                             className="h-8 min-w-[132px] text-xs"
-                            onChange={(event) => updateDemoLeadStatus(lead, event.target.value as PlatformDemoLead["status"])}
+                            disabled={!!pendingOperations[`lead:${lead.id}`]} onChange={(event) => updateDemoLeadStatus(lead, event.target.value as PlatformDemoLead["status"])}
                             aria-label={`Aggiorna stato lead ${lead.companyName}`}
                           >
                             <option value="NEW">Nuovo</option>
@@ -2667,8 +2493,7 @@ export const PlatformAdminPage = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={device.status !== "ACTIVE"}
-                    onClick={() => revokeTrustedDevice(device)}
+                    disabled={device.status !== "ACTIVE" || !!pendingOperations[`device:${device.id}`]} onClick={() => revokeTrustedDevice(device)}
                   >
                     Revoca
                   </Button>
@@ -2826,88 +2651,23 @@ export const PlatformAdminPage = () => {
           </Card>
         </div>
       ) : null}
-      </div>
+      </div> : null}
 
-      <div
-        className={`fixed inset-0 z-[110] bg-slate-950/50 backdrop-blur-sm transition-opacity lg:hidden ${
-          mobileSidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={() => setMobileSidebarOpen(false)}
-      >
-        <div
-          className={`platform-admin-mobile-aside g-sidebar h-full w-[86%] max-w-xs border-r border-border/70 bg-card p-4 transition-transform ${
-            mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Platform</p>
-              <p className="text-sm font-semibold text-foreground">Sezioni Console</p>
-            </div>
-            <Button variant="outline" size="icon" onClick={() => setMobileSidebarOpen(false)} aria-label="Chiudi sidebar">
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-          <nav className="space-y-1.5">
-            {sidebarItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeSection === item.id;
-              return (
-                <button
-                  key={`mobile-${item.id}`}
-                  type="button"
-                  onClick={() => {
-                    setActiveSection(item.id);
-                    setMobileSidebarOpen(false);
-                  }}
-                  className={`platform-admin-nav-item ${isActive ? "platform-admin-nav-item--active" : ""}`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="min-w-0 flex-1 text-left">
-                    <span className="block text-sm font-semibold text-foreground">{item.label}</span>
-                    <span className="block truncate text-[11px] text-muted-foreground">{item.description}</span>
-                  </span>
-                  {item.badge ? (
-                    <span className="rounded-full border border-border/80 bg-background px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      </div>
-
-      <div
-        className={`fixed inset-0 z-[112] bg-slate-950/45 backdrop-blur-sm transition-opacity ${
-          selectedTenant ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={() => setSelectedTenant(null)}
-      >
-        <aside
-          className={`ml-auto flex h-full w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl transition-transform duration-300 ${
-            selectedTenant ? "translate-x-0" : "translate-x-full"
-          }`}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Dettaglio tenant platform"
-          onClick={(event) => event.stopPropagation()}
-        >
+      {selectedTenant ? <PlatformDialog inspector label={`Azienda ${selectedTenant.name}`} onDismiss={() => setSelectedTenant(null)}>
           {selectedTenant ? (
             <>
               <div className="flex items-start justify-between gap-3 border-b border-border p-5">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Tenant drawer</p>
                   <h2 className="mt-1 text-xl font-semibold text-foreground">{selectedTenant.company?.legalName || selectedTenant.name}</h2>
                   <p className="mt-1 text-sm text-muted-foreground">{selectedTenant.owner?.email ?? "Owner non configurato"}</p>
                 </div>
-                <Button variant="outline" size="icon" onClick={() => setSelectedTenant(null)} aria-label="Chiudi drawer tenant">
+                <Button variant="outline" size="icon" onClick={() => setSelectedTenant(null)} aria-label="Chiudi azienda">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
               <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                {operationError ? <p role="alert" className="satin-error">{operationError}</p> : null}
+                {rowFeedback[selectedTenant.id] && rowFeedback[selectedTenant.id].type !== "error" ? <p role="status" className="text-sm">{rowFeedback[selectedTenant.id].message}</p> : null}
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border border-border/70 bg-background/70 p-3">
                     <p className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Piano</p>
@@ -2989,10 +2749,10 @@ export const PlatformAdminPage = () => {
                     <CardTitle className="text-base">Azioni rapide sicure</CardTitle>
                   </CardHeader>
                   <CardContent className="grid gap-2 sm:grid-cols-2">
-                    <Button variant="outline" onClick={() => openConfirm(selectedTenant, "TRIAL_14_DAYS")}>Trial 14 giorni</Button>
-                    <Button variant="outline" onClick={() => openConfirm(selectedTenant, "RENEW_30_DAYS")}>Rinnova +30 giorni</Button>
-                    <Button variant="secondary" onClick={() => generateInvoice(selectedTenant)}>Genera fattura</Button>
-                    <Button variant="destructive" onClick={() => openConfirm(selectedTenant, "SUSPEND_LICENSE")}>Sospendi licenza</Button>
+                    <Button variant="outline" disabled={!!rowLoading[selectedTenant.id]} onClick={() => openConfirm(selectedTenant, "TRIAL_14_DAYS")}>Trial 14 giorni</Button>
+                    <Button variant="outline" disabled={!!rowLoading[selectedTenant.id]} onClick={() => openConfirm(selectedTenant, "RENEW_30_DAYS")}>Rinnova +30 giorni</Button>
+                    <Button variant="secondary" disabled={!!invoiceLoading[selectedTenant.id]} onClick={() => generateInvoice(selectedTenant)}>Genera fattura</Button>
+                    <Button variant="destructive" disabled={!!rowLoading[selectedTenant.id]} onClick={() => openConfirm(selectedTenant, "SUSPEND_LICENSE")}>Sospendi licenza</Button>
                   </CardContent>
                 </Card>
 
@@ -3018,13 +2778,10 @@ export const PlatformAdminPage = () => {
               </div>
             </>
           ) : null}
-        </aside>
-      </div>
+      </PlatformDialog> : null}
 
       {planConfirmState ? (
-        <div className="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
-          <div className="mx-auto flex min-h-full w-full max-w-lg items-center py-4">
-          <div className="modal-pop w-full rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl" role="dialog" aria-modal="true">
+        <PlatformDialog label="Conferma operazione" onDismiss={() => { setPlanConfirmState(null); setConfirmState(null); }}>
             <h3 className="text-lg font-semibold">Conferma downgrade piano</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               Cliente: <span className="font-medium text-foreground">{planConfirmState.tenant.name}</span>
@@ -3049,15 +2806,11 @@ export const PlatformAdminPage = () => {
                 Conferma downgrade
               </Button>
             </div>
-          </div>
-          </div>
-        </div>
+        </PlatformDialog>
       ) : null}
 
       {confirmState ? (
-        <div className="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
-          <div className="mx-auto flex min-h-full w-full max-w-lg items-center py-4">
-          <div className="modal-pop w-full rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl" role="dialog" aria-modal="true">
+        <PlatformDialog label="Conferma operazione" onDismiss={() => { setPlanConfirmState(null); setConfirmState(null); }}>
             <h3 className="text-lg font-semibold">{confirmState.title}</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               Cliente: <span className="font-medium text-foreground">{confirmState.tenantName}</span>
@@ -3078,9 +2831,7 @@ export const PlatformAdminPage = () => {
                 Conferma azione
               </Button>
             </div>
-          </div>
-          </div>
-        </div>
+        </PlatformDialog>
       ) : null}
     </section>
   );

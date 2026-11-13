@@ -1,0 +1,216 @@
+{
+  "baseline": "local build of db1f231dc8cb699f1a5ce4215a0278c93212d16d, NOT exported production assets",
+  "output": "/private/tmp/fleetum-platform-satin-overlay-20261113",
+  "changedExistingFiles": [
+    "platform.html"
+  ],
+  "preservedExistingFiles": 180,
+  "assetCollisions": [],
+  "platformClosure": [
+    {
+      "path": "assets/CartesianGrid-Bbhx3ByG.js",
+      "sha256": "bb85832d57b380663bcb3589af6d40fd89a68d0a1e1d686c8bf02e8c07755aa6",
+      "bytes": 7265
+    },
+    {
+      "path": "assets/LineChart-7DSNtdWT.js",
+      "sha256": "7d2e3e4453591a943534812980a0f52f309a3389975440e3b37ba97c352af579",
+      "bytes": 235
+    },
+    {
+      "path": "assets/badge-D3Bidg0M.js",
+      "sha256": "185e4edaa898e4ae52af359304a7834f358939484fecbb41d86b574f8b6eeba5",
+      "bytes": 753
+    },
+    {
+      "path": "assets/building-2-MibTIiZU.js",
+      "sha256": "921ce97acf0990ab10ba1abe0ef225b745f1eb68adc6a11a137813ef8a2a7c72",
+      "bytes": 438
+    },
+    {
+      "path": "assets/button-BcrzHnkq.js",
+      "sha256": "ccb1835afbe68fcaffc2a32b6e19b7e0ca6472227ce69a681f9d88c5ddd51d44",
+      "bytes": 2233
+    },
+    {
+      "path": "assets/card-D6vuhX1S.js",
+      "sha256": "35d79cd87fbf1bb9b23fef9f8397ad4070a28a59fc4c0b9b28fd86787ee398b2",
+      "bytes": 1156
+    },
+    {
+      "path": "assets/chevron-right-T0hx1vQw.js",
+      "sha256": "5a88b2d743f21b686c4340cbf427f41250c45de67560f5dde8e14d88539a9f76",
+      "bytes": 129
+    },
+    {
+      "path": "assets/circle-check-BSTDEXu7.js",
+      "sha256": "34c2daedd7d14208b8139f55b1c7db65e0886cf3061f80bbe280f825542b1cf5",
+      "bytes": 177
+    },
+    {
+      "path": "assets/clock-3-qbqcMnd3.js",
+      "sha256": "a2158a9afb9a358b86aa3b7557f332ecac5d79f11288a1880316c5eebf42376c",
+      "bytes": 186
+    },
+    {
+      "path": "assets/createLucideIcon-Bf0a-z3h.js",
+      "sha256": "13b2abf6376adcbbf155b01138e887a6929ecbea379da27dabcdf2116d03c902",
+      "bytes": 953
+    },
+    {
+      "path": "assets/download-CEC9vu1s.js",
+      "sha256": "3af8dff6775d1b8486a5a27ebbc07b844843633c243514364442e8d6cb286bd2",
+      "bytes": 262
+    },
+    {
+      "path": "assets/earth-BAVEX5n-.js",
+      "sha256": "61e630265f32c1b21c7ec6903b556588d348d402a44bc3eb2e06ec29ed040ae4",
+      "bytes": 393
+    },
+    {
+      "path": "assets/entitlements-DPXqekHf.js",
+      "sha256": "a2bb9a70fe57e8bc31c396687fb2d7c541f30b1ae9d9fdbca7b0adfd5b5f34a2",
+      "bytes": 1664
+    },
+    {
+      "path": "assets/file-text-Da0v_ZMu.js",
+      "sha256": "c7c1b3ccda0c452b527896e8c55586d5829c404ea38b4b80c6394ab2805c452d",
+      "bytes": 332
+    },
+    {
+      "path": "assets/fleetum-logo-loader-CzWlz8MD.js",
+      "sha256": "5864bf7f11c478cd1c22d5230b1b3ccd3aa868faa8e23680bd85eb8f4526805e",
+      "bytes": 1283
+    },
+    {
+      "path": "assets/fleetum-logo-loader-DUax0LZd.css",
+      "sha256": "3d1f675fb7563561f6b5ff0bf50fb02e7d58fb9bf0e87fb38d67605c3e4c180c",
+      "bytes": 5043
+    },
+    {
+      "path": "assets/generateCategoricalChart-QNcmwxGc.js",
+      "sha256": "2b955d7215ab5a12bd99733372444487dee9c18f62ffba6251db1e86c63873e0",
+      "bytes": 374917
+    },
+    {
+      "path": "assets/global-CKGtAsbT.css",
+      "sha256": "52df5b914456eb010823dd493a8d2b346fffcd2df23a859b1ca6a8ee5624b2d5",
+      "bytes": 173987
+    },
+    {
+      "path": "assets/global-DgHdM0bJ.js",
+      "sha256": "1aea83c8aa7873537dbfd31b6f6a1701fa25c2f7549d5ce6239ff3755693dad4",
+      "bytes": 3223
+    },
+    {
+      "path": "assets/input-C-HLt2BQ.js",
+      "sha256": "b1d19b7da1ff5b06fecb63d9f15f40fd4a9be5db3c5f68ac8babf98a2c77afda",
+      "bytes": 673
+    },
+    {
+      "path": "assets/key-round-BHNXfpZL.js",
+      "sha256": "1c799424f12b0818e64d4f91ea3ab4a52fb2f4e382500cc683a60a95ebeddaf1",
+      "bytes": 551
+    },
+    {
+      "path": "assets/label-BdhlbV31.js",
+      "sha256": "d7243a0efa965db792048140ac3cb64860ba9b8c692f00376f56bfc0721b179d",
+      "bytes": 325
+    },
+    {
+      "path": "assets/mail-CEfeMuMv.js",
+      "sha256": "979426bacfdc9836937cbc5f7f9162042189ed9f7908a767fa50c8e068e5bda0",
+      "bytes": 404
+    },
+    {
+      "path": "assets/modulepreload-polyfill-Cf3xff8G.js",
+      "sha256": "785597bca2e7dd97a652a20a197c077079e635a5663433448e0e1d9fd8c98a64",
+      "bytes": 698
+    },
+    {
+      "path": "assets/platform-BhZERUt-.js",
+      "sha256": "87f88886ec23023e670c54f497080ca407ee6902e2a7e2f924e3e25a9a79df8f",
+      "bytes": 124311
+    },
+    {
+      "path": "assets/platform-CAYNqWvE.css",
+      "sha256": "9043079d387217c4f697eb1be7ba9fc2b247ad8dc81876c373486ed048036883",
+      "bytes": 17892
+    },
+    {
+      "path": "assets/rolldown-runtime-XQCOJYun.js",
+      "sha256": "c62a259caf983f4ea8940cae8d9abe35924f21613de275b1102b5f9e6243c126",
+      "bytes": 685
+    },
+    {
+      "path": "assets/search-B1VIziWM.js",
+      "sha256": "9f77a4430d34550c1adc9cc40bd8624b595876b17f060761e86e78b3e80bde93",
+      "bytes": 172
+    },
+    {
+      "path": "assets/select-BemlNG1i.js",
+      "sha256": "afe1149e09149657e05eca9d8d776382ae163b4a4fba540fb0a128f445b1b467",
+      "bytes": 625
+    },
+    {
+      "path": "assets/send-BlcFyHqu.js",
+      "sha256": "5f7935aa0ccaea0115586c9237d184dce18a40cf2ba31d5fcf2b07163a47688d",
+      "bytes": 290
+    },
+    {
+      "path": "assets/shield-check-C-Fy2JcB.js",
+      "sha256": "de38b347ae0e10e5aba7812658d572e7d753f421119935dacac7f8002cd6abc3",
+      "bytes": 319
+    },
+    {
+      "path": "assets/sparkles-Cwfj-uir.js",
+      "sha256": "c355f033ea644ad9b696fa4ed267086a96c4cb356b2f5e539435f8900e4f0ac6",
+      "bytes": 508
+    },
+    {
+      "path": "assets/table-BeNw5evY.js",
+      "sha256": "2a8107328825c8305b14120bd98b722cf367ea77243bee18ffb37061de565451",
+      "bytes": 1445
+    },
+    {
+      "path": "assets/theme-manager-C-k630wF.js",
+      "sha256": "7fb37b1b3b0ba2f314e7d8a555e11b622c81ffefa289930f27e45cbd63b4b943",
+      "bytes": 401
+    },
+    {
+      "path": "assets/triangle-alert-DWI-D-Xl.js",
+      "sha256": "6f16110e1fa1158fcb370d018d61c6f56a9f6918c1379db897afadf545e776d2",
+      "bytes": 264
+    },
+    {
+      "path": "assets/utils-Bh0d2fDz.js",
+      "sha256": "519e33a1d810250ead58c96f7948eff862d41261dd86e1934a5bc96c226b1a5d",
+      "bytes": 23072
+    },
+    {
+      "path": "assets/vendor-react-W5ujZe2D.js",
+      "sha256": "64789f081030aeae25ba08af7ee4555605f0bee5916bec7f42d005b432f717ec",
+      "bytes": 163633
+    },
+    {
+      "path": "assets/x-CrD4wAFO.js",
+      "sha256": "f70827b18dcc1141f84b5109f16c11ef6afd08edd17e1794566499910c7dd7ba",
+      "bytes": 154
+    },
+    {
+      "path": "brand/fleetum-logo-full-dark.svg",
+      "sha256": "6c6225d8ed607ee7a4e6c6938d4ecc4034663ad35ea6d5fb54816658c2807cb4",
+      "bytes": 899464
+    },
+    {
+      "path": "brand/fleetum-logo-full-light.svg",
+      "sha256": "8dd95924cf8ff306503fe0de8df7c5ce1a0cdf7907d352d5ab4a4e3e8e426b52",
+      "bytes": 571912
+    },
+    {
+      "path": "platform.html",
+      "sha256": "b4c338e6e255c5181d2b5710757592095bc93cb638ca327e6f0a11e0a18bf738",
+      "bytes": 4116
+    }
+  ]
+}

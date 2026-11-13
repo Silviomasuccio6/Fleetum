@@ -194,3 +194,21 @@ for (const stale of [false, true]) test(`actual page auth-error handler ${stale 
   assert.equal(platformAuthStorage.get(), stale ? "synthetic-new-bearer" : null);
   assert.deepEqual(events, stale ? [] : ["error", "/login"]);
 });
+
+for (const stale of [false, true]) test(`live metrics unauthorized response ${stale ? "preserves a newer" : "clears its current"} Platform session`, async () => {
+  const events: string[] = [];
+  const handle = actualPageAuthFailure(events);
+  platformAuthStorage.set("synthetic-old-live-bearer");
+  globalThis.fetch = async () => {
+    if (stale) platformAuthStorage.set("synthetic-new-live-bearer");
+    return result(401, { error: "PLATFORM_SESSION_REVOKED", message: "Sessione scaduta" });
+  };
+  let failure: unknown;
+  try { await platformAdminUseCases.dashboardLiveMetrics(); } catch (error) { failure = error; }
+  assert(failure);
+  assert.equal(handle(failure), true);
+  assert.equal(platformAuthStorage.get(), stale ? "synthetic-new-live-bearer" : null);
+  assert.deepEqual(events, stale ? [] : ["error", "/login"]);
+  assert.equal(JSON.stringify(failure).includes("synthetic-old-live-bearer"), false);
+  assert.equal(JSON.stringify(failure).includes("synthetic-new-live-bearer"), false);
+});
