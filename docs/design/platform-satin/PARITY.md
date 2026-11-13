@@ -1,3 +1,5 @@
+> Matrice del candidato originario ee34ffb. Nell’allineamento a main c46ede5 restano le undici sezioni e il disegno; logout, sessioni ed email seguono ora i contratti correnti. Vedere [ALIGNMENT_20261113.md](ALIGNMENT_20261113.md).
+
 # Platform Satinata — base e parità
 
 ## Base verificata il 13 novembre 2026

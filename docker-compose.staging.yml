@@ -1,16 +1,26 @@
+name: fleetum-staging
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: fleetum_staging_postgres
     restart: unless-stopped
+    cpus: "0.50"
+    mem_limit: 512m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-fleetum_staging}
+      POSTGRES_USER: fleetum_staging
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:-fleetum_staging}
+      POSTGRES_DB: fleetum_staging
     volumes:
       - /opt/fleetum-staging/postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fleetum_staging} -d ${POSTGRES_DB:-fleetum_staging}"]
+      test: ["CMD-SHELL", "pg_isready -U fleetum_staging -d fleetum_staging"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -18,19 +28,34 @@ services:
       - fleetum_staging_private
 
   backend:
-    image: ${FLEETUM_BACKEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-backend:staging-latest}
+    image: ${FLEETUM_BACKEND_IMAGE:?FLEETUM_BACKEND_IMAGE must be an immutable GHCR digest reference}
     container_name: fleetum_staging_backend
     restart: unless-stopped
+    cpus: "0.75"
+    mem_limit: 768m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       # Bcrypt hashes contain `$`; raw keeps them intact instead of interpolating them.
       - path: /opt/fleetum-staging/env/backend.env
         required: true
         format: raw
+    # Literal overrides win over backend.env and keep this manifest fail-closed.
+    environment:
+      FLEETUM_ENVIRONMENT: staging
+      EMAIL_PROVIDER: disabled
+      BILLING_DUNNING_CRON_ENABLED: "false"
+      PRIVACY_RETENTION_CRON_ENABLED: "false"
+      PRIVACY_RETENTION_GLOBAL_ENABLED: "false"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - /opt/fleetum-staging/uploads:/app/uploads
+      - /opt/fleetum-staging/uploads:/app/backend/uploads
       - /opt/fleetum-staging/logs:/app/logs
     expose:
       - "4000"
@@ -39,9 +64,17 @@ services:
       - fleetum_staging_private
 
   caddy:
-    image: ${FLEETUM_FRONTEND_IMAGE:-ghcr.io/silviomasuccio6/fleetum-frontend:staging-latest}
+    image: ${FLEETUM_FRONTEND_IMAGE:?FLEETUM_FRONTEND_IMAGE must be an immutable GHCR digest reference}
     container_name: fleetum_staging_caddy
     restart: unless-stopped
+    cpus: "0.25"
+    mem_limit: 128m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       - backend
     environment:
@@ -55,9 +88,15 @@ services:
       - staging_caddy_config:/config
     networks:
       - fleetum_staging_private
+      - fleetum_staging_edge
 
 networks:
   fleetum_staging_private:
+    name: fleetum_staging_private
+    internal: true
+    driver: bridge
+  fleetum_staging_edge:
+    name: fleetum_staging_edge
     driver: bridge
 
 volumes:

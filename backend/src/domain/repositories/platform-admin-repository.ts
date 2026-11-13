@@ -45,7 +45,11 @@ export interface PlatformAdminRepository {
   listTenants(): Promise<PlatformTenantRow[]>;
   getTenantById(tenantId: string): Promise<{ id: string; name: string; isActive: boolean } | null>;
   getTenantCompanyProfile(tenantId: string): Promise<unknown | null>;
-  setTenantActive(tenantId: string, isActive: boolean): Promise<void>;
+  setTenantActive(
+    tenantId: string,
+    isActive: boolean,
+    audit: { actorUserId: string; sourceIp: string }
+  ): Promise<boolean>;
   getLatestLicense(tenantId: string): Promise<PlatformLicense | null>;
   getLatestLicenseAtOrBefore(tenantId: string, at: Date): Promise<PlatformLicense | null>;
   setLicense(tenantId: string, userId: string, details: PlatformLicense): Promise<void>;

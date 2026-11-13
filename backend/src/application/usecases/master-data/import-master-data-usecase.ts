@@ -3,6 +3,7 @@ import { prisma } from "../../../infrastructure/database/prisma/client.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { ParsedImportRow, normalizeImportHeader, parseImportFile } from "../../services/import-file-parser-service.js";
 import { computeVehicleRevisionDueAt } from "../../services/vehicle-revision-schedule-service.js";
+import { lockVehicleSite, lockVehicleTenant } from "../../../infrastructure/repositories/vehicle-tenant-scope.js";
 
 type ImportEntity = "vehicles" | "workshops";
 
@@ -336,8 +337,12 @@ export class ImportMasterDataUseCase {
     }
     let insertResult: { count: number };
     try {
-      insertResult = await prisma.vehicle.createMany({
-        data: validCandidates.map((candidate) => ({ ...candidate, tenantId }))
+      insertResult = await prisma.$transaction(async (tx) => {
+        await lockVehicleTenant(tx, tenantId);
+        for (const siteId of [...new Set(validCandidates.map((candidate) => candidate.siteId))].sort()) {
+          await lockVehicleSite(tx, tenantId, siteId, true);
+        }
+        return tx.vehicle.createMany({ data: validCandidates.map((candidate) => ({ ...candidate, tenantId })) });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

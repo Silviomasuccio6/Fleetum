@@ -26,10 +26,18 @@ const trackingIdSchema = z.preprocess(
 const optionalTrackingText = (max: number) =>
   z.preprocess(emptyToUndefined, z.string().trim().max(max).transform((value) => value.replace(/[<>\r\n]/g, " ").replace(/\s+/g, " ").trim()).optional());
 
-const analyticsMetadataSchema = z
-  .record(z.union([z.string().trim().max(240), z.number().finite(), z.boolean(), z.null()]))
-  .optional()
-  .refine((value) => !value || Object.keys(value).length <= 20, "Troppi campi metadata analytics")
+const analyticsMetadataValuesSchema = z
+  .record(z.string(), z.union([z.string().trim().max(240), z.number().finite(), z.boolean(), z.null()]))
+  .optional();
+
+const analyticsMetadataSchema = z.preprocess((value, ctx) => {
+  // Bound the container before validating each potentially invalid value.
+  if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 20) {
+    ctx.addIssue({ code: "custom", message: "Troppi campi metadata analytics" });
+    return z.NEVER;
+  }
+  return value;
+}, analyticsMetadataValuesSchema)
   .refine((value) => !value || JSON.stringify(value).length <= 2000, "Metadata analytics troppo grande");
 
 export const publicDemoRequestSchema = z.object({
@@ -51,6 +59,7 @@ export const publicDemoRequestSchema = z.object({
   utmTerm: z.preprocess(emptyToUndefined, z.string().trim().max(160).optional()),
   visitorId: trackingIdSchema,
   sessionId: trackingIdSchema,
+  consentAnalytics: z.boolean().default(false),
   websiteUrl: z.string().trim().max(0).optional()
 });
 

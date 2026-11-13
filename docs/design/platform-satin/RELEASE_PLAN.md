@@ -1,3 +1,5 @@
+> Proposta storica, non eseguita. PR #158 e confronto dei 112 asset selezionati sono successivamente completati per il pacchetto originario; l’allineamento a main supera l’audit frontend senza aggiornamenti ulteriori. Il nuovo candidato richiede API compatibili e un nuovo confronto: non è direttamente montabile sul backend production precedente. Stato in [STATUS.md](STATUS.md) e [ALIGNMENT_20261113.md](ALIGNMENT_20261113.md). Nessuna modifica della policy o pipeline di rilascio è inclusa.
+
 # Proposta di rilascio limitato — non eseguita
 
 ## Vincolo reale

@@ -1,5 +1,8 @@
 import { SiteRepository } from "../../domain/repositories/site-repository.js";
 import { prisma } from "../database/prisma/client.js";
+import { scalarWriteFields } from "./vehicle-tenant-scope.js";
+
+const writableFields = ["name", "address", "city", "contactName", "email", "phone", "notes", "isActive"] as const;
 
 export class PrismaSiteRepository implements SiteRepository {
   async list(tenantId: string, params: { search?: string; skip: number; take: number }) {
@@ -24,12 +27,13 @@ export class PrismaSiteRepository implements SiteRepository {
     return { data, total };
   }
 
-  create(tenantId: string, input: Record<string, unknown>) {
-    return prisma.site.create({ data: { tenantId, ...input } as never });
+  async create(tenantId: string, input: Record<string, unknown>) {
+    return prisma.site.create({ data: { ...scalarWriteFields(input, writableFields), tenantId } as never });
   }
 
   async update(tenantId: string, id: string, input: Record<string, unknown>) {
-    await prisma.site.updateMany({ where: { id, tenantId, deletedAt: null }, data: input as never });
+    const data = scalarWriteFields(input, writableFields);
+    await prisma.site.updateMany({ where: { id, tenantId, deletedAt: null }, data: data as never });
     return prisma.site.findFirst({ where: { id, tenantId, deletedAt: null } });
   }
 

@@ -32,7 +32,7 @@ const routes = () => ({
 });
 const server = http.createServer(async (req,res)=>{
   const url=new URL(req.url,'http://127.0.0.1:5213');
-  res.setHeader('Access-Control-Allow-Origin','http://127.0.0.1:5212');res.setHeader('Access-Control-Allow-Credentials','true');res.setHeader('Access-Control-Allow-Headers','content-type, authorization');res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Origin','http://127.0.0.1:5212');res.setHeader('Access-Control-Allow-Credentials','true');res.setHeader('Access-Control-Allow-Headers','content-type, authorization, x-idempotency-key');res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Cache-Control','no-store');
   const send=(status,obj)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(obj));};
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
@@ -55,6 +55,7 @@ const server = http.createServer(async (req,res)=>{
     if(mode==='action-error')return send(409,{message:'Operazione QA rifiutata: nessuna modifica applicata'});
     operations.push({method:req.method,path,body,at:stamp()});
     await new Promise(resolve=>setTimeout(resolve,650));
+    if(path==='/auth/logout')return send(200,{revoked:true});
     if(path.endsWith('/license')){const tenant=tenants.find(t=>path.includes(`/${t.id}/`));tenant.license={...tenant.license,...body};return send(200,{after:tenant.license});}
     if(path.endsWith('/quick-action')){const tenant=tenants.find(t=>path.includes(`/${t.id}/`));if(body.action==='SUSPEND_LICENSE')tenant.license.status='SUSPENDED';if(body.action==='ACTIVATE_LICENSE')tenant.license.status='ACTIVE';if(body.action==='TRIAL_14_DAYS')tenant.license.status='TRIAL';if(body.action==='DEACTIVATE_TENANT')tenant.isActive=false;if(body.action==='REACTIVATE_TENANT')tenant.isActive=true;return send(200,{data:tenant});}
     if(path.endsWith('/invoices/generate'))return send(200,{data:invoice});

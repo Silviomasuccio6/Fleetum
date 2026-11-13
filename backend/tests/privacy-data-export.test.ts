@@ -80,7 +80,16 @@ test("customer data export returns every inventoried data section", async () => 
   };
   (prisma.emailQueue as any).findMany = async (input: any) => {
     assert.equal(input.where.tenantId, "tenant_a");
-    assert.ok(input.where.recipient.in.includes("customer@example.test"));
+    assert.equal(input.where.recipient, undefined, "Shared addresses do not identify a data subject");
+    assert.equal(input.where.type, "BOOKING_CONTRACT");
+    assert.deepEqual(input.where.OR, [{ AND: [
+      { meta: { path: ["bookingId"], equals: "booking_1" } },
+      { meta: { path: ["contractId"], equals: "contract_1" } },
+      { meta: { path: ["contractDeliveryId"], equals: "delivery_1" } }
+    ] }]);
+    for (const field of ["body", "subject", "lastError", "meta", "processingToken"]) {
+      assert.equal(input.select[field], undefined, `${field} must not be selected into the export`);
+    }
     return [{ id: "email_1" }];
   };
   (prisma.auditLog as any).findMany = async (input: any) => {
@@ -108,7 +117,10 @@ test("customer data export returns every inventoried data section", async () => 
   for (const [relation, decision] of Object.entries(RENTAL_CUSTOMER_EXPORT_RELATION_INVENTORY)) {
     if (decision.included) assert.ok(customerQuery.include[relation], `${relation} is not queried by the export`);
   }
-  assert.equal(customerQuery.include.bookings.where, undefined, "Soft-deleted retained bookings must remain exportable");
+  assert.deepEqual(customerQuery.include.bookings.where, {
+    tenantId: "tenant_a",
+    vehicle: { tenantId: "tenant_a", site: { tenantId: "tenant_a" } }
+  }, "Retained bookings and vehicles remain exportable only with an owned vehicle and site");
   assert.equal(customerQuery.include.paymentMethods.select.stripePaymentMethodId, undefined);
   assert.equal(customerQuery.include.rentalPaymentEvents.select.payload, undefined);
   assert.equal(result.schemaVersion, RENTAL_CUSTOMER_DATA_EXPORT_SCHEMA_VERSION);
@@ -129,4 +141,41 @@ test("customer data export returns every inventoried data section", async () => 
   assert.equal(result.data.storedFiles.length, 1);
   assert.equal(exportAudit.details.schemaVersion, RENTAL_CUSTOMER_DATA_EXPORT_SCHEMA_VERSION);
   assert.equal(exportAudit.details.paymentRecords, 5);
+});
+
+test("a verified contract receipt is exported even without a current customer address", async () => {
+  (prisma.rentalCustomer as any).findFirst = async () => ({
+    id: "customer_no_address", email: null,
+    attachments: [], bookings: [{ id: "booking_linked", customerEmail: null,
+      contract: { id: "contract_linked", deliveries: [{ id: "delivery_linked", recipient: "internal@example.test" }] }
+    }], paymentProfiles: [], paymentMethods: [], rentalDeposits: [], rentalExtraCharges: [], rentalPaymentEvents: []
+  });
+  (prisma.consentLog as any).findMany = async () => [];
+  (prisma.auditLog as any).findMany = async () => [];
+  (prisma.storedFileObject as any).findMany = async () => [];
+  (prisma.auditLog as any).findFirst = async () => null;
+  (prisma.auditLog as any).create = async (input: any) => input.data;
+  (prisma.emailQueue as any).findMany = async (input: any) => {
+    assert.equal(input.where.recipient, undefined);
+    assert.equal(input.where.OR[0].AND[2].meta.equals, "delivery_linked");
+    return [{ id: "linked_receipt" }];
+  };
+  const exported = await new PrivacyComplianceService().exportCustomerData({ tenantId: "tenant_a", customerId: "customer_no_address" });
+  assert.deepEqual(exported.data.communications.emailQueue, [{ id: "linked_receipt" }]);
+});
+
+test("an address without attributable contract deliveries does not query the email queue", async () => {
+  (prisma.rentalCustomer as any).findFirst = async () => ({
+    id: "customer_shared_address", email: "shared@example.test",
+    attachments: [], bookings: [], paymentProfiles: [], paymentMethods: [],
+    rentalDeposits: [], rentalExtraCharges: [], rentalPaymentEvents: []
+  });
+  (prisma.consentLog as any).findMany = async () => [];
+  (prisma.auditLog as any).findMany = async () => [];
+  (prisma.storedFileObject as any).findMany = async () => [];
+  (prisma.auditLog as any).findFirst = async () => null;
+  (prisma.auditLog as any).create = async (input: any) => input.data;
+  (prisma.emailQueue as any).findMany = async () => assert.fail("An address alone cannot authorize queue disclosure");
+  const exported = await new PrivacyComplianceService().exportCustomerData({ tenantId: "tenant_a", customerId: "customer_shared_address" });
+  assert.deepEqual(exported.data.communications.emailQueue, []);
 });

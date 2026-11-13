@@ -5,6 +5,7 @@ import { startBillingDunningCron } from "./infrastructure/cron/billing-dunning-c
 import { startPrivacyRetentionCron } from "./infrastructure/cron/privacy-retention-cron.js";
 import { startReminderCron } from "./infrastructure/cron/reminder-cron.js";
 import { startReportsCron } from "./infrastructure/cron/reports-cron.js";
+import { startAutomaticCronTasks, stopAutomaticCronTasks } from "./infrastructure/cron/cron-bootstrap.js";
 import { BillingDunningService } from "./application/services/billing-dunning-service.js";
 import { PrivacyComplianceService } from "./application/services/privacy-compliance-service.js";
 import { prisma } from "./infrastructure/database/prisma/client.js";
@@ -12,6 +13,10 @@ import { logger } from "./infrastructure/logging/logger.js";
 import { PrismaAuditLogRepository } from "./infrastructure/repositories/prisma-audit-log-repository.js";
 import { emailQueueCronService, licensePolicyService, reminderCronUseCase } from "./interfaces/http/routes/index.js";
 import { env } from "./shared/config/env.js";
+
+if (env.FLEETUM_ENVIRONMENT === "provider-qa") {
+  throw new Error("Provider QA requires the dedicated loopback-only runner; server.ts is refused");
+}
 
 const app = createApp();
 const platformApp = createPlatformApp();
@@ -27,11 +32,13 @@ const platformServer = platformApp.listen(env.PLATFORM_PORT, env.PLATFORM_BIND_H
   );
 });
 
-const reminderTask = startReminderCron(reminderCronUseCase);
-const emailQueueTask = startEmailQueueCron(emailQueueCronService);
-const reportsTask = startReportsCron(emailQueueCronService, licensePolicyService);
-const privacyRetentionTask = startPrivacyRetentionCron(new PrivacyComplianceService());
-const billingDunningTask = startBillingDunningCron(new BillingDunningService(new PrismaAuditLogRepository()));
+const automaticCronTasks = startAutomaticCronTasks(env.FLEETUM_ENVIRONMENT, {
+  reminder: () => startReminderCron(reminderCronUseCase),
+  emailQueue: () => startEmailQueueCron(emailQueueCronService),
+  reports: () => startReportsCron(emailQueueCronService, licensePolicyService),
+  privacyRetention: () => startPrivacyRetentionCron(new PrivacyComplianceService()),
+  billingDunning: () => startBillingDunningCron(new BillingDunningService(new PrismaAuditLogRepository()))
+});
 
 let shuttingDown = false;
 
@@ -46,11 +53,7 @@ const shutdown = async (signal: string) => {
 
   logger.warn({ signal }, "Shutdown requested, stopping services");
 
-  reminderTask.stop();
-  emailQueueTask.stop();
-  reportsTask.stop();
-  privacyRetentionTask.stop();
-  billingDunningTask.stop();
+  stopAutomaticCronTasks(automaticCronTasks);
 
   const closeAll = Promise.allSettled([closeServer(apiServer), closeServer(platformServer)]).then(() => "closed" as const);
   const closeTimeout = new Promise<"timeout">((resolve) =>

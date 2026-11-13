@@ -17,5 +17,5 @@ export interface StoppageRepository {
   update(tenantId: string, id: string, input: Record<string, unknown>): Promise<unknown>;
   delete(tenantId: string, id: string): Promise<void>;
   listForAutomaticReminders(now: Date): Promise<unknown[]>;
-  markReminderSent(stoppageId: string, sentAt: Date): Promise<void>;
+  markReminderSent(tenantId: string, stoppageId: string, sentAt: Date): Promise<void>;
 }

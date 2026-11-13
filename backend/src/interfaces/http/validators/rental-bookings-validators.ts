@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { partialUpdateSchema } from "./partial-update-schema.js";
 
 const optionalString = z.preprocess((value) => (value === "" ? undefined : value), z.string().optional());
 
@@ -66,7 +67,7 @@ export const rentalBookingCreateSchema = rentalBookingBaseSchema
     path: ["returnKm"]
   });
 
-export const rentalBookingUpdateSchema = rentalBookingBaseSchema.partial().refine((input) => {
+export const rentalBookingUpdateSchema = partialUpdateSchema(rentalBookingBaseSchema).refine((input) => {
   if (!input.pickupAt || !input.returnAt) return true;
   return input.returnAt.getTime() > input.pickupAt.getTime();
 }, {
@@ -175,7 +176,7 @@ export const rentalPricingCreateListSchema = pricingListBaseSchema.refine((input
   path: ["validTo"]
 });
 
-export const rentalPricingUpdateListSchema = pricingListBaseSchema.partial().refine((input) => {
+export const rentalPricingUpdateListSchema = partialUpdateSchema(pricingListBaseSchema).refine((input) => {
   if (!input.validFrom || !input.validTo) return true;
   return input.validTo.getTime() >= input.validFrom.getTime();
 }, {
@@ -202,7 +203,7 @@ export const rentalPricingCreatePackageSchema = packageBaseSchema.refine((input)
   path: ["kmIncluded"]
 });
 
-export const rentalPricingUpdatePackageSchema = packageBaseSchema.partial();
+export const rentalPricingUpdatePackageSchema = partialUpdateSchema(packageBaseSchema);
 
 const extraTierSchema = z.object({
   fromKm: z.coerce.number().int().min(1),
@@ -230,7 +231,7 @@ export const rentalPricingCreateExtraPolicySchema = extraPolicyBaseSchema.refine
   path: ["tiers"]
 });
 
-export const rentalPricingUpdateExtraPolicySchema = extraPolicyBaseSchema.partial();
+export const rentalPricingUpdateExtraPolicySchema = partialUpdateSchema(extraPolicyBaseSchema);
 
 export const rentalPricingQuoteSchema = z
   .object({
@@ -247,7 +248,15 @@ export const rentalPricingQuoteSchema = z
     path: ["returnAt"]
   });
 
-export const rentalBookingPricingUpdateSchema = z.object({
+const rentalBookingOperationalPricingSchema = z.object({
+  preserveTerms: z.literal(true),
+  estimatedKm: z.coerce.number().finite().min(0).optional().nullable(),
+  actualKm: z.coerce.number().finite().min(0).optional().nullable(),
+  notes: z.string().trim().optional()
+}).strict();
+
+const rentalBookingRepricingSchema = z.object({
+  preserveTerms: z.literal(false).optional(),
   priceListId: z.string().trim().min(1),
   pricePackageId: optionalString,
   extraKmPolicyId: optionalString,
@@ -255,6 +264,11 @@ export const rentalBookingPricingUpdateSchema = z.object({
   actualKm: z.coerce.number().min(0).optional().nullable(),
   notes: optionalString
 });
+
+export const rentalBookingPricingUpdateSchema = z.union([
+  rentalBookingOperationalPricingSchema,
+  rentalBookingRepricingSchema
+]);
 
 const italianVatRegex = /^\d{11}$/;
 const sdiCodeRegex = /^[A-Za-z0-9]{7}$/;
@@ -377,7 +391,7 @@ export const rentalCustomerCreateSchema = customerBaseSchema.superRefine((input,
   }
 });
 
-export const rentalCustomerUpdateSchema = customerBaseSchema.partial().superRefine((input, ctx) => {
+export const rentalCustomerUpdateSchema = partialUpdateSchema(customerBaseSchema).superRefine((input, ctx) => {
   const customerType = input.customerType;
   if (!customerType) return;
 

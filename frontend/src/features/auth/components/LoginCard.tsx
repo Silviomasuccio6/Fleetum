@@ -5,7 +5,7 @@ import { authUseCases } from "../../../application/usecases/auth-usecases";
 import { getApiBaseUrl } from "../../../infrastructure/api/api-base-url";
 import { FleetumLogoLoader } from "../../../presentation/components/brand/fleetum-logo-loader";
 import { prefetchPrimaryTenantRoutes } from "../../../presentation/routes/prefetch-routes";
-import { getSafeReturnTo } from "../../../presentation/routes/safe-return-to";
+import { getPostLoginReturnTo } from "../../../presentation/routes/safe-return-to";
 import { AuthBackToWebsite } from "./AuthBackToWebsite";
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -64,7 +64,7 @@ export const LoginCard = () => {
 
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const returnTo = getSafeReturnTo(searchParams.get("next"));
+  const returnTo = getPostLoginReturnTo(`?${searchParams.toString()}`);
   const welcome = searchParams.get("welcome");
   const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [password, setPassword] = useState("");

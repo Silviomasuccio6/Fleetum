@@ -1,6 +1,8 @@
-import crypto from "node:crypto";
-import fs from "node:fs/promises";
 import { prisma } from "../../infrastructure/database/prisma/client.js";
+import {
+  deleteRetiredPhysicalObject,
+  persistNewUploadedFiles
+} from "../../infrastructure/storage/upload-persistence.js";
 import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
@@ -303,89 +305,79 @@ export class TenantProfileService {
   }
 
   async setLogo(tenantId: string, actorUserId: string, file: Express.Multer.File) {
-    const relativePath = storageProvider.buildKey(file.filename);
-    const fileBuffer = await fs.readFile(file.path);
-    const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
-    await storageProvider.writeFromFile(relativePath, file.path, { tenantId, resourceType: "TenantBranding", resourceId: tenantId, originalName: file.originalname, mimeType: file.mimetype });
-    if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
-    const current = await prisma.tenantBranding.findUnique({ where: { tenantId } });
-    const branding = await prisma.tenantBranding.upsert({
-      where: { tenantId },
-      create: {
-        tenantId,
-        logoFilePath: relativePath,
-        logoFileName: file.originalname,
-        logoMimeType: file.mimetype,
-        primaryColor: "#21375d",
-        accentColor: "#5d82c2",
-        fontFamily: "helvetica"
-      },
-      update: {
-        logoFilePath: relativePath,
-        logoFileName: file.originalname,
-        logoMimeType: file.mimetype
-      }
-    });
+    const persisted = await persistNewUploadedFiles({
+      tenantId,
+      category: "branding",
+      resourceType: "TenantBranding",
+      resourceId: tenantId,
+      files: [file],
+      commit: async (tx, [upload]) => {
+        const current = await tx.tenantBranding.findUnique({ where: { tenantId } });
+        const branding = await tx.tenantBranding.upsert({
+          where: { tenantId },
+          create: {
+            tenantId,
+            logoFilePath: upload.key,
+            logoFileName: file.originalname,
+            logoMimeType: file.mimetype,
+            primaryColor: "#21375d",
+            accentColor: "#5d82c2",
+            fontFamily: "helvetica"
+          },
+          update: {
+            logoFilePath: upload.key,
+            logoFileName: file.originalname,
+            logoMimeType: file.mimetype
+          }
+        });
 
-    if (current?.logoFilePath && current.logoFilePath !== relativePath) {
-      await storageProvider.delete(current.logoFilePath);
-      await prisma.storedFileObject.updateMany({
-        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: current.logoFilePath, deletedAt: null },
-        data: { deletedAt: new Date() }
-      });
-    }
-
-    await prisma.storedFileObject.upsert({
-      where: {
-        provider_bucket_storageKey: {
-          provider: storageProvider.name,
-          bucket: this.storageBucket(),
-          storageKey: relativePath
+        if (current?.logoFilePath && current.logoFilePath !== upload.key) {
+          await tx.storedFileObject.updateMany({
+            where: {
+              tenantId,
+              provider: storageProvider.name,
+              ...(storageProvider.name === "local"
+                ? { OR: [{ bucket: this.storageBucket() }, { bucket: null }] }
+                : { bucket: this.storageBucket() }),
+              storageKey: current.logoFilePath,
+              deletedAt: null
+            },
+            data: { deletedAt: new Date() }
+          });
         }
-      },
-      create: {
-        tenantId,
-        provider: storageProvider.name,
-        bucket: this.storageBucket(),
-        storageKey: relativePath,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        checksumSha256,
-        resourceType: "TenantBranding",
-        resourceId: tenantId,
-        visibility: "private"
-      },
-      update: {
-        tenantId,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        checksumSha256,
-        resourceType: "TenantBranding",
-        resourceId: tenantId,
-        visibility: "private",
-        deletedAt: null
+
+        await tx.auditLog.create({
+          data: {
+            tenantId,
+            userId: actorUserId,
+            action: "TENANT_BRANDING_LOGO_UPDATED",
+            resource: "TenantBranding",
+            resourceId: branding.id,
+            details: { fileName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size }
+          }
+        });
+
+        const nextProfile = await tx.tenantProfile.findUnique({ where: { tenantId } });
+        if (nextProfile) {
+          const completeness = this.profileCompleteness(nextProfile as unknown as Record<string, unknown>, branding);
+          await tx.tenantProfile.update({
+            where: { tenantId },
+            data: { profileCompletedAt: completeness.completed ? new Date() : null }
+          });
+        }
+        return {
+          branding,
+          retiredKey: current?.logoFilePath && current.logoFilePath !== upload.key
+            ? current.logoFilePath
+            : null
+        };
       }
     });
 
-    await prisma.auditLog.create({
-      data: {
-        tenantId,
-        userId: actorUserId,
-        action: "TENANT_BRANDING_LOGO_UPDATED",
-        resource: "TenantBranding",
-        resourceId: branding.id,
-        details: { fileName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size }
-      }
-    });
-
-    const nextProfile = await prisma.tenantProfile.findUnique({ where: { tenantId } });
-    if (nextProfile) {
-      const completeness = this.profileCompleteness(nextProfile as unknown as Record<string, unknown>, branding);
-      await prisma.tenantProfile.update({
-        where: { tenantId },
-        data: { profileCompletedAt: completeness.completed ? new Date() : null }
+    if (persisted.result.retiredKey) {
+      await deleteRetiredPhysicalObject({
+        key: persisted.result.retiredKey,
+        resourceType: "TenantBranding"
       });
     }
 
@@ -393,51 +385,32 @@ export class TenantProfileService {
   }
 
   async setCompanyVerificationDocument(tenantId: string, actorUserId: string, file: Express.Multer.File) {
-    const fileBuffer = await fs.readFile(file.path);
-    const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-    const storageKey = storageProvider.buildKey("tenant-verifications", tenantId, `${Date.now()}-${safeName}`);
-
-    await storageProvider.writeFromFile(storageKey, file.path, {
+    const persisted = await persistNewUploadedFiles({
       tenantId,
+      category: "company-verification-documents",
       resourceType: "TenantCompanyVerificationDocument",
       resourceId: tenantId,
-      originalName: file.originalname,
-      mimeType: file.mimetype
-    });
-    if (storageProvider.name === "s3") await fs.unlink(file.path).catch(() => undefined);
-
-    const storedFile = await prisma.storedFileObject.create({
-      data: {
-        tenantId,
-        provider: storageProvider.name,
-        bucket: this.storageBucket(),
-        storageKey,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        checksumSha256,
-        resourceType: "TenantCompanyVerificationDocument",
-        resourceId: tenantId,
-        visibility: "private"
+      files: [file],
+      commit: async (tx, [upload]) => {
+        await tx.auditLog.create({
+          data: {
+            tenantId,
+            userId: actorUserId,
+            action: "TENANT_COMPANY_VERIFICATION_DOCUMENT_UPLOADED",
+            resource: "StoredFileObject",
+            resourceId: upload.storedFileObject.id,
+            details: {
+              fileName: file.originalname,
+              mimeType: file.mimetype,
+              sizeBytes: file.size,
+              checksumSha256: upload.checksumSha256
+            }
+          }
+        });
+        return upload.storedFileObject;
       }
     });
-
-    await prisma.auditLog.create({
-      data: {
-        tenantId,
-        userId: actorUserId,
-        action: "TENANT_COMPANY_VERIFICATION_DOCUMENT_UPLOADED",
-        resource: "StoredFileObject",
-        resourceId: storedFile.id,
-        details: {
-          fileName: file.originalname,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          checksumSha256
-        }
-      }
-    });
+    const storedFile = persisted.result;
 
     return {
       document: {
@@ -452,35 +425,67 @@ export class TenantProfileService {
   }
 
   async removeLogo(tenantId: string, actorUserId: string) {
-    const current = await prisma.tenantBranding.findUnique({ where: { tenantId } });
-    if (!current) return this.getProfile(tenantId);
-    if (current.logoFilePath) {
-      await storageProvider.delete(current.logoFilePath);
-      await prisma.storedFileObject.updateMany({
-        where: { tenantId, provider: storageProvider.name, bucket: this.storageBucket(), storageKey: current.logoFilePath, deletedAt: null },
-        data: { deletedAt: new Date() }
+    const retiredKey = await prisma.$transaction(async (tx) => {
+      const current = await tx.tenantBranding.findUnique({ where: { tenantId } });
+      if (!current) return null;
+      const branding = await tx.tenantBranding.update({
+        where: { tenantId },
+        data: { logoFilePath: null, logoFileName: null, logoMimeType: null }
       });
-    }
-    const branding = await prisma.tenantBranding.update({
-      where: { tenantId },
-      data: { logoFilePath: null, logoFileName: null, logoMimeType: null }
-    });
-    await prisma.tenantProfile.updateMany({ where: { tenantId }, data: { profileCompletedAt: null } });
-    await prisma.auditLog.create({
-      data: {
-        tenantId,
-        userId: actorUserId,
-        action: "TENANT_BRANDING_LOGO_REMOVED",
-        resource: "TenantBranding",
-        resourceId: branding.id,
-        details: {}
+      if (current.logoFilePath) {
+        await tx.storedFileObject.updateMany({
+          where: {
+            tenantId,
+            provider: storageProvider.name,
+            ...(storageProvider.name === "local"
+              ? { OR: [{ bucket: this.storageBucket() }, { bucket: null }] }
+              : { bucket: this.storageBucket() }),
+            storageKey: current.logoFilePath,
+            deletedAt: null
+          },
+          data: { deletedAt: new Date() }
+        });
       }
-    });
+      await tx.tenantProfile.updateMany({ where: { tenantId }, data: { profileCompletedAt: null } });
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          userId: actorUserId,
+          action: "TENANT_BRANDING_LOGO_REMOVED",
+          resource: "TenantBranding",
+          resourceId: branding.id,
+          details: {}
+        }
+      });
+      return current.logoFilePath;
+    }, { isolationLevel: "Serializable" });
+    if (retiredKey) {
+      await deleteRetiredPhysicalObject({ key: retiredKey, resourceType: "TenantBranding" });
+    }
     return this.getProfile(tenantId);
   }
 
-  async contractBranding(tenantId: string) {
-    const { profile, branding, legalSettings } = await this.getProfile(tenantId);
+  async contractBranding(tenantId: string, options: { ensureDefaults?: boolean } = {}) {
+    const current = options.ensureDefaults === false
+      ? await (async () => {
+          const tenant = await prisma.tenant.findUnique({
+            where: { id: tenantId },
+            select: {
+              tenantProfile: true,
+              tenantBranding: true,
+              tenantLegalSettings: true
+            }
+          });
+          if (!tenant) throw new AppError("Tenant non trovato", 404, "TENANT_NOT_FOUND");
+          return {
+            profile: tenant.tenantProfile,
+            branding: tenant.tenantBranding,
+            legalSettings: tenant.tenantLegalSettings
+          };
+        })()
+      : await this.getProfile(tenantId);
+    const { profile, branding, legalSettings } = current;
+
     return {
       companyName: profile?.tradeName ?? profile?.legalName ?? undefined,
       companyAddress: [profile?.legalAddress, profile?.postalCode, profile?.city, profile?.province, profile?.country].filter(Boolean).join(", "),

@@ -11,5 +11,5 @@ export const startReminderCron = (useCase: SendReminderUseCase): ScheduledTask =
     } catch (error) {
       logger.error({ error }, "Automatic reminder run failed");
     }
-  });
+  }, { noOverlap: true });
 };

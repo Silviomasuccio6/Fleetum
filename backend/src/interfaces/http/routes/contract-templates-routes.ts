@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { uploadContractLogo } from "../../../infrastructure/storage/multer.js";
+import { cleanupOnUploadFailure } from "../../../infrastructure/storage/upload-lifecycle.js";
 import { RentalBookingsController } from "../controllers/rental-bookings-controller.js";
 import { requirePermissions } from "../middlewares/permissions.js";
 import { asyncHandler } from "./async-handler.js";
@@ -12,7 +13,7 @@ export const contractTemplatesRoutes = (controller: RentalBookingsController) =>
   router.post(
     "/default/logo",
     requirePermissions("vehicles:write"),
-    uploadContractLogo.single("file"),
+    cleanupOnUploadFailure(uploadContractLogo.single("file")),
     asyncHandler(controller.uploadDefaultContractLogo)
   );
   router.get("/default/logo/file", requirePermissions("vehicles:read"), asyncHandler(controller.getDefaultContractLogoFile));

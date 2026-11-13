@@ -117,13 +117,25 @@ export class PrismaUserRepository implements UserRepository {
   }
 
   async setRole(tenantId: string, userId: string, roleKey: "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER"): Promise<UserEntity | null> {
-    const user = await prisma.user.findFirst({ where: { id: userId, tenantId, deletedAt: null } });
-    if (!user) return null;
+    return prisma.$transaction(async (tx) => {
+      // Use the same user-row lock as credential/session mutations, scoped to
+      // the requester tenant before any role relation is read or modified.
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "User"
+        WHERE "id" = ${userId} AND "tenantId" = ${tenantId} AND "deletedAt" IS NULL
+        FOR UPDATE
+      `;
+      if (rows.length !== 1) return null;
 
-    const role = await prisma.role.findUniqueOrThrow({ where: { key: roleKey } });
-    await prisma.userRole.deleteMany({ where: { userId } });
-    await prisma.userRole.create({ data: { userId, roleId: role.id } });
-    return this.findByIdInTenant(tenantId, userId);
+      const role = await tx.role.findUniqueOrThrow({ where: { key: roleKey } });
+      await tx.userRole.deleteMany({ where: { userId } });
+      await tx.userRole.create({ data: { userId, roleId: role.id } });
+      const updated = await tx.user.findFirst({
+        where: { id: userId, tenantId, deletedAt: null },
+        include: userWithRolesInclude
+      });
+      return updated ? toEntity(updated) : null;
+    });
   }
 
   async softDelete(tenantId: string, userId: string): Promise<void> {

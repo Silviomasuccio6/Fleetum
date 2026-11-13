@@ -1,15 +1,17 @@
 import { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
 import { logger } from "../../../infrastructure/logging/logger.js";
+import { sanitizeRequestUrl } from "../../../infrastructure/logging/sanitize-request-url.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 
 export const errorHandler = (error: unknown, req: Request, res: Response, _next: NextFunction) => {
   const requestId = req.requestId;
+  const path = sanitizeRequestUrl(req.originalUrl);
 
   if (error instanceof AppError) {
     if (error.statusCode >= 500) {
       logger.error(
-        { error, path: req.originalUrl, method: req.method, requestId },
+        { error, path, method: req.method, requestId },
         "Handled app error (5xx)"
       );
     }
@@ -22,7 +24,7 @@ export const errorHandler = (error: unknown, req: Request, res: Response, _next:
   }
 
   if (error instanceof ZodError) {
-    logger.info({ path: req.originalUrl, method: req.method, requestId, details: error.flatten() }, "Validation error");
+    logger.info({ path, method: req.method, requestId, details: error.flatten() }, "Validation error");
     return res.status(422).json({
       error: "VALIDATION_ERROR",
       message: "Request non valida",
@@ -32,7 +34,7 @@ export const errorHandler = (error: unknown, req: Request, res: Response, _next:
   }
 
   const isProd = process.env.NODE_ENV === "production";
-  logger.error({ error, path: req.originalUrl, method: req.method, requestId }, "Unhandled internal error");
+  logger.error({ error, path, method: req.method, requestId }, "Unhandled internal error");
   return res.status(500).json({
     error: "INTERNAL_ERROR",
     message: isProd ? "Errore interno" : (error as Error)?.message,

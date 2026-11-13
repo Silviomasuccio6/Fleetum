@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ChevronRight, LogOut, Menu, Search, X } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
+import { platformAuthStorage } from "../../../infrastructure/platform/platform-auth-storage";
+import { snackbar } from "../../../application/stores/snackbar-store";
 import { platformAdminUseCases } from "../../../application/usecases/platform/platform-admin-usecases";
 import { ThemeMode, getStoredTheme, setTheme } from "../../../infrastructure/theme/theme-manager";
 import { PlatformThemeToggle } from "../platform/platform-theme-toggle";
@@ -19,6 +21,7 @@ export const PlatformAdminLayout = () => {
   const navigate = useNavigate();
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getStoredTheme());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [activeSection, setActiveSection] = useState<PlatformSectionId>("overview");
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -85,9 +88,16 @@ export const PlatformAdminLayout = () => {
           </form>
           <div className="satin-topbar-actions">
             <PlatformThemeToggle mode={themeMode} onToggle={() => setThemeMode((current) => current === "dark" ? "light" : "dark")} />
-            <button type="button" className="satin-icon-button" aria-label="Esci dalla Platform" title="Esci dalla Platform" onClick={() => {
-              // Preserve the logout contract of the production-compatible API.
-              platformAdminUseCases.logout(); navigate("/login");
+            <button type="button" className="satin-icon-button" aria-label={loggingOut ? "Uscita in corso" : "Esci dalla Platform"} title="Esci dalla Platform" disabled={loggingOut} aria-busy={loggingOut} onClick={async () => {
+              setLoggingOut(true);
+              try {
+                const result = await platformAdminUseCases.logout();
+                if (result.sessionCleared && !platformAuthStorage.get()) navigate("/login", { replace: true });
+              } catch {
+                snackbar.error("Uscita non confermata. La sessione resta aperta: riprova.");
+              } finally {
+                setLoggingOut(false);
+              }
             }}><LogOut size={17} /></button>
           </div>
         </header>

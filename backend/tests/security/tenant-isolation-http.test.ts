@@ -2,10 +2,15 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
+import sharp from "sharp";
 import { createApp } from "../../src/app.js";
+import { TenantProfileService } from "../../src/application/services/tenant-profile-service.js";
 import { prisma } from "../../src/infrastructure/database/prisma/client.js";
+import { uploadStagingRootForTests } from "../../src/infrastructure/storage/upload-lifecycle.js";
+import { storageProvider } from "../../src/infrastructure/storage/storage-provider.js";
 import { env } from "../../src/shared/config/env.js";
 import { signTenantAccessToken } from "../helpers/http-auth.js";
 
@@ -47,6 +52,30 @@ const jsonRequest = async (
   return { response, body };
 };
 
+const multipartRequest = async (pathName: string, token: string, body: FormData) => {
+  const response = await fetch(`${baseUrl}${pathName}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  return { response, body: payload };
+};
+
+const listFiles = async (root: string): Promise<string[]> => {
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) return listFiles(fullPath);
+    return [path.relative(root, fullPath)];
+  }));
+  return nested.flat().sort();
+};
+
 const assertForbiddenOrNotFound = (status: number) => {
   assert.ok(status === 403 || status === 404, `Expected 403/404 for cross-tenant access, got ${status}`);
 };
@@ -56,6 +85,11 @@ const assertPayloadDoesNotContain = (payload: unknown, forbidden: string) => {
 };
 
 const cleanupTenant = async (tenantId: string) => {
+  const storedFiles = await prisma.storedFileObject.findMany({
+    where: { tenantId, provider: "local" },
+    select: { storageKey: true }
+  });
+  await Promise.all(storedFiles.map((file) => storageProvider.delete(file.storageKey)));
   await prisma.bookingContractDelivery.deleteMany({ where: { tenantId } });
   await prisma.bookingContractEvent.deleteMany({ where: { tenantId } });
   await prisma.bookingContract.deleteMany({ where: { tenantId } });
@@ -128,6 +162,17 @@ const createTenantFixture = async (label: "A" | "B"): Promise<TenantFixture> => 
       lastName: marker,
       isEmailVerified: true
     }
+  });
+
+  // Access tokens carry only identity. requireAuth reloads the live role from
+  // PostgreSQL so a role change takes effect on the very next request.
+  const adminRole = await prisma.role.upsert({
+    where: { key: "ADMIN" },
+    update: { name: "ADMIN" },
+    create: { key: "ADMIN", name: "ADMIN" }
+  });
+  await prisma.userRole.create({
+    data: { userId: user.id, roleId: adminRole.id }
   });
 
   await prisma.tenantSubscription.create({
@@ -262,10 +307,19 @@ const createTenantFixture = async (label: "A" | "B"): Promise<TenantFixture> => 
     }
   });
 
+  const session = await prisma.refreshSession.create({
+    data: {
+      userId: user.id,
+      tenantId: tenant.id,
+      tokenHash: `synthetic-${runId}-${marker}`,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000)
+    }
+  });
+
   return {
     tenantId: tenant.id,
     userId: user.id,
-    token: signTenantAccessToken({ tenantId: tenant.id, userId: user.id }),
+    token: signTenantAccessToken({ tenantId: tenant.id, userId: user.id, sessionId: session.id }),
     siteId: site.id,
     vehicleId: vehicle.id,
     customerId: customer.id,
@@ -338,12 +392,180 @@ describe("black-box HTTP tenant isolation", () => {
 
     const contract = await jsonRequest(`/rental-bookings/${tenantB.bookingId}/contract`, tenantA.token);
     assertForbiddenOrNotFound(contract.response.status);
+
+    const originalBooking = await prisma.rentalBooking.findUnique({
+      where: { id: tenantA.bookingId },
+      select: { vehicleId: true }
+    });
+    assert.equal(originalBooking?.vehicleId, tenantA.vehicleId);
+
+    const crossTenantUpdate = await jsonRequest(`/rental-bookings/${tenantA.bookingId}`, tenantA.token, {
+      method: "PATCH",
+      body: JSON.stringify({ vehicleId: tenantB.vehicleId })
+    });
+    assertForbiddenOrNotFound(crossTenantUpdate.response.status);
+    assertPayloadDoesNotContain(crossTenantUpdate.body, tenantB.marker);
+
+    const inactiveVehicle = await prisma.vehicle.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        siteId: tenantA.siteId,
+        plate: `INA${runId.slice(-7).toUpperCase()}`,
+        brand: "Inactive test vehicle",
+        model: "Tenant A",
+        year: 2024,
+        isActive: false
+      }
+    });
+    const deletedVehicle = await prisma.vehicle.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        siteId: tenantA.siteId,
+        plate: `DEL${runId.slice(-7).toUpperCase()}`,
+        brand: "Deleted test vehicle",
+        model: "Tenant A",
+        year: 2024,
+        deletedAt: new Date()
+      }
+    });
+
+    for (const vehicleId of [inactiveVehicle.id, deletedVehicle.id]) {
+      const invalidUpdate = await jsonRequest(`/rental-bookings/${tenantA.bookingId}`, tenantA.token, {
+        method: "PATCH",
+        body: JSON.stringify({ vehicleId })
+      });
+      assert.equal(invalidUpdate.response.status, 404);
+    }
+
+    const bookingAfterRejectedUpdates = await prisma.rentalBooking.findUnique({
+      where: { id: tenantA.bookingId },
+      select: { vehicleId: true }
+    });
+    assert.equal(bookingAfterRejectedUpdates?.vehicleId, tenantA.vehicleId);
+
+    const activeVehicle = await prisma.vehicle.create({
+      data: {
+        tenantId: tenantA.tenantId,
+        siteId: tenantA.siteId,
+        plate: `ACT${runId.slice(-7).toUpperCase()}`,
+        brand: "Active test vehicle",
+        model: "Tenant A",
+        year: 2024,
+        isActive: true
+      }
+    });
+    const validUpdate = await jsonRequest(`/rental-bookings/${tenantA.bookingId}`, tenantA.token, {
+      method: "PATCH",
+      body: JSON.stringify({ vehicleId: activeVehicle.id })
+    });
+    assert.equal(validUpdate.response.status, 200);
+    assert.equal((validUpdate.body as { vehicle?: { id?: string } }).vehicle?.id, activeVehicle.id);
+    assertPayloadDoesNotContain(validUpdate.body, tenantB.marker);
+
+    const persistedBooking = await prisma.rentalBooking.findUnique({
+      where: { id: tenantA.bookingId },
+      select: { vehicleId: true }
+    });
+    assert.equal(persistedBooking?.vehicleId, activeVehicle.id);
   });
 
   it("blocks cross-tenant upload download", async () => {
     const download = await jsonRequest(`/uploads/vehicle-photos/${tenantB.vehiclePhotoId}/file`, tenantA.token);
     assertForbiddenOrNotFound(download.response.status);
     assertPayloadDoesNotContain(download.body, tenantB.marker);
+  });
+
+  it("rejects a cross-tenant upload before staging or persistence", async () => {
+    const beforeStaging = await listFiles(uploadStagingRootForTests());
+    const beforeUploads = await listFiles(uploadRoot);
+    const beforeObjects = await prisma.storedFileObject.count({ where: { tenantId: tenantA.tenantId } });
+    const form = new FormData();
+    form.append("files", new Blob([Buffer.from("synthetic-cross-tenant-upload")], { type: "image/png" }), "shared.png");
+
+    const result = await multipartRequest(`/uploads/vehicles/${tenantB.vehicleId}/photos`, tenantA.token, form);
+    assertForbiddenOrNotFound(result.response.status);
+    assertPayloadDoesNotContain(result.body, tenantB.marker);
+
+    assert.deepEqual(await listFiles(uploadStagingRootForTests()), beforeStaging);
+    assert.deepEqual(await listFiles(uploadRoot), beforeUploads);
+    assert.equal(
+      await prisma.storedFileObject.count({ where: { tenantId: tenantA.tenantId } }),
+      beforeObjects
+    );
+  });
+
+  it("cleans the full staged batch when a later file fails validation", async () => {
+    const beforeStaging = await listFiles(uploadStagingRootForTests());
+    const beforeUploads = await listFiles(uploadRoot);
+    const beforeObjects = await prisma.storedFileObject.count({ where: { tenantId: tenantA.tenantId } });
+    const beforePhotos = await prisma.vehiclePhoto.count({ where: { vehicleId: tenantA.vehicleId } });
+    const validPng = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: { r: 20, g: 40, b: 60, alpha: 1 } }
+    }).png().toBuffer();
+    const form = new FormData();
+    form.append("files", new Blob([validPng], { type: "image/png" }), "first.png");
+    form.append("files", new Blob([Buffer.from("not-a-png")], { type: "image/png" }), "second.png");
+
+    const result = await multipartRequest(`/uploads/vehicles/${tenantA.vehicleId}/photos`, tenantA.token, form);
+    assert.equal(result.response.status, 400);
+
+    assert.deepEqual(await listFiles(uploadStagingRootForTests()), beforeStaging);
+    assert.deepEqual(await listFiles(uploadRoot), beforeUploads);
+    assert.equal(
+      await prisma.storedFileObject.count({ where: { tenantId: tenantA.tenantId } }),
+      beforeObjects
+    );
+    assert.equal(await prisma.vehiclePhoto.count({ where: { vehicleId: tenantA.vehicleId } }), beforePhotos);
+  });
+
+  it("keeps one referenced active logo under concurrent replacements", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "fleetum-logo-race-"));
+    const buildFile = async (name: string, color: { r: number; g: number; b: number }) => {
+      const filePath = path.join(directory, name);
+      const payload = await sharp({
+        create: { width: 2, height: 2, channels: 4, background: { ...color, alpha: 1 } }
+      }).png().toBuffer();
+      await fs.writeFile(filePath, payload);
+      return {
+        fieldname: "logo",
+        originalname: name,
+        encoding: "7bit",
+        mimetype: "image/png",
+        destination: directory,
+        filename: name,
+        path: filePath,
+        size: payload.length
+      } as Express.Multer.File;
+    };
+
+    try {
+      const [first, second] = await Promise.all([
+        buildFile("first.png", { r: 220, g: 20, b: 20 }),
+        buildFile("second.png", { r: 20, g: 20, b: 220 })
+      ]);
+      const service = new TenantProfileService();
+      const results = await Promise.allSettled([
+        service.setLogo(tenantA.tenantId, tenantA.userId, first),
+        service.setLogo(tenantA.tenantId, tenantA.userId, second)
+      ]);
+      assert.ok(results.some((result) => result.status === "fulfilled"));
+
+      const branding = await prisma.tenantBranding.findUnique({ where: { tenantId: tenantA.tenantId } });
+      assert.ok(branding?.logoFilePath);
+      const objects = await prisma.storedFileObject.findMany({
+        where: { tenantId: tenantA.tenantId, resourceType: "TenantBranding" },
+        select: { storageKey: true, deletedAt: true }
+      });
+      const active = objects.filter((object) => object.deletedAt === null);
+      assert.equal(active.length, 1);
+      assert.equal(active[0]?.storageKey, branding?.logoFilePath);
+      assert.equal(await storageProvider.exists(active[0]!.storageKey), true);
+      for (const retired of objects.filter((object) => object.deletedAt !== null)) {
+        assert.equal(await storageProvider.exists(retired.storageKey), false);
+      }
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("does not leak cross-tenant data through stats and settings", async () => {

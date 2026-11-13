@@ -1,3 +1,5 @@
+> Aggiornamento 13 novembre: PR #158 pubblicata e allineamento al main c46ede5. Stato autorevole in [STATUS.md](STATUS.md) e [ALIGNMENT_20261113.md](ALIGNMENT_20261113.md). Il contenuto seguente descrive il candidato originario ee34ffb e i suoi limiti storici.
+
 # Fleetum Platform Satinata — consegna locale
 
 Direzione scelta e integrata, non rilasciata online. Checkout isolato su `codex/platform-satin-ui`, base associata all'immagine production `db1f231dc8cb699f1a5ce4215a0278c93212d16d`. Il commit di consegna è HEAD del branch; SHA completo e copia durevole sono nel passaggio unico.

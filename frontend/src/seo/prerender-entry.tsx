@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { renderToString } from "react-dom/server";
 import { HelmetProvider, type HelmetServerState } from "react-helmet-async";
-import { StaticRouter } from "react-router-dom/server";
+import { StaticRouter } from "react-router-dom";
 import { PublicRoutes } from "../presentation/routes/public-routes";
 
 export type PrerenderedPage = {

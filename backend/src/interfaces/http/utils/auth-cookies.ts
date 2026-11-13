@@ -5,8 +5,12 @@ import { env } from "../../../shared/config/env.js";
 export const ACCESS_COOKIE_NAME = "fermi_access";
 export const REFRESH_COOKIE_NAME = "fermi_refresh";
 export const CSRF_COOKIE_NAME = "fermi_csrf";
+const OAUTH_COOKIE_NAMES = {
+  google: "fermi_oauth_google",
+  apple: "fermi_oauth_apple"
+} as const;
 
-const isSecure = env.NODE_ENV === "production";
+const isSecure = () => env.NODE_ENV === "production";
 const sameSite: "lax" | "strict" = "lax";
 
 const toCookieOptions = (overrides?: {
@@ -14,7 +18,7 @@ const toCookieOptions = (overrides?: {
   expiresAt?: string;
 }) => ({
   httpOnly: overrides?.httpOnly ?? true,
-  secure: isSecure,
+  secure: isSecure(),
   sameSite,
   path: "/",
   ...(overrides?.expiresAt ? { expires: new Date(overrides.expiresAt) } : {})
@@ -37,6 +41,53 @@ export const clearAuthCookies = (res: Response) => {
   res.clearCookie(REFRESH_COOKIE_NAME, toCookieOptions());
   res.clearCookie(CSRF_COOKIE_NAME, toCookieOptions({ httpOnly: false }));
 };
+
+export const getOAuthCorrelationCookieName = (
+  provider: keyof typeof OAUTH_COOKIE_NAMES,
+  state: string
+) => `${OAUTH_COOKIE_NAMES[provider]}_${crypto.createHash("sha256").update(state).digest("hex").slice(0, 20)}`;
+
+const oauthCorrelationCookieOptions = (provider: keyof typeof OAUTH_COOKIE_NAMES, expiresAt?: Date) => {
+  const appleCrossSitePost = provider === "apple";
+  const secure = appleCrossSitePost || isSecure();
+  return {
+    httpOnly: true,
+    secure,
+    // Apple's required form_post callback is cross-site. SameSite=None lets it
+    // carry the browser binding and therefore also requires HTTPS/Secure.
+    sameSite: appleCrossSitePost ? ("none" as const) : sameSite,
+    path: `/api/auth/${provider}/callback`,
+    ...(expiresAt ? { expires: expiresAt } : {})
+  };
+};
+
+export const setOAuthCorrelationCookie = (
+  res: Response,
+  provider: keyof typeof OAUTH_COOKIE_NAMES,
+  state: string,
+  browserBinding: string,
+  expiresAt: Date
+) => {
+  res.cookie(
+    getOAuthCorrelationCookieName(provider, state),
+    browserBinding,
+    oauthCorrelationCookieOptions(provider, expiresAt)
+  );
+};
+
+export const clearOAuthCorrelationCookie = (
+  res: Response,
+  provider: keyof typeof OAUTH_COOKIE_NAMES,
+  state: string
+) => {
+  res.clearCookie(getOAuthCorrelationCookieName(provider, state), oauthCorrelationCookieOptions(provider));
+};
+
+export const getOAuthCorrelationCookie = (
+  req: Request,
+  provider: keyof typeof OAUTH_COOKIE_NAMES,
+  state: string
+) => getCookieValue(req, getOAuthCorrelationCookieName(provider, state));
 
 export const getCookieValue = (req: Request, name: string) => {
   const raw = req.headers.cookie;

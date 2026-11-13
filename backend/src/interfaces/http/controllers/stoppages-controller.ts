@@ -8,6 +8,7 @@ import { SendReminderUseCase } from "../../../application/usecases/reminders/sen
 import { getSlaThresholdForPriority } from "../../../application/services/sla-policy.js";
 import { StoppageOpsRepository } from "../../../domain/repositories/stoppage-ops-repository.js";
 import { prisma } from "../../../infrastructure/database/prisma/client.js";
+import { ownedStoppageEventsWhere, ownedStoppageWhere } from "../../../infrastructure/repositories/stoppage-tenant-scope.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { stoppageStatusLabel } from "../../../shared/utils/stoppage-status-label.js";
@@ -1970,12 +1971,12 @@ export class StoppagesController {
     const dateTo = query.dateTo ? new Date(query.dateTo) : new Date();
 
     const rows = await prisma.stoppage.findMany({
-      where: { tenantId: req.auth!.tenantId, deletedAt: null, openedAt: { gte: dateFrom, lte: dateTo } },
+      where: { ...await ownedStoppageWhere(req.auth!.tenantId), openedAt: { gte: dateFrom, lte: dateTo } },
       include: {
         site: { select: { name: true } },
         workshop: { select: { name: true } },
         vehicle: { select: { plate: true, brand: true, model: true } },
-        events: { where: { type: "FINAL_COST" }, orderBy: { createdAt: "desc" }, take: 1 }
+        events: { where: { ...await ownedStoppageEventsWhere(req.auth!.tenantId), type: "FINAL_COST" }, orderBy: { createdAt: "desc" }, take: 1 }
       }
     });
 
@@ -2254,10 +2255,10 @@ export class StoppagesController {
     const intervalDays = Number(req.query.intervalDays ?? 180);
     const kmWarning = Number(req.query.kmWarning ?? 500);
     const vehicles = await prisma.vehicle.findMany({
-      where: { tenantId: req.auth!.tenantId, deletedAt: null, isActive: true },
+      where: { tenantId: req.auth!.tenantId, site: { tenantId: req.auth!.tenantId }, deletedAt: null, isActive: true },
       include: {
         site: { select: { name: true } },
-        stoppages: { where: { deletedAt: null }, orderBy: { openedAt: "desc" }, take: 1, select: { openedAt: true } }
+        stoppages: { where: await ownedStoppageWhere(req.auth!.tenantId), orderBy: { openedAt: "desc" }, take: 1, select: { openedAt: true } }
       }
     });
     const now = new Date();

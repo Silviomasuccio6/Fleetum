@@ -1,0 +1,172 @@
+# Internal HTTP only; the existing production Caddy terminates public TLS.
+# The single trusted peer is an approved fixed IP, never an entire bridge CIDR.
+{
+	auto_https off
+	servers {
+		trusted_proxies static 10.203.91.2/32
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
+}
+
+(shared_ingress_guard) {
+	@untrusted_proxy not remote_ip 10.203.91.2
+	respond @untrusted_proxy "Untrusted staging ingress" 403
+	@wrong_scheme not header X-Forwarded-Proto https
+	respond @wrong_scheme "Invalid staging scheme" 400
+	@missing_client_ip not header X-Forwarded-For *
+	respond @missing_client_ip "Missing staging client" 400
+}
+
+(shared_upstream_headers) {
+	# Collapse two proxy hops to the one verified client IP expected by TRUST_PROXY=1.
+	header_up Host {host}
+	header_up X-Forwarded-For {client_ip}
+	header_up X-Forwarded-Proto https
+	header_up X-Forwarded-Host {host}
+	header_up -Forwarded
+	header_up -X-Real-IP
+	header_up -X-Forwarded-Port
+	header_up -X-Forwarded-Server
+	header_up -X-Forwarded-Prefix
+}
+
+(security_headers) {
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Baseline only: Next export inline hydration scripts still need build-linked hashes.
+		# Append so stricter upstream policies (Helmet) also remain enforced.
+		+Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
+		-Server
+		defer
+	}
+}
+
+(staging_discovery) {
+	route /robots.txt {
+		header Content-Type "text/plain; charset=utf-8"
+		respond 200 {
+			body <<ROBOTS
+User-agent: *
+Disallow: /
+ROBOTS
+		}
+	}
+	@staging_sitemaps path /sitemap.xml /sitemap-*.xml
+	route @staging_sitemaps {
+		respond 404
+	}
+}
+
+(staging_errors) {
+	handle_errors {
+		import security_headers
+		respond "Staging request failed" {err.status_code}
+	}
+}
+
+http://staging.fleetum.it {
+	import security_headers
+	import staging_errors
+	route {
+		import shared_ingress_guard
+		import staging_discovery
+		encode zstd gzip
+		handle /api/* {
+			reverse_proxy backend:4000 {
+				import shared_upstream_headers
+			}
+		}
+
+		@legacy_software_autonoleggio path /software-autonoleggio /software-autonoleggio/*
+		redir @legacy_software_autonoleggio /prodotto 308
+
+		@legacy_software_rent_a_car path /software-rent-a-car /software-rent-a-car/*
+		redir @legacy_software_rent_a_car /soluzioni 308
+
+		@legacy_contracts path /contratti-noleggio-digitali /contratti-noleggio-digitali/*
+		redir @legacy_contracts /contratti-digitali 308
+
+		@legacy_profitability path /report-redditivita-veicolo /report-redditivita-veicolo/*
+		redir @legacy_profitability /gestionale-flotta 308
+
+		@website_assets path /_next/*
+		handle @website_assets {
+			root * /srv/fleetum-website
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		handle /brand/* {
+			root * /srv/fleetum
+			header Cache-Control "public, max-age=86400"
+			file_server
+		}
+
+		handle /assets/* {
+			root * /srv/fleetum
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		@marketing {
+			path / /accesso /accesso/* /booking-noleggi /booking-noleggi/* /chi-siamo /chi-siamo/* /come-funziona /come-funziona/* /contratti-digitali /contratti-digitali/* /cookie /cookie/* /demo /demo/* /dpa /dpa/* /gestionale-flotta /gestionale-flotta/* /moduli /moduli/* /prezzi /prezzi/* /privacy /privacy/* /prodotto /prodotto/* /scadenze-manutenzione /scadenze-manutenzione/* /sicurezza /sicurezza/* /soluzioni /soluzioni/* /termini /termini/* /tour /tour/* /llms.txt
+		}
+		handle @marketing {
+			root * /srv/fleetum-website
+			try_files {path} {path}/index.html /404.html
+			file_server
+		}
+
+		# Authenticated tenant routes retain the SPA shell, as in production.
+		handle {
+			root * /srv/fleetum
+			try_files {path} /spa.html
+			file_server
+		}
+	}
+}
+
+http://api-staging.fleetum.it {
+	import security_headers
+	import staging_errors
+	route {
+		import shared_ingress_guard
+		import staging_discovery
+		encode zstd gzip
+		@api path /api/*
+		reverse_proxy @api backend:4000 {
+			import shared_upstream_headers
+		}
+		respond "Fleetum Staging API" 200
+	}
+}
+
+http://platform-staging.fleetum.it {
+	import security_headers
+	import staging_errors
+	route {
+		import shared_ingress_guard
+		import staging_discovery
+		encode zstd gzip
+		@platform_api path /platform-api/*
+		reverse_proxy @platform_api backend:4100 {
+			import shared_upstream_headers
+		}
+		root * /srv/fleetum
+		try_files {path} /platform.html
+		file_server
+	}
+}
+
+# Reject unmatched Host headers instead of the default empty HTTP 200 response.
+:80 {
+	route {
+		import shared_ingress_guard
+		respond "Unknown staging host" 421
+	}
+}

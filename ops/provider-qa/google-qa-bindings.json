@@ -1,0 +1,9 @@
+{
+  "projectId": "fleetum-qa-20261018",
+  "clientId": "469668576971-8hj5ee3fs4mneqd87lgvgci4626ecml2.apps.googleusercontent.com",
+  "clientName": "Fleetum QA local",
+  "redirectUri": "http://localhost:4200/api/auth/google/callback",
+  "appCallback": "http://localhost:5273/auth/social-callback",
+  "testEmail": "info@fleetum.it",
+  "scopes": ["openid", "email", "profile"]
+}

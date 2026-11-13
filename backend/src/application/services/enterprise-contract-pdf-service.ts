@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { storageProvider } from "../../infrastructure/storage/storage-provider.js";
 
 type ContractBranding = {
   companyName?: string | null;
@@ -255,14 +256,13 @@ const wrapLines = (text: string, maxWidth: number, font: PDFFont, fontSize: numb
   return lines;
 };
 
-const maybeEmbedLogo = async (pdfDoc: PDFDocument, logoFilePath?: string | null): Promise<PDFImage | null> => {
-  if (!logoFilePath) return null;
+const maybeEmbedStoredImage = async (pdfDoc: PDFDocument, storageKey?: string | null): Promise<PDFImage | null> => {
+  if (!storageKey) return null;
   try {
-    const absolutePath = path.resolve(process.cwd(), logoFilePath);
-    const image = await fs.readFile(absolutePath);
-    const extension = path.extname(logoFilePath).toLowerCase();
-    if (extension === ".png") return pdfDoc.embedPng(image);
-    if (extension === ".jpg" || extension === ".jpeg") return pdfDoc.embedJpg(image);
+    const image = await storageProvider.read(storageKey);
+    const extension = path.extname(storageKey).toLowerCase();
+    if (extension === ".png") return await pdfDoc.embedPng(image);
+    if (extension === ".jpg" || extension === ".jpeg") return await pdfDoc.embedJpg(image);
     return null;
   } catch {
     return null;
@@ -424,7 +424,7 @@ export const buildEnterpriseContractPdf = async (input: EnterpriseContractPdfInp
     "frontend/public/brand/fleetum-favicon.png",
     "../../frontend/public/brand/fleetum-favicon.png"
   ]);
-  const signatureImage = await maybeEmbedLogo(pdfDoc, input.contract.signatureFilePath);
+  const signatureImage = await maybeEmbedStoredImage(pdfDoc, input.contract.signatureFilePath);
 
   page.drawText(companyName, {
     x: MARGIN_X + 20,

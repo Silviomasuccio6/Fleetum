@@ -1,3 +1,5 @@
+> Prove storiche del candidato ee34ffb. Esiti aggiornati della release completa, audit e sessioni in [ALIGNMENT_20261113.md](ALIGNMENT_20261113.md). PR e copia selettiva privata degli asset sono state completate successivamente; la prova del vecchio pacchetto non vale per la nuova build.
+
 # Verifiche — Platform Satinata,13 novembre 2026
 
 ## Ambiente e comandi

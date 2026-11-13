@@ -365,6 +365,7 @@ export const PlatformAdminPage = () => {
   const [planConfirmState, setPlanConfirmState] = useState<PlanConfirmState>(null);
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({});
   const [invoiceLoading, setInvoiceLoading] = useState<Record<string, boolean>>({});
+  const invoiceEmailRequestKeys = useRef(new Map<string, string>());
   const [rowFeedback, setRowFeedback] = useState<Record<string, { type: "success" | "error" | "loading"; message: string }>>({});
   const [rowActionDrafts, setRowActionDrafts] = useState<Record<string, RowActionSelection>>({});
   const [planDrafts, setPlanDrafts] = useState<Record<string, PlanTier>>({});
@@ -782,7 +783,10 @@ export const PlatformAdminPage = () => {
     try {
       setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
       try {
-        const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id);
+        const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
+        invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
+        const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
+        invoiceEmailRequestKeys.current.delete(invoice.id);
         snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
         setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
       } catch (err) {
@@ -953,7 +957,7 @@ export const PlatformAdminPage = () => {
 
   const handlePlatformAuthError = (err: unknown) => {
     if (!isPlatformAuthError(err)) return false;
-    platformAdminUseCases.logout();
+    if (!platformAdminUseCases.clearSessionForAuthError(err)) return true;
     snackbar.error("Sessione platform scaduta o non valida. Effettua di nuovo il login.");
     navigate("/login", { replace: true });
     return true;
