@@ -1,0 +1,6 @@
+<!doctype html><html lang="it"><meta charset="utf-8"><title>Fleetum QA responsive</title>
+<style>body{margin:0;background:#dce0e7;font:13px system-ui}header{display:flex;gap:10px;padding:12px;align-items:center}button{padding:7px 12px}iframe{display:block;border:0;background:white;width:390px;height:844px;margin:0 auto}</style>
+<header><strong>Frontend integrato · dati sintetici</strong><button data-width="320">320</button><button data-width="390">390</button><button data-width="768">768</button><button data-width="1440">1440</button></header>
+<iframe title="Fleetum Platform QA" src="/platform.html#/login"></iframe>
+<script>document.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{document.querySelector('iframe').style.width=button.dataset.width+'px'}))</script>
+</html>

@@ -1,3 +1,4 @@
+import { readPlatformLiveResponse } from "./platform-live-response";
 import { platformAuthStorage } from "../../../infrastructure/platform/platform-auth-storage";
 
 const configuredApiBase = import.meta.env.VITE_PLATFORM_API_BASE_URL || "/platform-api";
@@ -460,25 +461,7 @@ export const platformAdminUseCases = {
     const query = new URLSearchParams();
     if (input?.windowMinutes) query.set("windowMinutes", String(input.windowMinutes));
     const response = await platformFetch(`${apiBase}/metrics/dashboard-live?${query.toString()}`, { headers: { ...authHeaders() } });
-    if (response.status === 404) {
-      const now = new Date();
-      return {
-        generatedAt: now.toISOString(),
-        liveWindowMinutes: input?.windowMinutes ?? 15,
-        activeUsersLive: 0,
-        previousWindowActiveUsers: 0,
-        deltaFromPreviousWindow: 0,
-        activeTenantsLive: 0,
-        topTenants: [],
-        mrrMonthly: 0,
-        mrrLost: 0,
-        mrrDeltaFromPrevious: 0,
-        month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-      } as PlatformDashboardLiveMetrics;
-    }
-    const data = await response.json();
-    if (!response.ok) throw toPlatformError(response, data, "Impossibile caricare metriche live dashboard");
-    return data as PlatformDashboardLiveMetrics;
+    return readPlatformLiveResponse(response);
   },
   revenueCsv: async (input?: { month?: string; months?: number; range?: "2W" | "1M" | "6M" | "1Y" }) => {
     const query = new URLSearchParams();
