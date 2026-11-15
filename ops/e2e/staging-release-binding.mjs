@@ -1,4 +1,5 @@
 import path from "node:path";
+import { verifyOverlayProof } from "../platform-release/policy.mjs";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
@@ -42,7 +43,9 @@ export function validateBindingInputs(env = process.env) {
   if (!positiveId(env.E2E_STAGING_RUN_ID)) errors.push("E2E_STAGING_RUN_ID must be a positive safe integer run ID.");
   if (!SHA.test(env.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA ?? "")) errors.push("Protected staging control SHA is required.");
   if (!REPOSITORY.test(env.GITHUB_REPOSITORY ?? "")) errors.push("GITHUB_REPOSITORY must identify the expected owner/repository.");
-  return result(errors, { releaseSha: env.E2E_RELEASE_SHA, stagingRunId: env.E2E_STAGING_RUN_ID, repository: env.GITHUB_REPOSITORY, controlSha: env.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA });
+  if (env.E2E_PLATFORM_RUN_ID && !positiveId(env.E2E_PLATFORM_RUN_ID)) errors.push("Platform run selector must be a positive safe run ID.");
+  if (env.E2E_PLATFORM_RUN_ID && !SHA.test(env.FLEETUM_PLATFORM_APPROVED_UI_SHA ?? "")) errors.push("Explicit approved UI SHA required for Platform collation.");
+  return result(errors, { ...(env.E2E_PLATFORM_RUN_ID ? { platformRunId: env.E2E_PLATFORM_RUN_ID, approvedUiSha: env.FLEETUM_PLATFORM_APPROVED_UI_SHA } : {}), releaseSha: env.E2E_RELEASE_SHA, stagingRunId: env.E2E_STAGING_RUN_ID, repository: env.GITHUB_REPOSITORY, controlSha: env.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA });
 }
 
 export function verifySourceHead(head, releaseSha) {
@@ -139,6 +142,21 @@ export function verifyRuntimeContinuity(before, after) {
   return result(errors);
 }
 
+export function verifyBoundDocuments(proof, metadata, binding, { platformApproval } = {}) {
+  const context = { ...binding, releaseSha: binding.releaseSha ?? binding.appSha, stagingRunId: binding.stagingRunId ?? binding.parentRunId };
+  if (context.platformRunId) {
+    const overlay = verifyOverlayProof(proof, metadata, platformApproval, { ...context, approvedUiSha: binding.approvedUiSha ?? platformApproval?.uiSha });
+    if (!overlay.ok) return overlay;
+    const parentContext = { ...context, controlSha: platformApproval.parentControlSha };
+    return result([
+      ...verifyDeployRun(metadata?.parent?.run, metadata?.parent?.workflow, parentContext).errors,
+      ...verifyReleaseProof(proof?.parent, parentContext).errors
+    ]);
+  }
+  // A legacy selector cannot silently accept an overlay, or vice versa.
+  return result([...verifyDeployRun(metadata?.run, metadata?.workflow, context).errors, ...verifyReleaseProof(proof, context).errors]);
+}
+
 export function requireReleaseBinding(proofPath, runMetadataPath, env = process.env) {
   const binding = validateBindingInputs(env);
   if (!binding.ok) throw new Error(binding.errors.join(" "));
@@ -146,7 +164,12 @@ export function requireReleaseBinding(proofPath, runMetadataPath, env = process.
   try { proof = JSON.parse(readFileSync(proofPath, "utf8")); metadata = JSON.parse(readFileSync(runMetadataPath, "utf8")); }
   catch { throw new Error("Unable to read valid staging release and verified run proofs."); }
   const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
-  const checks = [verifySourceHead(head.status === 0 ? head.stdout.trim() : "", binding.releaseSha), verifyDeployRun(metadata.run, metadata.workflow, binding), verifyReleaseProof(proof, binding)];
+  let platformApproval;
+  if (binding.platformRunId) {
+    try { platformApproval = JSON.parse(env.FLEETUM_PLATFORM_APPROVAL_JSON ?? "null"); }
+    catch { throw new Error("Platform approval is not valid JSON."); }
+  }
+  const checks = [verifySourceHead(head.status === 0 ? head.stdout.trim() : "", binding.releaseSha), verifyBoundDocuments(proof, metadata, binding, { platformApproval })];
   const errors = checks.flatMap((check) => check.errors);
   if (errors.length) throw new Error(errors.join(" "));
   return proof;
