@@ -36,7 +36,7 @@ const actualSendInvoice = () => {
 };
 
 const keyFrom = (init?: RequestInit) => (init?.headers as Record<string, string>)["X-Idempotency-Key"];
-const success = () => Response.json({ data: { id: "synthetic-invoice", invoiceNumber: "QA-001" } });
+const success = () => Response.json({ data: { id: "synthetic-invoice", invoiceNumber: "QA-001" }, emailDelivery: { id: "synthetic-delivery", status: "SENT" } });
 
 test("invoice retry keeps the same request key until acknowledged; a later intentional send uses a new key", async () => {
   platformAuthStorage.set("synthetic-platform-bearer");

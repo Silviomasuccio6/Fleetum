@@ -786,8 +786,12 @@ export const PlatformAdminPage = () => {
         const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
         invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
         const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
-        invoiceEmailRequestKeys.current.delete(invoice.id);
-        snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
+        if (result.emailDelivery.status === "SENT") {
+          invoiceEmailRequestKeys.current.delete(invoice.id);
+          snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
+        } else {
+          snackbar.info(`Invio della fattura ${result.data.invoiceNumber} in elaborazione`);
+        }
         setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
       } catch (err) {
         if (handlePlatformAuthError(err)) return;
