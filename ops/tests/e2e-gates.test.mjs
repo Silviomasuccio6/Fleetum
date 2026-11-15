@@ -260,7 +260,9 @@ test("nightly workflow fails closed and always verifies execution evidence", () 
   assert.match(workflow, /environment:\s*staging/);
   assert.match(workflow, /group:\s*fleetum-staging\s+cancel-in-progress:\s*false/);
   assert.match(workflow, /actions\/download-artifact@v4/);
-  assert.match(workflow, /run-id:\s*\$\{\{ steps\.binding\.outputs\.staging_run_id \}\}/);
+  assert.match(workflow, /core\.setOutput\("proof_run_id", platformRun \|\| runId\)/);
+  assert.match(workflow, /core\.setOutput\("proof_prefix", platformRun \? "platform-release-proof" : "staging-release-proof"\)/);
+  assert.match(workflow, /run-id:\s*\$\{\{ steps\.binding\.outputs\.proof_run_id \}\}/);
   assert.match(workflow, /github-token:\s*\$\{\{ github\.token \}\}/);
   assert.match(workflow, /FLEETUM_STAGING_KNOWN_HOSTS/);
   assert.doesNotMatch(workflow, /ssh-keyscan/);

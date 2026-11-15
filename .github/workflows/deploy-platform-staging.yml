@@ -1,0 +1,248 @@
+name: Deploy Platform Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Install the approved Platform or explicitly restore its parent"
+        type: choice
+        options: [install, rollback]
+        default: install
+        required: true
+      priorPlatformRunId:
+        description: "Completed install run; required only for rollback"
+        required: false
+      confirm:
+        description: "Type CHANGE_PLATFORM_STAGING"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fleetum-staging
+  cancel-in-progress: false
+
+env:
+  FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
+  FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
+  FLEETUM_PLATFORM_APPROVED_UI_SHA: ${{ vars.FLEETUM_PLATFORM_APPROVED_UI_SHA }}
+  FLEETUM_PLATFORM_APPROVAL_JSON: ${{ vars.FLEETUM_PLATFORM_APPROVAL_JSON }}
+  E2E_STAGING_RUN_ID: ${{ vars.E2E_STAGING_RUN_ID }}
+  PLATFORM_OPERATION: ${{ inputs.operation }}
+
+jobs:
+  resolve:
+    name: Verify protected Platform and parent sources
+    if: inputs.confirm == 'CHANGE_PLATFORM_STAGING'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    outputs:
+      ui_sha: ${{ steps.sources.outputs.ui_sha }}
+      parent_run_id: ${{ steps.sources.outputs.parent_run_id }}
+      ui_ci_run_id: ${{ steps.sources.outputs.ui_ci_run_id }}
+      control_ci_run_id: ${{ steps.sources.outputs.control_ci_run_id }}
+      prior_run_id: ${{ steps.sources.outputs.prior_run_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.1"
+      - name: Resolve approved sources, successful runs and unique proof artifacts
+        id: sources
+        uses: actions/github-script@v7
+        env:
+          PRIOR_RUN_ID: ${{ inputs.priorPlatformRunId }}
+        with:
+          script: |
+            const { readApproval, contextFromEnv } = await import(`${process.env.GITHUB_WORKSPACE}/ops/platform-release/driver.mjs`);
+            const { resolveRuns } = await import(`${process.env.GITHUB_WORKSPACE}/ops/platform-release/resolve.mjs`);
+            const approval = readApproval();
+            const metadata = await resolveRuns(github, approval, contextFromEnv(), {operation: process.env.PLATFORM_OPERATION, priorRunId: process.env.PRIOR_RUN_ID});
+            const fs = require('node:fs');
+            fs.mkdirSync('proofs', {mode: 0o700});
+            fs.writeFileSync('proofs/approval.json', JSON.stringify(approval), {mode: 0o600});
+            fs.writeFileSync('proofs/run-metadata.json', JSON.stringify(metadata), {mode: 0o600});
+            for (const [key,value] of Object.entries({ui_sha: approval.uiSha, parent_run_id: approval.parentRunId, ui_ci_run_id: approval.uiCiRunId, control_ci_run_id: approval.controlCiRunId, prior_run_id: metadata.priorPlatform ? String(metadata.priorPlatform.run.id) : ''})) core.setOutput(key,value);
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-release-proof-${{ steps.sources.outputs.parent_run_id }}
+          run-id: ${{ steps.sources.outputs.parent_run_id }}
+          github-token: ${{ github.token }}
+          path: proofs/parent
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-source-proof-${{ steps.sources.outputs.ui_ci_run_id }}
+          run-id: ${{ steps.sources.outputs.ui_ci_run_id }}
+          github-token: ${{ github.token }}
+          path: proofs/ui-ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-source-proof-${{ steps.sources.outputs.control_ci_run_id }}
+          run-id: ${{ steps.sources.outputs.control_ci_run_id }}
+          github-token: ${{ github.token }}
+          path: proofs/control-ci
+      - uses: actions/download-artifact@v4
+        if: inputs.operation == 'rollback'
+        with:
+          name: platform-release-proof-${{ steps.sources.outputs.prior_run_id }}
+          run-id: ${{ steps.sources.outputs.prior_run_id }}
+          github-token: ${{ github.token }}
+          path: proofs/prior
+      - name: Verify downloaded proofs without executing UI source
+        run: node ops/platform-release/driver.mjs verify proofs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-inputs-${{ github.run_id }}
+          path: proofs/
+          if-no-files-found: error
+          retention-days: 30
+
+  build-ui:
+    name: Compile approved UI without deployment credentials
+    needs: resolve
+    if: inputs.operation == 'install'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.ui_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.1"
+      - name: Verify checkout and reject real env files
+        env:
+          UI_SHA: ${{ needs.resolve.outputs.ui_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$UI_SHA"
+          test -z "$(find . -maxdepth 2 -name '.env*' ! -name '*.example' ! -path './.git/*' -print)"
+      - name: Install exact dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --include=dev --no-audit --fund=false
+      - name: Compile frontend with explicit public inputs
+        env:
+          NODE_ENV: production
+          VITE_PLATFORM_API_BASE_URL: /platform-api
+        run: npm run build -w frontend
+      - name: Archive compiled data only
+        run: tar -czf ui-dist.tgz -C frontend/dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-compiled-${{ github.run_id }}
+          path: ui-dist.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  prepare-target:
+    name: Verify and publish only the derived frontend
+    needs: [resolve, build-ui]
+    if: always() && needs.resolve.result == 'success' && (inputs.operation == 'rollback' || needs.build-ui.result == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-inputs-${{ github.run_id }}
+          path: proofs
+      - run: node ops/platform-release/driver.mjs verify proofs
+      - uses: actions/download-artifact@v4
+        if: inputs.operation == 'install'
+        with:
+          name: platform-compiled-${{ github.run_id }}
+          path: compiled
+      - name: Extract inert UI data safely
+        if: inputs.operation == 'install'
+        run: python3 ops/platform-release/extract.py compiled/ui-dist.tgz ui-dist
+      - uses: docker/login-action@v3
+        if: inputs.operation == 'install'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build, compare both static roots, then publish digest
+        if: inputs.operation == 'install'
+        run: |
+          node ops/platform-release/driver.mjs build proofs
+          cp overlay-build/prepared-image.json overlay-build/package-manifest.json proofs/
+      - name: Restore the previously verified install manifest for rollback
+        if: inputs.operation == 'rollback'
+        run: cp proofs/prior/prepared-image.json proofs/prior/package-manifest.json proofs/
+      - name: Record the exact planned change before approval
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const a=JSON.parse(fs.readFileSync("proofs/approval.json"));
+            const p=JSON.parse(fs.readFileSync("proofs/prepared-image.json"));
+            const target=process.env.PLATFORM_OPERATION==="rollback"?a.parentFrontend:p.targetImage;
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`Platform source: ${a.uiSha}\nApplication source: ${a.appSha}\nParent: ${a.parentFrontend}\nBackend retained: ${a.backendImage}\nOperation: ${process.env.PLATFORM_OPERATION}\nTarget: ${target}\nManifest: ${p.manifestSha256}\n`);
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-prepared-${{ github.run_id }}
+          path: proofs/
+          if-no-files-found: error
+          retention-days: 30
+
+  apply:
+    name: Apply only the approved staging frontend
+    needs: [resolve, prepare-target]
+    if: always() && needs.resolve.result == 'success' && needs.prepare-target.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-prepared-${{ github.run_id }}
+          path: proofs
+      - name: Apply once, retain backend and verify static/runtime continuity
+        env:
+          FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
+          FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
+          FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}
+          FLEETUM_STAGING_KNOWN_HOSTS: ${{ secrets.FLEETUM_STAGING_KNOWN_HOSTS }}
+          FLEETUM_STAGING_DOCKER_MODE: ${{ vars.FLEETUM_STAGING_DOCKER_MODE || 'direct' }}
+        run: node ops/platform-release/driver.mjs apply proofs
+      - name: Publish completed composite proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-release-proof-${{ github.run_id }}
+          path: |
+            proofs/staging-release.json
+            proofs/prepared-image.json
+            proofs/package-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain attempt evidence without credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-attempt-${{ github.run_id }}
+          path: proofs/runtime-*.json
+          if-no-files-found: ignore
+          retention-days: 14
