@@ -177,7 +177,7 @@ export function attest(sources,reportsDir,outfile) {
   put(outfile,proof);return proof;
 }
 
-if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+async function main() {
   try {
     const {values,positionals}=parseArgs({allowPositionals:true,options:{out:{type:'string'},sources:{type:'string'},role:{type:'string'},reports:{type:'string'},database:{type:'string'}}});
     const mode=positionals[0];assert.ok(values.out,'Output required');let result;
@@ -191,3 +191,6 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     console.log(JSON.stringify({completed:true,mode,controlSha:result.controlSha,readyForDeployment:false}));
   } catch {console.error('Candidate CI step failed. Inspect the sanitized task logs.');process.exitCode=1;}
 }
+// Finish ESM evaluation before loading the backend adapter, which shares the
+// pure helpers above. A top-level awaited import here deadlocks that cycle.
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main();

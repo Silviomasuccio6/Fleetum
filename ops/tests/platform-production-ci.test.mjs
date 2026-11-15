@@ -6,6 +6,7 @@ import os from 'node:os';
 import { tapCount } from '../platform-production/ci.mjs';
 import { databaseConfig } from '../platform-production/database-check.mjs';
 import { validateAudit } from '../platform-production/audit-report.mjs';
+import { spawnSync } from 'node:child_process';
 
 test('TAP must contain actual non-skipped passing tests, not just exit zero',()=>{
  assert.equal(tapCount('# tests 13\n# pass 13\n# fail 0\n# skipped 0\n# cancelled 0\n',13),13);
@@ -29,4 +30,11 @@ test('database inputs cannot select a real host, arbitrary role or non-private c
   const r={...valid};change(r);writeFileSync(file,JSON.stringify(r));assert.throws(()=>databaseConfig(file));
  }
  const link=path.join(root,'link.json');symlinkSync(file,link);assert.throws(()=>databaseConfig(link));
+});
+test('the backend CLI loads its adapter and fails normally on invalid input, without an ESM deadlock',t=>{
+ const root=mkdtempSync(path.join(os.tmpdir(),'fleetum-source-dispatch-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const script=new URL('../platform-production/ci.mjs',import.meta.url);
+ const result=spawnSync(process.execPath,[script.pathname,'backend','--sources',path.join(root,'missing-sources'),'--database',path.join(root,'missing-session'),'--out',path.join(root,'out')],{encoding:'utf8',timeout:10000});
+ assert.equal(result.status,1);assert.doesNotMatch(result.stderr,/unsettled top-level await/);
+ assert.match(result.stderr,/Candidate CI step failed/);
 });
