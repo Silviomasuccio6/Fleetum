@@ -24,7 +24,7 @@ const validationFieldPath: Record<string, string> = {
   companyPhone: "phone"
 };
 
-const withCompanyFiscalRules = <T extends z.ZodTypeAny>(schema: T) =>
+const withCompanyFiscalRules = <T extends z.ZodType<Record<string, string | undefined>>>(schema: T) =>
   schema.superRefine((value, ctx) => {
     const errors = validateCompanyRegistrationDraft({
       country: value.country,

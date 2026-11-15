@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { PlatformAdminController } from "../controllers/platform-admin-controller.js";
-import { requirePlatformAuth } from "../middlewares/platform-auth.js";
+import { requirePlatformAuth, requirePlatformLogoutAuth } from "../middlewares/platform-auth.js";
 import { platformAuthRateLimit } from "../middlewares/platform-auth-rate-limit.js";
 import { asyncHandler } from "./async-handler.js";
 
@@ -8,6 +8,7 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
   const router = Router();
 
   router.post("/auth/login", platformAuthRateLimit, asyncHandler(controller.login));
+  router.post("/auth/logout", requirePlatformLogoutAuth, asyncHandler(controller.logout));
   router.post("/auth/password-reset/request", asyncHandler(controller.requestPasswordReset));
   router.post("/auth/password-reset/verify", asyncHandler(controller.verifyPasswordReset));
   router.post("/auth/password-reset/confirm", asyncHandler(controller.confirmPasswordReset));

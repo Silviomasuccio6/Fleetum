@@ -27,7 +27,7 @@ const optionalTrackingText = (max: number) =>
   z.preprocess(emptyToUndefined, z.string().trim().max(max).transform((value) => value.replace(/[<>\r\n]/g, " ").replace(/\s+/g, " ").trim()).optional());
 
 const analyticsMetadataSchema = z
-  .record(z.union([z.string().trim().max(240), z.number().finite(), z.boolean(), z.null()]))
+  .record(z.string(), z.union([z.string().trim().max(240), z.number().finite(), z.boolean(), z.null()]))
   .optional()
   .refine((value) => !value || Object.keys(value).length <= 20, "Troppi campi metadata analytics")
   .refine((value) => !value || JSON.stringify(value).length <= 2000, "Metadata analytics troppo grande");

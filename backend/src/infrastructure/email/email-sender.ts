@@ -16,6 +16,7 @@ export type SendEmailInput = {
   fromName?: string | null;
   replyTo?: string | null;
   attachments?: EmailAttachment[];
+  idempotencyKey?: string;
 };
 
 const normalizeRecipients = (to: string | string[]) => (Array.isArray(to) ? to : [to]).filter(Boolean);
@@ -48,7 +49,7 @@ const sendWithResend = async (input: SendEmailInput) => {
           }))
         }
       : {})
-  });
+  }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined);
 
   if (error) {
     throw new AppError(error.message || "Invio email Resend fallito", 502, "RESEND_EMAIL_FAILED");

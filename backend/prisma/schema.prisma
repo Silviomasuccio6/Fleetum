@@ -282,6 +282,9 @@ model Tenant {
   consentLogs                   ConsentLog[]
 
   @@index([isActive])
+  rentalBookingCreateRequests   RentalBookingCreateRequest[]
+  bookingContractEmailRequests  BookingContractEmailRequest[]
+  invoiceEmailRequests          InvoiceEmailRequest[]
 }
 
 model TenantSubscription {
@@ -826,6 +829,7 @@ model RentalBooking {
   @@index([tenantId, customerId])
   @@index([tenantId, customerId, pickupAt])
   @@index([vehicleId, pickupAt, returnAt])
+  createRequest        RentalBookingCreateRequest?
 }
 
 model RentalBookingNote {
@@ -1468,6 +1472,7 @@ model BookingContractDelivery {
   @@index([tenantId, bookingId, createdAt])
   @@index([contractId, status, createdAt])
   @@index([tenantId, channel, status, createdAt])
+  emailRequest BookingContractEmailRequest?
 }
 
 model Stoppage {
@@ -1765,6 +1770,10 @@ model EmailQueue {
   updatedAt     DateTime         @updatedAt
 
   @@index([status, nextAttemptAt])
+  processingToken     String?
+  processingStartedAt DateTime?
+  leaseExpiresAt      DateTime?
+  @@index([status, nextAttemptAt, leaseExpiresAt])
 }
 
 model Invoice {
@@ -1857,6 +1866,7 @@ model InvoiceDelivery {
 
   @@index([invoiceId, createdAt])
   @@index([status, createdAt])
+  emailRequest      InvoiceEmailRequest?
 }
 
 model WebsiteEvent {
@@ -1927,4 +1937,53 @@ model DemoLead {
   @@index([status, createdAt])
   @@index([email])
   @@index([createdAt])
+  idempotencyKey      String?        @unique
+  requestHash         String?
+}
+
+
+model RentalBookingCreateRequest {
+  id             String        @id @default(cuid())
+  tenantId       String
+  idempotencyKey String
+  requestHash    String
+  bookingId      String        @unique
+  createdAt      DateTime      @default(now())
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  booking        RentalBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
+}
+
+
+model BookingContractEmailRequest {
+  id             String                  @id @default(cuid())
+  tenantId       String
+  idempotencyKey String
+  requestHash    String
+  deliveryId     String                  @unique
+  queueEmailId   String                  @unique
+  createdAt      DateTime                @default(now())
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  delivery       BookingContractDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
+}
+
+
+model InvoiceEmailRequest {
+  id             String          @id @default(cuid())
+  tenantId       String
+  idempotencyKey String
+  requestHash    String
+  deliveryId     String          @unique
+  queueEmailId   String          @unique
+  createdAt      DateTime        @default(now())
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  delivery       InvoiceDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
 }

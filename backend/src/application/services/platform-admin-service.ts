@@ -358,7 +358,8 @@ export class PlatformAdminService {
         roles: ["PLATFORM_ADMIN"],
         permissions: ["platform:manage"],
         platformAdmin: true,
-        tokenType: "platform"
+        tokenType: "platform",
+        jti: crypto.randomUUID()
       },
       env.PLATFORM_JWT_SECRET,
       { expiresIn: env.PLATFORM_JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"] }

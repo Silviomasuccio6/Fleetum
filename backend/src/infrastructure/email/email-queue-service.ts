@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma/client.js";
 import { emailSender } from "./email-sender.js";
+import { PlatformInvoiceOutboxProcessor } from "./platform-invoice-outbox.js";
 
 export type QueueEmailInput = {
   tenantId?: string;
@@ -16,8 +17,8 @@ export const createRawToken = () => crypto.randomBytes(24).toString("hex");
 export const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
 
 export class EmailQueueService {
-  async enqueue(input: QueueEmailInput) {
-    return prisma.emailQueue.create({
+  async enqueue(input: QueueEmailInput, database: Prisma.TransactionClient | typeof prisma = prisma) {
+    return database.emailQueue.create({
       data: {
         tenantId: input.tenantId,
         type: input.type,
@@ -30,8 +31,10 @@ export class EmailQueueService {
   }
 
   async processPending(now = new Date(), options: { ids?: string[]; take?: number } = {}) {
+    const platformInvoices = await new PlatformInvoiceOutboxProcessor().processPending(now, options);
     const pending = await prisma.emailQueue.findMany({
       where: {
+        type: { not: "SAAS_INVOICE_EMAIL" },
         status: "PENDING",
         nextAttemptAt: { lte: now },
         ...(options.ids?.length ? { id: { in: options.ids } } : {})
@@ -216,6 +219,6 @@ export class EmailQueueService {
       }
     }
 
-    return { processed: pending.length };
+    return { processed: pending.length + platformInvoices.processed };
   }
 }
