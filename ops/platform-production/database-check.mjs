@@ -31,7 +31,10 @@ export async function backend(sources,configFile,directory) {
   run('npm',['run','prisma:generate','-w','backend'],{cwd:root,env,log:path.join(out,'prisma.log')});
   run('npm',['run','lint','-w','backend'],{cwd:root,env,log:path.join(out,'lint.log')});
   run('npm',['run','build','-w','backend'],{cwd:root,env,log:path.join(out,'build.log')});
-  const unit=run('npm',['test','-w','backend'],{cwd:root,env,log:path.join(out,'unit.log')});
+  // The existing storage unit contract uses relative keys prefixed by
+  // UPLOAD_DIR. Keep that contract; only HTTP/database fixtures need an
+  // absolute task-owned upload root.
+  const unit=run('npm',['test','-w','backend'],{cwd:root,env:{...env,UPLOAD_DIR:'uploads'},log:path.join(out,'unit.log')});
   const unitTests=tapCount(unit,182),counts=audit(root,'backend',path.join(out,'audit.json'));
   const {PrismaClient}=createRequire(path.join(root,'package.json'))('@prisma/client');
   const uri=db=>`postgresql://${c.user}:${encodeURIComponent(c.password)}@127.0.0.1:${c.port}/${db}?schema=public`;
