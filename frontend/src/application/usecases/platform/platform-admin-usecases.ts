@@ -582,7 +582,11 @@ export const platformAdminUseCases = {
     });
     const data = await response.json();
     if (!response.ok) throw toPlatformError(response, data, "Invio fattura fallito");
-    return data as { data: PlatformInvoice; replayed?: boolean };
+    const delivery = data.emailDelivery;
+    if (!delivery || typeof delivery.id !== "string" || !delivery.id.trim() || !["SENT", "PENDING"].includes(delivery.status)) {
+      throw toPlatformError(response, { error: "PLATFORM_INVOICE_EMAIL_UNCONFIRMED", message: "Esito invio non confermato. Verifica lo stato della fattura prima di riprovare." }, "Esito invio non confermato");
+    }
+    return data as { data: PlatformInvoice; replayed?: boolean; emailDelivery: { id: string; status: "SENT" | "PENDING" } };
   },
   updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/status`, {
