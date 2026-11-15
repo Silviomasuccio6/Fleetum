@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "kind": "platform-production-candidate",
+  "repository": "Silviomasuccio6/Fleetum",
+  "target": "production",
+  "readyForDeployment": false,
+  "sources": {
+    "backend": {
+      "baseSha": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
+      "sourceSha": "2afaf8f88498cca911fbd07866b922d2e7abf83c",
+      "treeSha": "730c2ddcb1a909b6c62549b84ff0ab9968511257",
+      "patch": "backend.patch",
+      "patchSha256": "3346cca21bf2d56723ae46fd90c2d6b4ca6a795366f95300fda56c31d3f700aa",
+      "changedPaths": [
+        "backend/package.json",
+        "backend/prisma/migrations/20260921150000_final_release_blocker_atomicity/migration.sql",
+        "backend/prisma/schema.prisma",
+        "backend/src/application/services/invoice-service.ts",
+        "backend/src/application/services/platform-admin-service.ts",
+        "backend/src/application/services/platform-session-service.ts",
+        "backend/src/infrastructure/email/email-queue-service.ts",
+        "backend/src/infrastructure/email/email-sender.ts",
+        "backend/src/infrastructure/email/platform-invoice-outbox.ts",
+        "backend/src/interfaces/http/controllers/platform-admin-controller.ts",
+        "backend/src/interfaces/http/middlewares/platform-auth.ts",
+        "backend/src/interfaces/http/routes/platform-admin-routes.ts",
+        "backend/src/interfaces/http/validators/public-validators.ts",
+        "backend/src/interfaces/http/validators/rental-payments-validators.ts",
+        "backend/src/interfaces/http/validators/tenant-profile-validators.ts",
+        "backend/tests/invoice-email-queue-state.test.ts",
+        "backend/tests/platform-email-facade.test.ts",
+        "backend/tests/platform-email-sender-protocol.test.ts",
+        "backend/tests/platform-invoice-outbox.test.ts",
+        "backend/tests/platform-logout-security.test.ts",
+        "backend/tests/security/platform-production-compatibility.test.ts",
+        "docs/platform-production-compatibility-20261115.md",
+        "package-lock.json",
+        "package.json"
+      ]
+    },
+    "satin": {
+      "baseSha": "ed34f81fd9408aab61b76cd76bd791eda82bad3f",
+      "sourceSha": "1f35e6c5a35d84e38ea928a4490cd772cc56473c",
+      "treeSha": "e52fa954c968c707cbc2aa58467b2f3420f3777d",
+      "patch": "satin.patch",
+      "patchSha256": "fb9049beb326c9dbc449b78df3fa5ad4d742ecb2d462e42f8cc46da636c7c22b",
+      "changedPaths": [
+        "frontend/src/application/usecases/platform/platform-admin-usecases.ts",
+        "frontend/src/presentation/pages/platform/platform-admin-page.tsx",
+        "frontend/tests/platform-invoice-email-outcome.test.ts",
+        "frontend/tests/platform-invoice-email.test.ts"
+      ]
+    },
+    "fallback": {
+      "baseSha": "76c1756c8394f9557e611704fee0cfeaf29a7800",
+      "sourceSha": "0583b525fbec4b4cbfe5fb8046f5eeb6692e8671",
+      "treeSha": "4d04baab07c6093bb9d0d8feae3c364af91e4340",
+      "patch": "fallback.patch",
+      "patchSha256": "9dacf25743a1ef37b3414f071ea8a4335f9afc83d2d2b8e343344fa2df8e088f",
+      "changedPaths": [
+        "frontend/src/application/usecases/platform/platform-admin-usecases.ts",
+        "frontend/src/presentation/pages/platform/platform-admin-page.tsx",
+        "frontend/tests/platform-invoice-email-outcome.test.ts"
+      ]
+    }
+  }
+}

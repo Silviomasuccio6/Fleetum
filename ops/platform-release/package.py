@@ -92,7 +92,7 @@ def prepare(build, baseline, output, source=None):
     changed = sorted(rel for rel,sha in original.items() if digest(merged/rel) != sha)
     if any(rel != 'platform.html' for rel in changed):
         raise ValueError('Non-Platform file changed')
-    report={'candidateSource':source,'ciRun':43469744746,'buildProvenance':'Compiled UI closure; source/CI/parent proofs required separately','baseline':str(baseline),'changedExistingFiles':changed,'preservedExistingFiles':len(original)-len(changed),'collisions':[], 'retainedSharedReferences':sorted(retained),'closure':[{'path':rel,'sha256':digest(build/rel),'bytes':(build/rel).stat().st_size} for rel in sorted(closure)],'backendChanged':False,'websiteRootChanged':False,'deployExecuted':False}
+    report={'candidateSource':source,'ciRun':None,'buildProvenance':'Local compiled UI closure only; source/CI/parent proofs required separately','baseline':str(baseline),'changedExistingFiles':changed,'preservedExistingFiles':len(original)-len(changed),'collisions':[], 'retainedSharedReferences':sorted(retained),'closure':[{'path':rel,'sha256':digest(build/rel),'bytes':(build/rel).stat().st_size} for rel in sorted(closure)],'backendChanged':False,'websiteRootChanged':False,'deployExecuted':False}
     (output/'manifest.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
 
