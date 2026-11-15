@@ -1,0 +1,249 @@
+name: Platform Production Candidate CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/platform-production-candidate-ci.yml
+      - ops/platform-production/**
+      - ops/platform-release/production-candidate.mjs
+      - ops/platform-release/production-candidates/**
+      - ops/tests/platform-production-*.test.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/platform-production-candidate-ci.yml
+      - ops/platform-production/**
+      - ops/platform-release/production-candidate.mjs
+      - ops/platform-release/production-candidates/**
+      - ops/tests/platform-production-*.test.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-production-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI_CONTROL_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  sources:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_CONTROL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.1'
+      - name: Reconstruct and export all three exact source trees
+        run: node ops/platform-production/ci.mjs sources --out "$RUNNER_TEMP/platform-sources"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-sources-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-sources/*
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+
+  backend:
+    needs: sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_CONTROL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-candidate-sources-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-sources
+      - name: Start only an isolated synthetic PostgreSQL
+        run: python3 ops/platform-production/ci-database.py start "$RUNNER_TEMP/platform-db.json" "$GITHUB_RUN_ID"
+      - name: Verify actual backend, database atomicity and migration chain
+        run: node ops/platform-production/ci.mjs backend --sources "$RUNNER_TEMP/platform-sources" --database "$RUNNER_TEMP/platform-db.json" --out "$RUNNER_TEMP/platform-backend"
+      - name: Remove the synthetic database and credential
+        if: always()
+        run: python3 ops/platform-production/ci-database.py stop "$RUNNER_TEMP/platform-db.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-report-backend-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-backend/backend.report.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain sanitized test logs only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-backend-logs-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-backend/*.log
+          overwrite: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    needs: sources
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [satin, fallback]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_CONTROL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-candidate-sources-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-sources
+      - name: Compile and test this exact frontend source
+        env:
+          CANDIDATE_ROLE: ${{ matrix.role }}
+        run: node ops/platform-production/ci.mjs frontend --sources "$RUNNER_TEMP/platform-sources" --role "$CANDIDATE_ROLE" --out "$RUNNER_TEMP/platform-frontend"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-report-${{ matrix.role }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-frontend/${{ matrix.role }}.report.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-compiled-${{ matrix.role }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-frontend/${{ matrix.role }}.compiled.tar.gz
+          overwrite: true
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain test and build logs only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-${{ matrix.role }}-logs-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-frontend/*.log
+          overwrite: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  image:
+    needs: [sources, backend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_CONTROL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.1'
+      - uses: docker/setup-buildx-action@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-candidate-sources-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-sources
+      - name: Build and smoke test Linux AMD64 without publishing
+        run: node ops/platform-production/ci.mjs image --sources "$RUNNER_TEMP/platform-sources" --out "$RUNNER_TEMP/platform-image"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-report-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-image/image.report.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-backend-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-image/backend.image.tar
+          overwrite: true
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain image build and vulnerability logs only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-image-logs-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-image/*.log
+          overwrite: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  security:
+    needs: sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_CONTROL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-candidate-sources-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-sources
+      - name: Scan actual backend and both frontend sources
+        run: node ops/platform-production/ci.mjs security --sources "$RUNNER_TEMP/platform-sources" --out "$RUNNER_TEMP/platform-security"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-report-security-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-security/security.report.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+
+  candidate-proof:
+    needs: [sources, backend, frontend, image, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CI_CONTROL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-candidate-sources-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-sources
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: platform-candidate-report-*-${{ github.run_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/platform-reports
+      - name: Bind all successful jobs, source trees and compiled payloads
+        env:
+          CANDIDATE_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: node ops/platform-production/ci.mjs attest --sources "$RUNNER_TEMP/platform-sources" --reports "$RUNNER_TEMP/platform-reports" --out "$RUNNER_TEMP/platform-candidate-proof.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-candidate-proof-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-candidate-proof.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
