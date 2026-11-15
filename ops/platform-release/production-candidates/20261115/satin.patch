@@ -2,27 +2,18 @@ diff --git a/frontend/src/application/usecases/platform/platform-admin-usecases.
 index 00c496e..ac190f7 100644
 --- a/frontend/src/application/usecases/platform/platform-admin-usecases.ts
 +++ b/frontend/src/application/usecases/platform/platform-admin-usecases.ts
-@@ -565,7 +565,11 @@ export const platformAdminUseCases = {
-     });
-     const data = await response.json();
-     if (!response.ok) throw toPlatformError(response, data, "Invio fattura fallito");
+@@ -568 +568,5 @@ export const platformAdminUseCases = {
 -    return data as { data: PlatformInvoice; replayed?: boolean };
 +    const delivery = data.emailDelivery;
 +    if (!delivery || typeof delivery.id !== "string" || !delivery.id.trim() || !["SENT", "PENDING"].includes(delivery.status)) {
 +      throw toPlatformError(response, { error: "PLATFORM_INVOICE_EMAIL_UNCONFIRMED", message: "Esito invio non confermato. Verifica lo stato della fattura prima di riprovare." }, "Esito invio non confermato");
 +    }
 +    return data as { data: PlatformInvoice; replayed?: boolean; emailDelivery: { id: string; status: "SENT" | "PENDING" } };
-   },
-   updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
-     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/status`, {
 diff --git a/frontend/src/presentation/pages/platform/platform-admin-page.tsx b/frontend/src/presentation/pages/platform/platform-admin-page.tsx
 index 1384923..c804456 100644
 --- a/frontend/src/presentation/pages/platform/platform-admin-page.tsx
 +++ b/frontend/src/presentation/pages/platform/platform-admin-page.tsx
-@@ -786,8 +786,12 @@ export const PlatformAdminPage = () => {
-         const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
-         invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
-         const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
+@@ -789,2 +789,6 @@ export const PlatformAdminPage = () => {
 -        invoiceEmailRequestKeys.current.delete(invoice.id);
 -        snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
 +        if (result.emailDelivery.status === "SENT") {
@@ -31,9 +22,6 @@ index 1384923..c804456 100644
 +        } else {
 +          snackbar.info(`Invio della fattura ${result.data.invoiceNumber} in elaborazione`);
 +        }
-         setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
-       } catch (err) {
-         if (handlePlatformAuthError(err)) return;
 diff --git a/frontend/tests/platform-invoice-email-outcome.test.ts b/frontend/tests/platform-invoice-email-outcome.test.ts
 new file mode 100644
 index 0000000..c6996a7
@@ -85,12 +73,6 @@ diff --git a/frontend/tests/platform-invoice-email.test.ts b/frontend/tests/plat
 index 86ed37d..3bd0beb 100644
 --- a/frontend/tests/platform-invoice-email.test.ts
 +++ b/frontend/tests/platform-invoice-email.test.ts
-@@ -36,7 +36,7 @@ const actualSendInvoice = () => {
- };
- 
- const keyFrom = (init?: RequestInit) => (init?.headers as Record<string, string>)["X-Idempotency-Key"];
+@@ -39 +39 @@ const keyFrom = (init?: RequestInit) => (init?.headers as Record<string, string>
 -const success = () => Response.json({ data: { id: "synthetic-invoice", invoiceNumber: "QA-001" } });
 +const success = () => Response.json({ data: { id: "synthetic-invoice", invoiceNumber: "QA-001" }, emailDelivery: { id: "synthetic-delivery", status: "SENT" } });
- 
- test("invoice retry keeps the same request key until acknowledged; a later intentional send uses a new key", async () => {
-   platformAuthStorage.set("synthetic-platform-bearer");

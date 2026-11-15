@@ -80,8 +80,8 @@ export function reconstructSource(repositoryRoot, source, patchFile) {
   try {
     const env = { ...process.env, GIT_INDEX_FILE: path.join(temporary, 'index') };
     git(['read-tree', source.baseSha], { env });
-    git(['apply', '--cached', '--binary', '--check', '-'], { env, input: bytes });
-    git(['apply', '--cached', '--binary', '-'], { env, input: bytes });
+    git(['apply', '--cached', '--binary', '--unidiff-zero', '--check', '-'], { env, input: bytes });
+    git(['apply', '--cached', '--binary', '--unidiff-zero', '-'], { env, input: bytes });
     const treeSha = git(['write-tree'], { env });
     assert.equal(treeSha, source.treeSha, 'Reconstructed tree mismatch');
     const changes = git(['diff', '--no-renames', '--name-status', source.baseSha, treeSha]).split('\n');

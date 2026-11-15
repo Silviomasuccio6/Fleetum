@@ -2,44 +2,29 @@ diff --git a/frontend/src/application/usecases/platform/platform-admin-usecases.
 index 7b03f16..19477e0 100644
 --- a/frontend/src/application/usecases/platform/platform-admin-usecases.ts
 +++ b/frontend/src/application/usecases/platform/platform-admin-usecases.ts
-@@ -582,7 +582,11 @@ export const platformAdminUseCases = {
-     });
-     const data = await response.json();
-     if (!response.ok) throw toPlatformError(response, data, "Invio fattura fallito");
+@@ -585 +585,5 @@ export const platformAdminUseCases = {
 -    return data as { data: PlatformInvoice; replayed?: boolean };
 +    const delivery = data.emailDelivery;
 +    if (!delivery || typeof delivery.id !== "string" || !delivery.id.trim() || !["SENT", "PENDING"].includes(delivery.status)) {
 +      throw toPlatformError(response, { error: "PLATFORM_INVOICE_EMAIL_UNCONFIRMED", message: "Esito invio non confermato. Verifica lo stato della fattura prima di riprovare." }, "Esito invio non confermato");
 +    }
 +    return data as { data: PlatformInvoice; replayed?: boolean; emailDelivery: { id: string; status: "SENT" | "PENDING" } };
-   },
-   updateInvoiceStatus: async (invoiceId: string, status: PlatformInvoice["status"]) => {
-     const response = await platformFetch(`${apiBase}/invoices/${invoiceId}/status`, {
 diff --git a/frontend/src/presentation/pages/platform/platform-admin-page.tsx b/frontend/src/presentation/pages/platform/platform-admin-page.tsx
 index e0eafcf..1a677fa 100644
 --- a/frontend/src/presentation/pages/platform/platform-admin-page.tsx
 +++ b/frontend/src/presentation/pages/platform/platform-admin-page.tsx
-@@ -363,6 +363,7 @@ export const PlatformAdminPage = () => {
-   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({});
-   const [invoiceLoading, setInvoiceLoading] = useState<Record<string, boolean>>({});
-   const invoiceEmailRequestKeys = useRef(new Map<string, string>());
+@@ -365,0 +366 @@ export const PlatformAdminPage = () => {
 +  const invoiceSendLocks = useRef(new Set<string>());
-   const [rowFeedback, setRowFeedback] = useState<Record<string, { type: "success" | "error" | "loading"; message: string }>>({});
-   const [rowActionDrafts, setRowActionDrafts] = useState<Record<string, RowActionSelection>>({});
-   const [planDrafts, setPlanDrafts] = useState<Record<string, PlanTier>>({});
-@@ -775,19 +776,26 @@ export const PlatformAdminPage = () => {
-   };
- 
-   const sendInvoice = async (invoice: PlatformInvoice) => {
+@@ -777,0 +779,2 @@ export const PlatformAdminPage = () => {
 +    if (invoiceSendLocks.current.has(invoice.id)) return;
 +    invoiceSendLocks.current.add(invoice.id);
-     setInvoiceLoading((old) => ({ ...old, [invoice.id]: true }));
+@@ -779,2 +781,0 @@ export const PlatformAdminPage = () => {
 -    const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
 -    invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
-     try {
+@@ -781,0 +783,2 @@ export const PlatformAdminPage = () => {
 +      const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
 +      invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
-       const result = await platformAdminUseCases.sendInvoiceEmail(invoice.id, idempotencyKey);
+@@ -783,2 +786,6 @@ export const PlatformAdminPage = () => {
 -      invoiceEmailRequestKeys.current.delete(invoice.id);
 -      snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
 +      if (result.emailDelivery.status === "SENT") {
@@ -48,16 +33,8 @@ index e0eafcf..1a677fa 100644
 +      } else {
 +        snackbar.info(`Invio della fattura ${result.data.invoiceNumber} in elaborazione`);
 +      }
-       setInvoices((old) => old.map((item) => (item.id === invoice.id ? result.data : item)));
-     } catch (err) {
-       if (handlePlatformAuthError(err)) return;
-       snackbar.error((err as Error).message);
-       void load({ silent: true });
-     } finally {
+@@ -790,0 +798 @@ export const PlatformAdminPage = () => {
 +      invoiceSendLocks.current.delete(invoice.id);
-       setInvoiceLoading((old) => ({ ...old, [invoice.id]: false }));
-     }
-   };
 diff --git a/frontend/tests/platform-invoice-email-outcome.test.ts b/frontend/tests/platform-invoice-email-outcome.test.ts
 new file mode 100644
 index 0000000..c6996a7
