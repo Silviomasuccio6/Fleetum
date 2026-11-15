@@ -27,6 +27,8 @@ The approval JSON has exactly these fields: `schemaVersion:1`, `repository`, `ap
 
 Do not commit a live approval or runtime inventory. Configure it only in a separately authorized execution block after fresh comparison; fixtures in tests are synthetic. Historical parent control/run remain in the tuple even when current controls advance.
 
+Environment-level variables are read only in steps after the protected `staging` environment is available, never in workflow-global `env`. GitHub documents this timing in its [configuration variable reference](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#configuration-variable-precedence). Resolution passes only the validated public tuple through job outputs to the publisher, which has no staging environment or SSH access. Installation reads the current protected variables again and compares them with the downloaded approval, rejecting changes between the two approvals.
+
 ## Workflow
 
 1. **Resolve**: verify the protected tuple, successful parent deploy, exact UI/control CI runs and one unexpired artifact for each proof. Download and verify the artifacts before any source execution. Fetch only the fixed public compose/Caddy source files from the approved application commit, storing their hashes for the server guard. No credentials are needed here.

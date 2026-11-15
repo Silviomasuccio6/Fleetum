@@ -25,11 +25,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
-  FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
-  FLEETUM_PLATFORM_APPROVED_UI_SHA: ${{ vars.FLEETUM_PLATFORM_APPROVED_UI_SHA }}
-  FLEETUM_PLATFORM_APPROVAL_JSON: ${{ vars.FLEETUM_PLATFORM_APPROVAL_JSON }}
-  E2E_STAGING_RUN_ID: ${{ vars.E2E_STAGING_RUN_ID }}
   PLATFORM_OPERATION: ${{ inputs.operation }}
 
 jobs:
@@ -40,6 +35,9 @@ jobs:
     timeout-minutes: 10
     environment: staging
     outputs:
+      control_sha: ${{ steps.sources.outputs.control_sha }}
+      app_sha: ${{ steps.sources.outputs.app_sha }}
+      approval_json: ${{ steps.sources.outputs.approval_json }}
       ui_sha: ${{ steps.sources.outputs.ui_sha }}
       parent_run_id: ${{ steps.sources.outputs.parent_run_id }}
       ui_ci_run_id: ${{ steps.sources.outputs.ui_ci_run_id }}
@@ -57,6 +55,11 @@ jobs:
         id: sources
         uses: actions/github-script@v7
         env:
+          FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
+          FLEETUM_PLATFORM_APPROVED_UI_SHA: ${{ vars.FLEETUM_PLATFORM_APPROVED_UI_SHA }}
+          FLEETUM_PLATFORM_APPROVAL_JSON: ${{ vars.FLEETUM_PLATFORM_APPROVAL_JSON }}
+          E2E_STAGING_RUN_ID: ${{ vars.E2E_STAGING_RUN_ID }}
           PRIOR_RUN_ID: ${{ inputs.priorPlatformRunId }}
         with:
           script: |
@@ -68,7 +71,7 @@ jobs:
             fs.mkdirSync('proofs', {mode: 0o700});
             fs.writeFileSync('proofs/approval.json', JSON.stringify(approval), {mode: 0o600});
             fs.writeFileSync('proofs/run-metadata.json', JSON.stringify(metadata), {mode: 0o600});
-            for (const [key,value] of Object.entries({ui_sha: approval.uiSha, parent_run_id: approval.parentRunId, ui_ci_run_id: approval.uiCiRunId, control_ci_run_id: approval.controlCiRunId, prior_run_id: metadata.priorPlatform ? String(metadata.priorPlatform.run.id) : ''})) core.setOutput(key,value);
+            for (const [key,value] of Object.entries({control_sha: approval.controlSha, app_sha: approval.appSha, approval_json: JSON.stringify(approval), ui_sha: approval.uiSha, parent_run_id: approval.parentRunId, ui_ci_run_id: approval.uiCiRunId, control_ci_run_id: approval.controlCiRunId, prior_run_id: metadata.priorPlatform ? String(metadata.priorPlatform.run.id) : ''})) core.setOutput(key,value);
       - uses: actions/download-artifact@v4
         with:
           name: staging-release-proof-${{ steps.sources.outputs.parent_run_id }}
@@ -95,6 +98,12 @@ jobs:
           github-token: ${{ github.token }}
           path: proofs/prior
       - name: Verify downloaded proofs without executing UI source
+        env:
+          FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ steps.sources.outputs.control_sha }}
+          FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ steps.sources.outputs.app_sha }}
+          FLEETUM_PLATFORM_APPROVED_UI_SHA: ${{ steps.sources.outputs.ui_sha }}
+          FLEETUM_PLATFORM_APPROVAL_JSON: ${{ steps.sources.outputs.approval_json }}
+          E2E_STAGING_RUN_ID: ${{ steps.sources.outputs.parent_run_id }}
         run: node ops/platform-release/driver.mjs verify proofs
       - uses: actions/upload-artifact@v4
         with:
@@ -150,6 +159,14 @@ jobs:
       contents: read
       actions: read
       packages: write
+    # Public identities validated after the first protected approval. This job
+    # has no staging environment, SSH credentials or direct environment vars.
+    env:
+      FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ needs.resolve.outputs.control_sha }}
+      FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ needs.resolve.outputs.app_sha }}
+      FLEETUM_PLATFORM_APPROVED_UI_SHA: ${{ needs.resolve.outputs.ui_sha }}
+      FLEETUM_PLATFORM_APPROVAL_JSON: ${{ needs.resolve.outputs.approval_json }}
+      E2E_STAGING_RUN_ID: ${{ needs.resolve.outputs.parent_run_id }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -222,6 +239,11 @@ jobs:
           path: proofs
       - name: Apply once, retain backend and verify static/runtime continuity
         env:
+          FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA: ${{ vars.FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA }}
+          FLEETUM_STAGING_APPROVED_RELEASE_SHA: ${{ vars.FLEETUM_STAGING_APPROVED_RELEASE_SHA }}
+          FLEETUM_PLATFORM_APPROVED_UI_SHA: ${{ vars.FLEETUM_PLATFORM_APPROVED_UI_SHA }}
+          FLEETUM_PLATFORM_APPROVAL_JSON: ${{ vars.FLEETUM_PLATFORM_APPROVAL_JSON }}
+          E2E_STAGING_RUN_ID: ${{ vars.E2E_STAGING_RUN_ID }}
           FLEETUM_STAGING_SSH_KEY: ${{ secrets.FLEETUM_STAGING_SSH_KEY }}
           FLEETUM_STAGING_HOST: ${{ secrets.FLEETUM_STAGING_HOST }}
           FLEETUM_STAGING_USER: ${{ secrets.FLEETUM_STAGING_USER }}

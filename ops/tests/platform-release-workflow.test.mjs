@@ -6,6 +6,43 @@ const require=createRequire(import.meta.url);
 const yaml=require('js-yaml');
 const source=readFileSync(new URL('../../.github/workflows/deploy-platform-staging.yml',import.meta.url),'utf8');
 const workflow=yaml.load(source);
+const bindingOutputs={FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA:'control_sha',FLEETUM_STAGING_APPROVED_RELEASE_SHA:'app_sha',FLEETUM_PLATFORM_APPROVED_UI_SHA:'ui_sha',FLEETUM_PLATFORM_APPROVAL_JSON:'approval_json',E2E_STAGING_RUN_ID:'parent_run_id'};
+test('protected environment bindings are read in approved steps and never inherited before environment resolution',()=>{
+ assert.deepEqual(workflow.env,{PLATFORM_OPERATION:'${{ inputs.operation }}'});
+ const resolve=workflow.jobs.resolve;
+ const sources=resolve.steps.find(s=>s.id==='sources');
+ const verify=resolve.steps.find(s=>s.run==='node ops/platform-release/driver.mjs verify proofs');
+ const apply=workflow.jobs.apply.steps.find(s=>s.name?.startsWith('Apply once'));
+ for(const [name,output] of Object.entries(bindingOutputs)){
+  assert.equal(sources.env[name],`\${{ vars.${name} }}`);
+  assert.equal(apply.env[name],`\${{ vars.${name} }}`);
+  assert.equal(verify.env[name],`\${{ steps.sources.outputs.${output} }}`);
+  assert.equal(resolve.outputs[output],`\${{ steps.sources.outputs.${output} }}`);
+ }
+ assert.equal(workflow.jobs['prepare-target'].environment,undefined);
+ assert.doesNotMatch(JSON.stringify(workflow.jobs['prepare-target']),/vars\.|secrets\./);
+ assert.doesNotMatch(JSON.stringify(workflow.jobs['build-ui']),/FLEETUM_PLATFORM_APPROVAL_JSON|FLEETUM_STAGING_/);
+ assert.match(sources.with.script,/approval_json: JSON.stringify\(approval\)/);
+ assert.match(sources.with.script,/control_sha: approval.controlSha/);
+ assert.match(sources.with.script,/app_sha: approval.appSha/);
+});
+test('publisher receives a complete validated tuple without access to staging variables and still rejects stale bindings',async()=>{
+ const {fixture}=await import('./helpers/platform-release-fixture.mjs');
+ const {readApproval}=await import('../platform-release/driver.mjs');
+ const {approval:a}=fixture();
+ const outputs={control_sha:a.controlSha,app_sha:a.appSha,ui_sha:a.uiSha,approval_json:JSON.stringify(a),parent_run_id:a.parentRunId};
+ const env={GITHUB_REPOSITORY:a.repository,GITHUB_WORKFLOW_SHA:a.controlSha,GITHUB_RUN_ATTEMPT:'1',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'Deploy Platform Staging',GITHUB_RUN_ID:'21'};
+ for(const [name,output] of Object.entries(bindingOutputs)){
+  assert.equal(workflow.jobs['prepare-target'].env?.[name],`\${{ needs.resolve.outputs.${output} }}`);
+  env[name]=outputs[output];
+ }
+ assert.deepEqual(readApproval(env,()=>a.controlSha),a);
+ assert.throws(()=>readApproval({...env,FLEETUM_PLATFORM_APPROVED_UI_SHA:''},()=>a.controlSha));
+ assert.throws(()=>readApproval({...env,FLEETUM_STAGING_APPROVED_RELEASE_SHA:'0'.repeat(40)},()=>a.controlSha));
+ // The install step reads current protected values again, so a changed approval
+ // cannot be silently replaced by the publisher's earlier resolved outputs.
+ assert.notEqual(workflow.jobs.apply.steps.find(s=>s.name?.startsWith('Apply once')).env.FLEETUM_PLATFORM_APPROVAL_JSON,workflow.jobs['prepare-target'].env.FLEETUM_PLATFORM_APPROVAL_JSON);
+});
 test('Platform workflow is dispatch-only, serializes with staging and protects both approval boundaries',()=>{
  assert.deepEqual(Object.keys(workflow.on),['workflow_dispatch']);assert.equal(workflow.concurrency.group,'fleetum-staging');assert.equal(workflow.concurrency['cancel-in-progress'],false);
  assert.equal(workflow.jobs.resolve.environment,'staging');assert.equal(workflow.jobs.apply.environment,'staging');
