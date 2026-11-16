@@ -21,6 +21,8 @@ import urllib.request
 HERE=Path(__file__).parent
 spec=importlib.util.spec_from_file_location('host_preflight',HERE/'host_preflight.py')
 preflight=importlib.util.module_from_spec(spec);spec.loader.exec_module(preflight)
+spec=importlib.util.spec_from_file_location('image_identity',HERE/'image_identity.py')
+identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
 need=preflight.need
 UPLOAD_POLICY={'action':'grant-backend-group-write','path':'/opt/fleetum/uploads','expectedOwnerUid':1001,'expectedGroupGid':1001,
     'expectedMode':0o755,'targetGroupGid':1000,'targetMode':0o775,'ownerPreserved':True,'onlyIfEmpty':True,'recursive':False,
@@ -132,6 +134,9 @@ class Runtime(preflight.Runtime):
             env={**os.environ,**public})
     def pull(self):
         for value in [self.r['prepared']['backendImage'],self.r['prepared']['variants']['satin']['image'],self.r['prepared']['variants']['fallback']['image']]:self.docker('pull',value)
+        # Verify the manifest-to-tested-config bridge before any lifecycle step;
+        # keep it for the post-start check rather than adding a network dependency.
+        self.backend_registry=identity.verify_published_backend(self.docker,self.r['prepared'],self.r['backendTreeSha'])
     def stop_backend(self):
         self.docker('stop','--time','45','fleetum_backend')
         need(self.snapshot()['fleetum_backend']['running'] is False,'Old invoice consumer did not stop')
@@ -153,8 +158,7 @@ class Runtime(preflight.Runtime):
         target=self.r['prepared']['backendImage'] if role=='backend' else self.r['prepared']['variants']['satin']['image']
         need(value['image']==target,'Unexpected installed image')
         if role=='backend':
-            actual=self.docker('inspect','--format','{{.Image}}',name).strip()
-            need(actual==self.r['prepared']['backendImageId'],'Installed backend differs from tested CI image')
+            identity.verify_backend(self.docker,self.r['prepared'],self.r['backendTreeSha'],self.backend_registry)
     def tree(self,root):
         need(root in ['/srv/fleetum','/srv/fleetum-website'],'Static root allowlist')
         raw=self.docker('exec','fleetum_caddy','sh','-c',"test ! -L /srv && test ! -L "+root+" && find "+root+" -xdev -exec stat -c '%F|%s|%n' {} +")

@@ -8,6 +8,7 @@ on:
       - .github/workflows/platform-production-candidate-ci.yml
       - .github/workflows/prepare-platform-production.yml
       - .github/workflows/install-platform-production.yml
+      - .github/workflows/complete-platform-production-frontend.yml
       - ops/platform-production/**
       - ops/platform-release/production-candidate.mjs
       - ops/platform-release/production-candidates/**
@@ -18,6 +19,7 @@ on:
       - .github/workflows/platform-production-candidate-ci.yml
       - .github/workflows/prepare-platform-production.yml
       - .github/workflows/install-platform-production.yml
+      - .github/workflows/complete-platform-production-frontend.yml
       - ops/platform-production/**
       - ops/platform-release/production-candidate.mjs
       - ops/platform-release/production-candidates/**

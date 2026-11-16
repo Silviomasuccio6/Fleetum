@@ -62,7 +62,7 @@ export async function resolveInstallation(github,env,directory){
  const name='20260921150000_final_release_blocker_atomicity';
  const sql=execFileSync('git',['show',descriptor.sources.backend.sourceSha+':backend/prisma/migrations/'+name+'/migration.sql'],{cwd:REPO});
  const install={schemaVersion:1,kind:'platform-production-install-request',confirm:context.confirm,runId:context.runId,
-  approval,profile:request.profile,backup:request.backup,backupRequest:request.backupRequest,prepared,expectedPatchMigration:{[name]:digest(sql)}};
+  approval,profile:request.profile,backup:request.backup,backupRequest:request.backupRequest,prepared,backendTreeSha:read(path.join(out,'platform-candidate-proof.json')).sourceProof.sources.backend.treeSha,expectedPatchMigration:{[name]:digest(sql)}};
  // The same host validation runs before an SSH credential is opened.
  const tested=spawnSync('python3',['-B','-c','import importlib.util,json,sys; s=importlib.util.spec_from_file_location("host_install",sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.validate(json.load(sys.stdin))',path.join(HERE,'host_install.py')],{input:JSON.stringify(install),encoding:'utf8'});
  assert.equal(tested.status,0,'Host transaction input did not pass pure validation');
@@ -74,7 +74,7 @@ need=lambda x: x or (_ for _ in ()).throw(ValueError('Trusted transfer rejected'
 need(os.geteuid()==0)
 raw=sys.stdin.buffer.read(2*1024*1024+1);need(len(raw)<=2*1024*1024)
 r=json.loads(raw);run=str(r['request']['runId']);need(re.fullmatch('[1-9][0-9]*',run))
-need(set(r['files'])=={'host_install.py','host_preflight.py'})
+need(set(r['files'])=={'host_install.py','host_preflight.py','image_identity.py'})
 base=pathlib.Path('/opt/fleetum/platform-production-code');need(not any(p.is_symlink() for p in (base,*base.parents)))
 base.mkdir(mode=0o700,exist_ok=True);need(base.stat().st_uid==0 and base.stat().st_mode&0o077==0)
 out=base/run;out.mkdir(mode=0o700)
@@ -94,7 +94,7 @@ export function executeInstallation(request,env=process.env,execute=spawnSync){
  try{
   const key=path.join(folder,'key'),known=path.join(folder,'known_hosts');
   writeFileSync(key,env.FLEETUM_PLATFORM_PRODUCTION_SSH_KEY.trim()+'\n',{mode:0o600});writeFileSync(known,env.FLEETUM_PLATFORM_PRODUCTION_KNOWN_HOSTS.trim()+'\n',{mode:0o600});
-  const files=Object.fromEntries(['host_install.py','host_preflight.py'].map(name=>{const text=readFileSync(path.join(HERE,name),'utf8');return [name,{text,sha256:digest(text)}];}));
+  const files=Object.fromEntries(['host_install.py','host_preflight.py','image_identity.py'].map(name=>{const text=readFileSync(path.join(HERE,name),'utf8');return [name,{text,sha256:digest(text)}];}));
   const result=execute('ssh',['-F','/dev/null','-o','GlobalKnownHostsFile=/dev/null','-o','UserKnownHostsFile='+known,'-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','IdentitiesOnly=yes','-o','ConnectTimeout=20','-i',key,
    env.FLEETUM_PLATFORM_PRODUCTION_USER+'@'+env.FLEETUM_PLATFORM_PRODUCTION_HOST,'sudo -n python3 -I -B -c '+"'"+LOADER.replaceAll("'","'\\''")+"'"],
    {input:JSON.stringify({files,request}),encoding:'utf8',env:{PATH:env.PATH,HOME:env.HOME},timeout:960000,maxBuffer:1024*1024});
