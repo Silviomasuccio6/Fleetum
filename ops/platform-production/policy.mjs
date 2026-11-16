@@ -8,7 +8,6 @@ export const JOBS = ['sources','backend','frontend','image','security'];
 export const ROLES = ['backend','satin','fallback'];
 export const PLATFORM_API = 'https://platform.fleetum.it/platform-api';
 export const CI_PATH = '.github/workflows/platform-production-candidate-ci.yml';
-export const RELEASE_PATH = '.github/workflows/deploy-platform-production.yml';
 export const positiveId = n => /^[1-9][0-9]*$/.test(String(n)) && Number.isSafeInteger(Number(n));
 const immutable = role => new RegExp(`^ghcr\\.io/silviomasuccio6/fleetum-${role}@sha256:[0-9a-f]{64}$`);
 const object = x => x && typeof x==='object' && !Array.isArray(x);
@@ -34,6 +33,7 @@ export function candidateProof({source,reports,needs,context:c}) {
   assert.ok(HASH.test(source.manifestSha256));
   assert.deepEqual(Object.keys(source.sources).sort(),[...ROLES].sort());
   assert.deepEqual(Object.keys(needs).sort(),[...JOBS].sort());
+  assert.deepEqual(Object.keys(reports).sort(),[...ROLES,'image','security'].sort());
   for (const job of JOBS) assert.equal(needs[job]?.result,'success',`${job} did not succeed`);
   for (const role of ROLES) {
     const s=source.sources[role],r=reports[role];
@@ -44,6 +44,7 @@ export function candidateProof({source,reports,needs,context:c}) {
     if (role==='backend') {
       assert.ok(Number.isSafeInteger(r.unitTests) && r.unitTests>=182);
       assert.ok(Number.isSafeInteger(r.databaseTests) && r.databaseTests>=13);
+      assert.match(r.postgresVersion??'',/^16\.[0-9]+/,'Recorded PostgreSQL 16 runtime required');
       const chain=r.migrationChain;
       assert.ok(chain?.baseline===42 && chain.patched===43 && chain.future===48 && chain.preserved===true && chain.canonical===true,'Complete migration trial required');
     } else {
@@ -54,7 +55,7 @@ export function candidateProof({source,reports,needs,context:c}) {
   checkReport(reports.image,source.sources.backend,c,source.manifestSha256,'image');
   assert.equal(reports.image.platform,'linux/amd64'); assert.equal(reports.image.smokePassed,true);
   assert.ok(/^sha256:[0-9a-f]{64}$/.test(reports.image.imageId) && HASH.test(reports.image.dockerfileSha256));
-  assert.match(reports.image.scanner?.image??'',/^aquasec\/trivy@sha256:[0-9a-f]{64}$/);
+  assert.match(reports.image.scanner?.image??'',/^(?:docker\.io\/)?aquasec\/trivy@sha256:[0-9a-f]{64}$/);
   assert.equal(reports.image.scanner.high,0);assert.equal(reports.image.scanner.critical,0);
   const security=reports.security;
   assert.ok(security?.schemaVersion===1&&security.role==='security'&&security.passed===true);
@@ -62,8 +63,8 @@ export function candidateProof({source,reports,needs,context:c}) {
   assert.equal(security.manifestSha256,source.manifestSha256);
   for(const role of ROLES)assert.equal(security.sources[role],source.sources[role].sourceSha);
   assert.match(security.tools?.gitleaks??'',/^ghcr\.io\/gitleaks\/gitleaks@sha256:[0-9a-f]{64}$/);
-  assert.match(security.tools?.semgrep??'',/^semgrep\/semgrep@sha256:[0-9a-f]{64}$/);
-  assert.ok(['push','pull_request'].includes(c.event));
+  assert.match(security.tools?.semgrep??'',/^(?:docker\.io\/)?semgrep\/semgrep@sha256:[0-9a-f]{64}$/);
+  assert.ok(['push','pull_request','workflow_dispatch'].includes(c.event));
   return {schemaVersion:1,kind:'platform-production-candidate-ci',recipeVersion:1,repository:c.repository,
     controlSha:c.controlSha,runId:String(c.runId),event:c.event,branch:c.branch,
     workflowPath:CI_PATH,sourceProof:source,reports,jobResults:needs,readyForDeployment:false};
@@ -97,8 +98,8 @@ export function verifyProductionApproval(a,c) {
 export function verifyPreparedRelease({approval:a,candidate:p,context:c,run,control,controlRun,manifestSha256,descriptor}) {
   verifyProductionApproval(a,c);
   verifyCandidateProof(p,{repository:c.repository,controlSha:c.controlSha,runId:a.candidateCiRunId});
-  assert.equal(p.event,'push'); assert.equal(p.branch,'main');
-  assert.ok(run?.status==='completed' && run.conclusion==='success' && run.event==='push' && run.head_branch==='main');
+  assert.ok(['push','workflow_dispatch'].includes(p.event)); assert.equal(p.event,run?.event);assert.equal(p.branch,'main');
+  assert.ok(run?.status==='completed' && run.conclusion==='success' && ['push','workflow_dispatch'].includes(run.event) && run.head_branch==='main');
   assert.equal(run.head_sha,c.controlSha); assert.equal(String(run.id),a.candidateCiRunId); assert.equal(run.path,CI_PATH);
   assert.equal(run.repository?.full_name,c.repository); assert.equal(run.head_repository?.full_name,c.repository);
   assert.equal(manifestSha256,a.manifestSha256); assert.equal(p.sourceProof.manifestSha256,a.manifestSha256);
@@ -107,4 +108,32 @@ export function verifyPreparedRelease({approval:a,candidate:p,context:c,run,cont
   assert.ok(verifyProductionCIRun(controlRun,{repository:c.repository,sourceSha:c.controlSha}).ok);
   assert.equal(String(controlRun.id),a.controlCiRunId);
   return true;
+}
+
+const PREPARE_KEYS=['schemaVersion','kind','repository','controlSha','manifestSha256','candidateCiRunId','controlCiRunId','parentBackend','parentFrontend','profileSha256','approvedUntil'];
+export function verifyImagePreparationApproval(a,c) {
+  checkContext(c);assert.ok(object(a));assert.deepEqual(Object.keys(a).sort(),[...PREPARE_KEYS].sort());
+  assert.equal(a.schemaVersion,1);assert.equal(a.kind,'platform-production-image-approval');assert.equal(a.repository,c.repository);
+  assert.equal(c.event,'workflow_dispatch');assert.equal(c.ref,'refs/heads/main');assert.equal(c.attempt,'1');
+  assert.equal(c.confirm,'PREPARE_PLATFORM_PRODUCTION');
+  assert.equal(a.controlSha,c.controlSha);assert.equal(c.mainSha,c.controlSha);assert.equal(c.workflowSha,c.controlSha);
+  assert.ok(positiveId(a.candidateCiRunId)&&positiveId(a.controlCiRunId));
+  assert.ok(HASH.test(a.manifestSha256)&&HASH.test(a.profileSha256));
+  assert.ok(immutable('backend').test(a.parentBackend)&&immutable('frontend').test(a.parentFrontend));
+  const at=Date.parse(a.approvedUntil),now=c.now??Date.now();assert.ok(Number.isFinite(at)&&at>now&&at-now<=6*3600000);
+  return true;
+}
+
+export function verifyImagePreparationEvidence({approval:a,candidate:p,context:c,run,control,controlRun,manifestSha256,descriptor}) {
+  verifyImagePreparationApproval(a,c);
+  verifyCandidateProof(p,{repository:c.repository,controlSha:c.controlSha,runId:a.candidateCiRunId});
+  assert.ok(['push','workflow_dispatch'].includes(p.event));assert.equal(p.event,run?.event);assert.equal(p.branch,'main');
+  assert.equal(run?.head_sha,c.controlSha);assert.equal(String(run?.id),a.candidateCiRunId);assert.equal(run.path,CI_PATH);
+  assert.ok(run.status==='completed'&&run.conclusion==='success'&&['push','workflow_dispatch'].includes(run.event)&&run.head_branch==='main');
+  assert.equal(run.repository?.full_name,c.repository);assert.equal(run.head_repository?.full_name,c.repository);
+  assert.equal(manifestSha256,a.manifestSha256);assert.equal(p.sourceProof.manifestSha256,a.manifestSha256);
+  for(const role of ROLES)for(const field of ['sourceSha','treeSha'])assert.equal(p.sourceProof.sources[role][field],descriptor?.sources?.[role]?.[field]);
+  verifyCIProof(control,{repository:c.repository,sourceSha:c.controlSha,runId:a.controlCiRunId});
+  assert.ok(verifyProductionCIRun(controlRun,{repository:c.repository,sourceSha:c.controlSha}).ok);
+  assert.equal(String(controlRun.id),a.controlCiRunId);return true;
 }

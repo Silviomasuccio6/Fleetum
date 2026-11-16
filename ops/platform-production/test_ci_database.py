@@ -27,7 +27,7 @@ class SyntheticLifecycle(unittest.TestCase):
         self.assertIn('cluster_name=fleetum_platform_synthetic_20261115',self.calls[0])
         module.stop(self.file);self.assertFalse(self.file.exists())
         self.assertEqual(self.calls[-1][0:2],('rm','-f'))
-        self.assertEqual(self.calls[-1][2],data['container'])
+        self.assertIn('-v',self.calls[-1]);self.assertEqual(self.calls[-1][-1],data['container'])
 
     def test_a_production_name_cannot_be_stopped(self):
         self.file.write_text(json.dumps({'syntheticOnly':True,'container':'fleetum_backend'}))

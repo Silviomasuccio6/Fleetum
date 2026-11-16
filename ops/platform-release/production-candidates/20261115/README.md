@@ -4,6 +4,10 @@ This directory describes the selected Satinata plus targeted production backend
 protections. It is not an approval, deploy workflow, CI result or image proof.
 The current staging-only release controls cannot install this production patch.
 
+The subsequent local exact-source CI and protected image-preparation tooling is
+documented in [the delivery runbook](../../../platform-production/README.md).
+That path still has no production installer or new live-server evidence.
+
 | Role | Base | Local reviewed source | Files changed from base |
 |---|---|---|---|
 | Backend backport | db1f231 | 2afaf8f | 24 |

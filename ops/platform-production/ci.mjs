@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync, lstatSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync, lstatSync, rmSync, openSync, readSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -12,15 +12,23 @@ import { validateAudit } from './audit-report.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const REPO=path.resolve(HERE,'../..');
 export const MANIFEST='ops/platform-release/production-candidates/20261115/candidate.json';
-export const digest=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
+export function digest(file) {
+  const fd=openSync(file,'r'),buffer=Buffer.alloc(1024*1024),h=createHash('sha256');
+  try {let n;while((n=readSync(fd,buffer,0,buffer.length,null))>0)h.update(buffer.subarray(0,n));return h.digest('hex');}
+  finally {closeSync(fd);}
+}
 export const json=file=>JSON.parse(readFileSync(file,'utf8'));
 export const put=(file,value)=>writeFileSync(file,JSON.stringify(value,null,2)+'\n',{mode:0o600,flag:'wx'});
 const runtime=()=>({node:process.versions.node,platform:process.platform,arch:process.arch});
 const git=(...args)=>execFileSync('git',['-C',REPO,...args],{encoding:'utf8',maxBuffer:32*1024*1024}).trim();
 const safeEnv=(extra={})=>({PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:process.env.TMPDIR??'/tmp',
   CI:'1',DOTENV_CONFIG_PATH:'/dev/null',CHECKPOINT_DISABLE:'1',PRISMA_HIDE_UPDATE_MESSAGE:'1',...extra});
+export function assertCIBuilder(env=process.env,platform=process.platform,arch=process.arch) {
+  assert.ok(env.GITHUB_ACTIONS==='true'&&platform==='linux'&&arch==='x64','Docker checks require the isolated GitHub Linux AMD64 runner');
+}
 
 export function run(command,args,{cwd=REPO,env={},log,redactions=[],timeout=900000}={}) {
+  if(command==='docker'){assertCIBuilder();args=['--host','unix:///var/run/docker.sock',...args];}
   const result=spawnSync(command,args,{cwd,env:safeEnv(env),encoding:'utf8',timeout,maxBuffer:32*1024*1024});
   let output=(result.stdout??'')+(result.stderr??'');
   for(const secret of redactions)if(secret)output=output.split(secret).join('[REDACTED]');
@@ -124,6 +132,7 @@ export function frontend(sources,role,directory) {
   put(path.join(out,role+'.report.json'),report);return report;
 }
 export function image(sources,directory) {
+  assertCIBuilder();
   const out=fresh(directory),{root,proof}=extractRole(sources,'backend',out),tag='fleetum-platform-ci:'+context().runId;
   run('docker',['buildx','build','--platform','linux/amd64','--load','--tag',tag,
     '--label','it.fleetum.platform.source='+proof.sources.backend.sourceSha,
@@ -136,7 +145,7 @@ export function image(sources,directory) {
   const archive=path.join(out,'backend.image.tar');run('docker',['save','--output',archive,tag],{timeout:180000});
   run('docker',['pull','aquasec/trivy:latest'],{log:path.join(out,'scanner-pull.log'),timeout:300000});
   const scannerRefs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}','aquasec/trivy:latest']));
-  const scanners=scannerRefs.filter(x=>/^aquasec\/trivy@sha256:[0-9a-f]{64}$/.test(x));assert.equal(scanners.length,1);
+  const scanners=scannerRefs.filter(x=>/^(?:docker\.io\/)?aquasec\/trivy@sha256:[0-9a-f]{64}$/.test(x));assert.equal(scanners.length,1);
   const scan=JSON.parse(run('docker',['run','--rm','-v',out+':/artifact:ro',scanners[0],
     'image','--input','/artifact/backend.image.tar','--scanners','vuln','--format','json','--severity','HIGH,CRITICAL','--exit-code','1'],
     {log:path.join(out,'image-vulnerabilities.log'),timeout:900000}));
@@ -149,12 +158,13 @@ export function image(sources,directory) {
   put(path.join(out,'image.report.json'),report);return report;
 }
 export function security(sources,directory) {
+  assertCIBuilder();
   const out=fresh(directory),proof=readSources(sources),tools={};
   for(const [name,tag] of Object.entries({gitleaks:'ghcr.io/gitleaks/gitleaks:latest',semgrep:'semgrep/semgrep:latest'})) {
     run('docker',['pull',tag],{log:path.join(out,name+'-pull.log'),timeout:300000});
     const refs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}',tag]));
-    const prefix=tag.split(':')[0]+'@sha256:';
-    const exact=refs.filter(x=>x.startsWith(prefix)&&HASH.test(x.slice(prefix.length)));
+    const prefix=tag.split(':')[0]+'@sha256:',prefixes=name==='semgrep'?[prefix,'docker.io/'+prefix]:[prefix];
+    const exact=refs.filter(x=>prefixes.some(p=>x.startsWith(p)&&HASH.test(x.slice(p.length))));
     assert.equal(exact.length,1,'Exactly one scanner digest required');tools[name]=exact[0];
   }
   for(const role of ROLES) {

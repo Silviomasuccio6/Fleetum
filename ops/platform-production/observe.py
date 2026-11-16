@@ -45,11 +45,11 @@ def checked_file(path):
 
 class Docker:
     def __init__(self):
-        self.prefix = ['docker']
+        self.prefix = ['docker', '--host', 'unix:///var/run/docker.sock']
         trial = subprocess.run(self.prefix + ['version', '--format', '{{.Server.Version}}'],
                                capture_output=True, timeout=10)
         if trial.returncode:
-            self.prefix = ['sudo', '-n', 'docker']
+            self.prefix = ['sudo', '-n', 'docker', '--host', 'unix:///var/run/docker.sock']
 
     def __call__(self, *args):
         result = subprocess.run(self.prefix + list(args), capture_output=True, timeout=20)

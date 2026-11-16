@@ -1,5 +1,6 @@
 """Start/stop one isolated CI PostgreSQL. No production environment or defaults."""
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -9,7 +10,9 @@ import time
 
 
 def docker(*args):
-    result = subprocess.run(['docker', *args], capture_output=True, timeout=120)
+    if os.environ.get('GITHUB_ACTIONS')!='true' or sys.platform!='linux':
+        raise ValueError('Docker lifecycle is limited to the isolated Linux CI runner')
+    result = subprocess.run(['docker', '--host', 'unix:///var/run/docker.sock', *args], capture_output=True, timeout=120)
     if result.returncode:
         raise ValueError('Synthetic database container operation failed')
     return result.stdout.decode().strip()
@@ -43,7 +46,7 @@ def start(file, run):
             json.dump(value, f)
         Path(file).chmod(0o600)
     except Exception:
-        docker('rm', '-f', name)
+        docker('rm', '-f', '-v', name)
         raise
 
 
@@ -54,7 +57,7 @@ def stop(file):
     value = json.loads(p.read_text())
     if value.get('syntheticOnly') is not True or not re.fullmatch(r'fleetum-platform-ci-[1-9][0-9]*-[0-9a-f]{8}', value.get('container','')):
         raise ValueError('Refusing to stop an unrecognized database')
-    docker('rm', '-f', value['container'])
+    docker('rm', '-f', '-v', value['container'])
     p.unlink()
 
 
