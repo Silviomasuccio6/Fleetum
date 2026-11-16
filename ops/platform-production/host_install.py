@@ -10,7 +10,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -167,7 +167,7 @@ class Runtime(preflight.Runtime):
         for line in self.docker('exec','fleetum_caddy','sha256sum',*sorted(files)).splitlines():
             sha,p=line.split(None,1);p=p.strip();need(p in files and re.fullmatch('[0-9a-f]{64}',sha),'Static checksum invalid');rows.append([p[len(root)+1:],files[p],sha])
         need(len(rows)==len(files),'Static hash inventory incomplete')
-        return hashlib.sha256(json.dumps(sorted(rows),separators=(',',':')).encode()).hexdigest()
+        return hashlib.sha256(json.dumps(sorted(rows,key=lambda row:PurePosixPath(row[0]).parts),separators=(',',':')).encode()).hexdigest()
     def health(self):
         for url in ['https://api.fleetum.it/api/ready','https://platform.fleetum.it/platform-api/health','https://staging.fleetum.it/','https://api-staging.fleetum.it/api/ready']:
             deadline=time.monotonic()+60
