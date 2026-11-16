@@ -82,4 +82,42 @@ class ProductionTransaction(unittest.TestCase):
         with self.assertRaises(ValueError):module.install(r,runtime,NOW)
         self.assertIn('stop_backend',runtime.calls);self.assertNotIn('migrate',runtime.calls);self.assertNotIn('start_backend',runtime.calls)
 
+
+class StaticTreeProtocol(unittest.TestCase):
+    @contextlib.contextmanager
+    def static_fixture(self,root,reverse=False,bad_type=False):
+        import hashlib,tempfile
+        with tempfile.TemporaryDirectory(prefix='fleetum-static-order-') as directory:
+            base=Path(directory)
+            for rel in ['index.html','assets/a.js','assets-manifest.json','en/index.html','en.html']:
+                p=base/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(('synthetic:'+rel).encode())
+            spec=importlib.util.spec_from_file_location('image_order_protocol',Path(module.__file__).parent.parent/'platform-release/image.py')
+            image=importlib.util.module_from_spec(spec);spec.loader.exec_module(image)
+            def docker(*args,**kwargs):
+                self.assertEqual(args[:2],('exec','fleetum_caddy'))
+                files={root+'/'+p.relative_to(base).as_posix():p for p in base.rglob('*') if p.is_file()}
+                if args[2]=='sh':
+                    names=sorted(files,reverse=reverse)
+                    return '\n'.join(['directory|4096|'+root]+[(('symbolic link' if bad_type and i==0 else 'regular file')+'|'+str(files[n].stat().st_size)+'|'+n) for i,n in enumerate(names)])
+                self.assertEqual(args[2],'sha256sum');self.assertEqual(set(args[3:]),set(files))
+                return '\n'.join(hashlib.sha256(files[n].read_bytes()).hexdigest()+'  '+n for n in args[3:])
+            runtime=module.Runtime(fixture());runtime.docker=docker
+            yield runtime,image,base
+    def test_tenant_prefix_paths_match_image_protocol(self):
+        with self.static_fixture('/srv/fleetum') as (runtime,image,base):
+            self.assertEqual(runtime.tree('/srv/fleetum'),image.tree_hash(base))
+    def test_website_prefix_paths_match_image_protocol(self):
+        with self.static_fixture('/srv/fleetum-website') as (runtime,image,base):
+            self.assertEqual(runtime.tree('/srv/fleetum-website'),image.tree_hash(base))
+    def test_enumeration_order_does_not_change_canonical_hash(self):
+        with self.static_fixture('/srv/fleetum-website',reverse=True) as (runtime,image,base):
+            self.assertEqual(runtime.tree('/srv/fleetum-website'),image.tree_hash(base))
+    def test_content_change_is_still_detected(self):
+        with self.static_fixture('/srv/fleetum-website') as (runtime,image,base):
+            original=runtime.tree('/srv/fleetum-website');(base/'en/index.html').write_bytes(b'changed synthetic content')
+            self.assertNotEqual(runtime.tree('/srv/fleetum-website'),original)
+    def test_symbolic_link_metadata_remains_rejected(self):
+        with self.static_fixture('/srv/fleetum-website',bad_type=True) as (runtime,image,base):
+            with self.assertRaises(ValueError):runtime.tree('/srv/fleetum-website')
+
 if __name__=='__main__':unittest.main()
