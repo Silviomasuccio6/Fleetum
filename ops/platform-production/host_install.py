@@ -125,9 +125,11 @@ class Runtime(preflight.Runtime):
     def compose(self,role,*args):
         # Separate invocations are necessary: merging the legacy app model with
         # the standalone shared gateway can change network/volume semantics.
+        public={'FLEETUM_BACKEND_IMAGE':self.r['prepared']['backendImage'],'FLEETUM_FRONTEND_IMAGE':self.r['prepared']['variants']['satin']['image']}
+        if self.caddy_contact:public['CADDY_EMAIL']=self.caddy_contact
         return self.docker('compose','--project-name','app','--project-directory','/opt/fleetum/app','--env-file','/opt/fleetum/env/compose.env',
             '-f',self.profile['backendCompose' if role=='backend' else 'frontendCompose'],'-f',str(self.directory/(role+'.json')),*args,
-            env={**os.environ,'CADDY_EMAIL':self.caddy_contact} if self.caddy_contact else None)
+            env={**os.environ,**public})
     def pull(self):
         for value in [self.r['prepared']['backendImage'],self.r['prepared']['variants']['satin']['image'],self.r['prepared']['variants']['fallback']['image']]:self.docker('pull',value)
     def stop_backend(self):

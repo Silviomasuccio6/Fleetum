@@ -58,12 +58,16 @@ class ProductionTransaction(unittest.TestCase):
             with self.assertRaises(ValueError):module.install(r,runtime,NOW)
             self.assertEqual(runtime.calls.count(phase),1);self.assertNotIn('rollback',runtime.calls)
     def test_backend_and_gateway_use_distinct_existing_compose_manifests(self):
-        r=fixture();runtime=module.Runtime(r);calls=[]
-        runtime.docker=lambda *args,**kwargs:calls.append(args)
+        r=fixture();runtime=module.Runtime(r);calls=[];environments=[]
+        def docker(*args,**kwargs):calls.append(args);environments.append(kwargs['env'])
+        runtime.docker=docker
         runtime.compose('backend','up','-d','--no-deps','backend');runtime.compose('frontend','up','-d','--no-deps','caddy')
         self.assertIn(r['profile']['backendCompose'],calls[0]);self.assertNotIn(r['profile']['frontendCompose'],calls[0])
         self.assertIn(r['profile']['frontendCompose'],calls[1]);self.assertNotIn(r['profile']['backendCompose'],calls[1])
         self.assertTrue(all('--env-file' in c and '/opt/fleetum/env/compose.env' in c for c in calls))
+        for env in environments:
+            self.assertEqual(env['FLEETUM_BACKEND_IMAGE'],r['prepared']['backendImage'])
+            self.assertEqual(env['FLEETUM_FRONTEND_IMAGE'],r['prepared']['variants']['satin']['image'])
     def test_upload_fix_preserves_owner_and_targets_only_the_open_empty_directory(self):
         runtime=module.Runtime(fixture());runtime.journal=lambda phase:None
         with patch.object(module.preflight,'canonical',return_value=True),patch.object(module.os,'open',return_value=42),patch.object(module.os,'fstat',return_value=SimpleNamespace(st_uid=1001,st_gid=1001,st_mode=0o40755)),patch.object(module.os,'listdir',return_value=[]),patch.object(module.os,'close'),patch.object(module.os,'fchown') as owner,patch.object(module.os,'fchmod') as mode:
