@@ -29,6 +29,14 @@ test('tenant handlers, website files, styles and secrets cannot enter the bounde
   const d = descriptor(); d.sources.satin.changedPaths = ['frontend/src/presentation/pages/booking/booking-page.tsx'];
   assert.throws(() => validateDescriptor(d));
 });
+test('the image hardening exception is limited to its exact Dockerfile and upload regression file',()=>{
+ for(const file of ['backend/Dockerfile.prod','backend/tests/multer-runtime-security.test.ts']){
+  const d=descriptor();d.sources.backend.changedPaths=[file];assert.equal(validateDescriptor(d).target,'production');
+ }
+ for(const file of ['backend/Dockerfile','backend/src/infrastructure/storage/multer.ts','backend/tests/arbitrary.test.ts']){
+  const d=descriptor();d.sources.backend.changedPaths=[file];assert.throws(()=>validateDescriptor(d));
+ }
+});
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'fleetum-candidate-test-'));

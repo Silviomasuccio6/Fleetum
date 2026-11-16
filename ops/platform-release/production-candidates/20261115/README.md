@@ -10,7 +10,7 @@ That path still has no production installer or new live-server evidence.
 
 | Role | Base | Local reviewed source | Files changed from base |
 |---|---|---|---|
-| Backend backport | db1f231 | 2afaf8f | 24 |
+| Backend backport | db1f231 | ae308ae | 26 |
 | Selected Satinata | ed34f81 | 1f35e6c | 4 |
 | Old-visual compatible fallback | 76c1756 | 0583b52 | 3 |
 
@@ -44,7 +44,7 @@ Satinata and the fallback both require the new backend. The fallback preserves
 server logout and invoice-email safeguards while restoring the prior visual
 shell. It is not a full backend downgrade or database restore.
 
-Local evidence: backend build, 182 unit regressions; 13 PostgreSQL cases (7 Platform and 6 tenant HTTP cases);
+Initial local evidence (before image hardening): backend build, 182 unit regressions; 13 PostgreSQL cases (7 Platform and 6 tenant HTTP cases);
 selected frontend build and 129 tests; fallback build and 118 tests; production
 dependency audits with zero reported vulnerabilities. Migration source chain
 42→43→48 applied with a preserved synthetic baseline row. These are local dated
@@ -63,3 +63,5 @@ image/schema/aggregate-backlog preflight and verified backups; explicit release
 authorization/approval; post-install authenticated checks. No server write,
 provider change, real email, customer-data export or deployment was performed
 while preparing this candidate.
+
+The image-security refinement adds only the production Dockerfile and four multipart middleware regressions to the backend path inventory. The new source passes186 local unit tests, build/lint and production dependency audit. The independent updated Linux CI must exercise its persistent cases and actual image scan before release; old successful runs are not substituted. Global npm/npx are removed only from the runtime; the direct Prisma CLI remains required.

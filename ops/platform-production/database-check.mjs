@@ -35,7 +35,7 @@ export async function backend(sources,configFile,directory) {
   // UPLOAD_DIR. Keep that contract; only HTTP/database fixtures need an
   // absolute task-owned upload root.
   const unit=run('npm',['test','-w','backend'],{cwd:root,env:{...env,UPLOAD_DIR:'uploads'},log:path.join(out,'unit.log')});
-  const unitTests=tapCount(unit,182),counts=audit(root,'backend',path.join(out,'audit.json'));
+  const unitTests=tapCount(unit,186),counts=audit(root,'backend',path.join(out,'audit.json'));
   const {PrismaClient}=createRequire(path.join(root,'package.json'))('@prisma/client');
   const uri=db=>`postgresql://${c.user}:${encodeURIComponent(c.password)}@127.0.0.1:${c.port}/${db}?schema=public`;
   const client=db=>new PrismaClient({datasourceUrl:uri(db)});

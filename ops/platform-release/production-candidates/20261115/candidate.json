@@ -7,11 +7,12 @@
   "sources": {
     "backend": {
       "baseSha": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
-      "sourceSha": "2afaf8f88498cca911fbd07866b922d2e7abf83c",
-      "treeSha": "730c2ddcb1a909b6c62549b84ff0ab9968511257",
+      "sourceSha": "ae308aeeb83a7b98b3130e348ecccaa94d532a32",
+      "treeSha": "86296c7fe2da1100027821cb99ea9b7f382e5bd0",
       "patch": "backend.patch",
-      "patchSha256": "7ed2a6c17a6489da70b92b09280c409a11f231856bf6a29e8dd6937be67f51c1",
+      "patchSha256": "3a323245b120b2771cec135a86ab3e01757acdf79493dfaeee1c445d9b04cd9d",
       "changedPaths": [
+        "backend/Dockerfile.prod",
         "backend/package.json",
         "backend/prisma/migrations/20260921150000_final_release_blocker_atomicity/migration.sql",
         "backend/prisma/schema.prisma",
@@ -28,6 +29,7 @@
         "backend/src/interfaces/http/validators/rental-payments-validators.ts",
         "backend/src/interfaces/http/validators/tenant-profile-validators.ts",
         "backend/tests/invoice-email-queue-state.test.ts",
+        "backend/tests/multer-runtime-security.test.ts",
         "backend/tests/platform-email-facade.test.ts",
         "backend/tests/platform-email-sender-protocol.test.ts",
         "backend/tests/platform-invoice-outbox.test.ts",

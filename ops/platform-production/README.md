@@ -12,7 +12,7 @@ three source commits, reconstructed trees, patches and exact file inventories:
 
 | Role | Reviewed source | Purpose |
 |---|---|---|
-| Backend | `2afaf8f88498cca911fbd07866b922d2e7abf83c` | Backport onto recorded production source `db1f231`, including server logout revocation and invoice-email idempotency |
+| Backend | `ae308aeeb83a7b98b3130e348ecccaa94d532a32` | Backport onto recorded production source `db1f231`, including server logout revocation and invoice-email idempotency |
 | Satinata | `1f35e6c5a35d84e38ea928a4490cd772cc56473c` | Selected Platform visual shell with the new backend contracts |
 | Fallback | `0583b525fbec4b4cbfe5fb8046f5eeb6692e8671` | Prior visual shell, retaining the same backend protections |
 
@@ -32,7 +32,7 @@ environment, package publication permission, server secrets or SSH steps.
 The jobs perform:
 
 1. Synthetic archive/publisher-control tests and reconstruction of all inputs.
-2. Fresh backend installation, lint/build, at least 182 unit tests, 13 persistent
+2. Fresh backend installation, lint/build, at least 186 unit tests, 13 persistent
    HTTP/security tests on its own PostgreSQL 16, production dependency audit,
    and the preserved-data migration trial `42 -> 43 -> 48`.
 3. Separate frontend jobs: at least 129 Satinata and 118 fallback tests, build
@@ -64,7 +64,7 @@ ordinary push proof are both required for the protected preparer.
 
 ## 2. Read-only production layout, still a separate gate
 
-`observe.py` is a bounded collector. The authorized live metadata inspection on 16 November confirmed the recorded parent images and the standalone shared production/staging gateway. It read no environment files, database records, logs or customer document contents.
+`observe.py` is a bounded collector for a separately authorized read-only inspection. Actual infrastructure observations, configuration fingerprints and host-specific findings belong in the private release handoff, never in this public document.
 
 It reads formatted metadata for the named Fleetum containers/images, mount and
 network names, hashes of bounded allowlisted Compose/Caddy files and free disk
@@ -80,7 +80,7 @@ must be reviewed if that baseline changed.
 
 This profile describes the layout; it has `executionReviewed: false` and
 `readyForDeployment: false`. It does not prove schema state, invoice backlog,
-backups or permission to install anything. The host transaction is now adapted to that observed layout. Backend and gateway use separate Compose invocations: merging the legacy app model with the standalone shared gateway can change network and volume semantics.
+backups or permission to install anything. Backend and standalone shared-gateway profiles use separate Compose invocations so that their network and volume models retain their semantics. A profile remains private evidence, not an installation approval.
 
 ## 3. Protected image preparation, without installation
 
@@ -156,15 +156,18 @@ existing service env files internally; these tools never display or copy them.
 Full final static/website hashes and both environments' health must pass.
 Authenticated product acceptance remains pending even after infrastructure passes.
 
-An existing upload-permission defect was confirmed read-only: the backend's
-UID/GID1000 cannot write to the currently empty upload directory owned by
-UID/GID1001 with mode0755. No production permission was changed in points1–3.
-The actual local storage root is `/app/backend/uploads`, while the historical bind targets `/app/uploads`. Both directories were found empty; the active root was backed up separately on the server. The proposed installation request must explicitly bind the exact directory,
-original owner/group/mode and empty state. Only in the separately approved
-installation does it preserve owner1001, set group1000 and mode0775 on that one
-directory. It also adds the persistent bind at `/app/backend/uploads` while retaining the old bind and log mount; stored relative file keys and env values stay unchanged. It never recurses or changes existing documents. Both active and mounted roots must remain empty before the drain. The stopped old container is archived and checked again before migration/replacement: any newly admitted file blocks rather than being hidden by the new mount. Any ownership,
-mode or content drift blocks before stopping the backend. The actual CI image
-smoke check also requires runtime UID/GID1000.
+The installer requires an explicit storage-maintenance policy bound to the
+protected preflight hash. It gates a narrowly scoped group-write permission and
+persistent bind addition, preserves the directory owner and existing mounts,
+and never changes stored relative keys or env values. Both source and destination
+roots must be empty. The stopped old container is archived and checked again
+after the drain: newly admitted documents, changed ownership or unexpected
+content stop the release before container replacement. No recursive permission
+change or silent document migration is performed. Actual current ownership,
+storage layout and observed contents are private preflight inputs, not facts
+asserted by the synthetic test fixtures. The CI image smoke also verifies the
+runtime user required by the reviewed policy.
+
 
 Phase journals preserve partial outcomes. There is no automatic retry, database
 restore or original-backend downgrade; a failed migration/backend start stops
@@ -173,19 +176,17 @@ as a recovery candidate. It is not automatically selected by this installer;
 visual recovery must use a separately reviewed protected operation, never an
 unreviewed manual Compose command or the full-main deployment workflow.
 
-The authorized live database preflight matched all42 baseline migration names
-and checksums, with no failed migration or pending/failed invoice backlog.
-A new private PostgreSQL/custom archive and uploads archive were created on the
-same server without offsite export, retention changes, notifications or service
-restarts. The full database archive was parsed to `/dev/null`, without connecting
-a restore target; upload content was compared. This proves archive integrity
-and readability, **not** a successful restore into a separate database. No real
-production data was copied to a local test database. Freshness is checked again
-before installation; backup data and live metadata stay outside the public repo.
+For a release, the approved database identity, migration names/checksums,
+aggregate queue state and backup receipts must be validated privately. Backup
+data must remain on the host. Full archive parsing without a restore target
+proves readability/integrity, not a successful restore into another database.
+The tooling does not copy production data into local test databases. Environment
+files and live infrastructure observations are excluded from public artifacts.
+
 
 Required external evidence remains:
 
-- Refresh the now-verified live layout, baseline checksums, aggregate queue state and private backup if their approval/freshness windows expire.
+- Obtain or refresh the privately reviewed layout, baseline checksums, aggregate queue state and backup before their approval/freshness windows expire.
 - Verified production backup and restore procedure appropriate to the actual
   persistence layout, without restoring over the active database during tests.
 - Real Linux CI, Docker build/scans, immutable registry image proof and static
@@ -205,13 +206,14 @@ use; assess any queued work first. No active-database restore is implemented.
 
 ## Local verification available on 16 November 2026
 
-The local wrapper executions compiled and tested the pinned application inputs:
+The initial local wrapper executions compiled/tested the original inputs. The selected backend has since received the image-security refinement; its new local186-test result does not reuse the earlier database/image proof:
 
 | Check | Result | Delivery recipe snapshot |
 |---|---|---|
 | Satinata frontend | 129 tests, build and production audit passed | `5214a9a` |
 | Compatible fallback | 118 tests, build and production audit passed | `5214a9a` |
-| Backend | 182 unit + 13 persistent tests, lint/build/audit and migration trial passed | `f70ceb7` |
+| Initial backend `2afaf8f` | 182 unit + 13 persistent tests, lint/build/audit and migration trial passed | `f70ceb7` |
+| Hardened backend `ae308ae` | 186 unit tests, four multipart regressions, lint/build/production audit passed; updated database/image CI required | isolated source checkout |
 
 These reports identify Darwin/ARM64 and local run `1`; the candidate policy
 rejects them as GitHub/Linux proofs. The wrapper was corrected to finish ESM
@@ -241,4 +243,9 @@ APIs. The final full run explicitly selected the required Node 22.23.1 without
 changing global settings and passed. Dated passing and failed-attempt logs are
 kept separately in the private delivery handoff.
 
-Authorization on16 November covers server inspection, tool publication/review/CI, image preparation and private backup (points1–3). The separately protected installation and its authenticated acceptance are point4 and have not been authorized or executed. Public review/real Linux CI and image outcomes must be recorded before claiming those gates passed.
+Publishing or merging these controls does not deploy an application. Image
+preparation and installation are distinct manual protected workflows. Actual
+source/image CI, private host evidence, explicit installation authorization and
+authenticated acceptance must pass before a production release is called complete.
+
+Image hardening retains Node22.23.1, applies the reported Alpine security package updates, pins Multer2.5.0 and removes global npm/npx only from the runtime. The unprivileged image smoke requires native Sharp loading, the direct Prisma CLI with no network and the absence of global npm. Trivy stdout JSON is parsed separately from stderr diagnostics; complete diagnostics remain in the task log. No finding waiver or lowered severity threshold is introduced.

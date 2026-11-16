@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { tapCount,assertCIBuilder } from '../platform-production/ci.mjs';
+import { tapCount,assertCIBuilder,run } from '../platform-production/ci.mjs';
 import { databaseConfig } from '../platform-production/database-check.mjs';
 import { validateAudit } from '../platform-production/audit-report.mjs';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,13 @@ import { spawnSync } from 'node:child_process';
 test('TAP must contain actual non-skipped passing tests, not just exit zero',()=>{
  assert.equal(tapCount('# tests 13\n# pass 13\n# fail 0\n# skipped 0\n# cancelled 0\n',13),13);
  for(const data of ['', '# tests 0\n# pass 0\n# fail 0\n# skipped 0\n# cancelled 0\n','# tests 13\n# pass 12\n# fail 0\n# skipped 1\n# cancelled 0\n'])assert.throws(()=>tapCount(data,13));
+});
+test('scanner JSON uses stdout while diagnostics remain in the task log',t=>{
+ const root=mkdtempSync(path.join(os.tmpdir(),'fleetum-scanner-json-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const log=path.join(root,'scan.log');
+ const output=run(process.execPath,['-e','process.stdout.write(JSON.stringify({SchemaVersion:2}));process.stderr.write("synthetic diagnostic")'],{stdoutOnly:true,log});
+ assert.deepEqual(JSON.parse(output),{SchemaVersion:2});
+ assert.match(readFileSync(log,'utf8'),/SchemaVersion.*synthetic diagnostic/);
+ const all=run(process.execPath,['-e','process.stdout.write("ok");process.stderr.write("diagnostic")']);assert.equal(all,'okdiagnostic');
 });
 test('image and scanner operations cannot use an accidental local or remote Docker context',()=>{
  assert.throws(()=>assertCIBuilder({},'darwin','arm64'));

@@ -20,6 +20,7 @@ const FRONTEND_PATHS = new Set([
   'frontend/tests/platform-invoice-email.test.ts'
 ]);
 const BACKEND_PATHS = new Set([
+  'backend/Dockerfile.prod', 'backend/tests/multer-runtime-security.test.ts',
   'package.json', 'package-lock.json', 'backend/package.json', 'backend/prisma/schema.prisma',
   'backend/prisma/migrations/20260921150000_final_release_blocker_atomicity/migration.sql',
   'backend/src/application/services/platform-session-service.ts',

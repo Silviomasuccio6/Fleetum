@@ -27,7 +27,7 @@ export function assertCIBuilder(env=process.env,platform=process.platform,arch=p
   assert.ok(env.GITHUB_ACTIONS==='true'&&platform==='linux'&&arch==='x64','Docker checks require the isolated GitHub Linux AMD64 runner');
 }
 
-export function run(command,args,{cwd=REPO,env={},log,redactions=[],timeout=900000}={}) {
+export function run(command,args,{cwd=REPO,env={},log,redactions=[],timeout=900000,stdoutOnly=false}={}) {
   if(command==='docker'){assertCIBuilder();args=['--host','unix:///var/run/docker.sock',...args];}
   const result=spawnSync(command,args,{cwd,env:safeEnv(env),encoding:'utf8',timeout,maxBuffer:32*1024*1024});
   let output=(result.stdout??'')+(result.stderr??'');
@@ -35,6 +35,11 @@ export function run(command,args,{cwd=REPO,env={},log,redactions=[],timeout=9000
   output=output.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,'[SYNTHETIC_TOKEN_REDACTED]');
   if(log)writeFileSync(log,output,{mode:0o600});
   assert.ok(!result.error&&!result.signal&&result.status===0,`Candidate check failed; inspect ${log??command}`);
+  if(stdoutOnly){
+    let stdout=result.stdout??'';
+    for(const secret of redactions)if(secret)stdout=stdout.split(secret).join('[REDACTED]');
+    return stdout.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,'[SYNTHETIC_TOKEN_REDACTED]');
+  }
   return output;
 }
 export function tapCount(text,minimum) {
@@ -138,21 +143,22 @@ export function image(sources,directory) {
     '--label','it.fleetum.platform.source='+proof.sources.backend.sourceSha,
     '--label','it.fleetum.platform.tree='+proof.sources.backend.treeSha,
     '--file',path.join(root,'backend/Dockerfile.prod'),root],{log:path.join(out,'image-build.log'),timeout:1800000});
-  const info=JSON.parse(run('docker',['image','inspect','--format','{"id":{{json .Id}},"os":{{json .Os}},"arch":{{json .Architecture}},"source":{{json (index .Config.Labels "it.fleetum.platform.source")}},"tree":{{json (index .Config.Labels "it.fleetum.platform.tree")}}}',tag]));
+  const info=JSON.parse(run('docker',['image','inspect','--format','{"id":{{json .Id}},"os":{{json .Os}},"arch":{{json .Architecture}},"source":{{json (index .Config.Labels "it.fleetum.platform.source")}},"tree":{{json (index .Config.Labels "it.fleetum.platform.tree")}}}',tag],{stdoutOnly:true}));
   assert.equal(info.os,'linux');assert.equal(info.arch,'amd64');assert.equal(info.source,proof.sources.backend.sourceSha);assert.equal(info.tree,proof.sources.backend.treeSha);
   run('docker',['run','--rm','--network','none','--entrypoint','node',tag,'-e',
-    'const a=require("node:assert/strict");a.equal(process.arch,"x64");a.equal(process.versions.node,"22.23.1");a.equal(process.getuid(),1000);a.equal(process.getgid(),1000);require.resolve("resend");require.resolve("@prisma/client");require("node:fs").accessSync("dist/interfaces/http/middlewares/platform-auth.js");'],{log:path.join(out,'image-smoke.log')});
+    'const a=require("node:assert/strict"),fs=require("node:fs");a.equal(process.arch,"x64");a.equal(process.versions.node,"22.23.1");a.equal(process.getuid(),1000);a.equal(process.getgid(),1000);require.resolve("resend");require.resolve("@prisma/client");a.ok(require("sharp").versions.vips);fs.accessSync("dist/interfaces/http/middlewares/platform-auth.js");a.equal(fs.existsSync("/usr/local/bin/npm"),false);'],{log:path.join(out,'image-smoke.log')});
+  run('docker',['run','--rm','--network','none','--entrypoint','/app/node_modules/.bin/prisma',tag,'--version'],{log:path.join(out,'image-migration-cli.log'),timeout:60000});
   const archive=path.join(out,'backend.image.tar');run('docker',['save','--output',archive,tag],{timeout:180000});
   run('docker',['pull','aquasec/trivy:latest'],{log:path.join(out,'scanner-pull.log'),timeout:300000});
-  const scannerRefs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}','aquasec/trivy:latest']));
+  const scannerRefs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}','aquasec/trivy:latest'],{stdoutOnly:true}));
   const scanners=scannerRefs.filter(x=>/^(?:docker\.io\/)?aquasec\/trivy@sha256:[0-9a-f]{64}$/.test(x));assert.equal(scanners.length,1);
   const scan=JSON.parse(run('docker',['run','--rm','-v',out+':/artifact:ro',scanners[0],
     'image','--input','/artifact/backend.image.tar','--scanners','vuln','--format','json','--severity','HIGH,CRITICAL','--exit-code','1'],
-    {log:path.join(out,'image-vulnerabilities.log'),timeout:900000}));
+    {log:path.join(out,'image-vulnerabilities.log'),timeout:900000,stdoutOnly:true}));
   assert.equal(scan.SchemaVersion,2);assert.ok(Array.isArray(scan.Results));
   const findings=scan.Results.flatMap(x=>x.Vulnerabilities??[]);
   assert.ok(findings.every(x=>!['HIGH','CRITICAL'].includes(x.Severity)),'Image vulnerability scan did not pass');
-  const report={...baseReport('image',proof),platform:'linux/amd64',imageId:info.id,smokePassed:true,runtimeUser:{uid:1000,gid:1000},
+  const report={...baseReport('image',proof),platform:'linux/amd64',imageId:info.id,smokePassed:true,migrationCliPassed:true,npmAbsent:true,runtimeUser:{uid:1000,gid:1000},
     dockerfileSha256:digest(path.join(root,'backend/Dockerfile.prod')),archiveSha256:digest(archive),
     scanner:{image:scanners[0],high:0,critical:0}};
   put(path.join(out,'image.report.json'),report);return report;
@@ -162,7 +168,7 @@ export function security(sources,directory) {
   const out=fresh(directory),proof=readSources(sources),tools={};
   for(const [name,tag] of Object.entries({gitleaks:'ghcr.io/gitleaks/gitleaks:latest',semgrep:'semgrep/semgrep:latest'})) {
     run('docker',['pull',tag],{log:path.join(out,name+'-pull.log'),timeout:300000});
-    const refs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}',tag]));
+    const refs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}',tag],{stdoutOnly:true}));
     const prefix=tag.split(':')[0]+'@sha256:',prefixes=name==='semgrep'?[prefix,'docker.io/'+prefix]:[prefix];
     const exact=refs.filter(x=>prefixes.some(p=>x.startsWith(p)&&HASH.test(x.slice(p.length))));
     assert.equal(exact.length,1,'Exactly one scanner digest required');tools[name]=exact[0];
