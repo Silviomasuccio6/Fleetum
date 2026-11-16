@@ -26,6 +26,11 @@ class PackageSafety(unittest.TestCase):
     def test_follows_nested_js_css_font_and_original_logos(self):
         result=self.run_package();self.assertEqual(len(result['closure']),7)
         self.assertTrue((self.out/'platform-closure/assets/type.woff2').is_file())
+    def test_local_build_does_not_inherit_an_unrelated_historical_ci_run(self):
+        result=self.run_package()
+        self.assertIsNone(result['ciRun'])
+        self.assertEqual(result['candidateSource'], 'a'*40)
+        self.assertFalse(result['deployExecuted'])
     def test_rejects_asset_collision_before_writing_output(self):
         (self.base/'assets/shared.js').write_text('existing tenant dependency')
         with self.assertRaisesRegex(ValueError,'collision'):self.run_package()

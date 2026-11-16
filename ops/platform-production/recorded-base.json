@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "platform-production-recorded-base",
+  "observedAtUTC": "2026-11-15T13:23:56.476393Z",
+  "backendSourceSha": "db1f231dc8cb699f1a5ce4215a0278c93212d16d",
+  "backendImage": "ghcr.io/silviomasuccio6/fleetum-backend@sha256:5f0fb4581586f84c3c5569c841dec8f13f2d8c44cf6681955d7ac993333760e9",
+  "frontendImage": "ghcr.io/silviomasuccio6/fleetum-frontend@sha256:f45eee091eca06f8745ed94096eb9ebe06d79bc2c6ab41d1575405195d49f6eb",
+  "freshObservationRequired": true,
+  "readyForDeployment": false
+}

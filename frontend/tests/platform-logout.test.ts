@@ -27,11 +27,17 @@ test("Platform logout waits for the server acknowledgement before clearing the l
   await logout;
   assert.equal(platformAuthStorage.get(), null);
 });
-for (const status of [403, 429, 500, 503]) test(`logout HTTP ${status} preserves bearer for an explicit retry`, async () => {
+for (const status of [403, 404, 429, 500, 503]) test(`logout HTTP ${status} preserves bearer for an explicit retry`, async () => {
   platformAuthStorage.set("synthetic-platform-bearer");
   globalThis.fetch = async () => result(status, { error: "SYNTHETIC_FAILURE", message: "Riprova" });
   await assert.rejects(async () => platformAdminUseCases.logout());
   assert.equal(platformAuthStorage.get(), "synthetic-platform-bearer");
+});
+test("a legacy success body without a revocation acknowledgement cannot pretend logout succeeded",async()=>{
+  platformAuthStorage.set("synthetic-platform-bearer");
+  globalThis.fetch=async()=>result(200,{ok:true});
+  await assert.rejects(()=>platformAdminUseCases.logout());
+  assert.equal(platformAuthStorage.get(),"synthetic-platform-bearer");
 });
 test("logout network failure preserves bearer for retry", async () => {
   platformAuthStorage.set("synthetic-platform-bearer");

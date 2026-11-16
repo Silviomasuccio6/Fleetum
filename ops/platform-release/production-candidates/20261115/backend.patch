@@ -1,0 +1,2274 @@
+diff --git a/backend/Dockerfile.prod b/backend/Dockerfile.prod
+index 9d2799c..41c70e7 100644
+--- a/backend/Dockerfile.prod
++++ b/backend/Dockerfile.prod
+@@ -3,0 +4,2 @@ FROM node:${NODE_VERSION}-alpine AS build
++RUN apk upgrade --no-cache libcrypto3 libssl3 musl musl-utils zlib
++
+@@ -20,0 +23,5 @@ FROM node:${NODE_VERSION}-alpine AS runtime
++# The runtime runs Node and the bundled Prisma CLI directly. The package
++# manager is build-only; do not ship its independent dependency tree.
++RUN apk upgrade --no-cache libcrypto3 libssl3 musl musl-utils zlib \
++    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
++
+diff --git a/backend/package.json b/backend/package.json
+index 9aafcf4..d95a846 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -32 +32 @@
+-    "csv-parse": "^5.6.0",
++    "csv-parse": "7.0.2",
+@@ -40,2 +40,2 @@
+-    "morgan": "^1.11.0",
+-    "multer": "^1.4.5-lts.1",
++    "morgan": "1.12.1",
++    "multer": "2.5.0",
+@@ -48 +48 @@
+-    "sharp": "^0.35.3",
++    "sharp": "0.35.5",
+@@ -50 +50 @@
+-    "zod": "^3.23.8"
++    "zod": "4.6.7"
+diff --git a/backend/prisma/migrations/20260921150000_final_release_blocker_atomicity/migration.sql b/backend/prisma/migrations/20260921150000_final_release_blocker_atomicity/migration.sql
+new file mode 100644
+index 0000000..6fdac92
+--- /dev/null
++++ b/backend/prisma/migrations/20260921150000_final_release_blocker_atomicity/migration.sql
+@@ -0,0 +1,110 @@
++-- Atomic email worker claims and idempotent rental-booking creation.
++ALTER TABLE "EmailQueue"
++  ADD COLUMN "processingToken" TEXT,
++  ADD COLUMN "processingStartedAt" TIMESTAMP(3),
++  ADD COLUMN "leaseExpiresAt" TIMESTAMP(3);
++
++CREATE INDEX "EmailQueue_status_nextAttemptAt_leaseExpiresAt_idx"
++  ON "EmailQueue"("status", "nextAttemptAt", "leaseExpiresAt");
++
++CREATE TABLE "RentalBookingCreateRequest" (
++  "id" TEXT NOT NULL,
++  "tenantId" TEXT NOT NULL,
++  "idempotencyKey" TEXT NOT NULL,
++  "requestHash" TEXT NOT NULL,
++  "bookingId" TEXT NOT NULL,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++
++  CONSTRAINT "RentalBookingCreateRequest_pkey" PRIMARY KEY ("id")
++);
++
++CREATE UNIQUE INDEX "RentalBookingCreateRequest_bookingId_key"
++  ON "RentalBookingCreateRequest"("bookingId");
++
++CREATE UNIQUE INDEX "RentalBookingCreateRequest_tenantId_idempotencyKey_key"
++  ON "RentalBookingCreateRequest"("tenantId", "idempotencyKey");
++
++CREATE INDEX "RentalBookingCreateRequest_tenantId_createdAt_idx"
++  ON "RentalBookingCreateRequest"("tenantId", "createdAt");
++
++ALTER TABLE "RentalBookingCreateRequest"
++  ADD CONSTRAINT "RentalBookingCreateRequest_tenantId_fkey"
++  FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++ALTER TABLE "RentalBookingCreateRequest"
++  ADD CONSTRAINT "RentalBookingCreateRequest_bookingId_fkey"
++  FOREIGN KEY ("bookingId") REFERENCES "RentalBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++-- Tenant-scoped request ledger for atomic, idempotent contract email enqueue.
++CREATE TABLE "BookingContractEmailRequest" (
++  "id" TEXT NOT NULL,
++  "tenantId" TEXT NOT NULL,
++  "idempotencyKey" TEXT NOT NULL,
++  "requestHash" TEXT NOT NULL,
++  "deliveryId" TEXT NOT NULL,
++  "queueEmailId" TEXT NOT NULL,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++
++  CONSTRAINT "BookingContractEmailRequest_pkey" PRIMARY KEY ("id")
++);
++
++CREATE UNIQUE INDEX "BookingContractEmailRequest_deliveryId_key"
++  ON "BookingContractEmailRequest"("deliveryId");
++
++CREATE UNIQUE INDEX "BookingContractEmailRequest_queueEmailId_key"
++  ON "BookingContractEmailRequest"("queueEmailId");
++
++CREATE UNIQUE INDEX "BookingContractEmailRequest_tenantId_idempotencyKey_key"
++  ON "BookingContractEmailRequest"("tenantId", "idempotencyKey");
++
++CREATE INDEX "BookingContractEmailRequest_tenantId_createdAt_idx"
++  ON "BookingContractEmailRequest"("tenantId", "createdAt");
++
++ALTER TABLE "BookingContractEmailRequest"
++  ADD CONSTRAINT "BookingContractEmailRequest_tenantId_fkey"
++  FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++ALTER TABLE "BookingContractEmailRequest"
++  ADD CONSTRAINT "BookingContractEmailRequest_deliveryId_fkey"
++  FOREIGN KEY ("deliveryId") REFERENCES "BookingContractDelivery"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++-- Persistent command ledger for atomic, idempotent invoice email enqueue.
++CREATE TABLE "InvoiceEmailRequest" (
++  "id" TEXT NOT NULL,
++  "tenantId" TEXT NOT NULL,
++  "idempotencyKey" TEXT NOT NULL,
++  "requestHash" TEXT NOT NULL,
++  "deliveryId" TEXT NOT NULL,
++  "queueEmailId" TEXT NOT NULL,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++
++  CONSTRAINT "InvoiceEmailRequest_pkey" PRIMARY KEY ("id")
++);
++
++CREATE UNIQUE INDEX "InvoiceEmailRequest_deliveryId_key"
++  ON "InvoiceEmailRequest"("deliveryId");
++
++CREATE UNIQUE INDEX "InvoiceEmailRequest_queueEmailId_key"
++  ON "InvoiceEmailRequest"("queueEmailId");
++
++CREATE UNIQUE INDEX "InvoiceEmailRequest_tenantId_idempotencyKey_key"
++  ON "InvoiceEmailRequest"("tenantId", "idempotencyKey");
++
++CREATE INDEX "InvoiceEmailRequest_tenantId_createdAt_idx"
++  ON "InvoiceEmailRequest"("tenantId", "createdAt");
++
++ALTER TABLE "InvoiceEmailRequest"
++  ADD CONSTRAINT "InvoiceEmailRequest_tenantId_fkey"
++  FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++ALTER TABLE "InvoiceEmailRequest"
++  ADD CONSTRAINT "InvoiceEmailRequest_deliveryId_fkey"
++  FOREIGN KEY ("deliveryId") REFERENCES "InvoiceDelivery"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++-- Public demo command correlation. Historical leads keep both fields NULL.
++ALTER TABLE "DemoLead"
++  ADD COLUMN "idempotencyKey" TEXT,
++  ADD COLUMN "requestHash" TEXT;
++
++CREATE UNIQUE INDEX "DemoLead_idempotencyKey_key"
++  ON "DemoLead"("idempotencyKey");
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 7a2ffe2..59a01e9 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -284,0 +285,3 @@ model Tenant {
++  rentalBookingCreateRequests   RentalBookingCreateRequest[]
++  bookingContractEmailRequests  BookingContractEmailRequest[]
++  invoiceEmailRequests          InvoiceEmailRequest[]
+@@ -828,0 +832 @@ model RentalBooking {
++  createRequest        RentalBookingCreateRequest?
+@@ -1470,0 +1475 @@ model BookingContractDelivery {
++  emailRequest BookingContractEmailRequest?
+@@ -1767,0 +1773,4 @@ model EmailQueue {
++  processingToken     String?
++  processingStartedAt DateTime?
++  leaseExpiresAt      DateTime?
++  @@index([status, nextAttemptAt, leaseExpiresAt])
+@@ -1859,0 +1869 @@ model InvoiceDelivery {
++  emailRequest      InvoiceEmailRequest?
+@@ -1929,0 +1940,49 @@ model DemoLead {
++  idempotencyKey      String?        @unique
++  requestHash         String?
++}
++
++
++model RentalBookingCreateRequest {
++  id             String        @id @default(cuid())
++  tenantId       String
++  idempotencyKey String
++  requestHash    String
++  bookingId      String        @unique
++  createdAt      DateTime      @default(now())
++  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
++  booking        RentalBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
++
++  @@unique([tenantId, idempotencyKey])
++  @@index([tenantId, createdAt])
++}
++
++
++model BookingContractEmailRequest {
++  id             String                  @id @default(cuid())
++  tenantId       String
++  idempotencyKey String
++  requestHash    String
++  deliveryId     String                  @unique
++  queueEmailId   String                  @unique
++  createdAt      DateTime                @default(now())
++  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
++  delivery       BookingContractDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
++
++  @@unique([tenantId, idempotencyKey])
++  @@index([tenantId, createdAt])
++}
++
++
++model InvoiceEmailRequest {
++  id             String          @id @default(cuid())
++  tenantId       String
++  idempotencyKey String
++  requestHash    String
++  deliveryId     String          @unique
++  queueEmailId   String          @unique
++  createdAt      DateTime        @default(now())
++  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
++  delivery       InvoiceDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
++
++  @@unique([tenantId, idempotencyKey])
++  @@index([tenantId, createdAt])
+diff --git a/backend/src/application/services/invoice-service.ts b/backend/src/application/services/invoice-service.ts
+index 7ffa152..b414927 100644
+--- a/backend/src/application/services/invoice-service.ts
++++ b/backend/src/application/services/invoice-service.ts
+@@ -0,0 +1 @@
++import crypto from "node:crypto";
+@@ -396 +397 @@ export class InvoiceService {
+-  async sendEmail(input: { invoiceId: string; actorUserId: string; sourceIp: string }) {
++  async sendEmail(input: { invoiceId: string; actorUserId: string; sourceIp: string; idempotencyKey: string }) {
+@@ -398,0 +400 @@ export class InvoiceService {
++    const recipient = invoice.billingEmail;
+@@ -400,9 +401,0 @@ export class InvoiceService {
+-    const delivery = await prisma.invoiceDelivery.create({
+-      data: {
+-        invoiceId: invoice.id,
+-        channel: "EMAIL",
+-        recipient: invoice.billingEmail,
+-        status: "PENDING"
+-      }
+-    });
+-
+@@ -423,4 +416,3 @@ export class InvoiceService {
+-    const queued = await this.emailQueueService.enqueue({
+-      tenantId: invoice.tenantId,
+-      type: "SAAS_INVOICE_EMAIL",
+-      recipient: invoice.billingEmail,
++    const requestHash = crypto.createHash("sha256").update(JSON.stringify({
++      invoiceId: invoice.id,
++      recipient,
+@@ -428,13 +420,32 @@ export class InvoiceService {
+-      body: text,
+-      meta: {
+-        fromName: "Fleetum Billing",
+-        replyTo: issuer.email,
+-        invoiceId: invoice.id,
+-        invoiceDeliveryId: delivery.id,
+-        tenantId: invoice.tenantId,
+-        html,
+-        attachments: [
+-          {
+-            filename: `${invoice.invoiceNumber}.pdf`,
+-            contentBase64: pdf.toString("base64"),
+-            contentType: "application/pdf"
++      body: text
++    })).digest("hex");
++
++    const enqueued = await prisma.$transaction(async (tx) => {
++      await tx.$executeRaw`SET LOCAL lock_timeout = '2s'`;
++      const lockKey = `fleetum:invoice-email:${invoice.tenantId}:${input.idempotencyKey}`;
++      await tx.$queryRaw<Array<{ locked: string }>>`
++        SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS locked
++      `;
++
++      const priorRequest = await tx.invoiceEmailRequest.findUnique({
++        where: {
++          tenantId_idempotencyKey: {
++            tenantId: invoice.tenantId,
++            idempotencyKey: input.idempotencyKey
++          }
++        },
++        include: { delivery: true }
++      });
++      if (priorRequest) {
++        if (priorRequest.requestHash !== requestHash) {
++          throw new AppError(
++            "La chiave di idempotenza e' gia' associata a un invio fattura diverso.",
++            409,
++            "IDEMPOTENCY_KEY_REUSED"
++          );
++        }
++        const queued = await tx.emailQueue.findFirst({
++          where: {
++            id: priorRequest.queueEmailId,
++            tenantId: invoice.tenantId,
++            type: "SAAS_INVOICE_EMAIL"
+@@ -442 +453,9 @@ export class InvoiceService {
+-        ]
++        });
++        if (!queued) {
++          throw new AppError(
++            "Coda invio fattura non disponibile per la richiesta idempotente.",
++            500,
++            "INVOICE_EMAIL_OUTBOX_INCONSISTENT"
++          );
++        }
++        return { delivery: priorRequest.delivery, queued, replayed: true };
+@@ -444 +463,44 @@ export class InvoiceService {
+-    });
++
++      const delivery = await tx.invoiceDelivery.create({
++        data: {
++          invoiceId: invoice.id,
++          channel: "EMAIL",
++          recipient,
++          status: "PENDING"
++        }
++      });
++      const queued = await this.emailQueueService.enqueue({
++        tenantId: invoice.tenantId,
++        type: "SAAS_INVOICE_EMAIL",
++        recipient,
++        subject,
++        body: text,
++        meta: {
++          fromName: "Fleetum Billing",
++          replyTo: issuer.email,
++          invoiceId: invoice.id,
++          invoiceDeliveryId: delivery.id,
++          tenantId: invoice.tenantId,
++          invoiceEmailCommandKey: input.idempotencyKey,
++          html,
++          attachments: [
++            {
++              filename: `${invoice.invoiceNumber}.pdf`,
++              contentBase64: pdf.toString("base64"),
++              contentType: "application/pdf"
++            }
++          ]
++        }
++      }, tx);
++      await tx.invoiceEmailRequest.create({
++        data: {
++          tenantId: invoice.tenantId,
++          idempotencyKey: input.idempotencyKey,
++          requestHash,
++          deliveryId: delivery.id,
++          queueEmailId: queued.id
++        }
++      });
++      return { delivery, queued, replayed: false };
++    }, { maxWait: 2000, timeout: 5000 });
++    const { delivery, queued, replayed } = enqueued;
+@@ -448,2 +510,3 @@ export class InvoiceService {
+-    const deliveryStatus = processed?.status === "SENT" ? "SENT" : "FAILED";
+-    const meta = (processed?.meta ?? {}) as Record<string, unknown>;
++    if (!processed) {
++      throw new AppError("Stato invio email fattura non disponibile", 502, "INVOICE_EMAIL_FAILED");
++    }
+@@ -451,23 +514,10 @@ export class InvoiceService {
+-    const updatedDelivery = await prisma.invoiceDelivery.update({
+-      where: { id: delivery.id },
+-      data: {
+-        status: deliveryStatus,
+-        provider: typeof meta.emailProvider === "string" ? meta.emailProvider : null,
+-        providerMessageId: typeof meta.providerMessageId === "string" ? meta.providerMessageId : null,
+-        errorMessage: deliveryStatus === "FAILED" ? (processed?.lastError ?? "Invio email fattura fallito") : null,
+-        sentAt: deliveryStatus === "SENT" ? new Date() : null
+-      }
+-    });
+-
+-    const updatedInvoice = await prisma.invoice.update({
+-      where: { id: invoice.id },
+-      data: {
+-        status: deliveryStatus === "SENT" ? "SENT" : "ERROR",
+-        sentAt: deliveryStatus === "SENT" ? new Date() : invoice.sentAt
+-      },
+-      include: {
+-        tenant: { select: { id: true, name: true } },
+-        items: true,
+-        deliveries: { orderBy: { createdAt: "desc" } }
+-      }
+-    });
++    const refreshedInvoice = await this.findInvoice(invoice.id);
++    const refreshedDelivery = refreshedInvoice.deliveries.find((candidate) => candidate.id === delivery.id) ?? delivery;
++    const meta = (processed.meta ?? {}) as Record<string, unknown>;
++    const auditAction = replayed
++      ? "PLATFORM_INVOICE_EMAIL_DEDUPED"
++      : processed.status === "SENT"
++      ? "PLATFORM_INVOICE_EMAIL_SENT"
++      : processed.status === "FAILED"
++        ? "PLATFORM_INVOICE_EMAIL_FAILED"
++        : "PLATFORM_INVOICE_EMAIL_QUEUED";
+@@ -479 +529 @@ export class InvoiceService {
+-        action: deliveryStatus === "SENT" ? "PLATFORM_INVOICE_EMAIL_SENT" : "PLATFORM_INVOICE_EMAIL_FAILED",
++        action: auditAction,
+@@ -486,5 +536,5 @@ export class InvoiceService {
+-          deliveryId: updatedDelivery.id,
+-          provider: updatedDelivery.provider,
+-          providerMessageId: updatedDelivery.providerMessageId,
+-          recipientMasked: invoice.billingEmail.replace(/^(.{2}).*(@.*)$/, "$1***$2"),
+-          error: updatedDelivery.errorMessage
++          deliveryId: refreshedDelivery.id,
++          provider: typeof meta.emailProvider === "string" ? meta.emailProvider : refreshedDelivery.provider,
++          providerMessageId: typeof meta.providerMessageId === "string" ? meta.providerMessageId : refreshedDelivery.providerMessageId,
++          recipientMasked: recipient.replace(/^(.{2}).*(@.*)$/, "$1***$2"),
++          error: processed.status === "FAILED" ? (processed.lastError ?? refreshedDelivery.errorMessage) : null
+@@ -495,2 +545,2 @@ export class InvoiceService {
+-    if (deliveryStatus !== "SENT") {
+-      throw new AppError(updatedDelivery.errorMessage ?? "Invio email fattura fallito", 502, "INVOICE_EMAIL_FAILED");
++    if (processed.status === "FAILED") {
++      throw new AppError(processed.lastError ?? refreshedDelivery.errorMessage ?? "Invio email fattura fallito", 502, "INVOICE_EMAIL_FAILED");
+@@ -499,2 +549 @@ export class InvoiceService {
+-    const exactUpdated = (await hydrateInvoiceRows([updatedInvoice], updatedInvoice.tenantId))[0];
+-    return { data: toPublicInvoice(exactUpdated) };
++    return { data: toPublicInvoice(refreshedInvoice), replayed, emailDelivery: { id: delivery.id, status: refreshedDelivery.status } };
+diff --git a/backend/src/application/services/platform-admin-service.ts b/backend/src/application/services/platform-admin-service.ts
+index 9cc725a..fd0abfd 100644
+--- a/backend/src/application/services/platform-admin-service.ts
++++ b/backend/src/application/services/platform-admin-service.ts
+@@ -361 +361,2 @@ export class PlatformAdminService {
+-        tokenType: "platform"
++        tokenType: "platform",
++        jti: crypto.randomUUID()
+diff --git a/backend/src/application/services/platform-session-service.ts b/backend/src/application/services/platform-session-service.ts
+new file mode 100644
+index 0000000..29803e6
+--- /dev/null
++++ b/backend/src/application/services/platform-session-service.ts
+@@ -0,0 +1,65 @@
++import crypto from "node:crypto";
++import jwt from "jsonwebtoken";
++import { prisma } from "../../infrastructure/database/prisma/client.js";
++import { env } from "../../shared/config/env.js";
++import { AppError } from "../../shared/errors/app-error.js";
++import { JwtPayload } from "../../shared/types/auth.js";
++
++const REVOCATION_ACTION = "PLATFORM_SESSION_REVOKED";
++const tokenHash = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
++
++export const verifyPlatformSessionToken = (token: string) => {
++  let payload: JwtPayload & jwt.JwtPayload;
++  try {
++    payload = jwt.verify(token, env.PLATFORM_JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload & jwt.JwtPayload;
++  } catch (error) {
++    if (error instanceof jwt.TokenExpiredError) throw new AppError("Sessione Platform scaduta. Accedi di nuovo.", 401, "PLATFORM_SESSION_EXPIRED");
++    throw new AppError("Token platform non valido", 401, "UNAUTHORIZED");
++  }
++  if (
++    payload.platformAdmin !== true || payload.tokenType !== "platform" ||
++    payload.userId !== "platform-admin" || payload.tenantId !== "platform" ||
++    !Number.isSafeInteger(payload.exp) || !payload.exp
++  ) throw new AppError("Accesso platform negato", 403, "FORBIDDEN");
++  return payload;
++};
++
++// Security events are durable revocation records. Retain this action at least
++// until its recorded JWT expiry; deleting a live record would restore access.
++export class PlatformSessionService {
++  constructor(private readonly database: typeof prisma = prisma) {}
++
++  async isRevoked(token: string) {
++    const event = await this.database.platformSecurityEvent.findFirst({
++      where: { action: REVOCATION_ACTION, details: { path: ["tokenHash"], equals: tokenHash(token) } },
++      select: { id: true }
++    });
++    return Boolean(event);
++  }
++
++  async logout(token: string) {
++    const payload = verifyPlatformSessionToken(token);
++    const hash = tokenHash(token);
++    const expiresAt = new Date(payload.exp! * 1000).toISOString();
++    await this.database.$transaction(async (tx) => {
++      // One durable event per bearer under concurrent retries. This lock never
++      // contains the bearer, and contention fails within two seconds.
++      await tx.$executeRaw`SET LOCAL lock_timeout = '2s'`;
++      await tx.$queryRaw<Array<{ locked: string }>>`
++        SELECT pg_advisory_xact_lock(hashtextextended(${`fleetum:platform-logout:${hash}`}, 0))::text AS locked
++      `;
++      const existing = await tx.platformSecurityEvent.findFirst({
++        where: { action: REVOCATION_ACTION, details: { path: ["tokenHash"], equals: hash } },
++        select: { id: true }
++      });
++      if (!existing) await tx.platformSecurityEvent.create({ data: {
++        action: REVOCATION_ACTION,
++        actor: env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase(),
++        details: { tokenHash: hash, expiresAt }
++      } });
++    }, { maxWait: 2000, timeout: 5000 });
++    return { revoked: true as const };
++  }
++}
++
++export const platformSessionService = new PlatformSessionService();
+diff --git a/backend/src/infrastructure/email/email-queue-service.ts b/backend/src/infrastructure/email/email-queue-service.ts
+index 7c323f9..c4d2a1e 100644
+--- a/backend/src/infrastructure/email/email-queue-service.ts
++++ b/backend/src/infrastructure/email/email-queue-service.ts
+@@ -4,0 +5 @@ import { emailSender } from "./email-sender.js";
++import { PlatformInvoiceOutboxProcessor } from "./platform-invoice-outbox.js";
+@@ -19,2 +20,2 @@ export class EmailQueueService {
+-  async enqueue(input: QueueEmailInput) {
+-    return prisma.emailQueue.create({
++  async enqueue(input: QueueEmailInput, database: Prisma.TransactionClient | typeof prisma = prisma) {
++    return database.emailQueue.create({
+@@ -32,0 +34 @@ export class EmailQueueService {
++    const platformInvoices = await new PlatformInvoiceOutboxProcessor().processPending(now, options);
+@@ -34,0 +37 @@ export class EmailQueueService {
++        type: { not: "SAAS_INVOICE_EMAIL" },
+@@ -219 +222 @@ export class EmailQueueService {
+-    return { processed: pending.length };
++    return { processed: pending.length + platformInvoices.processed };
+diff --git a/backend/src/infrastructure/email/email-sender.ts b/backend/src/infrastructure/email/email-sender.ts
+index b463f57..f249590 100644
+--- a/backend/src/infrastructure/email/email-sender.ts
++++ b/backend/src/infrastructure/email/email-sender.ts
+@@ -18,0 +19 @@ export type SendEmailInput = {
++  idempotencyKey?: string;
+@@ -51 +52 @@ const sendWithResend = async (input: SendEmailInput) => {
+-  });
++  }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined);
+diff --git a/backend/src/infrastructure/email/platform-invoice-outbox.ts b/backend/src/infrastructure/email/platform-invoice-outbox.ts
+new file mode 100644
+index 0000000..4dde341
+--- /dev/null
++++ b/backend/src/infrastructure/email/platform-invoice-outbox.ts
+@@ -0,0 +1,156 @@
++import crypto from "node:crypto";
++import { Prisma } from "@prisma/client";
++import { prisma } from "../database/prisma/client.js";
++import { emailSender,SendEmailInput } from "./email-sender.js";
++const LEASE_MS=15*60*1000;
++// Resend retains a key for 24h; stop before expiry if the outcome is uncertain.
++// https://resend.com/changelog/idempotency-keys
++const RETRY_WINDOW_MS=23*60*60*1000;
++const leaseAvailable=(now: Date) => ({ OR: [{ leaseExpiresAt: null },{ leaseExpiresAt: { lte: now } }] });
++const text=(meta: Record<string,unknown>,key: string) => typeof meta[key]==="string"? String(meta[key]).trim():"";
++class PermanentInvoiceEmailFailure extends Error {
++}
++type Sender={
++  send: (input: SendEmailInput) => Promise<{
++    provider: "resend";
++    id: string|null;
++  }>;
++};
++/** Owns only Platform invoice emails. Other queue types keep their production path. */
++export class PlatformInvoiceOutboxProcessor {
++  constructor(private readonly db: typeof prisma=prisma,private readonly sender: Sender=emailSender,private readonly sendTimeoutMs=30000) { }
++  private async send(input: SendEmailInput) {
++    let timer: ReturnType<typeof setTimeout>|undefined;
++    try {
++      return await Promise.race([this.sender.send(input),new Promise<never>((_resolve,reject) => {
++        timer=setTimeout(() => reject(new Error("INVOICE_EMAIL_PROVIDER_TIMEOUT")),Math.min(Math.max(this.sendTimeoutMs,1),30000));
++      })]);
++    }
++    finally {
++      if(timer)
++        clearTimeout(timer);
++    }
++  }
++  async processPending(now=new Date(),options: {
++    ids?: string[];
++    take?: number;
++  }={}) {
++    const started=Date.now();
++    const currentTime=() => new Date(now.getTime()+Math.max(0,Date.now()-started));
++    const candidates=await this.db.emailQueue.findMany({ where: { type: "SAAS_INVOICE_EMAIL",status: "PENDING",nextAttemptAt: { lte: now },...leaseAvailable(now),...(options.ids?.length? { id: { in: options.ids } }:{}) },orderBy: { createdAt: "asc" },take: options.take??30 });
++    let processed=0;
++    for(const candidate of candidates) {
++      const token=crypto.randomUUID(),claimedAt=currentTime();
++      const owned={ id: candidate.id,type: "SAAS_INVOICE_EMAIL",status: "PENDING" as const,processingToken: token };
++      const claim=await this.db.emailQueue.updateMany({ where: { id: candidate.id,type: "SAAS_INVOICE_EMAIL",status: "PENDING",nextAttemptAt: { lte: claimedAt },...leaseAvailable(claimedAt) },data: { processingToken: token,processingStartedAt: claimedAt,leaseExpiresAt: new Date(claimedAt.getTime()+LEASE_MS) } });
++      if(claim.count!==1)
++        continue;
++      const item=await this.db.emailQueue.findFirst({ where: owned });
++      if(!item)
++        continue;
++      processed++;
++      let meta={ ...(item.meta as Record<string,unknown>??{}) };
++      let target: {
++        tenantId: string;
++        invoiceId: string;
++        deliveryId: string;
++      }|undefined;
++      let accepted: {
++        provider: "resend";
++        id: string;
++      }|undefined;
++      let acceptedAt: string|undefined;
++      try {
++        const tenantId=item.tenantId,invoiceId=text(meta,"invoiceId"),deliveryId=text(meta,"invoiceDeliveryId");
++        if(!tenantId||text(meta,"tenantId")!==tenantId||!invoiceId||!deliveryId)
++          throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_TARGET_INVALID");
++        const invoice=await this.db.invoice.findFirst({ where: { id: invoiceId,tenantId,deletedAt: null },select: { id: true } });
++        const delivery=await this.db.invoiceDelivery.findFirst({ where: { id: deliveryId,invoiceId,channel: "EMAIL" },select: { id: true,recipient: true,status: true,provider: true,providerMessageId: true } });
++        if(!invoice||!delivery||delivery.recipient!==item.recipient)
++          throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_TARGET_INVALID");
++        target={ tenantId,invoiceId,deliveryId };
++        // Receipt and provider must come from the same durable record. Partial
++        // fields or contradictory receipts require reconciliation, not a send.
++        const metaProvider=text(meta,"emailProvider"),metaReceipt=text(meta,"providerMessageId");
++        const deliveryReceipt=delivery.status==="SENT"&&delivery.provider==="resend"? delivery.providerMessageId?.trim():"";
++        if(((metaProvider||metaReceipt)&&(metaProvider!=="resend"||!metaReceipt))||
++          (delivery.status==="SENT"&&!deliveryReceipt)||
++          (metaReceipt&&deliveryReceipt&&metaReceipt!==deliveryReceipt)) {
++          throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_RECONCILIATION_REQUIRED");
++        }
++        const receipt=metaReceipt||deliveryReceipt;
++        if(receipt) {
++          accepted={ provider: "resend",id: receipt };
++          acceptedAt=text(meta,"providerAcceptedAt")||text(meta,"sentAt")||currentTime().toISOString();
++        }
++        else {
++          // Rows created before this protocol may have an unknown provider
++          // outcome. Do not assign them a new key and risk a second email.
++          if(!/^[A-Za-z0-9._:-]{8,128}$/.test(text(meta,"invoiceEmailCommandKey")))
++            throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_RECONCILIATION_REQUIRED");
++          if(item.attempts>=item.maxAttempts)
++            throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_ATTEMPTS_EXHAUSTED");
++          const firstAttempt=text(meta,"platformInvoiceProviderStartedAt");
++          const firstAt=firstAttempt? Date.parse(firstAttempt):NaN;
++          if((!firstAttempt&&item.attempts>0)||(firstAttempt&&(!Number.isFinite(firstAt)||firstAt>currentTime().getTime()+60000||currentTime().getTime()-firstAt>=RETRY_WINDOW_MS)))
++            throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_RECONCILIATION_REQUIRED");
++          meta={ ...meta,platformInvoiceProviderStartedAt: firstAttempt||currentTime().toISOString() };
++          const marked=await this.db.emailQueue.updateMany({ where: owned,data: { meta: meta as Prisma.InputJsonValue,leaseExpiresAt: new Date(currentTime().getTime()+LEASE_MS) } });
++          if(marked.count!==1)
++            continue;
++          const raw=Array.isArray(meta.attachments)? meta.attachments:[];
++          const attachments=raw.map(x => x as {
++            filename?: string;
++            contentBase64?: string;
++            contentType?: string;
++          }).filter(x => x.filename&&x.contentBase64).map(x => ({ filename: String(x.filename),content: Buffer.from(String(x.contentBase64),"base64"),...(x.contentType? { contentType: String(x.contentType) }:{}) }));
++          const result=await this.send({ to: item.recipient,subject: item.subject,text: item.body,html: typeof meta.html==="string"? meta.html:undefined,fromName: typeof meta.fromName==="string"? meta.fromName:undefined,replyTo: typeof meta.replyTo==="string"? meta.replyTo:undefined,attachments,idempotencyKey: `fleetum-email-queue:${item.id}` });
++          if(result.provider!=="resend"||!result.id?.trim())
++            throw new PermanentInvoiceEmailFailure("INVOICE_EMAIL_RECEIPT_UNVERIFIED");
++          accepted={ provider: result.provider,id: result.id.trim() };
++          acceptedAt=currentTime().toISOString();
++        }
++        const receiptMeta={ ...meta,emailProvider: accepted.provider,providerMessageId: accepted.id,providerAcceptedAt: acceptedAt };
++        const finalizedAt=currentTime();
++        await this.db.$transaction(async (tx) => {
++          const marked=await tx.emailQueue.updateMany({ where: owned,data: { status: "SENT",attempts: { increment: 1 },lastError: null,processingToken: null,processingStartedAt: null,leaseExpiresAt: null,meta: { ...receiptMeta,sentAt: acceptedAt } as Prisma.InputJsonValue } });
++          if(marked.count!==1)
++            return;
++          const updated=await tx.invoiceDelivery.updateMany({ where: { id: deliveryId,invoiceId },data: { status: "SENT",provider: accepted!.provider,providerMessageId: accepted!.id,sentAt: finalizedAt,errorMessage: null } });
++          if(updated.count!==1)
++            throw Error("INVOICE_EMAIL_FINALIZATION_FAILED");
++          const changed=await tx.invoice.updateMany({ where: { id: invoiceId,tenantId,deletedAt: null,status: { not: "PAID" } },data: { status: "SENT",sentAt: finalizedAt } });
++          if(changed.count!==1&&!await tx.invoice.findFirst({ where: { id: invoiceId,tenantId,deletedAt: null,status: "PAID" },select: { id: true } }))
++            throw Error("INVOICE_EMAIL_FINALIZATION_FAILED");
++        });
++      }
++      catch(error) {
++        const failureAt=currentTime(),attempt=item.attempts+1;
++        const nextAttemptAt=new Date(failureAt.getTime()+Math.min(2**attempt,60)*60000);
++        if(accepted) {
++          // A committed SENT row no longer matches owned, including lost ACKs.
++          // Persist a receipt when local finalization alone needs another try.
++          await this.db.emailQueue.updateMany({ where: owned,data: { attempts: { increment: 1 },nextAttemptAt,lastError: "INVOICE_EMAIL_LOCAL_FINALIZATION_FAILED",processingToken: null,processingStartedAt: null,leaseExpiresAt: null,meta: { ...meta,emailProvider: accepted.provider,providerMessageId: accepted.id,providerAcceptedAt: acceptedAt } as Prisma.InputJsonValue } });
++          continue;
++        }
++        const terminal=error instanceof PermanentInvoiceEmailFailure||attempt>=item.maxAttempts;
++        const code=error instanceof PermanentInvoiceEmailFailure? error.message:"INVOICE_EMAIL_ATTEMPT_FAILED";
++        try {
++          await this.db.$transaction(async (tx) => {
++            const changed=await tx.emailQueue.updateMany({ where: owned,data: { status: terminal? "FAILED":"PENDING",attempts: { increment: 1 },nextAttemptAt: terminal? item.nextAttemptAt:nextAttemptAt,lastError: code,processingToken: null,processingStartedAt: null,leaseExpiresAt: null,meta: meta as Prisma.InputJsonValue } });
++            if(changed.count!==1||!target)
++              return;
++            await tx.invoiceDelivery.updateMany({ where: { id: target.deliveryId,invoiceId: target.invoiceId,status: { not: "SENT" } },data: { status: terminal? "FAILED":"PENDING",errorMessage: code } });
++            if(terminal)
++              await tx.invoice.updateMany({ where: { id: target.invoiceId,tenantId: target.tenantId,deletedAt: null,status: { notIn: ["SENT","PAID"] } },data: { status: "ERROR" } });
++          });
++        }
++        catch {
++          // Retain ownership if local persistence is unavailable. The finite
++          // lease and durable first-attempt deadline govern a later retry.
++        }
++      }
++    }
++    return { processed };
++  }
++}
+diff --git a/backend/src/interfaces/http/controllers/platform-admin-controller.ts b/backend/src/interfaces/http/controllers/platform-admin-controller.ts
+index e3747af..a79268c 100644
+--- a/backend/src/interfaces/http/controllers/platform-admin-controller.ts
++++ b/backend/src/interfaces/http/controllers/platform-admin-controller.ts
+@@ -0,0 +1,2 @@
++import { PlatformSessionService, platformSessionService } from "../../../application/services/platform-session-service.js";
++import { AppError } from "../../../shared/errors/app-error.js";
+@@ -28,0 +31,18 @@ import {
++const IDEMPOTENCY_HEADER = "x-idempotency-key";
++const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
++
++const requiredIdempotencyKey = (req: Request) => {
++  const header = req.header(IDEMPOTENCY_HEADER)?.trim();
++  if (!header) {
++    throw new AppError(
++      "Header x-idempotency-key obbligatorio per inviare una fattura.",
++      400,
++      "IDEMPOTENCY_KEY_REQUIRED"
++    );
++  }
++  if (!IDEMPOTENCY_KEY_PATTERN.test(header)) {
++    throw new AppError("Header x-idempotency-key non valido.", 400, "INVALID_IDEMPOTENCY_KEY");
++  }
++  return header;
++};
++
+@@ -33 +53,2 @@ export class PlatformAdminController {
+-    private readonly consoleService: PlatformConsoleService
++    private readonly consoleService: PlatformConsoleService,
++    private readonly sessions: PlatformSessionService = platformSessionService
+@@ -51,0 +73,8 @@ export class PlatformAdminController {
++  logout = async (req: Request, res: Response) => {
++    const token = req.headers.authorization?.slice(7);
++    if (!token) throw new AppError("Token platform mancante", 401, "UNAUTHORIZED");
++    const result = await this.sessions.logout(token);
++    res.setHeader("Cache-Control", "no-store");
++    res.json(result);
++  };
++
+@@ -246 +275,2 @@ export class PlatformAdminController {
+-      sourceIp: getClientIp(req)
++      sourceIp: getClientIp(req),
++      idempotencyKey: requiredIdempotencyKey(req)
+@@ -247,0 +278 @@ export class PlatformAdminController {
++    if (result.replayed) res.setHeader("Idempotency-Replayed", "true");
+diff --git a/backend/src/interfaces/http/middlewares/platform-auth.ts b/backend/src/interfaces/http/middlewares/platform-auth.ts
+index fbf39f1..adf0b85 100644
+--- a/backend/src/interfaces/http/middlewares/platform-auth.ts
++++ b/backend/src/interfaces/http/middlewares/platform-auth.ts
+@@ -7 +7 @@ import { AppError } from "../../../shared/errors/app-error.js";
+-import { JwtPayload } from "../../../shared/types/auth.js";
++import { platformSessionService, verifyPlatformSessionToken } from "../../../application/services/platform-session-service.js";
+@@ -9 +9 @@ import { JwtPayload } from "../../../shared/types/auth.js";
+-export const requirePlatformAuth = async (req: Request, _res: Response, next: NextFunction) => {
++const platformAuthentication = (logoutOnly: boolean) => async (req: Request, _res: Response, next: NextFunction) => {
+@@ -15,4 +15 @@ export const requirePlatformAuth = async (req: Request, _res: Response, next: Ne
+-    const payload = jwt.verify(token, env.PLATFORM_JWT_SECRET) as JwtPayload & { iat?: number };
+-    if (!payload?.platformAdmin || payload.tokenType !== "platform") {
+-      throw new AppError("Accesso platform negato", 403, "FORBIDDEN");
+-    }
++    const payload = verifyPlatformSessionToken(token);
+@@ -20,7 +17,18 @@ export const requirePlatformAuth = async (req: Request, _res: Response, next: Ne
+-    // Reject every Platform token issued before a completed password reset.
+-    const credential = await prisma.platformAdminCredential.findUnique({
+-      where: { email: env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase() },
+-      select: { passwordChangedAt: true }
+-    });
+-    if (credential && (!payload.iat || payload.iat * 1000 < credential.passwordChangedAt.getTime())) {
+-      throw new AppError("Sessione Platform revocata. Accedi di nuovo.", 401, "PLATFORM_SESSION_REVOKED");
++    try {
++      // Existing password-reset revocation remains independent of logout.
++      const credential = await prisma.platformAdminCredential.findUnique({
++        where: { email: env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase() },
++        select: { passwordChangedAt: true }
++      });
++      if (credential && (!payload.iat || payload.iat * 1000 < credential.passwordChangedAt.getTime())) {
++        throw new AppError("Sessione Platform revocata. Accedi di nuovo.", 401, "PLATFORM_SESSION_REVOKED");
++      }
++      // Only the logout route can acknowledge an already-revoked bearer.
++      // Subsequent authorization checks read the durable store without a cache;
++      // requests admitted before the logout commit may still finish.
++      if (!logoutOnly && await platformSessionService.isRevoked(token)) {
++        throw new AppError("Sessione Platform revocata. Accedi di nuovo.", 401, "PLATFORM_SESSION_REVOKED");
++      }
++    } catch (error) {
++      if (error instanceof AppError) throw error;
++      throw new AppError("Verifica sessione Platform temporaneamente non disponibile", 503, "PLATFORM_SESSION_CHECK_UNAVAILABLE");
+@@ -33,0 +42 @@ export const requirePlatformAuth = async (req: Request, _res: Response, next: Ne
++    if (error instanceof jwt.TokenExpiredError) return next(new AppError("Sessione Platform scaduta. Accedi di nuovo.", 401, "PLATFORM_SESSION_EXPIRED"));
+@@ -36,0 +46,4 @@ export const requirePlatformAuth = async (req: Request, _res: Response, next: Ne
++
++export const requirePlatformAuth = platformAuthentication(false);
++// Keep this exception private to POST /auth/logout; never use for business routes.
++export const requirePlatformLogoutAuth = platformAuthentication(true);
+diff --git a/backend/src/interfaces/http/routes/platform-admin-routes.ts b/backend/src/interfaces/http/routes/platform-admin-routes.ts
+index b88ead4..1cff8c2 100644
+--- a/backend/src/interfaces/http/routes/platform-admin-routes.ts
++++ b/backend/src/interfaces/http/routes/platform-admin-routes.ts
+@@ -3 +3 @@ import { PlatformAdminController } from "../controllers/platform-admin-controlle
+-import { requirePlatformAuth } from "../middlewares/platform-auth.js";
++import { requirePlatformAuth, requirePlatformLogoutAuth } from "../middlewares/platform-auth.js";
+@@ -10,0 +11 @@ export const platformAdminRoutes = (controller: PlatformAdminController) => {
++  router.post("/auth/logout", requirePlatformLogoutAuth, asyncHandler(controller.logout));
+diff --git a/backend/src/interfaces/http/validators/public-validators.ts b/backend/src/interfaces/http/validators/public-validators.ts
+index 6e4e3e9..26a5ecb 100644
+--- a/backend/src/interfaces/http/validators/public-validators.ts
++++ b/backend/src/interfaces/http/validators/public-validators.ts
+@@ -30 +30 @@ const analyticsMetadataSchema = z
+-  .record(z.union([z.string().trim().max(240), z.number().finite(), z.boolean(), z.null()]))
++  .record(z.string(), z.union([z.string().trim().max(240), z.number().finite(), z.boolean(), z.null()]))
+diff --git a/backend/src/interfaces/http/validators/rental-payments-validators.ts b/backend/src/interfaces/http/validators/rental-payments-validators.ts
+index 1c638c9..1f5aa88 100644
+--- a/backend/src/interfaces/http/validators/rental-payments-validators.ts
++++ b/backend/src/interfaces/http/validators/rental-payments-validators.ts
+@@ -7 +7 @@ export const rentalPaymentSetupSessionSchema = z.object({
+-    errorMap: () => ({ message: "Devi accettare il mandato per registrare la carta del cliente." })
++    error: "Devi accettare il mandato per registrare la carta del cliente."
+diff --git a/backend/src/interfaces/http/validators/tenant-profile-validators.ts b/backend/src/interfaces/http/validators/tenant-profile-validators.ts
+index bd66707..efefdf7 100644
+--- a/backend/src/interfaces/http/validators/tenant-profile-validators.ts
++++ b/backend/src/interfaces/http/validators/tenant-profile-validators.ts
+@@ -27 +27 @@ const validationFieldPath: Record<string, string> = {
+-const withCompanyFiscalRules = <T extends z.ZodTypeAny>(schema: T) =>
++const withCompanyFiscalRules = <T extends z.ZodType<Record<string, string | undefined>>>(schema: T) =>
+diff --git a/backend/tests/invoice-email-queue-state.test.ts b/backend/tests/invoice-email-queue-state.test.ts
+new file mode 100644
+index 0000000..cef9089
+--- /dev/null
++++ b/backend/tests/invoice-email-queue-state.test.ts
+@@ -0,0 +1,117 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { InvoiceService } from "../src/application/services/invoice-service.js";
++import { prisma } from "../src/infrastructure/database/prisma/client.js";
++
++test("invoice email keeps an in-flight leased queue item pending", async () => {
++  const now = new Date("2030-01-15T12:00:00.000Z");
++  const delivery = {
++    id: "delivery_pending",
++    invoiceId: "invoice_pending",
++    channel: "EMAIL",
++    recipient: "billing@example.test",
++    status: "PENDING",
++    provider: null,
++    providerMessageId: null,
++    errorMessage: null,
++    sentAt: null,
++    createdAt: now
++  };
++  const invoice = {
++    id: "invoice_pending",
++    tenantId: "tenant_pending",
++    invoiceNumber: "FLT-2030-PENDING",
++    issueDate: now,
++    dueDate: new Date("2030-01-31T00:00:00.000Z"),
++    periodStart: new Date("2029-12-01T00:00:00.000Z"),
++    periodEnd: new Date("2029-12-31T23:59:59.999Z"),
++    status: "GENERATED",
++    currency: "EUR",
++    subtotal: 100,
++    taxRate: 22,
++    taxAmount: 22,
++    total: 122,
++    billingName: "Synthetic Billing",
++    billingVatNumber: null,
++    billingTaxCode: null,
++    billingAddress: null,
++    billingEmail: "billing@example.test",
++    billingPec: null,
++    billingSdi: null,
++    notes: null,
++    pdfFilePath: null,
++    createdAt: now,
++    updatedAt: now,
++    sentAt: null,
++    deletedAt: null,
++    tenant: { id: "tenant_pending", name: "Synthetic Tenant" },
++    items: [],
++    deliveries: [delivery]
++  };
++
++  const queue = {
++    enqueue: async () => ({ id: "queue_pending" }),
++    processPending: async () => ({ processed: 0 })
++  };
++  const service = new InvoiceService(queue as any);
++  (service as any).findInvoice = async () => invoice;
++  (service as any).renderPdf = async () => Buffer.from("synthetic-pdf");
++
++  const originalTransaction = prisma.$transaction;
++  const originalDeliveryUpdate = prisma.invoiceDelivery.update;
++  const originalDeliveryCreate = prisma.invoiceDelivery.create;
++  const originalInvoiceUpdate = prisma.invoice.update;
++  const originalQueueFindUnique = prisma.emailQueue.findUnique;
++  const originalAuditCreate = prisma.auditLog.create;
++  let directFinalizationCalls = 0;
++  let auditAction: string | undefined;
++
++  const transactionClient = {
++    $executeRaw: async () => 0,
++    $queryRaw: async () => [{ locked: "1" }],
++    invoiceEmailRequest: {
++      findUnique: async () => null,
++      create: async () => ({ id: "invoice_request_pending" })
++    },
++    invoiceDelivery: {
++      create: async () => delivery
++    }
++  };
++  (prisma as any).$transaction = async (callback: (tx: typeof transactionClient) => unknown) => callback(transactionClient);
++  (prisma.invoiceDelivery as any).create = async () => delivery;
++  (prisma.invoiceDelivery as any).update = async () => {
++    directFinalizationCalls += 1;
++    throw new Error("The queue worker owns delivery finalization");
++  };
++  (prisma.invoice as any).update = async () => {
++    directFinalizationCalls += 1;
++    throw new Error("The queue worker owns invoice finalization");
++  };
++  (prisma.emailQueue as any).findUnique = async () => ({ status: "PENDING", lastError: "transient", meta: null });
++  (prisma.auditLog as any).create = async (input: any) => {
++    auditAction = input.data.action;
++    return { id: "audit_pending", ...input.data };
++  };
++
++  try {
++    const result = await service.sendEmail({
++      invoiceId: invoice.id,
++      actorUserId: "platform_user",
++      sourceIp: "203.0.113.20",
++      idempotencyKey: "invoice-email-pending"
++    });
++
++    assert.equal(result.data.status, "GENERATED");
++    assert.equal(result.data.deliveries[0]?.status, "PENDING");
++    assert.deepEqual(result.emailDelivery,{id:delivery.id,status:"PENDING"});
++    assert.equal(auditAction, "PLATFORM_INVOICE_EMAIL_QUEUED");
++    assert.equal(directFinalizationCalls, 0);
++  } finally {
++    (prisma as any).$transaction = originalTransaction;
++    (prisma.invoiceDelivery as any).update = originalDeliveryUpdate;
++    (prisma.invoiceDelivery as any).create = originalDeliveryCreate;
++    (prisma.invoice as any).update = originalInvoiceUpdate;
++    (prisma.emailQueue as any).findUnique = originalQueueFindUnique;
++    (prisma.auditLog as any).create = originalAuditCreate;
++  }
++});
+diff --git a/backend/tests/multer-runtime-security.test.ts b/backend/tests/multer-runtime-security.test.ts
+new file mode 100644
+index 0000000..ef9c5ac
+--- /dev/null
++++ b/backend/tests/multer-runtime-security.test.ts
+@@ -0,0 +1,73 @@
++import assert from "node:assert/strict";
++import { after, beforeEach, test } from "node:test";
++import { mkdtemp, readdir, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import path from "node:path";
++import http from "node:http";
++import express, { type ErrorRequestHandler } from "express";
++
++const root = await mkdtemp(path.join(tmpdir(), "fleetum-multipart-synthetic-"));
++process.env.NODE_ENV = "test";
++process.env.DOTENV_CONFIG_PATH = "/dev/null";
++process.env.UPLOAD_DIR = root;
++process.env.FILE_MAX_DOCUMENT_MB = "1";
++const { uploadRentalCustomerAttachments } = await import("../src/infrastructure/storage/multer.js");
++
++after(() => rm(root, { recursive: true, force: true }));
++beforeEach(async () => {
++  for (const name of await readdir(root)) await rm(path.join(root, name), { recursive: true, force: true });
++});
++async function lab(t: { after: (fn: () => Promise<void>) => void }) {
++  const app = express();
++  app.get("/health", (_req, res) => res.json({ synthetic: true }));
++  app.post("/upload", uploadRentalCustomerAttachments.single("document"), (req, res) => {
++    res.json({ bytes: req.file?.size, withinSyntheticRoot: req.file?.path.startsWith(root + path.sep) });
++  });
++  const errors: ErrorRequestHandler = (error, _req, res, _next) => {
++    res.status(400).json({ code: error.code ?? "MIDDLEWARE_REJECTED" });
++  };
++  app.use(errors);
++  const server = http.createServer(app);
++  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
++  t.after(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
++  const address = server.address();
++  assert.ok(address && typeof address !== "string");
++  return `http://127.0.0.1:${address.port}`;
++}
++function document(bytes: number, type = "application/pdf") {
++  const data = new FormData();
++  data.append("document", new Blob([Buffer.alloc(bytes, "S")], { type }), "synthetic-document.pdf");
++  return data;
++}
++test("rental upload accepts a file exactly at the configured size boundary", { timeout: 10000 }, async t => {
++  const url = await lab(t), bytes = 1024 * 1024;
++  const response = await fetch(url + "/upload", { method: "POST", body: document(bytes) });
++  assert.equal(response.status, 200);
++  assert.deepEqual(await response.json(), { bytes, withinSyntheticRoot: true });
++});
++test("an oversized rental attachment is rejected and its partial file is removed", { timeout: 10000 }, async t => {
++  const url = await lab(t);
++  const response = await fetch(url + "/upload", { method: "POST", body: document(1024 * 1024 + 1) });
++  assert.equal(response.status, 400);
++  assert.deepEqual(await response.json(), { code: "LIMIT_FILE_SIZE" });
++  assert.deepEqual(await readdir(root), []);
++});
++test("disallowed attachment media types do not create a file", { timeout: 10000 }, async t => {
++  const url = await lab(t);
++  const response = await fetch(url + "/upload", { method: "POST", body: document(32, "application/javascript") });
++  assert.equal(response.status, 400);
++  assert.deepEqual(await readdir(root), []);
++});
++test("a disconnected multipart upload cleans its file and the process stays responsive", { timeout: 10000 }, async t => {
++  const url = await lab(t), boundary = "fleetum-synthetic-abort";
++  await new Promise<void>(resolve => {
++    const request = http.request(url + "/upload", { method: "POST", headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` } });
++    request.on("error", () => {});
++    request.once("close", resolve);
++    request.write(`--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="synthetic.pdf"\r\nContent-Type: application/pdf\r\n\r\nSYNTHETIC PARTIAL FILE`);
++    setTimeout(() => request.destroy(), 40);
++  });
++  for (let i = 0; i < 20 && (await readdir(root)).length; i++) await new Promise(resolve => setTimeout(resolve, 25));
++  assert.deepEqual(await readdir(root), []);
++  assert.equal((await fetch(url + "/health")).status, 200);
++});
+diff --git a/backend/tests/platform-email-facade.test.ts b/backend/tests/platform-email-facade.test.ts
+new file mode 100644
+index 0000000..4a80e70
+--- /dev/null
++++ b/backend/tests/platform-email-facade.test.ts
+@@ -0,0 +1,33 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { prisma } from "../src/infrastructure/database/prisma/client.js";
++import { EmailQueueService } from "../src/infrastructure/email/email-queue-service.js";
++import { emailSender } from "../src/infrastructure/email/email-sender.js";
++test("Platform invoice enqueue uses the caller transaction without a second root write",async () => {
++  let calls=0;
++  const transaction={ emailQueue: { create: async ({ data }: any) => { calls++; return { id: "synthetic-queue",...data }; } } };
++  const result=await new EmailQueueService().enqueue({ tenantId: "tenant-synthetic",type: "SAAS_INVOICE_EMAIL",recipient: "billing@example.test",subject: "Synthetic",body: "Synthetic" },transaction as any);
++  assert.equal(calls,1);
++  assert.equal(result.id,"synthetic-queue");
++});
++test("the existing worker retains the password-email path and excludes Platform invoice rows",async () => {
++  const find=prisma.emailQueue.findMany,update=prisma.emailQueue.update,send=emailSender.send;
++  const queries: any[]=[],sent: any[]=[];
++  let updates=0;
++  (prisma.emailQueue as any).findMany=async (input: any) => { queries.push(input.where); return input.where.type==="SAAS_INVOICE_EMAIL"? []:[{ id: "synthetic-reset",type: "PASSWORD_RESET",recipient: "reset@example.test",subject: "Synthetic",body: "Synthetic",meta: {},attempts: 0,maxAttempts: 5,nextAttemptAt: new Date() }]; };
++  (prisma.emailQueue as any).update=async () => { updates++; return {}; };
++  emailSender.send=async (input: any) => { sent.push(input); return { provider: "resend",id: "synthetic-receipt" }; };
++  try {
++    const result=await new EmailQueueService().processPending();
++    assert.equal(result.processed,1);
++    assert.equal(sent.length,1);
++    assert.equal(sent[0].idempotencyKey,undefined);
++    assert.equal(updates,1);
++    assert.deepEqual(queries[1].type,{ not: "SAAS_INVOICE_EMAIL" });
++  }
++  finally {
++    (prisma.emailQueue as any).findMany=find;
++    (prisma.emailQueue as any).update=update;
++    emailSender.send=send;
++  }
++});
+diff --git a/backend/tests/platform-email-sender-protocol.test.ts b/backend/tests/platform-email-sender-protocol.test.ts
+new file mode 100644
+index 0000000..93f643a
+--- /dev/null
++++ b/backend/tests/platform-email-sender-protocol.test.ts
+@@ -0,0 +1,35 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { Resend } from "resend";
++import { emailSender } from "../src/infrastructure/email/email-sender.js";
++
++test("the provider SDK receives the stable invoice key as request options", async () => {
++  const original = Resend.prototype.post;
++  const requests: any[] = [];
++  Resend.prototype.post = (async (...args: any[]) => {
++    requests.push(args);
++    return { data: { id: "synthetic-provider-receipt" }, error: null };
++  }) as typeof original;
++  try {
++    const result = await emailSender.send({ to: "billing@example.test", subject: "Synthetic", text: "Synthetic", idempotencyKey: "fleetum-email-queue:synthetic-queue" });
++    assert.equal(requests.length, 1);
++    assert.equal(requests[0][0], "/emails");
++    assert.equal(requests[0][2].idempotencyKey, "fleetum-email-queue:synthetic-queue");
++    assert.equal(requests[0][1].idempotencyKey, undefined);
++    assert.equal(result.id, "synthetic-provider-receipt");
++  } finally { Resend.prototype.post = original; }
++});
++
++test("ordinary tenant emails keep their previous provider request options", async () => {
++  const original = Resend.prototype.post;
++  const requests: any[] = [];
++  Resend.prototype.post = (async (...args: any[]) => {
++    requests.push(args);
++    return { data: { id: "synthetic-tenant-receipt" }, error: null };
++  }) as typeof original;
++  try {
++    await emailSender.send({ to: "reset@example.test", subject: "Synthetic", text: "Synthetic" });
++    assert.equal(requests.length, 1);
++    assert.deepEqual(requests[0][2], {});
++  } finally { Resend.prototype.post = original; }
++});
+diff --git a/backend/tests/platform-invoice-outbox.test.ts b/backend/tests/platform-invoice-outbox.test.ts
+new file mode 100644
+index 0000000..f67074e
+--- /dev/null
++++ b/backend/tests/platform-invoice-outbox.test.ts
+@@ -0,0 +1,258 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { PlatformInvoiceOutboxProcessor } from "../src/infrastructure/email/platform-invoice-outbox.js";
++const now=new Date("2030-01-15T12:00:00Z");
++const clone=<T>(v: T): T => structuredClone(v);
++const matches=(row: any,where: any): boolean => Object.entries(where||{}).every(([key,value]: any) => {
++  if(key==="OR")
++    return value.some((condition: any) => matches(row,condition));
++  if(value&&typeof value==="object"&&!(value instanceof Date)) {
++    if("lte" in value)
++      return row[key]!=null&&new Date(row[key])<=value.lte;
++    if("in" in value)
++      return value.in.includes(row[key]);
++    if("notIn" in value)
++      return !value.notIn.includes(row[key]);
++    if("not" in value)
++      return row[key]!==value.not;
++  }
++  return row[key]===value;
++});
++const apply=(row: any,data: any) => {
++  for(const [key,value] of Object.entries(data) as any)
++    row[key]=value&&typeof value==="object"&&"increment" in value? row[key]+value.increment:clone(value);
++};
++function fixture() {
++  const state: any={ row: { id: "queue-synthetic",tenantId: "tenant-a",type: "SAAS_INVOICE_EMAIL",recipient: "billing@example.test",subject: "Synthetic",body: "Synthetic invoice",meta: { tenantId: "tenant-a",invoiceId: "invoice-a",invoiceDeliveryId: "delivery-a" },status: "PENDING",attempts: 0,maxAttempts: 5,nextAttemptAt: now,createdAt: now,processingToken: null,processingStartedAt: null,leaseExpiresAt: null },invoice: { id: "invoice-a",tenantId: "tenant-a",deletedAt: null,status: "GENERATED",sentAt: null },delivery: { id: "delivery-a",invoiceId: "invoice-a",channel: "EMAIL",recipient: "billing@example.test",status: "PENDING",provider: null,providerMessageId: null },calls: [],failFinalization: false,loseCommitAck: false };
++  const mutate=(row: any,input: any) => {
++    if(!matches(row,input.where))
++      return { count: 0 }; apply(row,input.data); return { count: 1 };
++  };
++  const db: any={
++    emailQueue: { findMany: async ({ where }: any) => matches(state.row,where)? [clone(state.row)]:[],findFirst: async ({ where }: any) => matches(state.row,where)? clone(state.row):null,updateMany: async (i: any) => mutate(state.row,i) },
++    invoice: {
++      findFirst: async ({ where }: any) => matches(state.invoice,where)? clone(state.invoice):null,updateMany: async (i: any) => {
++        if(state.failFinalization) {
++          state.failFinalization=false;
++          throw Error("synthetic finalization failure");
++        } return mutate(state.invoice,i);
++      }
++    },
++    invoiceDelivery: { findFirst: async ({ where }: any) => matches(state.delivery,where)? clone(state.delivery):null,updateMany: async (i: any) => mutate(state.delivery,i) },
++    $executeRaw: async () => 0,
++    $transaction: async (fn: any) => {
++      const snapshot=clone({ row: state.row,invoice: state.invoice,delivery: state.delivery }); let result; try {
++        result=await fn(db);
++      }
++        catch(e) {
++          Object.assign(state,snapshot);
++          throw e;
++        } if(state.loseCommitAck) {
++          state.loseCommitAck=false;
++          throw Error("synthetic lost commit acknowledgement");
++        } return result;
++    }
++  };
++  state.row.meta.invoiceEmailCommandKey="invoice-command-synthetic";
++  const sender={ send: async (input: any) => { state.calls.push(input); return { provider: "resend" as const,id: "receipt-synthetic" }; } };
++  return { state,db,sender,processor: new PlatformInvoiceOutboxProcessor(db,sender) };
++}
++test("two consumers claim one invoice queue row and record a single delivery",async () => {
++  const { state,processor }=fixture();
++  await Promise.all([processor.processPending(now),processor.processPending(now)]);
++  assert.equal(state.calls.length,1);
++  assert.equal(state.row.status,"SENT");
++  assert.equal(state.delivery.status,"SENT");
++  assert.equal(state.invoice.status,"SENT");
++  assert.equal(state.row.processingToken,null);
++  assert.equal(state.calls[0].idempotencyKey,"fleetum-email-queue:queue-synthetic");
++});
++test("foreign invoice metadata is rejected before calling the provider",async () => {
++  const { state,processor }=fixture();
++  state.invoice.tenantId="tenant-b";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++  assert.equal(state.invoice.status,"GENERATED");
++});
++test("a delivery for another invoice cannot authorize the message",async () => {
++  const { state,processor }=fixture();
++  state.delivery.invoiceId="invoice-b";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++});
++test("a changed snapshot recipient cannot be substituted into a queued invoice",async () => {
++  const { state,processor }=fixture();
++  state.row.recipient="other@example.test";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++});
++test("a provider receipt survives local finalization failure and avoids another send",async () => {
++  const { state,processor }=fixture();
++  state.failFinalization=true;
++  await processor.processPending(now);
++  assert.equal(state.row.status,"PENDING");
++  assert.equal(state.row.meta.providerMessageId,"receipt-synthetic");
++  assert.equal(state.delivery.status,"PENDING");
++  await processor.processPending(new Date(now.getTime()+180000));
++  assert.equal(state.calls.length,1);
++  assert.equal(state.row.status,"SENT");
++  assert.equal(state.delivery.status,"SENT");
++});
++test("a lost commit acknowledgement cannot revert a committed SENT row",async () => {
++  const { state,processor }=fixture();
++  state.loseCommitAck=true;
++  await processor.processPending(now);
++  assert.equal(state.row.status,"SENT");
++  assert.equal(state.invoice.status,"SENT");
++  assert.equal(state.delivery.status,"SENT");
++  assert.equal(state.calls.length,1);
++});
++test("an empty provider receipt is not advertised as a successful invoice email",async () => {
++  const { state,db }=fixture();
++  const processor=new PlatformInvoiceOutboxProcessor(db,{ send: async () => ({ provider: "resend",id: null }) } as any);
++  await processor.processPending(now);
++  assert.equal(state.row.status,"FAILED");
++  assert.notEqual(state.invoice.status,"SENT");
++});
++test("an old uncertain attempt cannot be resent beyond the provider key lifetime",async () => {
++  const { state,processor }=fixture();
++  state.row.attempts=1;
++  state.row.meta.platformInvoiceProviderStartedAt=new Date(now.getTime()-24*3600000).toISOString();
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++});
++test("legacy retry without an attempt timestamp is preserved for reconciliation",async () => {
++  const { state,processor }=fixture();
++  state.row.attempts=1;
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++});
++test("legacy pending rows are not given a fresh provider key during an upgrade",async () => {
++  const { state,processor }=fixture();
++  delete state.row.meta.invoiceEmailCommandKey;
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++  assert.equal(state.row.lastError,"INVOICE_EMAIL_RECONCILIATION_REQUIRED");
++});
++test("a verified legacy provider receipt can finish locally without sending again",async () => {
++  const { state,processor }=fixture();
++  delete state.row.meta.invoiceEmailCommandKey;
++  state.row.meta.emailProvider="resend";
++  state.row.meta.providerMessageId="legacy-receipt";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"SENT");
++});
++test("a definite transient failure retries with the same provider key",async () => {
++  const { state,db }=fixture();
++  let count=0;
++  const keys: string[]=[];
++  const processor=new PlatformInvoiceOutboxProcessor(db,{
++    send: async (input: any) => {
++      keys.push(input.idempotencyKey); if(count++===0)
++        throw Error("synthetic transport failure"); return { provider: "resend",id: "receipt-synthetic" };
++    }
++  } as any);
++  await processor.processPending(now);
++  await processor.processPending(new Date(now.getTime()+180000));
++  assert.equal(state.row.status,"SENT");
++  assert.equal(keys.length,2);
++  assert.equal(keys[0],keys[1]);
++});
++test("invoice sending cannot downgrade an already paid invoice",async () => {
++  const { state,processor }=fixture();
++  state.invoice.status="PAID";
++  await processor.processPending(now);
++  assert.equal(state.invoice.status,"PAID");
++  assert.equal(state.delivery.status,"SENT");
++});
++test("a failed resend cannot downgrade an invoice already sent",async () => {
++  const { state,db }=fixture();
++  state.invoice.status="SENT";
++  state.row.maxAttempts=1;
++  const processor=new PlatformInvoiceOutboxProcessor(db,{ send: async () => { throw Error("synthetic rejection"); } } as any);
++  await processor.processPending(now);
++  assert.equal(state.invoice.status,"SENT");
++  assert.equal(state.row.status,"FAILED");
++});
++test("the dedicated consumer leaves all tenant queue types to the existing worker",async () => {
++  const { state,processor }=fixture();
++  state.row.type="BOOKING_CONTRACT";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.processingToken,null);
++});
++test("provider acceptance with a lost reply reuses the original physical delivery",async () => {
++  const { state,db }=fixture();
++  let attempts=0,physical=0;
++  const receipts=new Map<string,string>();
++  const worker=new PlatformInvoiceOutboxProcessor(db,{
++    send: async (input: any) => {
++      let id=receipts.get(input.idempotencyKey); if(!id) {
++        id="receipt-"+(++physical);
++        receipts.set(input.idempotencyKey,id);
++      } if(attempts++===0)
++        throw Error("synthetic lost provider reply"); return { provider: "resend",id };
++    }
++  } as any);
++  await worker.processPending(now);
++  await worker.processPending(new Date(now.getTime()+180000));
++  assert.equal(physical,1);
++  assert.equal(attempts,2);
++  assert.equal(state.row.status,"SENT");
++});
++test("a hanging provider call releases the request with a bounded retryable outcome",async () => {
++  const { state,db }=fixture();
++  const worker=new PlatformInvoiceOutboxProcessor(db,{ send: async () => new Promise(() => { }) } as any,5);
++  await worker.processPending(now);
++  assert.equal(state.row.status,"PENDING");
++  assert.equal(state.row.processingToken,null);
++  assert.equal(state.row.attempts,1);
++});
++test("an exhausted queue cannot obtain another provider attempt",async () => {
++  const { state,processor }=fixture();
++  state.row.attempts=5;
++  state.row.meta.platformInvoiceProviderStartedAt=now.toISOString();
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++});
++test("receipt fields from different providers cannot be combined into false delivery",async () => {
++  const { state,processor }=fixture();
++  state.row.meta.emailProvider="other-provider";
++  state.row.meta.providerMessageId="unverified-receipt";
++  state.delivery.provider="resend";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++  assert.equal(state.delivery.status,"FAILED");
++});
++test("conflicting durable receipts require reconciliation without overwriting the sent delivery",async () => {
++  const { state,processor }=fixture();
++  state.row.meta.emailProvider="resend";
++  state.row.meta.providerMessageId="receipt-one";
++  state.delivery.status="SENT";
++  state.delivery.provider="resend";
++  state.delivery.providerMessageId="receipt-two";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"FAILED");
++  assert.equal(state.delivery.providerMessageId,"receipt-two");
++  assert.equal(state.delivery.status,"SENT");
++});
++test("a verified sent delivery can repair a pending queue without another provider call",async () => {
++  const { state,processor }=fixture();
++  delete state.row.meta.invoiceEmailCommandKey;
++  state.delivery.status="SENT";
++  state.delivery.provider="resend";
++  state.delivery.providerMessageId="receipt-original";
++  await processor.processPending(now);
++  assert.equal(state.calls.length,0);
++  assert.equal(state.row.status,"SENT");
++  assert.equal(state.row.meta.providerMessageId,"receipt-original");
++});
+diff --git a/backend/tests/platform-logout-security.test.ts b/backend/tests/platform-logout-security.test.ts
+new file mode 100644
+index 0000000..f3df463
+--- /dev/null
++++ b/backend/tests/platform-logout-security.test.ts
+@@ -0,0 +1,85 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import jwt from "jsonwebtoken";
++import { PlatformAdminService } from "../src/application/services/platform-admin-service.js";
++import { prisma } from "../src/infrastructure/database/prisma/client.js";
++import { requirePlatformAuth } from "../src/interfaces/http/middlewares/platform-auth.js";
++import { env } from "../src/shared/config/env.js";
++
++const platformToken = (extra: Record<string, unknown> = {}, secret = env.PLATFORM_JWT_SECRET) => jwt.sign({
++  userId: "platform-admin", tenantId: "platform", roles: ["PLATFORM_ADMIN"], permissions: ["platform:manage"],
++  platformAdmin: true, tokenType: "platform", ...extra
++}, secret, { expiresIn: "5m" });
++const authorize = async (token: string) => {
++  const req = { headers: { authorization: `Bearer ${token}` } } as any;
++  let error: any;
++  await requirePlatformAuth(req, {} as any, (value: unknown) => { error = value; });
++  return { error, auth: req.auth };
++};
++const withStore = async (event: any, run: () => Promise<void>, credential: any = null) => {
++  const findCredential = prisma.platformAdminCredential.findUnique;
++  const findEvent = prisma.platformSecurityEvent.findFirst;
++  (prisma.platformAdminCredential as any).findUnique = async () => credential;
++  (prisma.platformSecurityEvent as any).findFirst = async () => {
++    if (event instanceof Error) throw event;
++    return event;
++  };
++  try { await run(); }
++  finally {
++    (prisma.platformAdminCredential as any).findUnique = findCredential;
++    (prisma.platformSecurityEvent as any).findFirst = findEvent;
++  }
++};
++
++test("a durable per-token logout event rejects bearer replay on the next Platform request", async () => {
++  await withStore({ id: "synthetic-revocation" }, async () => {
++    const result = await authorize(platformToken());
++    assert.equal(result.error?.code, "PLATFORM_SESSION_REVOKED");
++    assert.equal(result.auth, undefined);
++  });
++});
++test("revocation-store failure fails closed instead of admitting a Platform request", async () => {
++  await withStore(new Error("Synthetic database failure"), async () => {
++    const result = await authorize(platformToken());
++    assert.equal(result.error?.statusCode, 503);
++    assert.equal(result.auth, undefined);
++  });
++});
++test("independent Platform logins issued in the same second have different tokens", () => {
++  const service = new PlatformAdminService({} as any, {} as any, {} as any);
++  const originalNow = Date.now;
++  Date.now = () => 1791316800000;
++  try {
++    const first = (service as any).createPlatformSession();
++    const second = (service as any).createPlatformSession();
++    assert.notEqual(first.token, second.token);
++    assert.notEqual((jwt.decode(first.token) as any).jti, (jwt.decode(second.token) as any).jti);
++  } finally { Date.now = originalNow; }
++});
++test("valid unrevoked Platform session remains usable", async () => {
++  await withStore(null, async () => {
++    const result = await authorize(platformToken());
++    assert.equal(result.error, undefined);
++    assert.equal(result.auth?.tenantId, "platform");
++  });
++});
++test("a tenant-signed token cannot authorize Platform even with forged Platform claims", async () => {
++  await withStore(null, async () => {
++    const result = await authorize(platformToken({}, env.JWT_SECRET));
++    assert.equal(result.error?.statusCode, 401);
++    assert.equal(result.auth, undefined);
++  });
++});
++test("existing password-reset cutoff still revokes prior Platform access", async () => {
++  await withStore(null, async () => {
++    const result = await authorize(platformToken({ iat: Math.floor(Date.now() / 1000) - 10 }));
++    assert.equal(result.error?.code, "PLATFORM_SESSION_REVOKED");
++  }, { passwordChangedAt: new Date() });
++});
++test("Platform-signed tokens with a tenant identity are rejected before business access", async () => {
++  await withStore(null, async () => {
++    const result = await authorize(platformToken({ tenantId: "synthetic-tenant-a" }));
++    assert.equal(result.error?.statusCode, 403);
++    assert.equal(result.auth, undefined);
++  });
++});
+diff --git a/backend/tests/security/platform-production-compatibility.test.ts b/backend/tests/security/platform-production-compatibility.test.ts
+new file mode 100644
+index 0000000..e61fc2c
+--- /dev/null
++++ b/backend/tests/security/platform-production-compatibility.test.ts
+@@ -0,0 +1,72 @@
++import assert from "node:assert/strict";
++import {after,before,test} from "node:test";
++import crypto from "node:crypto";
++import jwt from "jsonwebtoken";
++import {prisma} from "../../src/infrastructure/database/prisma/client.js";
++import {env} from "../../src/shared/config/env.js";
++import {PlatformSessionService} from "../../src/application/services/platform-session-service.js";
++import {requirePlatformAuth} from "../../src/interfaces/http/middlewares/platform-auth.js";
++import {InvoiceService} from "../../src/application/services/invoice-service.js";
++import {EmailQueueService} from "../../src/infrastructure/email/email-queue-service.js";
++import {PlatformInvoiceOutboxProcessor} from "../../src/infrastructure/email/platform-invoice-outbox.js";
++
++const url=new URL(env.DATABASE_URL);
++assert.equal(process.env.ALLOW_SYNTHETIC_PLATFORM_DATABASE,"yes");
++assert.equal(url.hostname,"127.0.0.1");
++assert.match(url.pathname,/^\/fleetum_platform_patch_[a-f0-9]+$/);
++before(async()=>{const rows=await prisma.$queryRawUnsafe<Array<{cluster_name:string}>>("SHOW cluster_name");assert.equal(rows[0].cluster_name,"fleetum_platform_synthetic_20261115");});
++after(async()=>{await prisma.$disconnect();});
++const token=()=>jwt.sign({userId:"platform-admin",tenantId:"platform",roles:["PLATFORM_ADMIN"],permissions:["platform:manage"],platformAdmin:true,tokenType:"platform",jti:crypto.randomUUID()},env.PLATFORM_JWT_SECRET,{expiresIn:"5m"});
++const authorize=async(bearer:string)=>{let failure:any;await requirePlatformAuth({headers:{authorization:`Bearer ${bearer}`}} as any,{} as any,(e:any)=>{failure=e;});return failure;};
++async function fixture(){
++ const suffix=crypto.randomUUID();
++ const tenant=await prisma.tenant.create({data:{id:"platform-qa-"+suffix,name:"Synthetic Platform QA"}});
++ const invoice=await prisma.invoice.create({data:{tenantId:tenant.id,invoiceNumber:"QA-"+suffix,status:"GENERATED",issueDate:new Date(),dueDate:new Date(),periodStart:new Date(),periodEnd:new Date(),currency:"EUR",subtotal:100,taxRate:22,taxAmount:22,total:122,billingName:"Synthetic Company",billingEmail:"billing@example.test"}});
++ const queue=new EmailQueueService();queue.processPending=async()=>({processed:0});
++ const service=new InvoiceService(queue);(service as any).renderPdf=async()=>Buffer.from("synthetic-pdf");
++ const input={invoiceId:invoice.id,actorUserId:"platform-admin",sourceIp:"127.0.0.1",idempotencyKey:"qa-"+suffix};
++ return {tenant,invoice,service,input};
++}
++test("native PostgreSQL logout is idempotent and rejects bearer replay",async()=>{
++ const service=new PlatformSessionService(),bearer=token();assert.equal(await authorize(bearer),undefined);
++ await Promise.all([service.logout(bearer),service.logout(bearer)]);
++ assert.equal(await service.isRevoked(bearer),true);assert.equal((await authorize(bearer))?.code,"PLATFORM_SESSION_REVOKED");assert.equal(await authorize(token()),undefined);
++ const hash=crypto.createHash("sha256").update(bearer).digest("hex");
++ assert.equal(await prisma.platformSecurityEvent.count({where:{action:"PLATFORM_SESSION_REVOKED",details:{path:["tokenHash"],equals:hash}}}),1);
++});
++test("a failed durable logout transaction does not falsely record revocation",async()=>{
++ const bearer=token();
++ await prisma.$executeRawUnsafe(`CREATE FUNCTION qa_reject_logout() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='PLATFORM_SESSION_REVOKED' THEN RAISE EXCEPTION 'synthetic revocation failure'; END IF; RETURN NEW; END $$`);
++ await prisma.$executeRawUnsafe(`CREATE TRIGGER qa_reject_logout BEFORE INSERT ON "PlatformSecurityEvent" FOR EACH ROW EXECUTE FUNCTION qa_reject_logout()`);
++ try{await assert.rejects(()=>new PlatformSessionService().logout(bearer));assert.equal(await new PlatformSessionService().isRevoked(bearer),false);}finally{await prisma.$executeRawUnsafe(`DROP TRIGGER qa_reject_logout ON "PlatformSecurityEvent"`);await prisma.$executeRawUnsafe(`DROP FUNCTION qa_reject_logout()`);}
++});
++test("concurrent invoice commands create one delivery and one queue row",async()=>{
++ const f=await fixture();const result=await Promise.all([f.service.sendEmail(f.input),f.service.sendEmail(f.input)]);
++ assert.deepEqual(result.map(x=>x.replayed).sort(),[false,true]);assert.equal(result[0].emailDelivery.status,"PENDING");
++ assert.equal(await prisma.invoiceEmailRequest.count({where:{tenantId:f.tenant.id}}),1);assert.equal(await prisma.invoiceDelivery.count({where:{invoiceId:f.invoice.id}}),1);assert.equal(await prisma.emailQueue.count({where:{tenantId:f.tenant.id,type:"SAAS_INVOICE_EMAIL"}}),1);
++});
++test("a reused key with a different invoice payload has no new side effects",async()=>{
++ const f=await fixture();await f.service.sendEmail(f.input);await prisma.invoice.update({where:{id:f.invoice.id},data:{billingEmail:"changed@example.test"}});
++ await assert.rejects(()=>f.service.sendEmail(f.input),(e:any)=>e.code==="IDEMPOTENCY_KEY_REUSED");assert.equal(await prisma.emailQueue.count({where:{tenantId:f.tenant.id}}),1);
++});
++test("invoice outbox enqueue rolls back delivery and queue if ledger insertion fails",async()=>{
++ const f=await fixture();f.input.idempotencyKey="synthetic-rollback-command";
++ await prisma.$executeRawUnsafe(`CREATE FUNCTION qa_reject_invoice_command() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW."idempotencyKey"='synthetic-rollback-command' THEN RAISE EXCEPTION 'synthetic ledger failure'; END IF; RETURN NEW; END $$`);
++ await prisma.$executeRawUnsafe(`CREATE TRIGGER qa_reject_invoice_command BEFORE INSERT ON "InvoiceEmailRequest" FOR EACH ROW EXECUTE FUNCTION qa_reject_invoice_command()`);
++ try{await assert.rejects(()=>f.service.sendEmail(f.input));assert.equal(await prisma.invoiceDelivery.count({where:{invoiceId:f.invoice.id}}),0);assert.equal(await prisma.emailQueue.count({where:{tenantId:f.tenant.id}}),0);}finally{await prisma.$executeRawUnsafe(`DROP TRIGGER qa_reject_invoice_command ON "InvoiceEmailRequest"`);await prisma.$executeRawUnsafe(`DROP FUNCTION qa_reject_invoice_command()`);}
++});
++test("native PostgreSQL consumers finalize a single invoice delivery",async()=>{
++ const f=await fixture();await f.service.sendEmail(f.input);const queued=await prisma.emailQueue.findFirstOrThrow({where:{tenantId:f.tenant.id}});let calls=0;
++ const worker=new PlatformInvoiceOutboxProcessor(prisma,{send:async()=>{calls++;return {provider:"resend",id:"synthetic-receipt-"+f.invoice.id};}});
++ await Promise.all([worker.processPending(new Date(),{ids:[queued.id]}),worker.processPending(new Date(),{ids:[queued.id]})]);
++ assert.equal(calls,1);assert.equal((await prisma.emailQueue.findUniqueOrThrow({where:{id:queued.id}})).status,"SENT");assert.equal((await prisma.invoice.findUniqueOrThrow({where:{id:f.invoice.id}})).status,"SENT");
++});
++test("a local finalization failure preserves the receipt and avoids another provider call",async()=>{
++ const f=await fixture();await f.service.sendEmail(f.input);const queued=await prisma.emailQueue.findFirstOrThrow({where:{tenantId:f.tenant.id}});let calls=0;
++ const worker=new PlatformInvoiceOutboxProcessor(prisma,{send:async()=>{calls++;return {provider:"resend",id:"synthetic-persisted-receipt"};}});
++ await prisma.$executeRawUnsafe(`CREATE FUNCTION qa_reject_delivery_finalization() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status='SENT' THEN RAISE EXCEPTION 'synthetic finalization failure'; END IF; RETURN NEW; END $$`);
++ await prisma.$executeRawUnsafe(`CREATE TRIGGER qa_reject_delivery_finalization BEFORE UPDATE ON "InvoiceDelivery" FOR EACH ROW EXECUTE FUNCTION qa_reject_delivery_finalization()`);
++ const now=new Date();
++ try{await worker.processPending(now,{ids:[queued.id]});const row=await prisma.emailQueue.findUniqueOrThrow({where:{id:queued.id}});assert.equal(row.status,"PENDING");assert.equal((row.meta as any).providerMessageId,"synthetic-persisted-receipt");}finally{await prisma.$executeRawUnsafe(`DROP TRIGGER qa_reject_delivery_finalization ON "InvoiceDelivery"`);await prisma.$executeRawUnsafe(`DROP FUNCTION qa_reject_delivery_finalization()`);}
++ await worker.processPending(new Date(now.getTime()+180000),{ids:[queued.id]});assert.equal(calls,1);assert.equal((await prisma.emailQueue.findUniqueOrThrow({where:{id:queued.id}})).status,"SENT");
++});
+diff --git a/docs/platform-production-compatibility-20261115.md b/docs/platform-production-compatibility-20261115.md
+new file mode 100644
+index 0000000..44bba72
+--- /dev/null
++++ b/docs/platform-production-compatibility-20261115.md
+@@ -0,0 +1,131 @@
++# Platform Satinata: targeted production compatibility candidate
++
++Local preparation only. No production installation is authorized by this file.
++
++## Scope and baseline
++
++This branch starts at the production backend source
++`db1f231dc8cb699f1a5ce4215a0278c93212d16d`. It backports only the Platform
++logout and invoice-email protocols needed by Satinata. It does not promote the
++tenant application from main or the application candidate in PR #156.
++
++The historical production image/source mapping is read-only evidence, not proof
++that a future live server or database still matches this baseline. Revalidate
++image digests, deployed schema and migration metadata before installation.
++
++## Behavior and failure handling
++
++- Platform logout persists a SHA-256 bearer fingerprint in PlatformSecurityEvent.
++  An authorization check after the logout commit rejects that bearer. Already
++  admitted requests can finish. Retries are idempotent; another session remains
++  usable. Password-reset revocation stays independent. A database error denies
++  authorization instead of treating the session as valid.
++- New sessions receive a unique JWT ID. Never log the bearer. Revocation events
++  must not be deleted while their corresponding token can still be valid.
++- Invoice-email commands require X-Idempotency-Key. Delivery, queue row and
++  tenant-scoped command ledger are committed in the same transaction. A reused
++  key with different invoice/recipient/content is rejected with HTTP 409.
++- A dedicated consumer owns only SAAS_INVOICE_EMAIL. A conditional, expiring
++  lease prevents simultaneous consumers from owning the same row. The legacy
++  tenant email worker excludes that type and otherwise keeps its behavior.
++- Provider calls use a stable key derived from the queue ID and time out after
++  30 seconds. Ambiguous retries use that same key, stop before the provider's
++  retention expires, and then require reconciliation. This is not an unlimited
++  exactly-once guarantee across an external service.
++- A verified receipt allows local completion without another provider call.
++  Partial or conflicting receipts are held for reconciliation. A lost database
++  commit acknowledgement cannot revert a completed row. Paid invoices remain
++  paid, and failed resends do not downgrade an already sent invoice.
++- Legacy pending rows lacking a valid command marker are not assigned a fresh
++  provider key. They are marked for reconciliation unless a verified durable
++  receipt can complete them locally. Inspect aggregate backlog metadata and plan
++  that reconciliation before rollout; do not blindly resend historical rows.
++- HTTP success includes emailDelivery.id/status. The matching UI retains the
++  request key and reports PENDING as processing; only SENT confirms dispatch.
++  Provider acceptance is not evidence of delivery to the recipient's inbox.
++
++## Database impact and compatibility
++
++Exactly one new migration is included:
++`20260921150000_final_release_blocker_atomicity`. Its SQL is byte-identical to
++the existing migration in main `76c1756c8394f9557e611704fee0cfeaf29a7800`.
++Reusing that canonical unit avoids altered historical checksums and a later
++attempt to recreate objects under the same migration name.
++
++Active objects: EmailQueue lease columns/index and InvoiceEmailRequest with its
++indexes and foreign keys. The same canonical SQL also creates two passive
++ledgers (RentalBookingCreateRequest and BookingContractEmailRequest) and adds
++two nullable DemoLead columns plus their unique index. This candidate adds the
++corresponding Prisma models/relations but does not activate the other handlers.
++It contains no row deletions, tenant backfill or credential changes. PostgreSQL
++still takes schema locks while applying DDL; duration and production table
++sizes are not established by synthetic tests.
++
++An isolated PostgreSQL 16.15 trial applied 42 baseline migrations, this canonical
++unit (43 total), and the later main chain (48 total) with an unchanged legacy
++synthetic row. That proves the tested source chains can upgrade; it does not
++prove the state or size of the live production database. No real database or
++email provider was used for these tests.
++
++## Dependency scope
++
++Targeted security fixes align body-parser, follow-redirects, proxy-addr, qs,
++deepmerge-ts, brace-expansion, uuid, sharp, csv-parse, morgan and Zod with patched
++versions. Zod 4 requires three small validator type/API adaptations; the original
++validation rules and messages remain. Prisma stays on major 6. Backend build,
++unit regressions and the synthetic database suite cover this candidate; no
++general dependency upgrade is intended.
++
++## Candidate image security refinement, 16 November 2026
++
++The independent Linux image scan found additional runtime findings not covered
++by the workspace's production npm audit. The candidate now pins Multer2.5.0,
++updates the reported Alpine security packages in both image stages, and removes
++the global npm/npx toolchain only from the final runtime. Node remains22.23.1;
++application node_modules and the direct Prisma CLI remain available. Installation
++must use `/app/node_modules/.bin/prisma` rather than npx. No live provider setting,
++env value, database migration or business handler is changed by this refinement.
++
++Four synthetic HTTP regressions exercise the actual rental upload middleware:
++exact size-limit acceptance, oversized-file cleanup, rejected media types and
++cleanup/process availability after a disconnected upload. Two failed on the
++old parser; all four passed after the update. The image gate additionally checks
++the direct migration CLI with networking disabled and the absence of global npm.
++Actual image scan success must still be proven by the new exact-source CI;
++local compilation/audit alone cannot substitute for that proof.
++
++Official upstream security/release notes:
++https://github.com/expressjs/multer/releases/tag/v2.5.0
++
++## Rollout and rollback requirements (not executed)
++
++
++1. Publish/review the exact source candidates and run their CI. Do not merge this
++   old-baseline application branch wholesale into main: that would roll back
++   unrelated main changes. A trusted release must bind the reviewed base,
++   patches, derived trees, images and test evidence explicitly.
++2. Verify the actual production images, migration history and aggregate pending
++   queue state; take and verify a fresh database/storage backup. Do not export
++   customer records or secrets into the repository or CI artifacts.
++3. Prepare a protected production-only GitHub path for the backend patch plus
++   the Platform asset closure. The current Platform staging-only controls are
++   insufficient. Do not use the full current main deployment as a substitute.
++4. Quiesce/drain the old invoice worker before switching versions. Never leave
++   old and new invoice consumers running concurrently during installation.
++5. Apply the expand-only schema and backend; validate the protocol before
++   exposing Satinata. Overlay only platform.html and its verified dependency
++   closure, preserving the live tenant and website trees and original logos.
++6. On visual regression use the separately prepared old-visual frontend with
++   the new logout/invoice protocol, keeping this security backend and schema.
++   Blindly restoring the original backend could re-enable revoked bearers and
++   old invoice sending. Full backend recovery requires a separately reviewed
++   containment/forward-fix plan, not an automatic downgrade or database restore.
++7. Do not drop the new tables/columns or purge revocation/command records as a
++   routine rollback. Verify authenticated login/logout, concurrent/replayed
++   invoice commands, tenant boundaries, health and asset preservation after any
++   authorized installation; no real invoice email is sent without authorization.
++
++Residual gates: public review/CI, exact production release workflow and image
++proofs, fresh live preflight/backup metadata, protected approval and controlled
++installation, post-install authenticated verification. Apple/OAuth, Stripe,
++CARGOS, tenant redesign and provider settings are outside this patch.
+diff --git a/package-lock.json b/package-lock.json
+index 09ece88..d9f9002 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -33 +33 @@
+-        "csv-parse": "^5.6.0",
++        "csv-parse": "7.0.2",
+@@ -41,2 +41,2 @@
+-        "morgan": "^1.11.0",
+-        "multer": "^1.4.5-lts.1",
++        "morgan": "1.12.1",
++        "multer": "2.5.0",
+@@ -49 +49 @@
+-        "sharp": "^0.35.3",
++        "sharp": "0.35.5",
+@@ -51 +51 @@
+-        "zod": "^3.23.8"
++        "zod": "4.6.7"
+@@ -68,3 +68,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.35.3.tgz",
+-      "integrity": "sha512-RMnFX7YQsMoh7lWfcM4NEHHymBX/rLuKNPVM84XE9ONPcaSCDgE7CHIHpSgPcO2xcRthgBy1HfNO319mwhIAkg==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.35.5.tgz",
++      "integrity": "sha512-QRUlFQ0WxvdWyqqG/WtI3iupfD5rBzmCHXSdPsY91sAtVtTo7Q4cb6zOccZ3gqEqkr0f1As1ehLqmEpDsRf+lg==",
+@@ -86 +86 @@
+-        "@img/sharp-libvips-darwin-arm64": "1.3.2"
++        "@img/sharp-libvips-darwin-arm64": "1.3.4"
+@@ -90,3 +90,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.35.3.tgz",
+-      "integrity": "sha512-Xo+5uFBtLN0BKqieTxiFzFPQAUlBbbH5iBKyRX/z1JrbnYsHTfKJnUfL8+p2TPXr1pXqao4eeL4Rl144uDpK9w==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.35.5.tgz",
++      "integrity": "sha512-+BR255RhDlpygUpOc/Jdt1nT6DQ3XG/ERo5wbcdOf5Q320dKtPCKPLR1LJs9VGXRaMa8l1uUa0tkCNOXiAxZUw==",
+@@ -108 +108 @@
+-        "@img/sharp-libvips-darwin-x64": "1.3.2"
++        "@img/sharp-libvips-darwin-x64": "1.3.4"
+@@ -112,3 +112,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.2.tgz",
+-      "integrity": "sha512-9J6ypZFpQBj4YnePGoq/S38w6nz+vqg5WZLrLGY4YuSemdMq47GMLBPO42MzwdGwpg/agZ7xzZcFHa48xlywfg==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.4.tgz",
++      "integrity": "sha512-5R89nBYiRdUlSWJxPhO+GVtaXzXSxKnRu/xqMn3KTA3L9EB9Oy/P+Nn2f2vlhPuUdy/Zusb2DarbyTpGCfEDuw==",
+@@ -128,3 +128,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.2.tgz",
+-      "integrity": "sha512-m2pW1n6cns9VaubNwsZ+c3CRYjxNQWgJ5gPlnL1nbBcpkBvFm6SCFN5o0psFHI8w9n11NKhFkeEDns98tiqbEw==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.4.tgz",
++      "integrity": "sha512-iR2OKH80yi0U+dUplyh3/xdpFvps6YkCwsXenIJxqxR1v9o+xtKTGbS9H7cps+2Vxjc8B1j96p75NmTGjIhtpQ==",
+@@ -144,3 +144,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.3.2.tgz",
+-      "integrity": "sha512-1eMLzy92I4J6rmi4mAT8yC3HxOtniyGELlzGbNMLLeqe052ahFQ0h6LFq+lh5DsDIdYViIDst08abvSbcEdLXQ==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.3.4.tgz",
++      "integrity": "sha512-LmRtTsOHuvM2+wlO2Db37dx5MiZhB0FvSunciw48YjdOkZz9KAiRbm8ujeMOA1INqmei5NapFxYEK1D1ZSidmw==",
+@@ -160,3 +160,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.2.tgz",
+-      "integrity": "sha512-dqVSFynCox4C/J8kT16V7SIFAns0IjgLwkvYT7p8LQVmJ5OS5b6tI9IGflxTeuBS//zXeFIUbwt5dwxyZ17cnA==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.4.tgz",
++      "integrity": "sha512-Y3dgX/6lE2QhQb+Gxy0WZxfg9MEm/JBjamZpS2IklP7xIQoKN4hzAm7KcMVGtaVDt3neE9OKBC7vAfonA/Lr1A==",
+@@ -176,3 +176,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.3.2.tgz",
+-      "integrity": "sha512-3z0NHDxD6n5I9gc05U1eW1AyRm+Gznzq3naMrthPNqE6oYykcogW0l/jfpJdjYnuNl8R7yI9pNbE1XiUeyq0Aw==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.3.4.tgz",
++      "integrity": "sha512-Le6boB8Tai0Nis+gIxIpKx68UDVVIqdR8Tin5Yf1z2LJJQLDJvCDRqRu+jC2qCoD+eIomonmOwB4smBRxfVpYQ==",
+@@ -192,3 +192,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.3.2.tgz",
+-      "integrity": "sha512-bsb4rI+NldGOsXuej2r8OdSS8+zXDVaCWxyWrcv6kneTOlgAHtZABRzBBCwdsPiD90J4myNJuHpg6kA20ImW/w==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.3.4.tgz",
++      "integrity": "sha512-aHkkIEHPRdQEegJN20MLmGtxYD9R2wQr3Cwpddnu5+YKMt6Uzax7S9h5gpZTo8wyrGuZSlfQ63OevL5mTyOC7Q==",
+@@ -208,3 +208,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.3.2.tgz",
+-      "integrity": "sha512-/ABshyj8gCpyIrNXnHn4LorDJ0HHm1VhXPBlxZ8zAtfVPAaSafXPGn+sUSIRiwaSBy0mmFjSjiXI5mkcwdChKQ==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.3.4.tgz",
++      "integrity": "sha512-ra/mB6MikESDUO7Yg+Mi95bFBb9GsObURuhnOv3OqknjGe9sZrG8tCe9q0xSIGrtLgvgw0gKnFWcK4blSgQOuQ==",
+@@ -224,3 +224,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.2.tgz",
+-      "integrity": "sha512-ITPEtgffGJ0S6G9dRyw/366tJQqFRcHWPHhC+Stpg3Z8AEMrDrTr2lhdz4f/Y/HMbRh//7Z5mBzEpVdi62Oc3w==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.4.tgz",
++      "integrity": "sha512-GJ//SSXbnwSDes02umB3nDJLFcQzw8a18V8fyhqr6tV515tOEMdImjjxj1AoafMRz56F3PHgftnj1QEKSU1zkw==",
+@@ -240,3 +240,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.3.2.tgz",
+-      "integrity": "sha512-zE9EdiUzUmg5mDT5a1rk5fYJ6GWPloTwWBYDS14naqHsL+EaMpDj1AWnpLgh3u0YCORv2Tt50wrcrpYqkP97Kw==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.3.4.tgz",
++      "integrity": "sha512-hvulFwtjUcagsis6BBxHwGFwWoNZjgYmULGVrZcyfNbjA8hKILbRxGg15/7w5HDyXHXUos/j6baAWqnCyQ2DWA==",
+@@ -256,3 +256,3 @@
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.2.tgz",
+-      "integrity": "sha512-m0lrLiUt+lBYnCFr8qV/65yMR4E/c7/wf78I5eKTdkEakFAlZ9QlzEM3QIhhAwVeUhLAHLcCq7a7Vszq/oFNZQ==",
++      "version": "1.3.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.4.tgz",
++      "integrity": "sha512-6zXKeE/p39I1AmA3cJG35eyBGNqNddLnUXjhwBnsGjFPWqf5VKkDBEqaEkPDoTEtkxwi2vv8Tcr2mDyP4So7Fg==",
+@@ -272,3 +272,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.35.3.tgz",
+-      "integrity": "sha512-affVWCTLooy8TSxbDx2qkzuDeaWLNVBA+P//FNBirHsXpP2fuBhk5AuboYUnrDnzoXes8GFjpTx0SBFOCRg+FA==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.35.5.tgz",
++      "integrity": "sha512-LEaXK2WdXVK5ykcw0buWyPMsmLLL2vpHLD6yrNSW+JGEL3BZPA4tpKN6iaMc4AxTTAoaX/sU1rOL51lcIz48ZQ==",
+@@ -290 +290 @@
+-        "@img/sharp-libvips-linux-arm": "1.3.2"
++        "@img/sharp-libvips-linux-arm": "1.3.4"
+@@ -294,3 +294,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.35.3.tgz",
+-      "integrity": "sha512-QgKDspHPnrU+GQ55XPhGwyhC8acLVOOSyAvo1oVfFmrIXLkDNmGWzAfDZ4xK8oSA1qBQrALcHX0G5UZni/SuFQ==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.35.5.tgz",
++      "integrity": "sha512-LYVx5JTsOM2CBzmxreh+nl64/3H6Xb09iSLknqH47z2T2DFFxDeFLP5y4dJwe6H7uGQlHPyEEtIqyo3DYsRwdQ==",
+@@ -312 +312 @@
+-        "@img/sharp-libvips-linux-arm64": "1.3.2"
++        "@img/sharp-libvips-linux-arm64": "1.3.4"
+@@ -316,3 +316,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.35.3.tgz",
+-      "integrity": "sha512-sMd8rDxmpLOwv/7N44klFjOD5DUO7FLdjiXDI0hoxYaf7Ar262dQIEkosE98bps+5HPLtp/EvNqeqQtOycP/IA==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.35.5.tgz",
++      "integrity": "sha512-QVxAAq8evVRI9ia2vqgwrmWucn5Dfv+JdWzj75pD8omHLPSP7f8p20O8jxzjCcuCEQEOtYOZUmX1hkiZ0kdevA==",
+@@ -334 +334 @@
+-        "@img/sharp-libvips-linux-ppc64": "1.3.2"
++        "@img/sharp-libvips-linux-ppc64": "1.3.4"
+@@ -338,3 +338,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.35.3.tgz",
+-      "integrity": "sha512-0Eob78yjlYPfL5vMNWAW55l3R9Y6BQS/gOfe0ZcP9mEz9ohhKSt4im1hayiknXgf8AWrFqMvJcKIdmLmEe7yeQ==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.35.5.tgz",
++      "integrity": "sha512-LtdreXguaavKODPIfzJ4kffx7UNt1omwtK0rch4EBbbSTXPnxWmYSayXdLJw0fJzQ97kHt1gL/yh4tvU+nCyRQ==",
+@@ -356 +356 @@
+-        "@img/sharp-libvips-linux-riscv64": "1.3.2"
++        "@img/sharp-libvips-linux-riscv64": "1.3.4"
+@@ -360,3 +360,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.35.3.tgz",
+-      "integrity": "sha512-KgAxQ0DxpNOq1rG2t5cgTgShJFGSuU7XO45cqC+1NVOuZnP6tlgZRuSYOfNupGkHID0o3cJOsw4DVeJpMovcGw==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.35.5.tgz",
++      "integrity": "sha512-UZasTOFiYzotTsGOCu42BfUzP6Tu6Do/947iRm1RsLKvlllxwGcn4RN27LibGWceix4Y+Pmw3jsnTcCQIgWjqA==",
+@@ -378 +378 @@
+-        "@img/sharp-libvips-linux-s390x": "1.3.2"
++        "@img/sharp-libvips-linux-s390x": "1.3.4"
+@@ -382,3 +382,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.3.tgz",
+-      "integrity": "sha512-8pqvxubL2PGdhlPy6GLqzDYMUjyRmKAwKHYKixpdJYBUK7PJ0C029XdsnpFIdgRZG68fZiGdHVWcKPvtiPB4cA==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.5.tgz",
++      "integrity": "sha512-SxFtLTeJInhAA9Q836kux2vZNeOBQEx658qvbboZScr0wIARym3IcGmW7KpVD5sbVg0Ojy+udFQdayYIZyoNog==",
+@@ -400 +400 @@
+-        "@img/sharp-libvips-linux-x64": "1.3.2"
++        "@img/sharp-libvips-linux-x64": "1.3.4"
+@@ -404,3 +404,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.35.3.tgz",
+-      "integrity": "sha512-Vz0iQjzzcSX3HCbfwFfCSG/9SCIqyO0mH2sXyiHaAYfBk0cRsCWXRyQYX0ovCK/PAQBbTzQ0dsPQHh5MAFL59w==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.35.5.tgz",
++      "integrity": "sha512-9HbMclmI1zlNkFRs3z9/eBtDjfD0sGlrX1z6b1qwmiFY5ElDLh4BC0LPBdVp7z1DXFiKlIcznf+ZlsuZzLxQqg==",
+@@ -422 +422 @@
+-        "@img/sharp-libvips-linuxmusl-arm64": "1.3.2"
++        "@img/sharp-libvips-linuxmusl-arm64": "1.3.4"
+@@ -426,3 +426,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.3.tgz",
+-      "integrity": "sha512-6O1NPKcDVj9QEdg7Hx549EX8U0rp6yXQERqru6yRN7fGBn32UvIRJUlWnk+8xDCiG76hXVBbX82NZ/ZKr0euIg==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.5.tgz",
++      "integrity": "sha512-4KOphqB035HrVdqLZfCgMzzERrQkkzOwRhl4OAkRO1YCldbaFjySXMaK534Mo0V+LndnlJk+sbUyLeU0ULyD1A==",
+@@ -444 +444 @@
+-        "@img/sharp-libvips-linuxmusl-x64": "1.3.2"
++        "@img/sharp-libvips-linuxmusl-x64": "1.3.4"
+@@ -448,3 +448,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.35.3.tgz",
+-      "integrity": "sha512-4bPwFdMbeC4JQ8L8LOyWp6nsHcboP5fxkp6iPOXz2Vg49R42TuMs2whkJ5OAP4/Ul035qOzy0AecOF9VOscn4w==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.35.5.tgz",
++      "integrity": "sha512-X4t7g+7ZA5DKblCBEXGjUqqemj4vczING/5viFwAL8h4N3qYeyjwdCvRLHi4EdOUI+2Z7UFlp1VM+p/AuEtm6Q==",
+@@ -467,3 +467,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.35.3.tgz",
+-      "integrity": "sha512-r53mXsBN6lFUDiST764SvgwUdHAqM4rPAiDzAmf4fLoB6X/rkfyTrLCg6+g17wJJiCmB3JYgHuUldCWUIRFSXw==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.35.5.tgz",
++      "integrity": "sha512-5Zm82LoBc43nhwNybZlG7Y1KO//Zhsn306fQl29ZOuStHLGTo3BWL83q3cznX0poxSAMuYL1On/BHBxkBeKr6A==",
+@@ -486,3 +486,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.3.tgz",
+-      "integrity": "sha512-D4y1vNeZrIIJCN+uHaWVtH86B+aCrdMYYjicy9pXHvbGZeGYLLSd3wdVuC37FxVXlU1ARsk84eKWfWMXGYEqvA==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.5.tgz",
++      "integrity": "sha512-x76eH0vEiHlcMQu8Y8IenntaACtddpT6W0wmXtWrnKcnKI7ME5DdgqhAD6SEWOEl1v2zDvkZDhFA9KnURwpfqg==",
+@@ -503,0 +504,59 @@
++    "backend/node_modules/csv-parse": {
++      "version": "7.0.2",
++      "resolved": "https://registry.npmjs.org/csv-parse/-/csv-parse-7.0.2.tgz",
++      "integrity": "sha512-uKZghv9UmPkMVLYy//KZ9HFAIJsl7wkhoEdIL0+rhuSY9pZQlhaeGEDPIe+/w7eh81MOql8Q/9+inAGWG6ZHYA==",
++      "license": "MIT"
++    },
++    "backend/node_modules/debug": {
++      "version": "2.6.9",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-2.6.9.tgz",
++      "integrity": "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==",
++      "license": "MIT",
++      "dependencies": {
++        "ms": "2.0.0"
++      }
++    },
++    "backend/node_modules/morgan": {
++      "version": "1.12.1",
++      "resolved": "https://registry.npmjs.org/morgan/-/morgan-1.12.1.tgz",
++      "integrity": "sha512-tljKC0ex20AjO58Ob/eZ53JloycbVswbVNCHx6V6VLGzqt/w8dIynVGL0G8qVjNKwiA7sYSogCrN6QtJ82IV+g==",
++      "license": "MIT",
++      "dependencies": {
++        "basic-auth": "~2.0.1",
++        "debug": "2.6.9",
++        "depd": "~2.0.0",
++        "on-finished": "~2.4.1",
++        "on-headers": "~1.1.0"
++      },
++      "engines": {
++        "node": ">= 0.8.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "backend/node_modules/ms": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz",
++      "integrity": "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==",
++      "license": "MIT"
++    },
++    "backend/node_modules/multer": {
++      "version": "2.5.0",
++      "resolved": "https://registry.npmjs.org/multer/-/multer-2.5.0.tgz",
++      "integrity": "sha512-BsqOzYGVq49JcW2IzoSAxeKYRevb+dGGPPWleOR8Lrlk4igwxu1/9pwSXlByhCb7MVZDrNJFC0IBP5/O5nLYRw==",
++      "license": "MIT",
++      "dependencies": {
++        "append-field": "^1.0.0",
++        "busboy": "^1.6.0",
++        "type-is": "^1.6.18"
++      },
++      "engines": {
++        "node": ">= 10.16.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
+@@ -517,3 +576,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.35.3.tgz",
+-      "integrity": "sha512-ej0zVHuZGHCiABXcNxeYhpRnPNPAcvbG8RMdBAhDAxLKkCRVSpK3Iyu7qbqw3JMzoj0REeM6f3tJLtVwl0023Q==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.35.5.tgz",
++      "integrity": "sha512-Ywn4OnzGukp7CDMrp08RQ50YKmuwG47brZgIVPTvBaaAfQlRlygrRqSrxdCiL9M+LlzLBiJ68IR1QqvzHyjC7g==",
+@@ -533,25 +592,25 @@
+-        "@img/sharp-darwin-arm64": "0.35.3",
+-        "@img/sharp-darwin-x64": "0.35.3",
+-        "@img/sharp-freebsd-wasm32": "0.35.3",
+-        "@img/sharp-libvips-darwin-arm64": "1.3.2",
+-        "@img/sharp-libvips-darwin-x64": "1.3.2",
+-        "@img/sharp-libvips-linux-arm": "1.3.2",
+-        "@img/sharp-libvips-linux-arm64": "1.3.2",
+-        "@img/sharp-libvips-linux-ppc64": "1.3.2",
+-        "@img/sharp-libvips-linux-riscv64": "1.3.2",
+-        "@img/sharp-libvips-linux-s390x": "1.3.2",
+-        "@img/sharp-libvips-linux-x64": "1.3.2",
+-        "@img/sharp-libvips-linuxmusl-arm64": "1.3.2",
+-        "@img/sharp-libvips-linuxmusl-x64": "1.3.2",
+-        "@img/sharp-linux-arm": "0.35.3",
+-        "@img/sharp-linux-arm64": "0.35.3",
+-        "@img/sharp-linux-ppc64": "0.35.3",
+-        "@img/sharp-linux-riscv64": "0.35.3",
+-        "@img/sharp-linux-s390x": "0.35.3",
+-        "@img/sharp-linux-x64": "0.35.3",
+-        "@img/sharp-linuxmusl-arm64": "0.35.3",
+-        "@img/sharp-linuxmusl-x64": "0.35.3",
+-        "@img/sharp-webcontainers-wasm32": "0.35.3",
+-        "@img/sharp-win32-arm64": "0.35.3",
+-        "@img/sharp-win32-ia32": "0.35.3",
+-        "@img/sharp-win32-x64": "0.35.3"
++        "@img/sharp-darwin-arm64": "0.35.5",
++        "@img/sharp-darwin-x64": "0.35.5",
++        "@img/sharp-freebsd-wasm32": "0.35.5",
++        "@img/sharp-libvips-darwin-arm64": "1.3.4",
++        "@img/sharp-libvips-darwin-x64": "1.3.4",
++        "@img/sharp-libvips-linux-arm": "1.3.4",
++        "@img/sharp-libvips-linux-arm64": "1.3.4",
++        "@img/sharp-libvips-linux-ppc64": "1.3.4",
++        "@img/sharp-libvips-linux-riscv64": "1.3.4",
++        "@img/sharp-libvips-linux-s390x": "1.3.4",
++        "@img/sharp-libvips-linux-x64": "1.3.4",
++        "@img/sharp-libvips-linuxmusl-arm64": "1.3.4",
++        "@img/sharp-libvips-linuxmusl-x64": "1.3.4",
++        "@img/sharp-linux-arm": "0.35.5",
++        "@img/sharp-linux-arm64": "0.35.5",
++        "@img/sharp-linux-ppc64": "0.35.5",
++        "@img/sharp-linux-riscv64": "0.35.5",
++        "@img/sharp-linux-s390x": "0.35.5",
++        "@img/sharp-linux-x64": "0.35.5",
++        "@img/sharp-linuxmusl-arm64": "0.35.5",
++        "@img/sharp-linuxmusl-x64": "0.35.5",
++        "@img/sharp-webcontainers-wasm32": "0.35.5",
++        "@img/sharp-win32-arm64": "0.35.5",
++        "@img/sharp-win32-ia32": "0.35.5",
++        "@img/sharp-win32-x64": "0.35.5"
+@@ -564,0 +624,9 @@
++    "backend/node_modules/zod": {
++      "version": "4.6.7",
++      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
++      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/sponsors/colinhacks"
++      }
++    },
+@@ -1973,3 +2041,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-freebsd-wasm32/-/sharp-freebsd-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-lUxcqWIj2wMQ9BrwNjngcr1gWUr5xgaGThBRqPPalIC2n67Cqj1uPh8NnA/ZhAg8hUbKl+kVHKwgUIwe6ZYPrg==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-freebsd-wasm32/-/sharp-freebsd-wasm32-0.35.5.tgz",
++      "integrity": "sha512-Y/z91nEZ4uIBX5X3nfTovjU9lHNKFYbL2lpHCLVNmXQK03VIZvXBBt0KxbPGp2SdGSF+2mQU4e+hQaWOt86iAw==",
+@@ -1982 +2050 @@
+-        "@img/sharp-wasm32": "0.35.3"
++        "@img/sharp-wasm32": "0.35.5"
+@@ -1992,3 +2060,3 @@
+-      "version": "1.11.2",
+-      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.2.tgz",
+-      "integrity": "sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA==",
++      "version": "1.11.3",
++      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz",
++      "integrity": "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==",
+@@ -2002,3 +2070,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-cZ0XkcYGpHZkqW6iCkqTcmUC0CD9DhD5d/qeZlZkfRBn6GnHniZXLUo5+9xw8Iv76YE6LQFN9YNBlKREcCG76w==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.5.tgz",
++      "integrity": "sha512-Ptsga1su4tQx+LLF1ECS9U6nz5kmrXKo6XVbtR48Ke3ZRxxgaWBu7IDtEe1quo8hiupwm6WFqxVlXaSf7IINGQ==",
+@@ -2008 +2076 @@
+-        "@emnapi/runtime": "^1.11.1"
++        "@emnapi/runtime": "^1.11.3"
+@@ -2392,3 +2460,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-webcontainers-wasm32/-/sharp-webcontainers-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-2rnq7bX3NzeR2T4YWgz8qiG4h3TSdMe+vN1iQXpJleSJ3SM5zQ8Fy2SyyXAWlbxpEZ2Y+Z4u1BePgJEYbSy80Q==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-webcontainers-wasm32/-/sharp-webcontainers-wasm32-0.35.5.tgz",
++      "integrity": "sha512-hfhF/FmoQyTUkA0bIKFOtw536BQSeBMe6BF6QyWlrPxT754+TFLaZ7sKKTfvvM0yJgKgaYTwnFCIZ/GuDw5SUA==",
+@@ -2401 +2469 @@
+-        "@img/sharp-wasm32": "0.35.3"
++        "@img/sharp-wasm32": "0.35.5"
+@@ -2411,3 +2479,3 @@
+-      "version": "1.11.2",
+-      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.2.tgz",
+-      "integrity": "sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA==",
++      "version": "1.11.3",
++      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz",
++      "integrity": "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==",
+@@ -2421,3 +2489,3 @@
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-cZ0XkcYGpHZkqW6iCkqTcmUC0CD9DhD5d/qeZlZkfRBn6GnHniZXLUo5+9xw8Iv76YE6LQFN9YNBlKREcCG76w==",
++      "version": "0.35.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.5.tgz",
++      "integrity": "sha512-Ptsga1su4tQx+LLF1ECS9U6nz5kmrXKo6XVbtR48Ke3ZRxxgaWBu7IDtEe1quo8hiupwm6WFqxVlXaSf7IINGQ==",
+@@ -2427 +2495 @@
+-        "@emnapi/runtime": "^1.11.1"
++        "@emnapi/runtime": "^1.11.3"
+@@ -4578,3 +4646,3 @@
+-      "version": "5.0.8",
+-      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.8.tgz",
+-      "integrity": "sha512-JZyDyq3D4AUifKTPOB7DELf6XsB3WdPuNxCtob1vFXPsSXhdAiHBWJ/tJ8HAc9aH84BK+5JFZLNkJKx3G9kzQg==",
++      "version": "5.0.13",
++      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.13.tgz",
++      "integrity": "sha512-Vh3dmFbc4wZeox7M9I/0L9GfFd83Su4+yCck/OF9Gi/P/dAHn0RT7X4K9R7gMNMhDck3DvhR6QXsnQdjjgwNvQ==",
+@@ -5641,3 +5709,3 @@
+-      "version": "1.20.6",
+-      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.6.tgz",
+-      "integrity": "sha512-p5tAzS57i5MV9fZFDj9LeIiTZEufbSe2eDozP+ElheSUq1m74CRq1jI4mYNDdVs9vQztXFLuk/Gd6BWTdwRJ5g==",
++      "version": "1.20.9",
++      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.9.tgz",
++      "integrity": "sha512-FISIQxV5u91Y9gvuFq3q/tA/qTqLJn3AhRcEvyozyhJTh5OBFFtv827AdHU7Rbyct4r+Ba1/99oFa1Y3yuFsdw==",
+@@ -5654 +5722 @@
+-        "qs": "~6.15.1",
++        "qs": "~6.16.0",
+@@ -5680,3 +5748,3 @@
+-      "version": "1.1.16",
+-      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.16.tgz",
+-      "integrity": "sha512-IDw48K2/2kRkg9LdJxurvq3lV3aBgq0REY89duEqFRthjlPdXHKMj7EnQOXVckxzgisinf3nHfrcE2FufFLXMw==",
++      "version": "1.1.22",
++      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.22.tgz",
++      "integrity": "sha512-CKLDTuSsN0+r1ThM0WkzzBI7dnPI6xEGfa/JnVYIK9JNBA1N1NyPwXVHor//NKD/y3sDxp764sZdLhFK7pH8XQ==",
+@@ -5775,6 +5842,0 @@
+-    "node_modules/buffer-from": {
+-      "version": "1.1.2",
+-      "resolved": "https://registry.npmjs.org/buffer-from/-/buffer-from-1.1.2.tgz",
+-      "integrity": "sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==",
+-      "license": "MIT"
+-    },
+@@ -6125,15 +6186,0 @@
+-    "node_modules/concat-stream": {
+-      "version": "1.6.2",
+-      "resolved": "https://registry.npmjs.org/concat-stream/-/concat-stream-1.6.2.tgz",
+-      "integrity": "sha512-27HBghJxjiZtIk3Ycvn/4kbJk/1uZuJFfuPEns6LaEvpvG1f0hTea8lilrouyo9mVc2GWdcEZ8OLoGmSADlrCw==",
+-      "engines": [
+-        "node >= 0.8"
+-      ],
+-      "license": "MIT",
+-      "dependencies": {
+-        "buffer-from": "^1.0.0",
+-        "inherits": "^2.0.3",
+-        "readable-stream": "^2.2.2",
+-        "typedarray": "^0.0.6"
+-      }
+-    },
+@@ -6444,6 +6490,0 @@
+-    "node_modules/csv-parse": {
+-      "version": "5.6.0",
+-      "resolved": "https://registry.npmjs.org/csv-parse/-/csv-parse-5.6.0.tgz",
+-      "integrity": "sha512-l3nz3euub2QMg5ouu5U09Ew9Wf6/wQ8I++ch1loQ0ljmzhmfZYrH9fflS22i/PQEvsPvxCwxgz5q7UB8K1JO4Q==",
+-      "license": "MIT"
+-    },
+@@ -6669,3 +6710,3 @@
+-      "version": "7.1.5",
+-      "resolved": "https://registry.npmjs.org/deepmerge-ts/-/deepmerge-ts-7.1.5.tgz",
+-      "integrity": "sha512-HOJkrhaYsweh+W+e74Yn7YStZOilkoPb6fycpwNLKzSPtruFs48nYis0zy5yJz1+ktUhHxoRDJ27RQAWLIJVJw==",
++      "version": "8.0.2",
++      "resolved": "https://registry.npmjs.org/deepmerge-ts/-/deepmerge-ts-8.0.2.tgz",
++      "integrity": "sha512-uqbvqLUMrc6p0MO+WBRtTxY55hmyh94WRwI5a++PZe54X+bfVh59FSN7uWCBCW1CCVjzjnrwzfI8zidE2obMMw==",
+@@ -6672,0 +6714,10 @@
++      "funding": [
++        {
++          "type": "ko-fi",
++          "url": "https://ko-fi.com/rebeccastevens"
++        },
++        {
++          "type": "tidelift",
++          "url": "https://tidelift.com/funding/github/npm/deepmerge-ts"
++        }
++      ],
+@@ -6675 +6726 @@
+-        "node": ">=16.0.0"
++        "node": ">=16.9.0"
+@@ -7993,3 +8044,3 @@
+-      "version": "1.16.0",
+-      "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.0.tgz",
+-      "integrity": "sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==",
++      "version": "1.16.2",
++      "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.2.tgz",
++      "integrity": "sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==",
+@@ -9960,35 +10010,0 @@
+-    "node_modules/morgan": {
+-      "version": "1.11.0",
+-      "resolved": "https://registry.npmjs.org/morgan/-/morgan-1.11.0.tgz",
+-      "integrity": "sha512-zSkVu3t18r39pw4ixfBKvfZi3y2UOqr7d4WYwcj3m8nXpEQK4rPO6GLzs/CExoRgmX3y9EjmmcXqv6jq0SK46g==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "basic-auth": "~2.0.1",
+-        "debug": "2.6.9",
+-        "depd": "~2.0.0",
+-        "on-finished": "~2.4.1",
+-        "on-headers": "~1.1.0"
+-      },
+-      "engines": {
+-        "node": ">= 0.8.0"
+-      },
+-      "funding": {
+-        "type": "opencollective",
+-        "url": "https://opencollective.com/express"
+-      }
+-    },
+-    "node_modules/morgan/node_modules/debug": {
+-      "version": "2.6.9",
+-      "resolved": "https://registry.npmjs.org/debug/-/debug-2.6.9.tgz",
+-      "integrity": "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "ms": "2.0.0"
+-      }
+-    },
+-    "node_modules/morgan/node_modules/ms": {
+-      "version": "2.0.0",
+-      "resolved": "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz",
+-      "integrity": "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==",
+-      "license": "MIT"
+-    },
+@@ -10001,19 +10016,0 @@
+-    "node_modules/multer": {
+-      "version": "1.4.5-lts.2",
+-      "resolved": "https://registry.npmjs.org/multer/-/multer-1.4.5-lts.2.tgz",
+-      "integrity": "sha512-VzGiVigcG9zUAoCNU+xShztrlr1auZOlurXynNvO9GiWD1/mTBbUljOKY+qMeazBqXgRnjzeEgJI/wyjJUHg9A==",
+-      "deprecated": "Multer 1.x is impacted by a number of vulnerabilities, which have been patched in 2.x. You should upgrade to the latest 2.x version.",
+-      "license": "MIT",
+-      "dependencies": {
+-        "append-field": "^1.0.0",
+-        "busboy": "^1.0.0",
+-        "concat-stream": "^1.5.2",
+-        "mkdirp": "^0.5.4",
+-        "object-assign": "^4.1.1",
+-        "type-is": "^1.6.4",
+-        "xtend": "^4.0.0"
+-      },
+-      "engines": {
+-        "node": ">= 6.0.0"
+-      }
+-    },
+@@ -11025,3 +11022,3 @@
+-      "version": "2.0.7",
+-      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
+-      "integrity": "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==",
++      "version": "2.0.8",
++      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.8.tgz",
++      "integrity": "sha512-5nnx0yGyVUcY6t9RnWcARWtwT9F1D8O9rt08htPvnd49W1IgZtmLkhu9WfMzQj1cFxjHIO6connUNVW5k7AVyQ==",
+@@ -11034,0 +11032,4 @@
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
+@@ -11074,3 +11075,3 @@
+-      "version": "6.15.2",
+-      "resolved": "https://registry.npmjs.org/qs/-/qs-6.15.2.tgz",
+-      "integrity": "sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==",
++      "version": "6.16.1",
++      "resolved": "https://registry.npmjs.org/qs/-/qs-6.16.1.tgz",
++      "integrity": "sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==",
+@@ -11079 +11080,2 @@
+-        "side-channel": "^1.1.0"
++        "es-define-property": "^1.0.1",
++        "side-channel": "^1.1.1"
+@@ -11331,3 +11333,3 @@
+-      "version": "2.1.2",
+-      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.1.2.tgz",
+-      "integrity": "sha512-w5JZcKgdhDOgOwm8H+KgbosopHMuGcl6qbulwjtz3SM7I7P3yW1eAjzMPLrIE+NQ9vjgANKHWeMHnrT0OXW1oA==",
++      "version": "2.1.8",
++      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.1.8.tgz",
++      "integrity": "sha512-BnlDzDYQoplTsZSvPi86CNzmbcb07X8ufR8fk1zivaiEJlXJkiq1MQyDCVmlWcsWbj6aWXqHnrwwevbrm/Saig==",
+@@ -11974,3 +11976,3 @@
+-      "version": "1.1.0",
+-      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.0.tgz",
+-      "integrity": "sha512-ZX99e6tRweoUXqR+VBrslhda51Nh5MTQwou5tnUDgbtyM0dBgmhEDtWGP/xbKn6hqfPRHujUNwz5fy/wbbhnpw==",
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
++      "integrity": "sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==",
+@@ -11980,2 +11982,2 @@
+-        "object-inspect": "^1.13.3",
+-        "side-channel-list": "^1.0.0",
++        "object-inspect": "^1.13.4",
++        "side-channel-list": "^1.0.1",
+@@ -12852,6 +12853,0 @@
+-    "node_modules/typedarray": {
+-      "version": "0.0.6",
+-      "resolved": "https://registry.npmjs.org/typedarray/-/typedarray-0.0.6.tgz",
+-      "integrity": "sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==",
+-      "license": "MIT"
+-    },
+@@ -13053,4 +13049,7 @@
+-      "version": "8.3.2",
+-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
+-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
+-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
++      "version": "11.1.1",
++      "resolved": "https://registry.npmjs.org/uuid/-/uuid-11.1.1.tgz",
++      "integrity": "sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==",
++      "funding": [
++        "https://github.com/sponsors/broofa",
++        "https://github.com/sponsors/ctavan"
++      ],
+@@ -13059 +13058 @@
+-        "uuid": "dist/bin/uuid"
++        "uuid": "dist/esm/bin/uuid"
+@@ -13318,9 +13316,0 @@
+-    "node_modules/xtend": {
+-      "version": "4.0.2",
+-      "resolved": "https://registry.npmjs.org/xtend/-/xtend-4.0.2.tgz",
+-      "integrity": "sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=0.4"
+-      }
+-    },
+diff --git a/package.json b/package.json
+index 17df9aa..0629d72 100644
+--- a/package.json
++++ b/package.json
+@@ -33,3 +33,8 @@
+-    "body-parser": "^1.20.6",
+-    "follow-redirects": "^1.16.0",
+-    "uuid": "^14.0.0"
++    "body-parser": "1.20.9",
++    "follow-redirects": "1.16.2",
++    "proxy-addr": "2.0.8",
++    "qs": "6.16.1",
++    "deepmerge-ts": "8.0.2",
++    "brace-expansion@^1": "1.1.22",
++    "brace-expansion@^2": "2.1.8",
++    "uuid": "11.1.1"

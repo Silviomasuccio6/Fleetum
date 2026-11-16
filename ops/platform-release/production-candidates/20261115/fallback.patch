@@ -1,0 +1,84 @@
+diff --git a/frontend/src/application/usecases/platform/platform-admin-usecases.ts b/frontend/src/application/usecases/platform/platform-admin-usecases.ts
+index 7b03f16..19477e0 100644
+--- a/frontend/src/application/usecases/platform/platform-admin-usecases.ts
++++ b/frontend/src/application/usecases/platform/platform-admin-usecases.ts
+@@ -585 +585,5 @@ export const platformAdminUseCases = {
+-    return data as { data: PlatformInvoice; replayed?: boolean };
++    const delivery = data.emailDelivery;
++    if (!delivery || typeof delivery.id !== "string" || !delivery.id.trim() || !["SENT", "PENDING"].includes(delivery.status)) {
++      throw toPlatformError(response, { error: "PLATFORM_INVOICE_EMAIL_UNCONFIRMED", message: "Esito invio non confermato. Verifica lo stato della fattura prima di riprovare." }, "Esito invio non confermato");
++    }
++    return data as { data: PlatformInvoice; replayed?: boolean; emailDelivery: { id: string; status: "SENT" | "PENDING" } };
+diff --git a/frontend/src/presentation/pages/platform/platform-admin-page.tsx b/frontend/src/presentation/pages/platform/platform-admin-page.tsx
+index e0eafcf..1a677fa 100644
+--- a/frontend/src/presentation/pages/platform/platform-admin-page.tsx
++++ b/frontend/src/presentation/pages/platform/platform-admin-page.tsx
+@@ -365,0 +366 @@ export const PlatformAdminPage = () => {
++  const invoiceSendLocks = useRef(new Set<string>());
+@@ -777,0 +779,2 @@ export const PlatformAdminPage = () => {
++    if (invoiceSendLocks.current.has(invoice.id)) return;
++    invoiceSendLocks.current.add(invoice.id);
+@@ -779,2 +781,0 @@ export const PlatformAdminPage = () => {
+-    const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
+-    invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
+@@ -781,0 +783,2 @@ export const PlatformAdminPage = () => {
++      const idempotencyKey = invoiceEmailRequestKeys.current.get(invoice.id) ?? globalThis.crypto.randomUUID();
++      invoiceEmailRequestKeys.current.set(invoice.id, idempotencyKey);
+@@ -783,2 +786,6 @@ export const PlatformAdminPage = () => {
+-      invoiceEmailRequestKeys.current.delete(invoice.id);
+-      snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
++      if (result.emailDelivery.status === "SENT") {
++        invoiceEmailRequestKeys.current.delete(invoice.id);
++        snackbar.success(`Fattura ${result.data.invoiceNumber} inviata`);
++      } else {
++        snackbar.info(`Invio della fattura ${result.data.invoiceNumber} in elaborazione`);
++      }
+@@ -790,0 +798 @@ export const PlatformAdminPage = () => {
++      invoiceSendLocks.current.delete(invoice.id);
+diff --git a/frontend/tests/platform-invoice-email-outcome.test.ts b/frontend/tests/platform-invoice-email-outcome.test.ts
+new file mode 100644
+index 0000000..c6996a7
+--- /dev/null
++++ b/frontend/tests/platform-invoice-email-outcome.test.ts
+@@ -0,0 +1,41 @@
++import assert from "node:assert/strict";
++import {afterEach,test} from "node:test";
++import vm from "node:vm";
++import {readFileSync} from "node:fs";
++import ts from "typescript";
++import {platformAdminUseCases} from "../src/application/usecases/platform/platform-admin-usecases";
++import {platformAuthStorage} from "../src/infrastructure/platform/platform-auth-storage";
++const originalFetch=globalThis.fetch;
++afterEach(()=>{globalThis.fetch=originalFetch;platformAuthStorage.clear();});
++const invoice={id:"invoice-synthetic",invoiceNumber:"QA-SYNTHETIC",status:"GENERATED"};
++function callback(reply:(id:string,key:string)=>Promise<any>){
++ const path=new URL('../src/presentation/pages/platform/platform-admin-page.tsx',import.meta.url),source=ts.createSourceFile(path.pathname,readFileSync(path,'utf8'),ts.ScriptTarget.ES2022,true,ts.ScriptKind.TSX);
++ let node:ts.Expression|undefined;const visit=(n:ts.Node)=>{if(ts.isVariableDeclaration(n)&&n.name.getText(source)==='sendInvoice')node=n.initializer;ts.forEachChild(n,visit);};visit(source);assert.ok(node);
++ const keys=new Map<string,string>(),events:string[]=[],calls:string[]=[],locks=new Set<string>();let count=0;
++ const run=vm.runInNewContext(ts.transpileModule(`const run=${node.getText(source)};run`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{
++  platformAdminUseCases:{sendInvoiceEmail:async(id:string,key:string)=>{calls.push(key);return reply(id,key);}},
++  invoiceEmailRequestKeys:{current:keys},operationLocks:{current:locks},invoiceSendLocks:{current:locks},
++  setPendingOperations:()=>{},setInvoiceLoading:()=>{},setOperationError:()=>{},setInvoices:()=>{},
++  snackbar:{success:()=>events.push('success'),info:()=>events.push('info'),error:()=>events.push('error')},
++  handlePlatformAuthError:()=>false,load:async()=>{},crypto:{randomUUID:()=>`synthetic-command-${++count}`}
++ });
++ return {run:()=>run(invoice),keys,events,calls};
++}
++test('pending invoice delivery keeps one command key across explicit refresh attempts',async()=>{
++ const h=callback(async()=>({data:invoice,emailDelivery:{id:'delivery-synthetic',status:'PENDING'}}));await h.run();await h.run();
++ assert.equal(h.keys.size,1);assert.equal(h.calls[0],h.calls[1]);assert.deepEqual(h.events,['info','info']);
++});
++test('only a sent delivery clears the key and announces an email as sent',async()=>{
++ let sent=false;const h=callback(async()=>({data:invoice,emailDelivery:{id:'delivery-synthetic',status:sent?'SENT':'PENDING'}}));await h.run();sent=true;await h.run();
++ assert.equal(h.keys.size,0);assert.equal(h.calls[0],h.calls[1]);assert.deepEqual(h.events,['info','success']);
++});
++test('a failed request retains its original command key without success feedback',async()=>{
++ const h=callback(async()=>{throw Error('synthetic unavailable');});await h.run();await h.run();assert.equal(h.keys.size,1);assert.equal(h.calls[0],h.calls[1]);assert.deepEqual(h.events,['error','error']);
++});
++test('the actual callback blocks simultaneous clicks before React state updates',async()=>{
++ let resolve!:(x:any)=>void;const h=callback(async()=>new Promise(r=>{resolve=r;}));const first=h.run();await h.run();assert.equal(h.calls.length,1);resolve({data:invoice,emailDelivery:{id:'delivery-synthetic',status:'SENT'}});await first;
++});
++test('an old backend success body cannot be mistaken for confirmed delivery',async()=>{
++ platformAuthStorage.set('synthetic-platform-bearer');globalThis.fetch=async()=>new Response(JSON.stringify({data:invoice}),{status:200,headers:{'Content-Type':'application/json'}});
++ await assert.rejects(()=>platformAdminUseCases.sendInvoiceEmail(invoice.id,'synthetic-command'));assert.equal(platformAuthStorage.get(),'synthetic-platform-bearer');
++});
