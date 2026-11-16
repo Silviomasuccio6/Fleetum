@@ -59,10 +59,16 @@ test('protected production values resolve inside approved steps and are checked 
  const resolve=job.steps.find(s=>s.name?.startsWith('Resolve exact'));
  const build=job.steps.find(s=>s.name?.startsWith('Prepare tested'));
  for(const key of ['FLEETUM_PLATFORM_PRODUCTION_TRUSTED_CONTROL_SHA','FLEETUM_PLATFORM_PRODUCTION_PREPARE_JSON','FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON']) {
-  assert.equal(resolve.env[key],`\${{ vars.${key} }}`);assert.equal(build.env[key],`\${{ vars.${key} }}`);
+  const context=key.endsWith('_JSON')?'secrets':'vars';
+  assert.equal(resolve.env[key],`\${{ ${context}.${key} }}`);assert.equal(build.env[key],`\${{ ${context}.${key} }}`);
  }
  const login=job.steps.findIndex(s=>s.uses==='docker/login-action@v3');assert.ok(login>job.steps.indexOf(resolve));
  assert.equal(job.steps.find(s=>s.uses==='actions/checkout@v6').with.ref,'${{ github.workflow_sha }}');
+});
+test('private evidence is masked at environment assignment and assertion details cannot enter public logs',()=>{
+ assert.doesNotMatch(prepareText,/vars\.FLEETUM_PLATFORM_PRODUCTION_(?:PREPARE|PROFILE)_JSON/);
+ const script=prepare.jobs.prepare.steps.find(s=>s.name?.startsWith('Resolve exact')).with.script;
+ assert.match(script,/catch\s*\{\s*core\.setFailed/);assert.doesNotMatch(script,/error\.message|error\.stack|console\.error\(error/);
 });
 test('the publisher uploads only reviewed public image metadata and parses without running',()=>{
  const job=prepare.jobs.prepare;

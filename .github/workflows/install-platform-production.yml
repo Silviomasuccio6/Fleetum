@@ -39,40 +39,48 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INSTALL_CONFIRM: ${{ inputs.confirm }}
           FLEETUM_PLATFORM_PRODUCTION_TRUSTED_CONTROL_SHA: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_TRUSTED_CONTROL_SHA }}
-          FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON }}
-          FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON }}
-          FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON }}
-          FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON }}
           FLEETUM_PLATFORM_PRODUCTION_PREPARED_RUN_ID: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_PREPARED_RUN_ID }}
         with:
           script: |
-            const {resolveInstallation}=await import(`${process.env.GITHUB_WORKSPACE}/ops/platform-production/install.mjs`);
-            const request=await resolveInstallation(github,process.env,`${process.env.RUNNER_TEMP}/platform-install-proof`);
-            const {writeFileSync}=await import('node:fs');
-            writeFileSync(`${process.env.RUNNER_TEMP}/platform-install-request.json`,JSON.stringify(request),{mode:0o600,flag:'wx'});
+            try {
+              const {resolveInstallation}=await import(`${process.env.GITHUB_WORKSPACE}/ops/platform-production/install.mjs`);
+              const request=await resolveInstallation(github,process.env,`${process.env.RUNNER_TEMP}/platform-install-proof`);
+              const {writeFileSync}=await import('node:fs');
+              writeFileSync(`${process.env.RUNNER_TEMP}/platform-install-request.json`,JSON.stringify(request),{mode:0o600,flag:'wx'});
+            } catch {
+              core.setFailed('Production control stopped. Preserve the private journal; no automatic retry or rollback.');
+            }
       - name: Execute one reviewed production transaction
         uses: actions/github-script@v7
         env:
           INSTALL_CONFIRM: ${{ inputs.confirm }}
           FLEETUM_PLATFORM_PRODUCTION_TRUSTED_CONTROL_SHA: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_TRUSTED_CONTROL_SHA }}
-          FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON }}
-          FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON }}
-          FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON }}
-          FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_INSTALL_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_BACKUP_JSON }}
+          FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_PREFLIGHT_JSON }}
           FLEETUM_PLATFORM_PRODUCTION_PREPARED_RUN_ID: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_PREPARED_RUN_ID }}
-          FLEETUM_PLATFORM_PRODUCTION_HOST: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_HOST }}
-          FLEETUM_PLATFORM_PRODUCTION_USER: ${{ vars.FLEETUM_PLATFORM_PRODUCTION_USER }}
+          FLEETUM_PLATFORM_PRODUCTION_HOST: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_HOST }}
+          FLEETUM_PLATFORM_PRODUCTION_USER: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_USER }}
           FLEETUM_PLATFORM_PRODUCTION_KNOWN_HOSTS: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_KNOWN_HOSTS }}
           FLEETUM_PLATFORM_PRODUCTION_SSH_KEY: ${{ secrets.FLEETUM_PLATFORM_PRODUCTION_SSH_KEY }}
         with:
           script: |
-            const {readFileSync,writeFileSync}=await import('node:fs');
-            const {executeInstallation,revalidateInstallation}=await import(`${process.env.GITHUB_WORKSPACE}/ops/platform-production/install.mjs`);
-            const request=JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/platform-install-request.json`,'utf8'));
-            const {data:main}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:'main'});
-            revalidateInstallation(request,process.env,main.sha,process.env.GITHUB_WORKFLOW_SHA);
-            const proof=executeInstallation(request);
-            writeFileSync(`${process.env.RUNNER_TEMP}/platform-production-installed.json`,JSON.stringify(proof),{mode:0o600,flag:'wx'});
+            try {
+              const {readFileSync,writeFileSync}=await import('node:fs');
+              const {executeInstallation,revalidateInstallation}=await import(`${process.env.GITHUB_WORKSPACE}/ops/platform-production/install.mjs`);
+              const request=JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/platform-install-request.json`,'utf8'));
+              const {data:main}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:'main'});
+              revalidateInstallation(request,process.env,main.sha,process.env.GITHUB_WORKFLOW_SHA);
+              const proof=executeInstallation(request);
+              writeFileSync(`${process.env.RUNNER_TEMP}/platform-production-installed.json`,JSON.stringify(proof),{mode:0o600,flag:'wx'});
+            } catch {
+              core.setFailed('Production control stopped. Preserve the private journal; no automatic retry or rollback.');
+            }
       - name: Retain only the installation outcome
         uses: actions/upload-artifact@v4
         with:

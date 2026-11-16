@@ -24,8 +24,10 @@ test('all installer scripts parse and only the outcome is retained publicly',()=
  for(const step of w.jobs.install.steps){
   if(step.run)assert.equal(spawnSync('bash',['-n'],{input:step.run,encoding:'utf8'}).status,0);
   if(step.with?.script)assert.doesNotThrow(()=>new AsyncFunction('github','context','core',step.with.script));
+  if(step.with?.script)assert.match(step.with.script,/catch\s*\{\s*core\.setFailed/);
   if(step.uses==='actions/upload-artifact@v4')assert.equal(step.with.path,'${{ runner.temp }}/platform-production-installed.json');
  }
+ assert.doesNotMatch(text,/vars\.FLEETUM_PLATFORM_PRODUCTION_(?:INSTALL|PROFILE|BACKUP|PREFLIGHT)_JSON/);
 });
 test('missing production evidence is refused without invoking a transport',()=>{
  assert.throws(()=>readInstallation({},'a'.repeat(40),'a'.repeat(40)));

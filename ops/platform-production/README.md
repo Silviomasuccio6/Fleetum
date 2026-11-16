@@ -89,11 +89,13 @@ current-`main` only, guarded by the `production` environment and the exact
 `PREPARE_PLATFORM_PRODUCTION` confirmation. It can publish three prepared
 images to GHCR; it has no server access or installation step.
 
-Protected inputs are read inside the job steps after environment protection:
+Protected inputs are read inside the job steps after environment protection. The trusted control SHA is a public environment variable; private JSON approval/profile data are encrypted environment secrets, never plain variables:
 
 - `FLEETUM_PLATFORM_PRODUCTION_TRUSTED_CONTROL_SHA`
 - `FLEETUM_PLATFORM_PRODUCTION_PREPARE_JSON`
 - `FLEETUM_PLATFORM_PRODUCTION_PROFILE_JSON`
+
+Use compact single-line JSON for the encrypted inputs. Validation failures are caught without printing raw assertions, private objects or stack details to public logs. No private evidence values should be emitted by a script.
 
 The strict image-approval object binds the control SHA, manifest hash, both
 independent main CI run IDs, immutable backend/frontend parent images, canonical
