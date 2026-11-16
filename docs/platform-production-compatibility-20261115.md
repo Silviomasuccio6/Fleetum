@@ -76,7 +76,29 @@ validation rules and messages remain. Prisma stays on major 6. Backend build,
 unit regressions and the synthetic database suite cover this candidate; no
 general dependency upgrade is intended.
 
+## Candidate image security refinement, 16 November 2026
+
+The independent Linux image scan found additional runtime findings not covered
+by the workspace's production npm audit. The candidate now pins Multer2.5.0,
+updates the reported Alpine security packages in both image stages, and removes
+the global npm/npx toolchain only from the final runtime. Node remains22.23.1;
+application node_modules and the direct Prisma CLI remain available. Installation
+must use `/app/node_modules/.bin/prisma` rather than npx. No live provider setting,
+env value, database migration or business handler is changed by this refinement.
+
+Four synthetic HTTP regressions exercise the actual rental upload middleware:
+exact size-limit acceptance, oversized-file cleanup, rejected media types and
+cleanup/process availability after a disconnected upload. Two failed on the
+old parser; all four passed after the update. The image gate additionally checks
+the direct migration CLI with networking disabled and the absence of global npm.
+Actual image scan success must still be proven by the new exact-source CI;
+local compilation/audit alone cannot substitute for that proof.
+
+Official upstream security/release notes:
+https://github.com/expressjs/multer/releases/tag/v2.5.0
+
 ## Rollout and rollback requirements (not executed)
+
 
 1. Publish/review the exact source candidates and run their CI. Do not merge this
    old-baseline application branch wholesale into main: that would roll back
