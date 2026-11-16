@@ -66,6 +66,13 @@ jobs:
           name: platform-production-prepared-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/platform-production-prepare/prepared/prepared-production.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish both overlay manifests separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-production-manifests-${{ github.run_id }}
+          path: |
             ${{ runner.temp }}/platform-production-prepare/prepared/satin/manifest.json
             ${{ runner.temp }}/platform-production-prepare/prepared/fallback/manifest.json
           if-no-files-found: error

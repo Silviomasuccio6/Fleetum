@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('observe', Path(__file__).with_name('observe.py'))
 module = importlib.util.module_from_spec(spec)
@@ -57,6 +58,11 @@ class ObservationSafety(unittest.TestCase):
             if call[0] == 'inspect':
                 self.assertEqual(call[2], module.FORMAT)
                 self.assertIn(call[-1], module.NAMES)
+
+    def test_inaccessible_disk_metadata_does_not_hide_container_observation(self):
+        with patch.object(module.Path,'is_dir',side_effect=PermissionError):
+            result=module.observe(self.docker,lambda p:{})
+        self.assertTrue(all(d.get('readable') is False for d in result['host']['disks']))
 
 
 if __name__ == '__main__':

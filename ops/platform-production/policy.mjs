@@ -54,6 +54,7 @@ export function candidateProof({source,reports,needs,context:c}) {
   }
   checkReport(reports.image,source.sources.backend,c,source.manifestSha256,'image');
   assert.equal(reports.image.platform,'linux/amd64'); assert.equal(reports.image.smokePassed,true);
+  assert.deepEqual(reports.image.runtimeUser,{uid:1000,gid:1000});
   assert.ok(/^sha256:[0-9a-f]{64}$/.test(reports.image.imageId) && HASH.test(reports.image.dockerfileSha256));
   assert.match(reports.image.scanner?.image??'',/^(?:docker\.io\/)?aquasec\/trivy@sha256:[0-9a-f]{64}$/);
   assert.equal(reports.image.scanner.high,0);assert.equal(reports.image.scanner.critical,0);

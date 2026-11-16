@@ -3,7 +3,7 @@
 This is the local delivery tooling for Satinata and its targeted production
 backend protections. It does not install the operational UI redesign from
 PR #156, replace the public website, or deploy the whole current `main` app.
-There is no production installer in this directory yet.
+A separately protected manual installer is now implemented and tested. It has not been dispatched; production installation remains a separate authorization.
 
 ## Immutable application inputs
 
@@ -64,9 +64,7 @@ ordinary push proof are both required for the protected preparer.
 
 ## 2. Read-only production layout, still a separate gate
 
-`observe.py` is a bounded collector, prepared and tested locally. It has not
-been run on the production server during this delivery-tooling phase. Explicit
-read-only access approval is pending.
+`observe.py` is a bounded collector. The authorized live metadata inspection on 16 November confirmed the recorded parent images and the standalone shared production/staging gateway. It read no environment files, database records, logs or customer document contents.
 
 It reads formatted metadata for the named Fleetum containers/images, mount and
 network names, hashes of bounded allowlisted Compose/Caddy files and free disk
@@ -82,8 +80,7 @@ must be reviewed if that baseline changed.
 
 This profile describes the layout; it has `executionReviewed: false` and
 `readyForDeployment: false`. It does not prove schema state, invoice backlog,
-backups or permission to install anything. The actual host transaction must be
-completed from the observed layout rather than guessed from historical paths.
+backups or permission to install anything. The host transaction is now adapted to that observed layout. Backend and gateway use separate Compose invocations: merging the legacy app model with the standalone shared gateway can change network and volume semantics.
 
 ## 3. Protected image preparation, without installation
 
@@ -129,19 +126,66 @@ two overlay manifests, not the host profile, request, approvals, credentials or
 downloaded archives. A failed attempt has no automatic second publication or
 installation attempt.
 
-## Remaining installation and rollback work
+## 4. Separately authorized installation and recovery
 
-Before an actual production release, complete and review the host adapter from
-fresh authorized metadata. The install gate already has a distinct policy
-requiring exact source/CI identity, parent/static/website/profile hashes,
-preflight and backup hashes, current-main first dispatch and a bounded approval.
-There is deliberately no workflow invoking a host transaction yet.
+`.github/workflows/install-platform-production.yml` is manual, current-main,
+first-attempt and guarded by the existing production environment. It shares the
+`fleetum-production` concurrency lock with the full release workflow. Publishing
+or merging these tools does not start it.
+
+The controller verifies both exact CI proofs, the exact successful image-preparer
+run and digest-verified artifact, immutable source/image identities, a protected
+profile, backup and preflight tuple, then validates the host request before SSH.
+It rechecks current main and protected values again immediately before transfer.
+The installer has no npm installation or registry publication permission. SSH
+trust is pinned, only two trusted scripts are transferred through stdin, the
+host keeps them root-owned, and the runner removes its private key afterwards.
+No SSH key or secret for this new installation path has been configured here.
+
+The host transaction takes the existing production lock, checks runtime/config
+and actual complete static-parent hashes, revalidates the private backup and
+aggregate database preflight, then pulls only the approved immutable images.
+It stops the old backend/consumer before schema expansion, rechecks the invoice
+backlog after the drain, applies only the candidate's Prisma chain, verifies all
+43 canonical migration checksums and starts the new backend before the UI. It
+keeps separate backend/gateway Compose models, database container identity,
+mounts, named volumes, production/staging networks, original configuration files
+and the existing non-secret certificate contact. The contact is kept only in
+host memory, never printed or written to a credential file. Docker Compose uses
+existing service env files internally; these tools never display or copy them.
+Full final static/website hashes and both environments' health must pass.
+Authenticated product acceptance remains pending even after infrastructure passes.
+
+An existing upload-permission defect was confirmed read-only: the backend's
+UID/GID1000 cannot write to the currently empty upload directory owned by
+UID/GID1001 with mode0755. No production permission was changed in points1–3.
+The actual local storage root is `/app/backend/uploads`, while the historical bind targets `/app/uploads`. Both directories were found empty; the active root was backed up separately on the server. The proposed installation request must explicitly bind the exact directory,
+original owner/group/mode and empty state. Only in the separately approved
+installation does it preserve owner1001, set group1000 and mode0775 on that one
+directory. It also adds the persistent bind at `/app/backend/uploads` while retaining the old bind and log mount; stored relative file keys and env values stay unchanged. It never recurses or changes existing documents. Both active and mounted roots must remain empty before the drain. The stopped old container is archived and checked again before migration/replacement: any newly admitted file blocks rather than being hidden by the new mount. Any ownership,
+mode or content drift blocks before stopping the backend. The actual CI image
+smoke check also requires runtime UID/GID1000.
+
+Phase journals preserve partial outcomes. There is no automatic retry, database
+restore or original-backend downgrade; a failed migration/backend start stops
+for a reviewed forward fix. The tested old-visual compatible image is prepared
+as a recovery candidate. It is not automatically selected by this installer;
+visual recovery must use a separately reviewed protected operation, never an
+unreviewed manual Compose command or the full-main deployment workflow.
+
+The authorized live database preflight matched all42 baseline migration names
+and checksums, with no failed migration or pending/failed invoice backlog.
+A new private PostgreSQL/custom archive and uploads archive were created on the
+same server without offsite export, retention changes, notifications or service
+restarts. The full database archive was parsed to `/dev/null`, without connecting
+a restore target; upload content was compared. This proves archive integrity
+and readability, **not** a successful restore into a separate database. No real
+production data was copied to a local test database. Freshness is checked again
+before installation; backup data and live metadata stay outside the public repo.
 
 Required external evidence remains:
 
-- Fresh actual layout and immutable parent images, followed by an approved
-  schema and aggregate invoice-queue preflight if needed; those database reads
-  are outside the metadata collector's permission.
+- Refresh the now-verified live layout, baseline checksums, aggregate queue state and private backup if their approval/freshness windows expire.
 - Verified production backup and restore procedure appropriate to the actual
   persistence layout, without restoring over the active database during tests.
 - Real Linux CI, Docker build/scans, immutable registry image proof and static
@@ -178,9 +222,7 @@ password/session removed; no system database service was changed.
 
 Local tooling checks:
 
-Final results on Node 22.23.1: operations **633/633**, targeted controls
-**53/53** (a subset of operations), and **25 Python fixtures** (executed by
-the Node wrapper as well). No final failures, cancellations or skipped tests.
+The final host-adapted tooling passed638/638 operations tests,58/58 targeted Node controls and39/39 Python fixtures (the Python suite is also invoked by Node). Exact final counts and commit identity are recorded in the private handoff; do not add overlapping Node/Python counts.
 Python/Node syntax checks and `git diff --check` also passed.
 
 ```sh
@@ -199,7 +241,4 @@ APIs. The final full run explicitly selected the required Node 22.23.1 without
 changing global settings and passed. Dated passing and failed-attempt logs are
 kept separately in the private delivery handoff.
 
-No new push, PR edit, merge, registry publication, server access, production or
-staging deploy was performed while implementing this local delivery phase.
-Source CI, real image/scanner evidence, live metadata, backup and installation
-remain open gates.
+Authorization on16 November covers server inspection, tool publication/review/CI, image preparation and private backup (points1–3). The separately protected installation and its authenticated acceptance are point4 and have not been authorized or executed. Public review/real Linux CI and image outcomes must be recorded before claiming those gates passed.

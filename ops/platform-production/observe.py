@@ -29,10 +29,10 @@ def checked_file(path):
         'docker-compose.prod.yml', 'docker-compose.prod.shared.yml',
         'deploy/caddy/Caddyfile', 'deploy/caddy/Caddyfile.production-shared',
         'deploy/caddy/Caddyfile.staging-ingress')}
-    allowed = str(p) in allowed_paths
-    if not allowed or any(x.is_symlink() for x in (p, *p.parents)):
-        return {'path': str(p), 'verified': False}
+    allowed = str(p) in allowed_paths or bool(re.fullmatch(r'/opt/fleetum/ingress-control/[0-9a-f]{64}\.shared\.json',str(p)))
     try:
+        if not allowed or any(x.is_symlink() for x in (p, *p.parents)):
+            return {'path': str(p), 'verified': False}
         stat = p.stat()
         if not p.is_file() or stat.st_size > 1024 * 1024:
             return {'path': str(p), 'verified': False}
@@ -80,7 +80,7 @@ def observe(docker, inspect_file=checked_file):
             if rel:
                 configs.add(rel)
         for mount in item.get('mounts', []):
-            if mount.get('destination') == '/etc/caddy/Caddyfile':
+            if mount.get('destination') in ('/etc/caddy/Caddyfile','/etc/caddy/production-baseline','/etc/caddy/staging-ingress'):
                 configs.add(mount['source'])
     frontend = containers['fleetum_caddy']
     static_mounts = [m['destination'] for m in frontend.get('mounts', [])
@@ -92,9 +92,12 @@ def observe(docker, inspect_file=checked_file):
     disks = []
     for root in ROOTS:
         p = Path(root)
-        if p.is_dir() and p.resolve() == p:
-            usage = shutil.disk_usage(p)
-            disks.append({'path': root, 'total': usage.total, 'free': usage.free})
+        try:
+            if p.is_dir() and p.resolve() == p:
+                usage = shutil.disk_usage(p)
+                disks.append({'path': root, 'total': usage.total, 'free': usage.free})
+        except PermissionError:
+            disks.append({'path':root,'readable':False})
     return {'schemaVersion': 1, 'kind': 'platform-production-readonly-observation',
             'observedAtUTC': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'containers': containers, 'configFingerprints': [inspect_file(p) for p in sorted(configs)],

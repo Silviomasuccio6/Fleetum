@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/platform-production-candidate-ci.yml
       - .github/workflows/prepare-platform-production.yml
+      - .github/workflows/install-platform-production.yml
       - ops/platform-production/**
       - ops/platform-release/production-candidate.mjs
       - ops/platform-release/production-candidates/**
@@ -16,6 +17,7 @@ on:
     paths:
       - .github/workflows/platform-production-candidate-ci.yml
       - .github/workflows/prepare-platform-production.yml
+      - .github/workflows/install-platform-production.yml
       - ops/platform-production/**
       - ops/platform-release/production-candidate.mjs
       - ops/platform-release/production-candidates/**

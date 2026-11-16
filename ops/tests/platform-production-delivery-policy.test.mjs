@@ -12,7 +12,7 @@ const sources=()=>Object.fromEntries(['backend','satin','fallback'].map(role=>[r
 function fixture(){
  const backend=report('backend'),satin=report('satin'),fallback=report('fallback');
  const source={schemaVersion:1,kind:'platform-production-source-export',controlSha:sha('a'),runId:'11',manifestSha256:hash('b'),sources:sources()};
- const image={...report('backend'),role:'image',imageId:'sha256:'+hash('2'),platform:'linux/amd64',dockerfileSha256:hash('3'),archiveSha256:hash('4'),smokePassed:true,scanner:{image:'aquasec/trivy@sha256:'+hash('6'),high:0,critical:0}};
+ const image={...report('backend'),role:'image',imageId:'sha256:'+hash('2'),platform:'linux/amd64',runtimeUser:{uid:1000,gid:1000},dockerfileSha256:hash('3'),archiveSha256:hash('4'),smokePassed:true,scanner:{image:'aquasec/trivy@sha256:'+hash('6'),high:0,critical:0}};
  const needs=Object.fromEntries(['sources','backend','frontend','image','security'].map(k=>[k,{result:'success'}]));
  const security={schemaVersion:1,role:'security',controlSha:sha('a'),runId:'11',manifestSha256:hash('b'),passed:true,sources:Object.fromEntries(['backend','satin','fallback'].map(r=>[r,report(r).sourceSha])),tools:{gitleaks:'ghcr.io/gitleaks/gitleaks@sha256:'+hash('4'),semgrep:'semgrep/semgrep@sha256:'+hash('5')}};
  return {source,reports:{backend,satin,fallback,image,security},needs,context:{repository:'Silviomasuccio6/Fleetum',controlSha:sha('a'),runId:'11',event:'push',branch:'main'}};

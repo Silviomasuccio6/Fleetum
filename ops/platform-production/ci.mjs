@@ -141,7 +141,7 @@ export function image(sources,directory) {
   const info=JSON.parse(run('docker',['image','inspect','--format','{"id":{{json .Id}},"os":{{json .Os}},"arch":{{json .Architecture}},"source":{{json (index .Config.Labels "it.fleetum.platform.source")}},"tree":{{json (index .Config.Labels "it.fleetum.platform.tree")}}}',tag]));
   assert.equal(info.os,'linux');assert.equal(info.arch,'amd64');assert.equal(info.source,proof.sources.backend.sourceSha);assert.equal(info.tree,proof.sources.backend.treeSha);
   run('docker',['run','--rm','--network','none','--entrypoint','node',tag,'-e',
-    'const a=require("node:assert/strict");a.equal(process.arch,"x64");a.equal(process.versions.node,"22.23.1");require.resolve("resend");require.resolve("@prisma/client");require("node:fs").accessSync("dist/interfaces/http/middlewares/platform-auth.js");'],{log:path.join(out,'image-smoke.log')});
+    'const a=require("node:assert/strict");a.equal(process.arch,"x64");a.equal(process.versions.node,"22.23.1");a.equal(process.getuid(),1000);a.equal(process.getgid(),1000);require.resolve("resend");require.resolve("@prisma/client");require("node:fs").accessSync("dist/interfaces/http/middlewares/platform-auth.js");'],{log:path.join(out,'image-smoke.log')});
   const archive=path.join(out,'backend.image.tar');run('docker',['save','--output',archive,tag],{timeout:180000});
   run('docker',['pull','aquasec/trivy:latest'],{log:path.join(out,'scanner-pull.log'),timeout:300000});
   const scannerRefs=JSON.parse(run('docker',['image','inspect','--format','{{json .RepoDigests}}','aquasec/trivy:latest']));
@@ -152,7 +152,7 @@ export function image(sources,directory) {
   assert.equal(scan.SchemaVersion,2);assert.ok(Array.isArray(scan.Results));
   const findings=scan.Results.flatMap(x=>x.Vulnerabilities??[]);
   assert.ok(findings.every(x=>!['HIGH','CRITICAL'].includes(x.Severity)),'Image vulnerability scan did not pass');
-  const report={...baseReport('image',proof),platform:'linux/amd64',imageId:info.id,smokePassed:true,
+  const report={...baseReport('image',proof),platform:'linux/amd64',imageId:info.id,smokePassed:true,runtimeUser:{uid:1000,gid:1000},
     dockerfileSha256:digest(path.join(root,'backend/Dockerfile.prod')),archiveSha256:digest(archive),
     scanner:{image:scanners[0],high:0,critical:0}};
   put(path.join(out,'image.report.json'),report);return report;

@@ -22,3 +22,14 @@ test('staging, unverified config paths, static mounts and unknown layouts requir
   const o=observation();change(o);assert.throws(()=>profileFromObservation(o,{now}));
  }
 });
+test('the observed standalone shared gateway retains its own manifest and all three Caddy mounts',()=>{
+ const o=observation(),front=o.containers.fleetum_caddy;
+ front.workingDir='/opt/fleetum/ingress-control';front.configFiles=front.workingDir+'/'+'e'.repeat(64)+'.shared.json';front.networks=['app_fleetum_private','fleetum_staging_ingress'];
+ front.mounts=[['Caddyfile.production-shared','/etc/caddy/Caddyfile'],['Caddyfile','/etc/caddy/production-baseline'],['Caddyfile.staging-ingress','/etc/caddy/staging-ingress']].map(([name,destination])=>({source:'/opt/fleetum/app/deploy/caddy/'+name,destination,rw:false}));
+ o.configFingerprints=['/opt/fleetum/app/docker-compose.prod.yml',front.configFiles,...front.mounts.map(m=>m.source)].map(path=>({path,verified:true,sha256:'d'.repeat(64)}));
+ const profile=profileFromObservation(o,{now});assert.equal(profile.ingressMode,'shared');assert.notEqual(profile.frontendCompose,profile.backendCompose);
+ assert.equal(verifyProfile(profile,{parentBackend:base.backendImage,parentFrontend:base.frontendImage},{now}),true);
+ for(const change of [x=>x.containers.fleetum_caddy.mounts.pop(),x=>x.containers.fleetum_caddy.configFiles='/opt/fleetum/ingress-control/unreviewed.json',x=>x.configFingerprints.push({path:'/opt/fleetum/env/compose.env',verified:true,sha256:'d'.repeat(64)})]){
+  const copy=structuredClone(o);change(copy);assert.throws(()=>profileFromObservation(copy,{now}));
+ }
+});
