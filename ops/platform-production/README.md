@@ -251,3 +251,40 @@ source/image CI, private host evidence, explicit installation authorization and
 authenticated acceptance must pass before a production release is called complete.
 
 Image hardening retains Node22.23.1, applies the reported Alpine security package updates, pins Multer2.5.0 and removes global npm/npx only from the runtime. The unprivileged image smoke requires native Sharp loading, the direct Prisma CLI with no network and the absence of global npm. Trivy stdout JSON is parsed separately from stderr diagnostics; complete diagnostics remain in the task log. No finding waiver or lowered severity threshold is introduced.
+# Frontend-only completion after a partial installation
+
+`complete-platform-production-frontend.yml` is a separate, manually approved
+production operation. It does not call the full installer. It verifies both the
+original successful application CI/preparation and the new current-main controller
+CI, the original failed installation and personal approvals, exact artifact ZIP
+digests, unchanged candidate sources, and the explicitly approved live state.
+Prepared artifacts retain their original control SHA. The outcome records both
+controller identities and all corresponding run IDs.
+
+The root-owned helper rechecks canonical migration history (42 plus the approved
+patch), existing backup integrity, backend image manifest/config/source/tree,
+backend and database container identity/start time, persistent storage access,
+configuration hashes and shared gateway mounts/networks. It changes only the
+`caddy` service using the existing standalone gateway model, immutable already
+prepared images and `--no-deps --no-build --pull never`; there is no backend/DB
+lifecycle, migration, restore, upload permission change or document operation.
+
+The original frontend/static parent must still match. After activation the exact
+prepared static tree and unchanged public website must match; all shared health
+checks and backend/DB invariants must pass. Only an explicitly approved, single
+visual fallback to the prepared compatible frontend is allowed. Backend drift
+blocks this fallback. A recovered outcome is labelled `fallback`, never a
+successful Satinata acceptance. No automatic second workflow or install attempt
+is permitted. Authenticated operator acceptance remains a separate final gate.
+
+The SSH grant must pin the exact reviewed loader, three helper hashes, canonical
+request, run ID and a window of at most six hours; accept it only once. Preserve
+the existing production reviewer and global deployment lock. Revoke the grant,
+GitHub inputs and local private key at completion, before authenticated QA.
+
+Docker manifest and image configuration digests are distinct. `image_identity.py`
+bridges them through the immutable registry descriptor/config graph, checks the
+tested config digest, exact RepoDigest, runtime/local image equality, source/tree
+labels and Linux AMD64. Both classic config-addressed and manifest-addressed image
+stores are supported. All mismatches remain fatal. The full installer resolves
+this graph before stopping its old consumer and reuses it after start.

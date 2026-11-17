@@ -41,7 +41,7 @@ test('SSH transfer pins host trust, forwards no GitHub token and removes its tem
   FLEETUM_PLATFORM_PRODUCTION_HOST:'synthetic.example.invalid',FLEETUM_PLATFORM_PRODUCTION_USER:'ubuntu',FLEETUM_PLATFORM_PRODUCTION_SSH_KEY:'synthetic-key-only',FLEETUM_PLATFORM_PRODUCTION_KNOWN_HOSTS:'synthetic-host-only'},(command,args,options)=>{
    assert.equal(command,'ssh');assert.ok(args.includes('StrictHostKeyChecking=yes'));keyFile=args[args.indexOf('-i')+1];assert.equal(statSync(keyFile).mode&0o077,0);
    assert.deepEqual(Object.keys(options.env).sort(),['HOME','PATH']);assert.equal(spawnSync('bash',['-n'],{input:args.at(-1),encoding:'utf8'}).status,0);
-   const payload=JSON.parse(options.input);assert.deepEqual(Object.keys(payload.files).sort(),['host_install.py','host_preflight.py']);
+   const payload=JSON.parse(options.input);assert.deepEqual(Object.keys(payload.files).sort(),['host_install.py','host_preflight.py','image_identity.py']);
    assert.equal(payload.request.confirm,'RELEASE_PLATFORM_PRODUCTION');assert.ok(!options.input.includes('synthetic-token-must-not-forward'));
    return {status:0,stdout:JSON.stringify({completed:true,controlSha:'a'.repeat(40),runId:'12'})};
   });
