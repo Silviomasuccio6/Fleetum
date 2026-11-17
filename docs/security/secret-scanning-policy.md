@@ -18,7 +18,7 @@ gitleaks detect --source /repo --no-git --redact
 
 Scopo:
 
-- scansionare solo working tree e diff effettivo;
+- scansionare il working tree del checkout verificato (non soltanto il diff);
 - evitare che vecchi falsi positivi storici blocchino ogni PR;
 - bloccare nuove chiavi, token, password e `.env` committati per errore;
 - non stampare segreti nei log grazie a `--redact`.
@@ -44,8 +44,19 @@ Comportamento:
 - fetch esplicito di tutti i branch remoti e tag;
 - include la history raggiungibile con `--log-opts="--all"`;
 - genera artifact SARIF redatto;
-- non fallisce di default per evitare blocchi ingestibili durante triage legacy;
+- conserva il triage non bloccante dei rilevamenti storici, che restano da valutare anche con un job verde;
+- distingue errori e analisi incomplete dai rilevamenti: gli errori falliscono sempre;
 - puo' fallire manualmente usando `fail_on_findings=true`.
+
+Il workflow usa `--exit-code 10` per i rilevamenti: il valore predefinito `1`
+di Gitleaks e' condiviso con gli errori e da solo non prova una scansione riuscita.
+Richiede un SARIF autentico e coerente, con snippet dei segreti oscurati, e
+registra checkout e numero di commit raggiungibili. Il validatore viene dalla
+revisione esatta del workflow, separata dal ref sottoposto a scansione. Non viene
+creato un rapporto vuoto sostitutivo quando il tool fallisce.
+
+Vedere [la guida ai controlli GitHub](github-controls.md) per la distinzione fra
+configurazione nei file, impostazione abilitata, esecuzione ed esito verificato.
 
 ## Baseline e falsi positivi
 
