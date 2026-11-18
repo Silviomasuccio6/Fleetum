@@ -74,10 +74,17 @@ jobs:
           "$RUNNER_TEMP/semgrep-venv/bin/python" -m pip install --upgrade pip
           "$RUNNER_TEMP/semgrep-venv/bin/python" -m pip install semgrep
 
+      - name: Setup Node.js for scan evidence
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
       - name: Run Semgrep
+        id: semgrep
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
+          set +e
           "$RUNNER_TEMP/semgrep-venv/bin/semgrep" scan \
             --config p/owasp-top-ten \
             --config p/nodejs \
@@ -87,16 +94,27 @@ jobs:
             --sarif \
             --output semgrep.sarif \
             .
+          scan_status="$?"
+          echo "exit_code=$scan_status" >> "$GITHUB_OUTPUT"
+          exit "$scan_status"
 
-      - name: Ensure SARIF exists
+      - name: Validate genuine Semgrep evidence
+        id: semgrep-evidence
         if: always()
+        env:
+          SCAN_EXIT_CODE: ${{ steps.semgrep.outputs.exit_code }}
         run: |
-          if [ ! -s semgrep.sarif ]; then
-            printf '%s\n' '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Semgrep","informationUri":"https://semgrep.dev","rules":[]}},"results":[]}]}' > semgrep.sarif
-          fi
+          validation_status=0
+          node ops/security/scan-evidence.mjs semgrep semgrep.sarif "$SCAN_EXIT_CODE" > "$RUNNER_TEMP/semgrep-evidence.json" || validation_status=$?
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const s=JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/semgrep-evidence.json`));
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`Semgrep execution: ${s.status}; reason: ${s.reason ?? "none"}; findings: ${s.findingsCount}; rules: ${s.rulesCount}; warnings: ${s.warningCount}. This is not a coverage guarantee.\n`);
+          '
+          exit "$validation_status"
 
       - name: Upload SARIF
-        if: always()
+        if: always() && steps.semgrep-evidence.outcome == 'success'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
