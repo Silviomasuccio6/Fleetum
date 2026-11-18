@@ -41,8 +41,15 @@ for (const method of ["compile", "expand", "stringify"]) {
 }
 
 test("every consumer resolves the corrected implementation, including nested watchers and Next lint", () => {
-  for (const consumer of ["micromatch", "tailwindcss", "@next/eslint-plugin-next"]) {
-    const fromConsumer = createRequire(require.resolve(consumer));
+  const fromWebsite = createRequire(new URL("../../website/eslint.config.mjs", import.meta.url));
+  const fromNextConfig = createRequire(fromWebsite.resolve("eslint-config-next/core-web-vitals"));
+  const consumers = [
+    ["micromatch", require],
+    ["tailwindcss", require],
+    ["@next/eslint-plugin-next", fromNextConfig],
+  ];
+  for (const [consumer, resolveFrom] of consumers) {
+    const fromConsumer = createRequire(resolveFrom.resolve(consumer));
     const indirect = consumer === "@next/eslint-plugin-next"
       ? createRequire(fromConsumer.resolve("fast-glob"))
       : fromConsumer;
