@@ -3,7 +3,7 @@
 Fleetum usa due livelli di secret scanning per bilanciare sicurezza e produttivita':
 
 1. PR/push working tree scan: blocca nuove introduzioni di segreti.
-2. Full history scan: controlla tutta la history Git in modo manuale/schedulato e produce artifact redatti.
+2. Full history scan: controlla tutta la history Git in modo manuale/schedulato e pubblica un riepilogo aggregato.
 
 Questa policy non sostituisce la rotazione dei segreti. Se un segreto reale e' stato committato,
 considerarlo compromesso anche se viene rimosso dal repository.
@@ -43,7 +43,8 @@ Comportamento:
 - checkout completo con `fetch-depth: 0`;
 - fetch esplicito di tutti i branch remoti e tag;
 - include la history raggiungibile con `--log-opts="--all"`;
-- genera artifact SARIF redatto;
+- valida il SARIF nel job temporaneo e lo elimina al termine della validazione;
+- pubblica l’artefatto JSON `gitleaks-history-summary` con esito, conteggi, SHA e numero di commit raggiungibili;
 - conserva il triage non bloccante dei rilevamenti storici, che restano da valutare anche con un job verde;
 - distingue errori e analisi incomplete dai rilevamenti: gli errori falliscono sempre;
 - puo' fallire manualmente usando `fail_on_findings=true`.
@@ -64,11 +65,13 @@ Se Gitleaks trova stringhe storiche verificate come non-segreti o placeholder no
 
 1. verificare manualmente che non siano credenziali reali;
 2. non copiare il valore del presunto segreto in chat, issue o PR;
-3. aggiungere solo il fingerprint alla `.gitleaksignore`;
-4. aprire PR con motivazione breve e riferimento al run redatto;
+3. valutare in un ambiente riservato il fingerprint da aggiungere alla `.gitleaksignore`;
+4. aprire PR con motivazione breve e riferimento al riepilogo della scansione;
 5. rieseguire `Secret History Scan`.
 
-Non committare report raw di Gitleaks se contiene valori non redatti.
+Conservare eventuali rapporti dettagliati in un ambiente riservato. Il riepilogo
+di GitHub basta per verificare l’esecuzione e rinviare la verifica dei singoli
+risultati a un contesto privato.
 
 ## Se viene trovato un segreto reale nella history
 

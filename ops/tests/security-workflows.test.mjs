@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readFileSync} from 'node:fs';
+import {
+ copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
+} from 'node:fs';
 import {createRequire} from 'node:module';
+import {tmpdir} from 'node:os';
+import {delimiter, dirname, join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 const yaml=createRequire(import.meta.url)('js-yaml');
 const read=name=>readFileSync(new URL(`../../${name}`,import.meta.url),'utf8');
@@ -52,9 +56,76 @@ test('history clean, findings and execution errors take distinct paths without w
  assert.match(scan.run,/0\|10\) exit 0/);assert.match(scan.run,/analysis incomplete.*exit 1/);
  const upload=job.steps.find(s=>s.uses==='actions/upload-artifact@v4');
  assert.equal(upload.if,"always() && steps.evidence.outcome == 'success'");
+ assert.equal(upload.with.name,'gitleaks-history-summary');
+ assert.equal(upload.with.path,'${{ runner.temp }}/gitleaks-history-summary.json');
  assert.equal(upload.with['if-no-files-found'],'error');
  const enforce=job.steps.find(s=>s.name==='Enforce manual failure on findings');
  assert.match(enforce.if,/inputs.fail_on_findings == 'true'/);assert.match(enforce.if,/exit_code == '10'/);
+});
+
+test('history publishes only the validated aggregate and removes its temporary SARIF', () => {
+ const root = mkdtempSync(join(tmpdir(), 'fleetum-history-summary-'));
+ try {
+  const controls = join(root, '.scan-controls', 'ops', 'security');
+  mkdirSync(controls, {recursive: true});
+  copyFileSync(new URL('../security/scan-evidence.mjs', import.meta.url), join(controls, 'scan-evidence.mjs'));
+  const reportDir = join(root, 'gitleaks-history');
+  mkdirSync(reportDir);
+  const report = join(reportDir, 'report.sarif');
+  const summary = join(root, 'gitleaks-history-summary.json');
+  const fixture = {
+   version: '2.1.0',
+   runs: [{
+    tool: {driver: {name: 'gitleaks', rules: [{id: 'synthetic-rule'}]}},
+    results: [{
+     message: {text: 'synthetic detail'},
+     partialFingerprints: {email: 'synthetic@example.invalid', commitMessage: 'synthetic commit'},
+     locations: [{physicalLocation: {
+      artifactLocation: {uri: 'synthetic-path'},
+      region: {snippet: {text: 'REDACTED'}}
+     }}]
+    }]
+   }]
+  };
+  const checkoutSha = 'a'.repeat(40);
+  const evidence = history.jobs['gitleaks-history'].steps.find(step => step.id === 'evidence');
+  const execute = () => spawnSync('bash', ['-e', '-c', evidence.run], {
+   cwd: root,
+   encoding: 'utf8',
+   env: {
+    ...process.env,
+    PATH: [dirname(process.execPath), process.env.PATH].join(delimiter),
+    RUNNER_TEMP: root,
+    GITHUB_STEP_SUMMARY: join(root, 'step-summary.md'),
+    SCAN_EXIT_CODE: '10',
+    SCANNED_SHA: checkoutSha,
+    SCANNED_COMMITS: '9'
+   }
+  });
+
+  writeFileSync(report, JSON.stringify(fixture));
+  const valid = execute();
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(summary, 'utf8')), {
+   schemaVersion: 1,
+   scanner: 'gitleaks',
+   status: 'findings',
+   findingsCount: 1,
+   rulesCount: 1,
+   warningCount: 0,
+   checkoutSha,
+   reachableCommits: 9
+  });
+  assert.equal(existsSync(report), false);
+
+  rmSync(summary);
+  writeFileSync(report, 'invalid synthetic report');
+  assert.notEqual(execute().status, 0);
+  assert.equal(existsSync(report), false);
+  assert.equal(existsSync(summary), false);
+ } finally {
+  rmSync(root, {recursive: true, force: true});
+ }
 });
 
 test('changed workflow shell blocks remain syntactically valid',()=>{

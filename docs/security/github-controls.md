@@ -54,10 +54,12 @@ may still contain findings requiring private review. Manual fail_on_findings=tru
 fails on those findings. Errors cannot take the non-blocking findings path.
 
 The scanner checks the requested source ref and reachable history. Its evidence
-validator is checked out separately from the exact workflow revision, so an old
-scan ref need not contain the new helper. Preserve contents:read, redaction and
-the source/coverage metadata. No deployment environment or provider credentials
-are required by this scan.
+validator comes from the exact workflow revision, so an old scan ref need not
+contain the helper. The job deletes the temporary SARIF after validation and
+publishes only the `gitleaks-history-summary` JSON artifact. It records the
+outcome, counts, checkout SHA and number of reachable commits. Review individual
+findings in a private environment. The workflow uses `contents: read` and runs
+independently of deployment environments.
 
 ## Private reports
 
