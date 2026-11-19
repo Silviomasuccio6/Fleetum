@@ -1,0 +1,184 @@
+{
+  "compiledSections": [
+    {
+      "section": "Panoramica",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Aziende",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Licenze e piani",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Fatture",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Utenti",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Analytics sito",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Richieste demo",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Eventi e audit",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Stato servizi",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Sicurezza",
+      "heading": true,
+      "overflow": false
+    },
+    {
+      "section": "Impostazioni",
+      "heading": true,
+      "overflow": false
+    }
+  ],
+  "developmentSections": [
+    {
+      "section": "Aziende",
+      "heading": true,
+      "content": 15194,
+      "overflow": false
+    },
+    {
+      "section": "Licenze e piani",
+      "heading": true,
+      "content": 3060,
+      "overflow": false
+    },
+    {
+      "section": "Fatture",
+      "heading": true,
+      "content": 2907,
+      "overflow": false
+    },
+    {
+      "section": "Utenti",
+      "heading": true,
+      "content": 2129,
+      "overflow": false
+    },
+    {
+      "section": "Analytics sito",
+      "heading": true,
+      "content": 3388,
+      "overflow": false
+    },
+    {
+      "section": "Richieste demo",
+      "heading": true,
+      "content": 2745,
+      "overflow": false
+    },
+    {
+      "section": "Eventi e audit",
+      "heading": true,
+      "content": 1917,
+      "overflow": false
+    },
+    {
+      "section": "Stato servizi",
+      "heading": true,
+      "content": 3343,
+      "overflow": false
+    },
+    {
+      "section": "Sicurezza",
+      "heading": true,
+      "content": 1909,
+      "overflow": false
+    },
+    {
+      "section": "Impostazioni",
+      "heading": true,
+      "content": 1806,
+      "overflow": false
+    },
+    {
+      "section": "Panoramica",
+      "heading": true,
+      "content": 6389,
+      "overflow": false
+    }
+  ],
+  "responsiveFrameWidths": [
+    {
+      "menuVisible": true,
+      "scroll": 320,
+      "sidebarVisible": false,
+      "width": 320
+    },
+    {
+      "menuVisible": true,
+      "scroll": 390,
+      "sidebarVisible": false,
+      "width": 390
+    },
+    {
+      "menuVisible": true,
+      "scroll": 768,
+      "sidebarVisible": false,
+      "width": 768
+    },
+    {
+      "menuVisible": false,
+      "scroll": 1440,
+      "sidebarVisible": true,
+      "width": 1440
+    }
+  ],
+  "observed": [
+    "synthetic login and OTP",
+    "compiled anonymous guard and local logout",
+    "search by owner gives one company",
+    "250-row list and filter to one company",
+    "desktop nonmodal inspector",
+    "mobile modal inspector",
+    "downgrade cancel, Escape and return focus",
+    "double renewal one synthetic POST",
+    "suspension updates inspector after reload",
+    "generate invoice opens billing",
+    "synthetic email delivery and mark paid",
+    "lead status and trusted-device revoke",
+    "initial 503 shows error and no KPI strip",
+    "empty state",
+    "401 returns to login",
+    "dark persists on reload",
+    "skip link retains HashRouter and focuses main",
+    "Meta+K focuses search",
+    "public home and tenant login have no Platform styles",
+    "final compiled 404 live endpoint shows unavailable metrics and a dash instead of invented revenue"
+  ],
+  "limitations": [
+    "synthetic transport only, not live provider or database evidence",
+    "responsive iframe viewports, not physical devices",
+    "native browser viewport override had no effect",
+    "VoiceOver and native reduced-motion/transparency settings not exercised",
+    "old production auth/logout contract retained"
+  ],
+  "newCompiledConsoleErrors": [],
+  "sourceBuild": "final build platform-BhZERUt-.js"
+}
