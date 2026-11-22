@@ -35,6 +35,9 @@
     "verify:staging-bootstrap": "bash ops/verify-staging-bootstrap.sh"
   },
   "overrides": {
+    "@prisma/config": {
+      "effect": "3.22.1"
+    },
     "body-parser": "1.20.9",
     "deepmerge-ts": "8.0.2",
     "esbuild": "0.28.1",
