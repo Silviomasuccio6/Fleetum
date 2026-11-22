@@ -2,6 +2,7 @@ import { prisma } from "../../infrastructure/database/prisma/client.js";
 import { EmailQueueService } from "../../infrastructure/email/email-queue-service.js";
 import { logger } from "../../infrastructure/logging/logger.js";
 import { env } from "../../shared/config/env.js";
+import { escapeHtml } from "../../shared/utils/escape-html.js";
 import { BillingCycle, SaasPlan } from "./feature-entitlements-service.js";
 
 export type BillingLifecycleStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "EXPIRED" | "TRIAL" | "PAST_DUE" | "CANCELED";
@@ -50,24 +51,24 @@ const htmlShell = (title: string, intro: string, rows: Array<[string, string | n
     <div style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e4e9f2;border-radius:18px;overflow:hidden;">
       <div style="background:linear-gradient(135deg,#0f2748,#315b91);padding:26px;color:#fff;">
         <p style="margin:0 0 8px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#b9c9e5;">Fleetum Billing</p>
-        <h1 style="margin:0;font-size:26px;line-height:1.15;">${title}</h1>
+        <h1 style="margin:0;font-size:26px;line-height:1.15;">${escapeHtml(title)}</h1>
       </div>
       <div style="padding:24px;">
-        <p style="margin:0 0 18px;font-size:15px;line-height:1.65;color:#33415c;">${intro}</p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.65;color:#33415c;">${escapeHtml(intro)}</p>
         <table style="width:100%;border-collapse:collapse;margin:0 0 20px;">
           <tbody>
             ${rows
               .filter(([, value]) => value)
               .map(([label, value]) => `
                 <tr>
-                  <td style="padding:10px 0;border-top:1px solid #edf1f7;color:#6a7891;font-size:13px;">${label}</td>
-                  <td style="padding:10px 0;border-top:1px solid #edf1f7;text-align:right;color:#172033;font-size:13px;font-weight:700;">${value}</td>
+                  <td style="padding:10px 0;border-top:1px solid #edf1f7;color:#6a7891;font-size:13px;">${escapeHtml(label)}</td>
+                  <td style="padding:10px 0;border-top:1px solid #edf1f7;text-align:right;color:#172033;font-size:13px;font-weight:700;">${escapeHtml(value ?? "")}</td>
                 </tr>
               `)
               .join("")}
           </tbody>
         </table>
-        ${cta ? `<a href="${cta.url}" style="display:inline-block;background:#2457a6;color:#fff;text-decoration:none;font-weight:800;border-radius:12px;padding:12px 18px;">${cta.label}</a>` : ""}
+        ${cta ? `<a href="${escapeHtml(cta.url)}" style="display:inline-block;background:#2457a6;color:#fff;text-decoration:none;font-weight:800;border-radius:12px;padding:12px 18px;">${escapeHtml(cta.label)}</a>` : ""}
         <p style="margin:22px 0 0;color:#6a7891;font-size:12px;line-height:1.55;">Questa email e' stata inviata automaticamente per aiutarti a mantenere attivo il servizio Fleetum. Se hai gia' risolto, puoi ignorare questo messaggio.</p>
       </div>
     </div>

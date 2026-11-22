@@ -10,6 +10,7 @@ import { exactMoneyReader } from "../../infrastructure/database/exact-money-read
 import { EmailQueueService } from "../../infrastructure/email/email-queue-service.js";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { escapeHtml } from "../../shared/utils/escape-html.js";
 import { ensureKnownPlan, getPlanMonthlyPrice } from "./feature-entitlements-service.js";
 
 const TAX_RATE = 22;
@@ -521,8 +522,8 @@ export class InvoiceService {
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:660px;border:1px solid rgba(230,236,242,.14);border-radius:28px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.035));box-shadow:0 28px 90px rgba(0,0,0,.38);">
               <tr><td style="padding:30px 34px 10px;">
                 <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#9fb2d2;font-weight:800;">Fleetum Billing</div>
-                <h1 style="margin:12px 0 10px;font-size:30px;line-height:1.1;letter-spacing:-.04em;color:#fff;">${invoice.invoiceNumber}</h1>
-                <p style="margin:0;color:#a8b4c8;font-size:15px;line-height:1.65;">Documento riepilogativo per ${invoice.billingName}. Il PDF e' allegato a questa email.</p>
+                <h1 style="margin:12px 0 10px;font-size:30px;line-height:1.1;letter-spacing:-.04em;color:#fff;">${escapeHtml(invoice.invoiceNumber)}</h1>
+                <p style="margin:0;color:#a8b4c8;font-size:15px;line-height:1.65;">Documento riepilogativo per ${escapeHtml(invoice.billingName)}. Il PDF e' allegato a questa email.</p>
               </td></tr>
               <tr><td style="padding:18px 34px 28px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid rgba(50,221,209,.22);border-radius:22px;background:rgba(5,12,24,.72);">
@@ -534,8 +535,8 @@ export class InvoiceService {
                 </table>
               </td></tr>
               <tr><td style="padding:0 34px 34px;">
-                <a href="${env.APP_URL}/upgrade" style="display:inline-block;border-radius:999px;background:linear-gradient(135deg,#2563ff,#32ddd1);padding:12px 18px;color:#fff;text-decoration:none;font-size:14px;font-weight:800;">Accedi alla tua area Fleetum</a>
-                <p style="margin:18px 0 0;color:#7f8da6;font-size:12px;line-height:1.6;">Se hai domande, rispondi a questa email o scrivi a ${issuer.email}.</p>
+                <a href="${escapeHtml(`${env.APP_URL}/upgrade`)}" style="display:inline-block;border-radius:999px;background:linear-gradient(135deg,#2563ff,#32ddd1);padding:12px 18px;color:#fff;text-decoration:none;font-size:14px;font-weight:800;">Accedi alla tua area Fleetum</a>
+                <p style="margin:18px 0 0;color:#7f8da6;font-size:12px;line-height:1.6;">Se hai domande, rispondi a questa email o scrivi a ${escapeHtml(issuer.email)}.</p>
               </td></tr>
             </table>
           </td></tr>
