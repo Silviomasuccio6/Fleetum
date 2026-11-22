@@ -7,6 +7,18 @@ const yaml=require('js-yaml');
 const source=readFileSync(new URL('../../.github/workflows/deploy-platform-staging.yml',import.meta.url),'utf8');
 const workflow=yaml.load(source);
 const bindingOutputs={FLEETUM_STAGING_TRUSTED_WORKFLOW_SHA:'control_sha',FLEETUM_STAGING_APPROVED_RELEASE_SHA:'app_sha',FLEETUM_PLATFORM_APPROVED_UI_SHA:'ui_sha',FLEETUM_PLATFORM_APPROVAL_JSON:'approval_json',E2E_STAGING_RUN_ID:'parent_run_id'};
+
+test('staging deploys, rollback and browser checks share a serial queue that preserves waiting runs', () => {
+  for (const filename of ['deploy-platform-staging.yml', 'deploy-staging.yml', 'e2e-nightly.yml']) {
+    const config = yaml.load(readFileSync(new URL(`../../.github/workflows/${filename}`, import.meta.url), 'utf8'));
+    assert.deepEqual(config.concurrency, {
+      group: 'fleetum-staging',
+      'cancel-in-progress': false,
+      queue: 'max'
+    }, filename);
+  }
+});
+
 test('protected environment bindings are read in approved steps and never inherited before environment resolution',()=>{
  assert.deepEqual(workflow.env,{PLATFORM_OPERATION:'${{ inputs.operation }}'});
  const resolve=workflow.jobs.resolve;
