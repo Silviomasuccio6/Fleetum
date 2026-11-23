@@ -28,6 +28,7 @@ on:
 concurrency:
   group: fleetum-staging
   cancel-in-progress: false
+  queue: max
 
 jobs:
   resolve-release:

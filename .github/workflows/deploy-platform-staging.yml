@@ -23,6 +23,7 @@ permissions:
 concurrency:
   group: fleetum-staging
   cancel-in-progress: false
+  queue: max
 
 env:
   PLATFORM_OPERATION: ${{ inputs.operation }}

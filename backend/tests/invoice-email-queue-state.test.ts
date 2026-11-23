@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { InvoiceService } from "../src/application/services/invoice-service.js";
 import { prisma } from "../src/infrastructure/database/prisma/client.js";
+import type { QueueEmailInput } from "../src/infrastructure/email/email-queue-service.js";
 
 test("invoice email keeps an in-flight leased queue item pending", async () => {
   const now = new Date("2030-01-15T12:00:00.000Z");
@@ -31,7 +32,7 @@ test("invoice email keeps an in-flight leased queue item pending", async () => {
     taxRate: 22,
     taxAmount: 22,
     total: 122,
-    billingName: "Synthetic Billing",
+    billingName: "Città & Figli <Roma> \"Centro\" d'Oro",
     billingVatNumber: null,
     billingTaxCode: null,
     billingAddress: null,
@@ -50,7 +51,12 @@ test("invoice email keeps an in-flight leased queue item pending", async () => {
   };
 
   const queue = {
-    enqueue: async () => ({ id: "queue_pending" }),
+    enqueue: async (email: QueueEmailInput) => {
+      assert.ok(email.body.includes(invoice.billingName));
+      assert.equal(typeof email.meta?.html, "string");
+      assert.ok((email.meta.html as string).includes("Città &amp; Figli &lt;Roma&gt; &quot;Centro&quot; d&#39;Oro"));
+      return { id: "queue_pending" };
+    },
     processPending: async () => ({ processed: 0 })
   };
   const service = new InvoiceService(queue as any);
